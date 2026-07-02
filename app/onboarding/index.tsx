@@ -45,6 +45,7 @@ import { auth as authMod, db } from '@/lib/firebase';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
+import { FirestoreService } from '@/lib/services/firestore';
 import { OnboardingService } from '@/lib/services/onboardingService';
 import { revenueCatService } from '@/lib/services/revenueCatService';
 import { detectCountry, type DachCountry } from '@/lib/utils/country';
@@ -134,6 +135,10 @@ export default function OnboardingScreen() {
   // Funnel raus (T3 Bottom-Sheet bzw. T4 Attribution-API).
   const [loadingProgress] = useState(new Animated.Value(0));
   const [loadingMessage, setLoadingMessage] = useState('🕵️ Die MarkenDetektive beginnen ihre Recherche...');
+  // 2.2b (Stufe 2): echte Alternativen-Zahl statt Fake-"Analyse". Wird im
+  // Loading-Step aus der echten produkte-Zählung der gewählten Märkte gefüllt.
+  const [realAltCount, setRealAltCount] = useState<number | null>(null);
+  const [countMarketLabel, setCountMarketLabel] = useState('');
   const [slideAnimation] = useState(new Animated.Value(1)); // Für Slide-Animationen
   const [backgroundOpacity] = useState(new Animated.Value(1)); // Für Background Fade
   const [sessionId] = useState(`session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`); // Persistente Session-ID
@@ -234,15 +239,47 @@ export default function OnboardingScreen() {
         setCurrentStep(6);
       }, 3000);
 
-      // Loading Messages
+      // 2.2b: ECHTE Alternativen-Zahl statt Fake-"deine Produkte werden
+      // analysiert". Zählt NoName-Produkte (produkte-Collection, öffentlich
+      // lesbar) für die gewählten echten Märkte via getCountFromServer (billig,
+      // 1 Read/Markt). Kommt i.d.R. innerhalb der 3s-Animation zurück; wenn
+      // nicht, bleibt es bei der generischen Message (keine erfundene Zahl).
+      const realMarkets = selectedMarkets.filter((m) => !m.isOther && m?.id);
+      let cancelledCount = false;
+      if (realMarkets.length > 0) {
+        setCountMarketLabel(
+          realMarkets
+            .map((m) => m.name)
+            .filter(Boolean)
+            .slice(0, 3)
+            .join(' & '),
+        );
+        (async () => {
+          try {
+            const counts = await Promise.all(
+              realMarkets.map((m) =>
+                FirestoreService.getProductCountByDiscounter(m.id).catch(() => 0),
+              ),
+            );
+            if (cancelledCount) return;
+            const total = counts.reduce((a, b) => a + b, 0);
+            if (total > 0) setRealAltCount(total);
+          } catch {
+            /* Fallback: generische Message bleibt, keine erfundene Zahl */
+          }
+        })();
+      }
+
+      // Loading Messages — ehrlich formuliert (keine "deine Produkte werden
+      // analysiert"-Behauptung, die es nicht gibt).
       const messages = [
-        '🕵️ Die MarkenDetektive beginnen ihre Recherche...',
-        '🔍 Deine Lieblingsprodukte werden analysiert...',
-        '💰 Die Buchhaltung errechnet dein Sparpotential...',
-        '🎯 Dein persönliches App-Erlebnis wird optimiert...',
+        '🕵️ Die MarkenDetektive machen sich an die Arbeit...',
+        '🔍 Wir durchsuchen unsere Alternativen-Datenbank...',
+        '💰 Dein persönliches Sparpotenzial wird eingerichtet...',
+        '🎯 Dein App-Erlebnis wird vorbereitet...',
         '✨ Fast geschafft - noch einen Moment...'
       ];
-      
+
       let messageIndex = 0;
       const messageInterval = setInterval(() => {
         if (messageIndex < messages.length - 1) {
@@ -252,11 +289,12 @@ export default function OnboardingScreen() {
       }, 1200);
 
       return () => {
+        cancelledCount = true;
         clearTimeout(timer);
         clearInterval(messageInterval);
       };
     }
-  }, [currentStep, loadingProgress]);
+  }, [currentStep, loadingProgress, selectedMarkets]);
 
   // Lade Märkte aus Firestore
   const loadMarkets = async () => {
@@ -1369,7 +1407,27 @@ export default function OnboardingScreen() {
             <View style={styles.loadingMessageContainer}>
               <Text style={styles.loadingMessage}>{loadingMessage}</Text>
             </View>
-            
+
+            {/* 2.2b: ECHTE Zahl statt Fake-Analyse — nur wenn die Zählung
+                zurückkam (sonst keine erfundene Zahl). */}
+            {realAltCount != null ? (
+              <Text
+                style={{
+                  fontFamily: 'Nunito_700Bold',
+                  fontSize: 15,
+                  lineHeight: 21,
+                  textAlign: 'center',
+                  marginTop: 4,
+                  paddingHorizontal: 24,
+                  color: colorScheme === 'dark' ? Colors.dark.tint : Colors.light.tint,
+                }}
+              >
+                {countMarketLabel
+                  ? `Bei ${countMarketLabel} kennen wir schon ${realAltCount.toLocaleString('de-DE')} Alternativen für dich!`
+                  : `Wir kennen schon ${realAltCount.toLocaleString('de-DE')} Alternativen für dich!`}
+              </Text>
+            ) : null}
+
             <View style={styles.loadingBarContainer}>
               <Animated.View
                 style={[

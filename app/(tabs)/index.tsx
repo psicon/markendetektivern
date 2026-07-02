@@ -623,7 +623,26 @@ export default function HomeScreen() {
           // pickt Home's Top-Enttarnte aus einem ausreichend großen
           // Pool für sichtbare Variety, ohne 200 Doc-Reads bei
           // jedem Home-Mount (auf Web SDK Android 2-3 s Roundtrip).
-          const produkteData = await FirestoreService.getTopEnttarnteProdukteRandomized(90, 10);
+          // 2.2 (Stufe 2): "Für dich enttarnt" nach Lieblingsmärkten bevorzugen.
+          // `favoriteMarket` (singular) = Discounter-Doc-ID (zuverlässig);
+          // `favoriteMarkets` ist shape-inkonsistent → nur Objekt-IDs mitnehmen.
+          // Soft-Prefer im Service (nie leer); wenn userProfile noch nicht
+          // hydratiert ist, bleibt der Feed einfach ungefiltert (kein Bruch).
+          const favIds: string[] = [];
+          const fm = (userProfile as any)?.favoriteMarket;
+          if (typeof fm === 'string' && fm) favIds.push(fm);
+          const fms = (userProfile as any)?.favoriteMarkets;
+          if (Array.isArray(fms)) {
+            for (const m of fms) {
+              const id = typeof m === 'string' ? null : (m?.id ?? m?.docRef?.id);
+              if (typeof id === 'string' && id) favIds.push(id);
+            }
+          }
+          const produkteData = await FirestoreService.getTopEnttarnteProdukteRandomized(
+            90,
+            10,
+            favIds.length ? Array.from(new Set(favIds)) : undefined,
+          );
           if (cancelled) return;
           setEnttarnteProdukte(produkteData);
 

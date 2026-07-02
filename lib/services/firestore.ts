@@ -413,6 +413,13 @@ export class FirestoreService {
   static async getTopEnttarnteProdukteRandomized(
     poolSize: number = 200,
     pickCount: number = 10,
+    // 2.2 (Stufe 2): optionale Bevorzugung der Lieblingsmärkte des Users
+    // (Discounter-Doc-IDs). SOFT: Produkte aus diesen Märkten kommen zuerst,
+    // aufgefüllt mit dem Rest — der Feed ist NIE leer, auch wenn ein Markt
+    // wenig Stufe-3-5-Produkte im Pool hat. Kein Query-/Index-Wechsel (Firestore
+    // erlaubt kein zweites `in` neben `stufe in [...]`), die Bevorzugung läuft
+    // client-seitig auf dem gecachten Pool.
+    preferredDiscounterIds?: string[],
   ): Promise<FirestoreDocument<Produkte>[]> {
     // Cache the POOL (not the random pick) so the user still sees
     // a fresh shuffle each visit, but we don't pay 200 doc-reads
@@ -464,6 +471,15 @@ export class FirestoreService {
       for (let i = shuffled.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      // 2.2: Lieblingsmärkte zuerst (stabil innerhalb des Shuffles), Rest füllt
+      // auf → nie leer. `discounter` ist eine DocumentReference; `.id` matcht die
+      // Discounter-Doc-ID der Lieblingsmärkte.
+      if (preferredDiscounterIds && preferredDiscounterIds.length > 0) {
+        const prefSet = new Set(preferredDiscounterIds);
+        const preferred = shuffled.filter((p) => prefSet.has((p as any).discounter?.id));
+        const rest = shuffled.filter((p) => !prefSet.has((p as any).discounter?.id));
+        return [...preferred, ...rest].slice(0, pickCount);
       }
       return shuffled.slice(0, pickCount);
     } catch (error) {

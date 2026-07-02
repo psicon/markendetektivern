@@ -1,5 +1,7 @@
 import * as Device from 'expo-device';
+import { doc, setDoc } from '@react-native-firebase/firestore';
 import { REVENUECAT_CONFIG } from '@/lib/config/revenueCatConfig';
+import { db } from '@/lib/firebase';
 import { revenueCatService } from '@/lib/services/revenueCatService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
@@ -67,6 +69,9 @@ export const RevenueCatProvider: React.FC<RevenueCatProviderProps> = ({ children
   const [isPremium, setIsPremium] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [offerings, setOfferings] = useState<any[]>([]);
+  // 2.6a (Stufe 2): letzter nach Firestore gespiegelter Premium-Wert —
+  // vermeidet redundante Writes bei jedem Refresh (nur bei echter Änderung).
+  const lastSyncedPremiumRef = useRef<boolean | null>(null);
 
   // Hydrate from cache ONCE on mount (synchron-ish via useEffect ohne
   // Auth-Dep — feuert vor dem User-Effect). Hält den Fall ab dass
@@ -211,6 +216,21 @@ export const RevenueCatProvider: React.FC<RevenueCatProviderProps> = ({ children
       }
       setIsPremium(premium);
       console.log('🛒 Premium Status refreshed:', premium, forceRefresh ? '(forced)' : '(cached)');
+
+      // 2.6a (Stufe 2): Premium-Status ins User-Doc spiegeln. RevenueCat bleibt
+      // Source of Truth; das gespiegelte Feld liest nur das Umfrage-Targeting
+      // (surveyTargeting) + der Kategorie-Zugang — vorher war es IMMER false,
+      // sodass Premium-Umfragen Premium-User nie erreichten. Nur für nicht-
+      // anonyme User + nur bei echter Wertänderung (spart Writes). `isPremium`
+      // ist KEIN Geld-Feld → von den Stufe-0-Firestore-Rules erlaubt.
+      const uid = user?.uid;
+      if (uid && !(user as any)?.isAnonymous && lastSyncedPremiumRef.current !== premium) {
+        lastSyncedPremiumRef.current = premium;
+        setDoc(doc(db, 'users', uid), { isPremium: premium }, { merge: true }).catch((err) => {
+          console.warn('⚠️ isPremium-Firestore-Sync fehlgeschlagen (nicht fatal):', err);
+          lastSyncedPremiumRef.current = null; // Retry beim nächsten Refresh erlauben
+        });
+      }
     } catch (error) {
       console.error('❌ Error refreshing premium status:', error);
     }

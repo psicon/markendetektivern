@@ -5,6 +5,7 @@ import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
+import { FilterSheet } from '@/components/design/FilterSheet';
 import { useSurvey } from '@/components/survey/SurveyProvider';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
@@ -33,6 +34,12 @@ export default function SurveysScreen() {
 
   const [surveys, setSurveys] = useState<Poll[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // 2.5 (Stufe 2): anonyme User können vergütete Umfragen (noch) nicht
+  // auszahlen lassen (Reward braucht Konto + Cashback-Consent). Statt sie
+  // NACH dem Beantworten zu enttäuschen, zeigen wir die Bedingung + ein
+  // Konto-Angebot VORHER. `accountOffer` = die angetippte vergütete Umfrage.
+  const [accountOffer, setAccountOffer] = useState<Poll | null>(null);
+  const isAnon = (user as any)?.isAnonymous === true;
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
@@ -153,7 +160,16 @@ export default function SurveysScreen() {
           list.map((s) => (
             <Pressable
               key={s.id}
-              onPress={() => showSurvey(s)}
+              onPress={() => {
+                // 2.5: Anonyme + vergütete Umfrage → erst Konto-Angebot, sonst
+                // direkt starten. (Registrierte ohne Consent fängt weiterhin
+                // der bestehende Nudge nach dem Beantworten ab.)
+                if (isAnon && typeof s.rewardCents === 'number' && s.rewardCents > 0) {
+                  setAccountOffer(s);
+                } else {
+                  showSurvey(s);
+                }
+              }}
               style={({ pressed }) => ({
                 flexDirection: 'row',
                 alignItems: 'center',
@@ -217,25 +233,40 @@ export default function SurveysScreen() {
                     {(s.questions?.length ?? 0)} {(s.questions?.length ?? 0) === 1 ? 'Frage' : 'Fragen'}
                   </Text>
                   {typeof s.rewardCents === 'number' && s.rewardCents > 0 ? (
-                    <View
-                      style={{
-                        paddingHorizontal: 8,
-                        paddingVertical: 3,
-                        borderRadius: 8,
-                        backgroundColor: theme.primaryContainer ?? theme.surfaceAlt,
-                      }}
-                    >
-                      <Text
+                    <>
+                      <View
                         style={{
-                          fontFamily,
-                          fontWeight: fontWeight.extraBold,
-                          fontSize: 11,
-                          color: brand.primary,
+                          paddingHorizontal: 8,
+                          paddingVertical: 3,
+                          borderRadius: 8,
+                          backgroundColor: theme.primaryContainer ?? theme.surfaceAlt,
                         }}
                       >
-                        +{formatCents(s.rewardCents)}
-                      </Text>
-                    </View>
+                        <Text
+                          style={{
+                            fontFamily,
+                            fontWeight: fontWeight.extraBold,
+                            fontSize: 11,
+                            color: brand.primary,
+                          }}
+                        >
+                          +{formatCents(s.rewardCents)}
+                        </Text>
+                      </View>
+                      {/* 2.5: Bedingung ehrlich upfront statt Enttäuschung danach. */}
+                      {isAnon ? (
+                        <Text
+                          style={{
+                            fontFamily,
+                            fontWeight: fontWeight.medium,
+                            fontSize: 10,
+                            color: theme.textMuted,
+                          }}
+                        >
+                          mit Konto
+                        </Text>
+                      ) : null}
+                    </>
                   ) : null}
                 </View>
               </View>
@@ -244,6 +275,65 @@ export default function SurveysScreen() {
           ))
         )}
       </ScrollView>
+
+      {/* 2.5 (Stufe 2): Konto-Angebot VOR einer vergüteten Umfrage für
+          anonyme User — positiv gerahmt (kein "du kriegst nichts"). */}
+      <FilterSheet
+        visible={!!accountOffer}
+        title="Guthaben sichern"
+        onClose={() => setAccountOffer(null)}
+      >
+        <View style={{ paddingBottom: 8, gap: 14 }}>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.medium,
+              fontSize: 14,
+              lineHeight: 20,
+              color: theme.textSub,
+            }}
+          >
+            Für die Auszahlung deines Guthabens brauchst du ein kostenloses Konto.
+            Leg in ein paar Sekunden eins an — oder mach jetzt schon mit: deine
+            Antwort hilft uns trotzdem weiter.
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
+              setAccountOffer(null);
+              router.push('/auth/welcome' as any);
+            }}
+            style={({ pressed }) => ({
+              backgroundColor: brand.primary,
+              borderRadius: radii.md,
+              paddingVertical: 14,
+              alignItems: 'center',
+              opacity: pressed ? 0.9 : 1,
+            })}
+          >
+            <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 15, color: '#ffffff' }}>
+              Konto anlegen
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
+              const s = accountOffer;
+              setAccountOffer(null);
+              if (s) showSurvey(s);
+            }}
+            style={({ pressed }) => ({
+              paddingVertical: 12,
+              alignItems: 'center',
+              opacity: pressed ? 0.7 : 1,
+            })}
+          >
+            <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 14, color: theme.textSub }}>
+              Trotzdem beantworten
+            </Text>
+          </Pressable>
+        </View>
+      </FilterSheet>
     </View>
   );
 }
