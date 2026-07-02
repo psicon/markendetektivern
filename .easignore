@@ -57,6 +57,12 @@ GoogleService-Info.plist.bak
 .vscode/
 .claude/
 
+# Knowledge-graph output (graphify) + firebase emulator/hosting cache +
+# nested native-module android build artifacts — never part of the binary.
+graphify-out/
+.firebase/
+modules/*/android/build/
+
 # CI / git artifacts
 .github/
 
