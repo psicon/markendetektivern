@@ -21,7 +21,9 @@ export function DetailErrorState({
    *  generic = Laden fehlgeschlagen/zu langsam. */
   variant: 'offline' | 'notFound' | 'generic';
   onRetry: () => void;
-  onBack: () => void;
+  /** Optional: Tab-/Listen-Screens (Home, Favoriten, Verlauf) haben keinen
+   *  sinnvollen "Zurück" — dann wird der Ghost-Button ausgeblendet. */
+  onBack?: () => void;
 }) {
   const { theme, brand } = useTokens();
 
@@ -118,29 +120,31 @@ export function DetailErrorState({
           Erneut versuchen
         </Text>
       </Pressable>
-      <Pressable
-        onPress={onBack}
-        style={({ pressed }) => ({
-          marginTop: 10,
-          height: 44,
-          paddingHorizontal: 22,
-          borderRadius: radii.full,
-          alignItems: 'center',
-          justifyContent: 'center',
-          opacity: pressed ? 0.7 : 1,
-        })}
-      >
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.bold,
-            fontSize: 14,
-            color: theme.textSub,
-          }}
+      {onBack ? (
+        <Pressable
+          onPress={onBack}
+          style={({ pressed }) => ({
+            marginTop: 10,
+            height: 44,
+            paddingHorizontal: 22,
+            borderRadius: radii.full,
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: pressed ? 0.7 : 1,
+          })}
         >
-          Zurück
-        </Text>
-      </Pressable>
+          <Text
+            style={{
+              fontFamily,
+              fontWeight: fontWeight.bold,
+              fontSize: 14,
+              color: theme.textSub,
+            }}
+          >
+            Zurück
+          </Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }

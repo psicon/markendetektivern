@@ -732,6 +732,26 @@ function PurchaseEmpty({ variant }: { variant: Tab }) {
           ? 'Markenprodukte aus deinen Einkäufen erscheinen hier — markiere sie beim Einkauf als gekauft, dann siehst du sie hier wieder.'
           : 'NoName-Produkte aus deinen Einkäufen erscheinen hier — markiere sie beim Einkauf als gekauft, dann siehst du sie hier wieder.'}
       </Text>
+      {/* 3.3 (Stufe 3): Hinweis-Link zur "anderen Käufe-Welt" (gescannte Bons),
+          damit niemand die zwei Bereiche verwechselt. */}
+      <Pressable
+        onPress={() => safePush('/cashback/history' as any)}
+        hitSlop={8}
+        accessibilityRole="button"
+        style={({ pressed }) => ({ marginTop: 4, opacity: pressed ? 0.6 : 1 })}
+      >
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.bold,
+            fontSize: 13,
+            color: theme.primary,
+            textAlign: 'center',
+          }}
+        >
+          Suchst du gescannte Kassenbons? → Meine Bons
+        </Text>
+      </Pressable>
     </View>
   );
 }

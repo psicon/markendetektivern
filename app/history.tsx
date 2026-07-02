@@ -39,6 +39,8 @@ import {
 } from '@/components/design/DetailHeader';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { Crossfade, Shimmer } from '@/components/design/Skeletons';
+import { DetailErrorState } from '@/components/design/DetailErrorState';
+import { isOnline } from '@/lib/services/network';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -105,6 +107,9 @@ export default function HistoryScreen() {
   const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>([]);
   const [scanHistory, setScanHistory] = useState<ScanHistoryItem[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
+  // 3.1 (Stufe 3): offline ehrlich — nicht "kein Verlauf" zeigen, wenn der Load
+  // bloß offline scheiterte.
+  const [offlineError, setOfflineError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const hasLoadedOnce = useRef(false);
 
@@ -120,6 +125,7 @@ export default function HistoryScreen() {
       setSearchHistory(searches);
     } catch (e) {
       console.warn('History: load search failed', e);
+      if (!isOnline()) setOfflineError(true);
     }
   }, [user?.uid]);
 
@@ -130,6 +136,7 @@ export default function HistoryScreen() {
       setScanHistory(scans);
     } catch (e) {
       console.warn('History: load scan failed', e);
+      if (!isOnline()) setOfflineError(true);
     }
   }, [user?.uid]);
 
@@ -140,6 +147,7 @@ export default function HistoryScreen() {
         if (!hasLoadedOnce.current) {
           hasLoadedOnce.current = true;
         }
+        setOfflineError(false);
         await Promise.all([loadSearchHistory(), loadScanHistory()]);
         if (alive) setInitialLoading(false);
       })();
@@ -151,6 +159,7 @@ export default function HistoryScreen() {
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
+    setOfflineError(false);
     await Promise.all([loadSearchHistory(), loadScanHistory()]);
     setRefreshing(false);
   }, [loadSearchHistory, loadScanHistory]);
@@ -255,6 +264,9 @@ export default function HistoryScreen() {
       <View style={{ flex: 1, paddingTop: chromeHeight }}>
         {/* Body — Crossfade between skeleton list and live PagerView.
             `fillParent` is required so the PagerView claims height. */}
+        {offlineError && searchHistory.length === 0 && scanHistory.length === 0 ? (
+          <DetailErrorState variant="offline" onRetry={handleRefresh} />
+        ) : (
         <Crossfade
           ready={!initialLoading}
           duration={320}
@@ -309,6 +321,7 @@ export default function HistoryScreen() {
             </View>
           </PagerView>
         </Crossfade>
+        )}
       </View>
 
       {/* Chrome */}

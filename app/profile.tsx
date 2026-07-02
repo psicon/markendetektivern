@@ -1244,7 +1244,10 @@ export default function ProfileScreen() {
         </View>
 
         {/* Account / Inhalte menu */}
-        <View style={{ paddingHorizontal: 20, paddingTop: 16 }}>
+        {/* 3.5 (Stufe 3): erste Section bekommt eine eigene Überschrift, damit
+            "Meine Inhalte" klar von "Einstellungen" (weiter unten) getrennt ist. */}
+        <SectionLabel theme={theme}>Meine Inhalte</SectionLabel>
+        <View style={{ paddingHorizontal: 20 }}>
           <MenuCard>
             {/* Gamification-Bereich: zwei Einträge, beide hinter dem
                 Toggle versteckbar.
@@ -1291,13 +1294,14 @@ export default function ProfileScreen() {
               icon="history"
               color="#8b5cf6"
               label="Kaufhistorie"
+              sub="Produkte, die du in der App gekauft hast"
               onPress={() => safePush('/purchase-history' as any)}
             />
             <MenuRow
               icon="clipboard-list-outline"
               color="#0d8575"
               label="Meine Bons"
-              sub="Verlauf, Status & abgelehnte Bons"
+              sub="Gescannte Kassenbons · Status & abgelehnte"
               onPress={() => safePush('/cashback/history' as any)}
             />
             <MenuRow

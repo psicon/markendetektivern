@@ -644,6 +644,25 @@ export default function CashbackHistoryScreen() {
           Bon scannen
         </Text>
       </Pressable>
+      {/* 3.3 (Stufe 3): Rück-Link zur "anderen Käufe-Welt" (In-App-Käufe). */}
+      <Pressable
+        onPress={() => safePush('/purchase-history' as any)}
+        hitSlop={8}
+        accessibilityRole="button"
+        style={({ pressed }) => ({ marginTop: 2, opacity: pressed ? 0.6 : 1 })}
+      >
+        <Text
+          style={{
+            color: primary,
+            fontFamily: fontFamilyVariants.body,
+            fontWeight: fontWeight.bold as any,
+            fontSize: 13,
+            textAlign: 'center',
+          }}
+        >
+          In-App gekaufte Produkte? → Kaufhistorie
+        </Text>
+      </Pressable>
     </View>
   );
 

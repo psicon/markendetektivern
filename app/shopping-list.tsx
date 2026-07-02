@@ -75,7 +75,8 @@ import {
   type CartSnapshot,
   type CartSnapshotItem,
 } from '@/lib/services/cartSnapshotService';
-import { isOnline } from '@/lib/services/network';
+import { isOnline, subscribeNetwork } from '@/lib/services/network';
+import { CartOutboxService } from '@/lib/services/cartOutboxService';
 import {
   FilterSheet,
   OptionList,
@@ -2643,6 +2644,40 @@ export default function ShoppingListScreen() {
     if (user?.uid) loadShoppingCart();
   }, [user?.uid, loadShoppingCart]);
 
+  // 3.2 (Stufe 3): Outbox-Replay. subscribeNetwork feuert einmal sofort (Mount)
+  // und danach bei jeder Netz-Änderung — so werden offline (auch vor einem
+  // App-Kill) gemerkte Abhak-Aktionen nachgespielt, sobald wieder Netz da ist.
+  // Idempotent + fail-open im Service; nur bei online. Ein Refetch danach zieht
+  // die Liste sauber nach.
+  useEffect(() => {
+    const uid = user?.uid;
+    if (!uid) return;
+    const unsub = subscribeNetwork((s) => {
+      if (!s.online) return;
+      void CartOutboxService.flush(uid, async (op) => {
+        if (op.kind === 'markPurchased') {
+          await FirestoreService.markAsPurchased(uid, op.itemId);
+        } else {
+          await FirestoreService.removeFromShoppingCart(uid, op.itemId, {
+            productId: op.itemId,
+            productName: op.productName,
+            productType: op.productType,
+            isCustomItem: true,
+          });
+        }
+      })
+        .then((n) => {
+          if (n > 0) void loadShoppingCart();
+        })
+        .catch(() => {});
+    });
+    return unsub;
+    // loadShoppingCart bewusst nicht in den Deps — ein evtl. leicht veralteter
+    // Refetch ist harmlos, und wir wollen den Listener nur bei uid-Wechsel neu
+    // aufsetzen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid]);
+
   // ─── Filter options ────────────────────────────────────────────
   const loadFilterOptions = useCallback(async () => {
     try {
@@ -2779,6 +2814,13 @@ export default function ShoppingListScreen() {
     produktRef: string,
   ) => {
     if (!user) return;
+    // 3.5 (Stufe 3): offline würde der convert-Write ewig hängen (Android
+    // persistence:false → keine lokale Write-Queue). Sauber abfangen statt
+    // einfrieren.
+    if (!isOnline()) {
+      showInfoToast('Gerade kein Empfang — das Umwandeln klappt, sobald du wieder online bist.', 'info');
+      return;
+    }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     const conversions = [{ einkaufswagenRef, markenProduktRef, produktRef }];
     const brandItem = brandProducts.find((i) => i.id === einkaufswagenRef);
@@ -2809,6 +2851,11 @@ export default function ShoppingListScreen() {
     if (!user?.uid) return;
     if (selectedConversions.length === 0) {
       showInfoToast(TOAST_MESSAGES.SHOPPING.selectFirstPrompt, 'info');
+      return;
+    }
+    // 3.5 (Stufe 3): offline nicht in den hängenden convert-Write laufen.
+    if (!isOnline()) {
+      showInfoToast('Gerade kein Empfang — das Umwandeln klappt, sobald du wieder online bist.', 'info');
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -2990,6 +3037,27 @@ export default function ShoppingListScreen() {
       : FirestoreService.markAsPurchased(user.uid, itemId);
     writeP.catch((error: unknown) => {
       console.error('Error marking as purchased:', error);
+      // 3.2 (Stufe 3): offline (Android hat keine native Write-Queue) → NICHT
+      // revertieren, sondern in die Outbox legen und die optimistische Entfernung
+      // behalten. Wird beim Reconnect (auch nach App-Kill) nachgespielt. Punkte/
+      // Ersparnis sind oben bereits einmal optimistisch vergeben — der Replay
+      // macht nur den DB-Write nach.
+      if (!isOnline()) {
+        void CartOutboxService.enqueue(
+          user.uid,
+          isCustomItem
+            ? {
+                kind: 'removeCustom',
+                itemId,
+                productName: matched.name ?? 'Custom item',
+                productType: matched.customType === 'brand' ? 'brand' : 'noname',
+                ts: Date.now(),
+              }
+            : { kind: 'markPurchased', itemId, ts: Date.now() },
+        );
+        showInfoToast('Als gekauft gemerkt — wird gespeichert, sobald du wieder online bist.', 'info');
+        return;
+      }
       revert();
       showRetryableErrorToast(TOAST_MESSAGES.SHOPPING.purchaseError, () => {
         void handleMarkAsPurchased(itemId, unitSavings);
@@ -3041,6 +3109,12 @@ export default function ShoppingListScreen() {
 
   const handleRemoveFromCart = async (itemId: string) => {
     if (!user?.uid) return;
+    // 3.2 (Stufe 3): offline würde der awaited deleteDoc ewig hängen (Android
+    // persistence:false). Sauber abfangen statt Endlos-Spinner.
+    if (!isOnline()) {
+      showInfoToast('Gerade kein Empfang — die Änderung klappt, sobald du wieder online bist.', 'info');
+      return;
+    }
     setDeletingItems((prev) => new Set(prev).add(itemId));
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -3112,6 +3186,12 @@ export default function ShoppingListScreen() {
   // dahinter der Firestore-Sync via addToShoppingCart bzw. decrementCartQuantity.
   const handleIncrementCart = async (item: EnrichedItem) => {
     if (!user?.uid) return;
+    // 3.2 (Stufe 3): offline hängt der awaited Mengen-Write ewig (Android
+    // persistence:false) → sauber abfangen.
+    if (!isOnline()) {
+      showInfoToast('Gerade kein Empfang — die Änderung klappt, sobald du wieder online bist.', 'info');
+      return;
+    }
     if (item.isCustom) {
       // T17.39: Custom-Items haben kein productId — wir adressieren
       // direkt über die cart-doc-id (item.id) via updateCustomItemQuantity.
@@ -3192,6 +3272,11 @@ export default function ShoppingListScreen() {
 
   const handleDecrementCart = async (item: EnrichedItem) => {
     if (!user?.uid) return;
+    // 3.2 (Stufe 3): offline hängt der awaited Mengen-Write ewig → abfangen.
+    if (!isOnline()) {
+      showInfoToast('Gerade kein Empfang — die Änderung klappt, sobald du wieder online bist.', 'info');
+      return;
+    }
     if (item.isCustom) {
       // T17.39: Custom-Items haben jetzt anzahl-Konzept. Bei anzahl > 1
       // dekrementieren, bei anzahl == 1 ganz entfernen (wie bei DB-Items
@@ -3323,6 +3408,13 @@ export default function ShoppingListScreen() {
     sourceLabel: string,
   ) => {
     if (!user || targets.length === 0) return;
+    // 3.2 (Stufe 3): Bulk-Abhaken ist NICHT outbox-backed (nur der Einzel-Check-
+    // off) → offline würde es die Items still verlieren. Sauber abfangen; einzeln
+    // abhaken funktioniert offline weiterhin (Outbox).
+    if (!isOnline()) {
+      showInfoToast('Gerade kein Empfang — einzeln abhaken geht, „alle" klappt wieder online.', 'info');
+      return;
+    }
 
     const dbProducts = targets.filter(
       (item) => !item.isCustom && item.kind === 'noname',

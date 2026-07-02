@@ -2754,6 +2754,26 @@ export default function ExploreScreen() {
           }
         />
       </Pressable>
+      {/* 3.5 (Stufe 3): Barcode-Scan auch im Stöbern-Suchfeld (wie auf Home).
+          Der Scanner navigiert nach dem Scan selbst zum Produkt. */}
+      <Pressable
+        onPress={() => safePush('/barcode-scanner')}
+        accessibilityRole="button"
+        accessibilityLabel="Barcode scannen"
+        style={({ pressed }) => ({
+          height: 38,
+          width: 38,
+          borderRadius: 11,
+          backgroundColor: theme.surface,
+          borderWidth: 1,
+          borderColor: theme.border,
+          alignItems: 'center',
+          justifyContent: 'center',
+          opacity: pressed ? 0.85 : 1,
+        })}
+      >
+        <MaterialCommunityIcons name="barcode-scan" size={18} color={theme.text} />
+      </Pressable>
     </View>
   );
 
@@ -3413,6 +3433,59 @@ export default function ExploreScreen() {
     }
 
     if (empty) {
+      // 3.1 (Stufe 3): offline NICHT als "Keine Treffer" ausgeben (das wirkt
+      // wie "deine Daten sind weg"), sondern als "kein Empfang" + Retry.
+      if (!netStatus.online) {
+        return (
+          <View style={{ alignItems: 'center', paddingVertical: 56, paddingHorizontal: 32 }}>
+            <MaterialCommunityIcons name="wifi-off" size={46} color={theme.textMuted} style={{ marginBottom: 14 }} />
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 16,
+                color: theme.text,
+                textAlign: 'center',
+              }}
+            >
+              Gerade kein Empfang
+            </Text>
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.medium,
+                fontSize: 13,
+                lineHeight: 19,
+                color: theme.textMuted,
+                textAlign: 'center',
+                marginTop: 6,
+              }}
+            >
+              Sobald du wieder online bist, sind die Produkte sofort da.
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Erneut versuchen"
+              onPress={() => {
+                void loadNonames(true);
+                void loadMarken(true);
+              }}
+              style={({ pressed }) => ({
+                marginTop: 18,
+                backgroundColor: brand.primary,
+                borderRadius: radii.full,
+                paddingHorizontal: 22,
+                paddingVertical: 10,
+                opacity: pressed ? 0.9 : 1,
+              })}
+            >
+              <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 14, color: '#fff' }}>
+                Erneut versuchen
+              </Text>
+            </Pressable>
+          </View>
+        );
+      }
       return (
         <View style={{ alignItems: 'center', paddingVertical: 60, paddingHorizontal: 32 }}>
           <Text style={{ fontSize: 54, marginBottom: 12 }}>🔍</Text>

@@ -45,6 +45,8 @@ import {
 } from '@/components/design/FilterSheet';
 import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { Crossfade, Shimmer } from '@/components/design/Skeletons';
+import { DetailErrorState } from '@/components/design/DetailErrorState';
+import { isOnline } from '@/lib/services/network';
 import BatchActionLoader from '@/components/ui/BatchActionLoader';
 import { TOAST_MESSAGES } from '@/constants/ToastMessages';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
@@ -172,6 +174,9 @@ export default function FavoritesScreen() {
 
   // Initial load — prevents the "no favorites" flash on first paint.
   const [initialLoading, setInitialLoading] = useState(true);
+  // 3.1 (Stufe 3): offline ehrlich — nicht "Noch keine Favoriten" zeigen, wenn
+  // der Load bloß offline scheiterte (Datenverlust-Panik vermeiden).
+  const [offlineError, setOfflineError] = useState(false);
   const hasLoadedOnce = useRef(false);
 
   // ─── PagerView <-> SegmentedTabs sync ───────────────────────────
@@ -235,6 +240,7 @@ export default function FavoritesScreen() {
 
   const loadInitialData = async () => {
     setInitialLoading(true);
+    setOfflineError(false);
     try {
       const data = await loadFavoritesWithData();
       const split = splitDataByTab(data);
@@ -244,6 +250,9 @@ export default function FavoritesScreen() {
       setNoNameMarkets(split.noNameMarkets);
     } catch (e) {
       console.warn('FavoritesScreen: load failed', e);
+      // Nur als "kein Empfang" werten, wenn wirklich offline — sonst normaler
+      // (leerer) Zustand.
+      setOfflineError(!isOnline());
     } finally {
       setInitialLoading(false);
     }
@@ -500,6 +509,9 @@ export default function FavoritesScreen() {
             propagate height. Without it, both layers collapse to
             0 and the lists render empty (yes, this caught us once
             already — see the rule in CLAUDE.md). */}
+        {offlineError && brandFavorites.length === 0 && noNameFavorites.length === 0 ? (
+          <DetailErrorState variant="offline" onRetry={loadInitialData} />
+        ) : (
         <Crossfade
           ready={!initialLoading}
           duration={320}
@@ -545,6 +557,7 @@ export default function FavoritesScreen() {
             </View>
           </PagerView>
         </Crossfade>
+        )}
       </View>
 
       {/* Chrome — DetailHeader with persistent "Alle markieren"

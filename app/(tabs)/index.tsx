@@ -1298,16 +1298,55 @@ export default function HomeScreen() {
               ))}
             </Animated.ScrollView>
           ) : error ? (
-            <Text
-              style={{
-                paddingHorizontal: 20,
-                fontFamily,
-                fontSize: 14,
-                color: theme.textMuted,
-              }}
-            >
-              {error}
-            </Text>
+            // 3.1 (Stufe 3): statt totem Text ein offline-bewusster Retry-Block.
+            // Bumpt netRetryNonce → derselbe Reload-Pfad wie bei Reconnect.
+            <View style={{ paddingHorizontal: 20, gap: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
+                <MaterialCommunityIcons
+                  name={netStatus.online ? 'cloud-alert' : 'wifi-off'}
+                  size={18}
+                  color={theme.textMuted}
+                  style={{ marginTop: 1 }}
+                />
+                <Text
+                  style={{
+                    flex: 1,
+                    fontFamily,
+                    fontWeight: fontWeight.medium,
+                    fontSize: 14,
+                    lineHeight: 19,
+                    color: theme.textSub,
+                  }}
+                >
+                  {netStatus.online
+                    ? 'Das Laden hat gerade nicht geklappt. Ein neuer Versuch hilft meistens.'
+                    : 'Gerade kein Empfang — sobald du wieder online bist, klappt es sofort.'}
+                </Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Erneut versuchen"
+                onPress={() => {
+                  setError(null);
+                  setLoading(true);
+                  setProductsStageDone(false);
+                  setNewsStageDone(false);
+                  setNetRetryNonce((n) => n + 1);
+                }}
+                style={({ pressed }) => ({
+                  alignSelf: 'flex-start',
+                  backgroundColor: brand.primary,
+                  borderRadius: radii.full,
+                  paddingHorizontal: 22,
+                  paddingVertical: 10,
+                  opacity: pressed ? 0.9 : 1,
+                })}
+              >
+                <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 14, color: '#fff' }}>
+                  Erneut versuchen
+                </Text>
+              </Pressable>
+            </View>
           ) : (
             <Animated.ScrollView
               horizontal
