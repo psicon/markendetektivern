@@ -52,6 +52,7 @@ import { TOAST_MESSAGES } from '@/constants/ToastMessages';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { ActiveListService } from '@/lib/services/activeListService';
 import { useFavorites } from '@/lib/hooks/useFavorites';
 import { FirestoreService } from '@/lib/services/firestore';
 import { Image as ExpoImage } from 'expo-image';
@@ -393,6 +394,15 @@ export default function FavoritesScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       let successCount = 0;
       let errorCount = 0;
+      // Aktive Liste als Ziel (ActiveListService) — einmal pro Batch auflösen.
+      const activeList = await ActiveListService.getActiveList();
+      const cartTarget = activeList
+        ? {
+            sharedListId: activeList.listId,
+            addedByName:
+              (userProfile as any)?.display_name || (user as any)?.displayName || null,
+          }
+        : undefined;
 
       for (let i = 0; i < selectedFavorites.length; i++) {
         const product = selectedFavorites[i];
@@ -423,6 +433,8 @@ export default function FavoritesScreen() {
               batchSize: selectedFavorites.length,
             },
             priceInfo,
+            undefined,
+            cartTarget,
           );
           successCount++;
         } catch (e) {
@@ -443,7 +455,9 @@ export default function FavoritesScreen() {
 
       if (errorCount === 0) {
         showCartAddedToast(
-          `${successCount} ${successCount === 1 ? 'Produkt' : 'Produkte'} hinzugefügt!`,
+          activeList
+            ? `${successCount} ${successCount === 1 ? 'Produkt' : 'Produkte'} zu „${activeList.name}" hinzugefügt!`
+            : `${successCount} ${successCount === 1 ? 'Produkt' : 'Produkte'} hinzugefügt!`,
           () => safePush('/shopping-list' as any),
         );
       } else {

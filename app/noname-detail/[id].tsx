@@ -75,6 +75,7 @@ import {
   type NaehrwerteShape,
 } from '@/lib/utils/productNutrition';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { ActiveListService } from '@/lib/services/activeListService';
 import journeyTrackingService from '@/lib/services/journeyTrackingService';
 import { scoreToVerdict } from '@/lib/utils/aiVerdict';
 import { useFavorites } from '@/lib/hooks/useFavorites';
@@ -144,7 +145,7 @@ export default function NoNameDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { theme, brand, shadows, isDark } = useTokens();
-  const { user } = useAuth();
+  const { user, userProfile } = useAuth();
   const { toggleFavorite, isFavorite } = useFavorites();
 
   // Produktbesuch fürs Demografie-Sheet-Aufschub-Signal (2026-06-11).
@@ -329,7 +330,10 @@ export default function NoNameDetailScreen() {
   const refreshCartState = useCallback(async () => {
     if (!user?.uid || !id) return;
     try {
-      const items = await FirestoreService.getShoppingCartItems(user.uid);
+      const items = await FirestoreService.getShoppingCartItems(
+        user.uid,
+        (await ActiveListService.getActiveList())?.listId,
+      );
       let total = 0;
       for (const it of items as any[]) {
         const pid = it?.handelsmarkenProdukt?.id;
@@ -515,7 +519,8 @@ export default function NoNameDetailScreen() {
       return;
     }
     // Det-ID-Doc lesen — analog zur neuen Cart-Schema-v2.
-    FirestoreService.getShoppingCartItems(user.uid)
+    ActiveListService.getActiveList()
+      .then((a) => FirestoreService.getShoppingCartItems(user.uid, a?.listId))
       .then((items) => {
         if (!alive) return;
         let total = 0;
@@ -802,6 +807,10 @@ export default function NoNameDetailScreen() {
     }
 
     try {
+      // Aktive Liste als Ziel (ActiveListService, User-Anforderung 2026-07-02).
+      const cartTarget = await ActiveListService.getCartTarget(
+        (userProfile as any)?.display_name || (user as any)?.displayName,
+      );
       await FirestoreService.addToShoppingCart(
         user.uid,
         p.id,
@@ -810,6 +819,8 @@ export default function NoNameDetailScreen() {
         'comparison',
         { screenName: 'noname-detail' },
         { price: p.preis ?? 0, savings: (p as any).ersparnis ?? 0 },
+        undefined,
+        cartTarget,
       );
       // 'add_to_cart'-Action (ClickUp 86ca8fbpz): triggert ggf. eine
       // produkt-/action-getriggerte Umfrage. fire-and-forget.
@@ -847,6 +858,9 @@ export default function NoNameDetailScreen() {
     }
 
     try {
+      const cartTarget = await ActiveListService.getCartTarget(
+        (userProfile as any)?.display_name || (user as any)?.displayName,
+      );
       await FirestoreService.addToShoppingCart(
         user.uid,
         p.id,
@@ -855,6 +869,8 @@ export default function NoNameDetailScreen() {
         'comparison',
         { screenName: 'noname-detail' },
         { price: p.preis ?? 0, savings: (p as any).ersparnis ?? 0 },
+        undefined,
+        cartTarget,
       );
     } catch (e) {
       console.error('Cart increment failed:', e);
@@ -878,6 +894,7 @@ export default function NoNameDetailScreen() {
       closePill(); // mit Exit-Animation
     }
     try {
+      const activeList = await ActiveListService.getActiveList();
       await FirestoreService.decrementCartQuantity(
         user.uid,
         p.id,
@@ -890,6 +907,7 @@ export default function NoNameDetailScreen() {
               productType: 'noname',
             }
           : undefined,
+        activeList?.listId,
       );
       // Kein "entfernt"-Toast: die Mengen-Pill schließt sich beim Entfernen
       // mit Exit-Animation (closePill oben) → das IST das Feedback. Der Toast

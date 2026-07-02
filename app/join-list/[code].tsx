@@ -1,6 +1,6 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -20,7 +20,14 @@ export default function JoinListScreen() {
   const { theme, brand } = useTokens();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const navigation = useNavigation();
   const { user, userProfile, isAnonymous } = useAuth();
+
+  // Nativen Stack-Header verstecken — sonst zeigt Expo-Router den rohen
+  // Routen-Pfad „join-list/[code]" als Titel (User-Report 2026-07-02).
+  useLayoutEffect(() => {
+    navigation.setOptions({ headerShown: false });
+  }, [navigation]);
 
   const [state, setState] = useState<'joining' | 'need-account' | 'error'>('joining');
   const [errorMsg, setErrorMsg] = useState('');

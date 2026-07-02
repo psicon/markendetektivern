@@ -112,6 +112,7 @@ import { updateUserStats } from '@/lib/services/userProfile';
 import { doc } from '@react-native-firebase/firestore';
 import { db } from '@/lib/firebase';
 import { SharedListManageSheet } from '@/components/ui/SharedListManageSheet';
+import { ActiveListService } from '@/lib/services/activeListService';
 import {
   SharedListService,
   type SharedListDoc,
@@ -2529,6 +2530,33 @@ export default function ShoppingListScreen() {
       setActiveSharedListId(listParam.trim());
     }
   }, [listParam]);
+
+  // App-weit „aktuelle Liste" (ActiveListService, User-Anforderung
+  // 2026-07-02): beim Mount die zuletzt gewählte Liste wiederherstellen
+  // (sofern kein Deep-Link-Param) und jede Umschaltung zurückschreiben —
+  // Adds von Produktseiten + der Cart-Badge folgen diesem Ziel.
+  const activeListHydratedRef = useRef(false);
+  useEffect(() => {
+    void ActiveListService.getActiveList().then((active) => {
+      if (!activeListHydratedRef.current) {
+        activeListHydratedRef.current = true;
+        if (!listParam && active) setActiveSharedListId(active.listId);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    // Erst NACH dem Initial-Hydrate zurückschreiben — sonst löscht der
+    // Mount-Zustand (null) den persistierten Wert, bevor er geladen ist.
+    if (!activeListHydratedRef.current) return;
+    if (!activeSharedListId) {
+      void ActiveListService.setActiveList(null);
+    } else {
+      const name =
+        mySharedLists.find((l) => l.id === activeSharedListId)?.name ?? 'Geteilte Liste';
+      void ActiveListService.setActiveList({ listId: activeSharedListId, name });
+    }
+  }, [activeSharedListId, mySharedLists]);
 
   // Wenn ich aus der aktiven Liste entfernt wurde / sie gelöscht wurde
   // (Liste verschwindet aus der Subscription), zurück auf „Meine Liste".

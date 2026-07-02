@@ -82,6 +82,7 @@ import {
 } from '@/lib/utils/productNutrition';
 import { useAnalytics } from '@/lib/contexts/AnalyticsProvider';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { ActiveListService } from '@/lib/services/activeListService';
 import journeyTrackingService from '@/lib/services/journeyTrackingService';
 import { scoreToVerdict } from '@/lib/utils/aiVerdict';
 import { useFavorites } from '@/lib/hooks/useFavorites';
@@ -206,7 +207,7 @@ export default function ProductComparisonScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { theme, brand, shadows, stufen, isDark } = useTokens();
-  const { user } = useAuth();
+  const { user, userProfile } = useAuth();
   const { toggleFavorite, isFavorite } = useFavorites();
   const analytics = useAnalytics();
 
@@ -338,7 +339,10 @@ export default function ProductComparisonScreen() {
         // — billiger als N parallele isInShoppingCart-Calls.
         if (user?.uid && alive) {
           try {
-            const items = await FirestoreService.getShoppingCartItems(user.uid);
+            const items = await FirestoreService.getShoppingCartItems(
+              user.uid,
+              (await ActiveListService.getActiveList())?.listId,
+            );
             if (!alive) return;
             // Map productId → anzahl aus dem geladenen Cart-State
             const anzahlByPid = new Map<string, number>();
@@ -685,7 +689,10 @@ export default function ProductComparisonScreen() {
   const refreshCartState = useCallback(async () => {
     if (!user?.uid) return;
     try {
-      const items = await FirestoreService.getShoppingCartItems(user.uid);
+      const items = await FirestoreService.getShoppingCartItems(
+        user.uid,
+        (await ActiveListService.getActiveList())?.listId,
+      );
       const anzahlByPid = new Map<string, number>();
       for (const it of items as any[]) {
         const pid = it?.markenProdukt?.id || it?.handelsmarkenProdukt?.id;
@@ -1153,6 +1160,10 @@ export default function ProductComparisonScreen() {
     }
 
     try {
+      // Aktive Liste als Ziel (ActiveListService, User-Anforderung 2026-07-02).
+      const cartTarget = await ActiveListService.getCartTarget(
+        (userProfile as any)?.display_name || (user as any)?.displayName,
+      );
       await FirestoreService.addToShoppingCart(
         user.uid,
         productId,
@@ -1161,6 +1172,8 @@ export default function ProductComparisonScreen() {
         'comparison',
         { screenName: 'product-comparison' },
         { price: productData?.preis ?? 0, savings: 0 },
+        undefined,
+        cartTarget,
       );
       // 'add_to_cart'-Action (ClickUp 86ca8fbpz) → ggf. Umfrage-Trigger.
       achievementService
@@ -1212,6 +1225,9 @@ export default function ProductComparisonScreen() {
     }
 
     try {
+      const cartTarget = await ActiveListService.getCartTarget(
+        (userProfile as any)?.display_name || (user as any)?.displayName,
+      );
       await FirestoreService.addToShoppingCart(
         user.uid,
         productId,
@@ -1220,6 +1236,8 @@ export default function ProductComparisonScreen() {
         'comparison',
         { screenName: 'product-comparison' },
         { price: productData?.preis ?? 0, savings: 0 },
+        undefined,
+        cartTarget,
       );
     } catch (e) {
       console.error('Cart increment failed:', e);
@@ -1263,12 +1281,14 @@ export default function ProductComparisonScreen() {
               productType === 'markenprodukt' ? ('brand' as const) : ('noname' as const),
           }
         : undefined;
+      const activeList = await ActiveListService.getActiveList();
       await FirestoreService.decrementCartQuantity(
         user.uid,
         productId,
         productType === 'markenprodukt',
         prevAnzahl,
         trackingPayload,
+        activeList?.listId,
       );
       // Kein "entfernt"-Toast: die Mengen-Pill schließt sich beim Entfernen
       // sichtbar → das IST das Feedback. Toast wäre redundant + verdeckt den
