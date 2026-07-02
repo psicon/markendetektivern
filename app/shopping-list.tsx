@@ -87,7 +87,7 @@ import { AddCustomItemModal } from '@/components/ui/AddCustomItemModal';
 import BatchActionLoader from '@/components/ui/BatchActionLoader';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { TOAST_MESSAGES } from '@/constants/ToastMessages';
-import { fontFamily, fontWeight } from '@/constants/tokens';
+import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { getProductImage } from '@/lib/utils/productImage';
 import { calculateSavings } from '@/lib/utils/savings';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -109,6 +109,10 @@ import {
   showRetryableErrorToast,
 } from '@/lib/services/ui/toast';
 import { updateUserStats } from '@/lib/services/userProfile';
+import {
+  SharedListService,
+  type SharedListItem,
+} from '@/lib/services/sharedListService';
 import {
   Einkaufswagen,
   FirestoreDocument,
@@ -2247,7 +2251,7 @@ export default function ShoppingListScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { theme, brand } = useTokens();
-  const { user, userProfile } = useAuth();
+  const { user, userProfile, isAnonymous } = useAuth();
   const { isPremium } = useRevenueCat();
   const analytics = useAnalytics();
 
@@ -2320,6 +2324,77 @@ export default function ShoppingListScreen() {
   // ─── Filter ────────────────────────────────────────────────────
   const [showFilter, setShowFilter] = useState(false);
   const [showCustomItemModal, setShowCustomItemModal] = useState(false);
+
+  // ─── Teilen: Chooser (verschicken ODER gemeinsame Liste erstellen) ───
+  // Additive Brücke in das isolierte Shared-Lists-Feature (Stufe 5). Der
+  // persönliche Zettel bleibt unangetastet — wir LESEN nur die bereits
+  // geladenen Items und befüllen daraus einmalig eine neue shared_lists-Liste.
+  const [showShareSheet, setShowShareSheet] = useState(false);
+  const [creatingShared, setCreatingShared] = useState(false);
+
+  const myDisplayName =
+    (userProfile as any)?.display_name ||
+    (user as any)?.displayName ||
+    'Ich';
+
+  /** Aktuelle Zettel-Items → self-contained SharedListItems (Read-Side-Map,
+   *  kein Datenmodell-Touch am persönlichen Zettel). */
+  const buildSharedItems = useCallback((): Omit<SharedListItem, 'id'>[] => {
+    const map = (arr: EnrichedItem[], kind: 'brand' | 'noname') =>
+      arr.map((it) => ({
+        name: it.name || it.product?.name || it.product?.produktName || 'Produkt',
+        kind,
+        anzahl: it.anzahl ?? 1,
+        marketName: it.product?.discounter?.name || it.markt?.name || null,
+        savings: kind === 'noname' ? (it.savings ?? null) : null,
+        productId: it.productId || it.product?.id || null,
+        bild: it.product?.bild || it.markt?.bild || null,
+        addedByName: myDisplayName,
+      }));
+    return [...map(brandProducts, 'brand'), ...map(noNameProducts, 'noname')];
+  }, [brandProducts, noNameProducts, myDisplayName]);
+
+  /** Option A — Liste als schöner Text ins native Share-Sheet. Erst das
+   *  FilterSheet schließen, DANN präsentieren: iOS darf kein
+   *  UIActivityViewController über einem noch präsentierten RN-Modal öffnen
+   *  (sonst "already presenting"). */
+  const handleShareAsText = useCallback(() => {
+    setShowShareSheet(false);
+    setTimeout(() => {
+      Share.share({
+        message: buildShoppingListShareText(brandProducts, noNameProducts),
+      }).catch(() => {});
+    }, 350);
+  }, [brandProducts, noNameProducts]);
+
+  /** Option B — aus dem aktuellen Zettel eine gemeinsame Liste erstellen und
+   *  hinein navigieren (dort: Einladen + Umbenennen). Konto-Pflicht wie in der
+   *  Übersicht (anonyme Owner verlieren die Liste beim Reinstall). */
+  const handleCreateSharedList = useCallback(async () => {
+    if (creatingShared) return;
+    if (isAnonymous || !user) {
+      setShowShareSheet(false);
+      showInfoToast('Für eine gemeinsame Liste brauchst du ein kostenloses Konto.', 'info');
+      router.push('/auth/welcome' as any);
+      return;
+    }
+    setCreatingShared(true);
+    try {
+      const items = buildSharedItems();
+      const id = await SharedListService.createSharedList(
+        'Gemeinsamer Einkauf',
+        items,
+        myDisplayName,
+      );
+      setShowShareSheet(false);
+      showInfoToast('Gemeinsame Liste erstellt — jetzt Freunde einladen! 🎉', 'info');
+      router.push(`/shared-list/${id}` as any);
+    } catch {
+      showInfoToast('Die gemeinsame Liste konnte gerade nicht erstellt werden.', 'error');
+    } finally {
+      setCreatingShared(false);
+    }
+  }, [creatingShared, isAnonymous, user, buildSharedItems, myDisplayName, router]);
   const [filters, setFilters] = useState<{
     markets: string[];
     categories: string[];
@@ -4190,9 +4265,7 @@ export default function ShoppingListScreen() {
                   showInfoToast('Dein Einkaufszettel ist noch leer.', 'info');
                   return;
                 }
-                Share.share({
-                  message: buildShoppingListShareText(brandProducts, noNameProducts),
-                }).catch(() => {});
+                setShowShareSheet(true);
               }}
               hitSlop={6}
               style={({ pressed }) => ({
@@ -4338,6 +4411,97 @@ export default function ShoppingListScreen() {
           brandCount={brandProducts.length}
           noNameCount={noNameProducts.length}
         />
+      </FilterSheet>
+
+      {/* Teilen-Chooser — verschicken ODER gemeinsame Liste erstellen.
+          Brücke in das isolierte Shared-Lists-Feature (Stufe 5). */}
+      <FilterSheet
+        visible={showShareSheet}
+        title="Einkaufszettel teilen"
+        onClose={() => setShowShareSheet(false)}
+      >
+        <View style={{ paddingBottom: 8, gap: 10 }}>
+          <Pressable
+            onPress={handleShareAsText}
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 14,
+              backgroundColor: theme.surface,
+              borderRadius: radii.lg,
+              borderWidth: 1,
+              borderColor: theme.border,
+              padding: 14,
+              opacity: pressed ? 0.85 : 1,
+            })}
+          >
+            <View
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 22,
+                backgroundColor: theme.surfaceAlt,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <MaterialCommunityIcons name="share-variant" size={22} color={theme.text} />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 15, color: theme.text, letterSpacing: -0.2 }}>
+                Als Nachricht verschicken
+              </Text>
+              <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 12, lineHeight: 17, color: theme.textMuted, marginTop: 2 }}>
+                Sende deine Liste als Text an Familie oder Freunde.
+              </Text>
+            </View>
+            <MaterialCommunityIcons name="chevron-right" size={22} color={theme.textMuted} />
+          </Pressable>
+
+          <Pressable
+            onPress={handleCreateSharedList}
+            disabled={creatingShared}
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 14,
+              backgroundColor: theme.primaryContainer ?? theme.surface,
+              borderRadius: radii.lg,
+              borderWidth: 1.5,
+              borderColor: brand.primary,
+              padding: 14,
+              opacity: pressed || creatingShared ? 0.9 : 1,
+            })}
+          >
+            <View
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 22,
+                backgroundColor: brand.primary,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              {creatingShared ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <MaterialCommunityIcons name="account-multiple-plus" size={22} color="#fff" />
+              )}
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 15, color: theme.text, letterSpacing: -0.2 }}>
+                {creatingShared ? 'Wird erstellt …' : 'Gemeinsame Liste erstellen'}
+              </Text>
+              <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 12, lineHeight: 17, color: theme.textSub, marginTop: 2 }}>
+                Alle bearbeiten dieselbe Liste — in Echtzeit, gemeinsam.
+              </Text>
+            </View>
+            {!creatingShared ? (
+              <MaterialCommunityIcons name="chevron-right" size={22} color={brand.primary} />
+            ) : null}
+          </Pressable>
+        </View>
       </FilterSheet>
 
       {/* Marken-Info-Sheet — getriggert vom (i)-Icon im
