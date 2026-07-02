@@ -314,6 +314,34 @@ Recent-Sessions.
   bestätigten Werten beschrieben (premiumKnown-Gate). (4) init-Fehler ≠
   Mock-Mode — uninitialisiert lassen + Retry.
 
+- **RevenueCat-Downgrades aus Listener/Cache-Reads übernehmen (Premium-
+  Regression 2026-07-02, Commit cef84bf).** Premium hängt bei Receipt-Setups
+  am RESTORE, nicht am RC-Serverstand der uid. Der CustomerInfo-Listener
+  feuert bei Registrierung sofort mit dem gecachten (entitlement-losen)
+  Stand, und Cache-Reads nach einem Restore können stale sein. Regeln:
+  (1) Listener + Hintergrund-Abgleiche übernehmen NUR true (Upgrade).
+  (2) Ein SDK-false beim Boot ist erst FINAL, nachdem der Geräte-Restore
+  durch ist — dessen zurückgegebene CustomerInfo DIREKT auswerten
+  (revenueCatService.restorePremiumOrNull), nie danach den Cache lesen.
+  (3) „Käufe wiederherstellen" ebenso über das direkte Restore-Ergebnis.
+
+- **Edge-to-Edge auf Android aktivieren (`edgeToEdgeEnabled: true` /
+  `Theme.EdgeToEdge`).** Führte mit targetSdk 35 dazu, dass die App-UI
+  unter die System-Navigationsleiste lief (3-Button-Geräte), die Gesten-
+  Bar „verschwand", Toasts falsch saßen — und stand im Verdacht, den
+  Back-Swipe auf Android 15 zu brechen. Die App ist auf klassisches
+  Fenster-Verhalten gebaut: styles.xml AppTheme = AppCompat.DayNight.
+  NoActionBar + opake weiße navigationBarColor + android:windowOptOut
+  EdgeToEdgeEnforcement (targetApi 35) + app.json edgeToEdgeEnabled:false.
+  NICHT reaktivieren, ohne ALLE Screens auf insets.bottom umzubauen.
+
+- **Lokaler Android-Debug-Build (`npx expo run:android`) braucht JDK 17**
+  (`/usr/local/opt/openjdk@17/...`) — das RN-Gradle-Plugin lehnt JDK 25 ab
+  („Error resolving plugin com.facebook.react.settings > 25.0.2"). Expos
+  Install-Schritt flaket (wie iOS) → `adb install android/app/build/outputs/
+  apk/debug/app-debug.apk` manuell + `adb reverse tcp:8081 tcp:8081`.
+  Release-Builds weiterhin NUR via EAS.
+
 - **Fire-and-forget `void asyncStorageWrite(...)` direkt vor
   `setVisible(false)`/`setState`** — Race-Garantie. Wenn ein Listener
   auf das State-Change wartet und dann den just-geschriebenen Wert
