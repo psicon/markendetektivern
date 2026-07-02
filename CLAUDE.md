@@ -1866,13 +1866,15 @@ Backend-Deploys (rules/functions) allein liefern nur das Backend. QR wird LOKAL
 generiert (kein Invite-Code an fremde QR-Dienste), immer weißer Grund + dunkle
 Module (scanbar auch im Dark-Mode).
 
-**⚠️ DEPLOY-PFLICHT (Feature ist „dark" bis dahin):** zwei Prod-Deploys nötig,
-sonst permission-denied im Sim/Prod:
-1. `firebase deploy --only firestore:rules` (Rules-Tests VORHER grün — sind es).
-2. `firebase deploy --only functions:shared-lists` (Node 22 / firebase-tools
-   ≥15.15, neue Codebase in `firebase.json`).
-Bis beide durch sind: UI rendert (Übersicht, Empty-State, Sheets), aber Erstellen
-/Beitreten scheitert sauber mit Fehler-Toast — kein Crash.
+**Deploy-Status: BEIDE Prod-Deploys sind LIVE (2026-07-02).**
+1. `firebase deploy --only firestore:rules` ✅ (Erstellen/Lesen im Sim bewiesen).
+2. `firebase deploy --only functions:shared-lists` ✅ — Achtung Learning: der
+   Deploy braucht `npm install` IM CF-Ordner (sonst „Couldn't find
+   firebase-functions package" beim Analyse-Schritt). Lockfile ist committet.
+E2E verifiziert: Unauth-Call → 401 UNAUTHENTICATED; Join-Deep-Link mit echtem
+Token → CF-Lookup per inviteCode → idempotent (alreadyMember) → App landet in
+der Liste. Sollte je eine neue CF-Codebase dazukommen: gleiche Checkliste
+(npm install im Ordner, Rules-Tests grün, dann deploy).
 
 ## Apple-Sign-In im SIMULATOR testen (Sim-Build-Saga 2026-06-11)
 
