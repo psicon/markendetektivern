@@ -395,7 +395,10 @@ export default function ExploreScreen() {
       : '';
   const hasInitialQuery = initialQuery.length > 0;
   const { user, userProfile } = useAuth();
-  const { isPremium } = useRevenueCat();
+  // showAds = Werbe-Gate (nur bei BESTÄTIGT kein Premium), isPremiumEffective
+  // = Content-Gate (unbekannter Status wird wie Premium behandelt — keine
+  // Kategorie-Sperren im Boot-Fenster). Premium-Boot-Fix 2026-07.
+  const { showAds, isPremiumEffective } = useRevenueCat();
   const analytics = useAnalytics();
   // Slice D: Präferenz-Profil (read-once) → sanfter Default-Bias (s. u.).
   const prefProfile = usePreferenceProfile();
@@ -637,7 +640,10 @@ export default function ExploreScreen() {
   // every tab switch (visible flicker, fresh AdMob fetch each time).
   // PagerView keeps all pages in memory; only one is visible. Cost:
   // 3 simultaneous ad slots instead of 1, but no remount jank.
-  const mountBanner = () => !isPremium && adsReady;
+  // Premium-Boot-Fix 2026-07: showAds statt !isPremium — bei UNBEKANNTEM
+  // Status (Boot-Fenster) keine Ads mounten (zahlende Kunden sahen sonst
+  // kurz Werbung; AdMob-Request feuerte trotzdem).
+  const mountBanner = () => showAds && adsReady;
 
   // ─── Reference data (filters + card lookup) ───────────────────────────
   const [discounter, setDiscounter] = useState<FirestoreDocument<Discounter>[]>([]);
@@ -715,7 +721,7 @@ export default function ExploreScreen() {
   // Dead-Zone-Crash beim Stöbern-Mount in Production-Builds.
   // Premium-User sehen weiterhin keine Ads (early-return).
   useEffect(() => {
-    if (isPremium) return;
+    if (!showAds) return;
     const dataReady =
       nonames.length > 0 ||
       markenprodukte.length > 0 ||
@@ -726,7 +732,7 @@ export default function ExploreScreen() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    isPremium,
+    showAds,
     nonames.length,
     markenprodukte.length,
     searchHitsEigen.length,
@@ -937,7 +943,7 @@ export default function ExploreScreen() {
           getDocs(collection(db, 'packungstypen')).catch(() => null),
         ];
         if (!PERF.lazyKategorien) {
-          queries.push(categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium, userAge));
+          queries.push(categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremiumEffective, userAge));
         }
         if (!PERF.lazyHandelsmarken) {
           queries.push(getDocs(collection(db, 'handelsmarken')).catch(() => null));
@@ -984,7 +990,7 @@ export default function ExploreScreen() {
   }, [
     (userProfile as any)?.stats?.currentLevel,
     userProfile?.level,
-    isPremium,
+    isPremiumEffective,
   ]);
 
   // Marken-Liste lazy laden — erst wenn der User den Marken-Filter
@@ -1040,7 +1046,7 @@ export default function ExploreScreen() {
     (async () => {
       try {
         const userLevel = (userProfile as any)?.stats?.currentLevel ?? userProfile?.level ?? 1;
-        const cats = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium, userAge);
+        const cats = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremiumEffective, userAge);
         setKategorien([...cats].sort(byNameLocal));
       } catch (e) {
         console.warn('Explore: failed to load kategorien lazy', e);
@@ -4865,7 +4871,7 @@ export default function ExploreScreen() {
             // wird jetzt nicht mehr als locked gemeldet.
             categoryAccessService.clearCache();
             const userLevel = (userProfile as any)?.stats?.currentLevel ?? userProfile?.level ?? 1;
-            const cats = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium, result.age);
+            const cats = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremiumEffective, result.age);
             setKategorien(cats);
             // Direkt Alkohol-Kategorie selektieren (wir wissen ja warum
             // der User das Sheet überhaupt geöffnet hat).
@@ -4905,7 +4911,7 @@ export default function ExploreScreen() {
             // Re-fetch categories so the lock state updates after rewarded-ad unlock
             (async () => {
               const userLevel = (userProfile as any)?.stats?.currentLevel ?? userProfile?.level ?? 1;
-              const cats = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium, userAge);
+              const cats = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremiumEffective, userAge);
               setKategorien(cats);
             })();
           }}

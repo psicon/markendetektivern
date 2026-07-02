@@ -145,12 +145,21 @@ class RevenueCatService {
         isExpoGo: this.isExpoGo,
         platform: Platform.OS
       });
-      
-      // Fallback zu Mock-Mode für Stabilität
-      console.log('🛒 RevenueCat: Falling back to mock mode due to error');
-      this.isExpoGo = true;
-      this._isInitialized = true;
+
+      // WICHTIG (Premium-Boot-Fix 2026-07): NICHT in den Mock-Mode kippen.
+      // Das setzte `isExpoGo = true` für die GESAMTE Session → jeder
+      // Premium-Check lieferte hart false → zahlende Kunden sahen dauerhaft
+      // Werbung. Stattdessen: uninitialisiert bleiben — der nächste
+      // initialize()-Aufruf (Provider-Retry) versucht es erneut, und die
+      // Status-Reads liefern in der Zwischenzeit "unbekannt" (null) statt
+      // fälschlich "kein Premium".
+      this._isInitialized = false;
     }
+  }
+
+  /** true, solange initialize() (noch) nicht erfolgreich durchgelaufen ist. */
+  get needsInitialization(): boolean {
+    return !this._isInitialized;
   }
 
   /**
@@ -354,6 +363,87 @@ class RevenueCatService {
     } catch (error) {
       console.error('❌ Error checking premium status:', error);
       return false;
+    }
+  }
+
+  /** Premium aus einer (rohen) CustomerInfo ableiten — gleiche Logik wie
+   *  isPremium(): irgendein aktives Entitlement ODER aktive Subscription. */
+  private derivePremium(customerInfo: any): boolean {
+    const hasAnyEntitlement =
+      Object.keys(customerInfo?.entitlements?.active || {}).length > 0;
+    const hasActiveSubscriptions =
+      (customerInfo?.activeSubscriptions?.length || 0) > 0;
+    return hasAnyEntitlement || hasActiveSubscriptions;
+  }
+
+  /**
+   * EHRLICHER Premium-Check (Premium-Boot-Fix 2026-07): liefert
+   *   true/false = vom SDK bestätigter Status (Cache oder Server),
+   *   null       = Status UNBEKANNT (SDK-Fehler, offline ohne Cache,
+   *                nicht initialisiert).
+   * Im Gegensatz zu isPremium() maskiert diese Methode Fehler NICHT als
+   * false — der Provider darf ein null niemals als "kein Premium"
+   * behandeln (zahlende Kunden sahen sonst Werbung).
+   */
+  async isPremiumOrNull(): Promise<boolean | null> {
+    if (this.isExpoGo) return false; // echtes Expo Go: Mock, ehrlich kein Premium
+    if (!this._isInitialized) return null;
+    try {
+      const Purchases = require('react-native-purchases');
+      const customerInfo = await Purchases.default.getCustomerInfo();
+      return this.derivePremium(customerInfo);
+    } catch (error) {
+      console.warn('⚠️ isPremiumOrNull: Status unbekannt (SDK-Fehler):', error);
+      return null;
+    }
+  }
+
+  /**
+   * Server-Abgleich mit ehrlichem Ergebnis: invalidiert den SDK-Cache und
+   * holt frisch. Fehler → null (Status unbekannt) — NIEMALS Mock-false,
+   * sonst überschreibt ein Offline-Boot den korrekten Cache-Wert.
+   */
+  async forceRefreshPremiumOrNull(): Promise<boolean | null> {
+    if (this.isExpoGo) return false;
+    if (!this._isInitialized) return null;
+    try {
+      await this.invalidateCustomerInfoCache();
+      const Purchases = require('react-native-purchases');
+      const customerInfo = await Purchases.default.getCustomerInfo();
+      return this.derivePremium(customerInfo);
+    } catch (error) {
+      console.warn('⚠️ forceRefreshPremiumOrNull: Status unbekannt:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Push-Korrektiv: RevenueCat meldet CustomerInfo-Änderungen (Kauf,
+   * Renewal, Ablauf, Restore — auch von anderen Geräten) aktiv. Gibt eine
+   * Unsubscribe-Funktion zurück. In Expo Go / vor Init: No-op.
+   */
+  onPremiumChanged(cb: (isPremium: boolean) => void): () => void {
+    if (this.isExpoGo || !this._isInitialized) return () => {};
+    try {
+      const Purchases = require('react-native-purchases');
+      const listener = (customerInfo: any) => {
+        try {
+          cb(this.derivePremium(customerInfo));
+        } catch {
+          /* Listener darf nie werfen */
+        }
+      };
+      Purchases.default.addCustomerInfoUpdateListener(listener);
+      return () => {
+        try {
+          Purchases.default.removeCustomerInfoUpdateListener(listener);
+        } catch {
+          /* best effort */
+        }
+      };
+    } catch (error) {
+      console.warn('⚠️ onPremiumChanged: Listener nicht registrierbar:', error);
+      return () => {};
     }
   }
 

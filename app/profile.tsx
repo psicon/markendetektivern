@@ -98,7 +98,11 @@ export default function ProfileScreen() {
   const cashbackEurStr = (cashback.balanceCents / 100)
     .toFixed(2)
     .replace('.', ',');
-  const { isPremium, presentPaywall } = useRevenueCat();
+  // Premium-Boot-Fix 2026-07: Crown-Badge nur bei BESTÄTIGTEM Premium
+  // (isPremium), der Upsell nur bei BESTÄTIGT keinem (showAds-Semantik via
+  // isPremiumEffective) — im Boot-Fenster (Status unbekannt) also beides
+  // neutral statt falsches Flackern.
+  const { isPremium, isPremiumEffective, presentPaywall } = useRevenueCat();
   const { isDarkMode, toggleDarkMode } = useTheme();
 
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -1019,7 +1023,7 @@ export default function ProfileScreen() {
             Premium-Benefit ist Werbe-Entfernung. Sichtbar für JEDEN
             non-premium User (auch anonyme). Title fokussiert auf den
             konkreten Benefit statt abstraktem "Premium". */}
-        {!isPremium ? (
+        {!isPremiumEffective ? (
           <View style={{ paddingHorizontal: 20, paddingTop: 14 }}>
             <Pressable
               onPress={() => presentPaywall('profile_upgrade')}

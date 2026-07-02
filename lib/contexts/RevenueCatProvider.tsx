@@ -32,11 +32,27 @@ const writeCachedPremium = (value: boolean) => {
 
 interface RevenueCatContextType {
   isPremium: boolean;
+  /** true, sobald der Status aus einer VERLÄSSLICHEN Quelle stammt
+   *  (lokaler Cache-Hit, bestätigter SDK-Read oder Update-Listener).
+   *  Solange false: Status ist UNBEKANNT — nicht als "kein Premium"
+   *  behandeln! */
+  premiumKnown: boolean;
+  /** Werbe-Gate: NUR true, wenn BESTÄTIGT kein Premium vorliegt.
+   *  Bei unbekanntem Status → keine Ads (fail-closed zugunsten
+   *  zahlender Kunden). Alle Ad-Callsites nutzen DIESES Flag,
+   *  nicht !isPremium. */
+  showAds: boolean;
+  /** Content-Gate (z.B. Premium-Kategorien): unbekannter Status wird
+   *  wie Premium behandelt, damit zahlende Kunden im Boot-Fenster
+   *  keine Sperren/Upsells sehen. */
+  isPremiumEffective: boolean;
   isLoading: boolean;
   offerings: any[];
   purchasePackage: (packageId: string) => Promise<boolean>;
   restorePurchases: () => Promise<void>;
-  refreshPremiumStatus: () => Promise<void>;
+  /** Liefert den frischen Status (true/false) oder null, wenn er nicht
+   *  ermittelt werden konnte — Caller dürfen null NICHT als false lesen. */
+  refreshPremiumStatus: (forceRefresh?: boolean) => Promise<boolean | null>;
   presentPaywall: (context?: string, offeringId?: string) => Promise<{ result: 'purchased' | 'cancelled' | 'error' | 'not_presented' }>;
   presentPaywallIfNeeded: () => Promise<{ result: 'purchased' | 'cancelled' | 'error' | 'not_presented' }>;
   // Helper-Funktionen für spezifische Paywalls
@@ -67,11 +83,27 @@ export const RevenueCatProvider: React.FC<RevenueCatProviderProps> = ({ children
   // vorher) — aber returning Premium-User starten mit `true` und sehen
   // KEINEN Pop wenn RC-Call später bestätigt.
   const [isPremium, setIsPremium] = useState(false);
+  // Premium-Boot-Fix 2026-07: false = Status UNBEKANNT (weder Cache-Hit
+  // noch SDK-Bestätigung). Konsumenten (Ads/Paywall/Kategorien) dürfen
+  // "unbekannt" NIE als "kein Premium" behandeln — das war die Ursache
+  // für "Premium-User sieht beim Start Werbung".
+  const [premiumKnown, setPremiumKnown] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [offerings, setOfferings] = useState<any[]>([]);
   // 2.6a (Stufe 2): letzter nach Firestore gespiegelter Premium-Wert —
   // vermeidet redundante Writes bei jedem Refresh (nur bei echter Änderung).
   const lastSyncedPremiumRef = useRef<boolean | null>(null);
+  // true, sobald ein SDK-BESTÄTIGTER Wert gesetzt wurde — der (langsamere)
+  // Cache-Hydrate darf ihn dann nicht mehr überschreiben (Ref statt
+  // Timing-Annahme).
+  const sdkConfirmedRef = useRef(false);
+
+  /** Einzige Stelle, die einen VERLÄSSLICHEN Status setzt (SDK/Listener). */
+  const confirmPremium = (value: boolean) => {
+    sdkConfirmedRef.current = true;
+    setIsPremium(value);
+    setPremiumKnown(true);
+  };
 
   // Hydrate from cache ONCE on mount (synchron-ish via useEffect ohne
   // Auth-Dep — feuert vor dem User-Effect). Hält den Fall ab dass
@@ -81,19 +113,19 @@ export const RevenueCatProvider: React.FC<RevenueCatProviderProps> = ({ children
     let cancelled = false;
     readCachedPremium().then((cached) => {
       if (cancelled || cached === null) return;
-      // Nur setzen wenn noch nicht durch RC-Call überschrieben.
-      // RC-Service-Init dauert min. eine Round-Trip, der Cache-Read
-      // ist immer schneller → kein Konflikt zu erwarten.
+      if (sdkConfirmedRef.current) return; // SDK war schneller — nicht überschreiben
       setIsPremium(cached);
+      setPremiumKnown(true);
     });
     return () => { cancelled = true; };
   }, []);
 
-  // Cache schreiben bei jedem isPremium-Wechsel (RC = Source of Truth,
-  // Cache nur ein Hint für nächsten Boot).
+  // Cache schreiben — NUR verlässliche Werte (premiumKnown). Vorher schrieb
+  // der Effect auch das initiale/fehlerinduzierte false und vergiftete damit
+  // den nächsten Boot (Symptom "Werbung bleibt oft").
   useEffect(() => {
-    writeCachedPremium(isPremium);
-  }, [isPremium]);
+    if (premiumKnown) writeCachedPremium(isPremium);
+  }, [isPremium, premiumKnown]);
 
   // RevenueCat initialisieren wenn User sich ändert.
   // T17.21: KEIN paralleler Polling-Effect mehr (war Race-Condition).
@@ -108,7 +140,10 @@ export const RevenueCatProvider: React.FC<RevenueCatProviderProps> = ({ children
     }
 
     let cancelled = false;
-    const initializeRevenueCat = async () => {
+    let unsubscribePremium: (() => void) | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const initializeRevenueCat = async (attempt = 0) => {
       try {
         if (!initRanRef.current) {
           setIsLoading(true);
@@ -117,52 +152,64 @@ export const RevenueCatProvider: React.FC<RevenueCatProviderProps> = ({ children
         await revenueCatService.initialize(user?.uid);
         if (cancelled) return;
 
+        // Premium-Boot-Fix 2026-07: init-Fehler kippt den Service nicht
+        // mehr in den Mock-Mode (= dauerhaft false), sondern lässt ihn
+        // uninitialisiert → hier mit Backoff erneut versuchen. Bis dahin
+        // liefern die Status-Reads null (unbekannt) statt false.
+        if (revenueCatService.needsInitialization) {
+          if (attempt < 3) {
+            retryTimer = setTimeout(() => {
+              if (!cancelled) void initializeRevenueCat(attempt + 1);
+            }, 3000 * (attempt + 1));
+          }
+          return;
+        }
+
         if (user?.uid) {
           await revenueCatService.setUserId(user?.uid);
           if (cancelled) return;
         }
 
-        // Ersten Premium-Status holen (cached innerhalb von RC SDK)
-        try {
-          const isPremiumUser = await revenueCatService.isPremium();
-          if (cancelled) return;
-          setIsPremium(isPremiumUser);
+        // Push-Korrektiv: RC meldet Käufe/Renewals/Abläufe (auch von
+        // anderen Geräten) aktiv — bestätigte Werte, direkt übernehmen.
+        unsubscribePremium = revenueCatService.onPremiumChanged((premium) => {
+          if (!cancelled) confirmPremium(premium);
+        });
 
-          // Sofortiger Server-Abgleich im Hintergrund (User-Vorgabe
-          // 2026-06-11: "beim Start die Käufe checken — oft Werbung
-          // trotz Premium"). Der isPremium()-Call oben bedient sich
-          // aus dem RC-SDK-Cache — ist der stale-false (Kauf auf
-          // anderem Gerät, abgelaufene TTL), bleibt Werbung sichtbar.
-          // forceRefresh holt CustomerInfo frisch vom RC-Server;
-          // danach liest isPremium() den frischen Cache. Fire-and-
-          // forget: nur ein ERFOLGREICHER Refresh updated den State
-          // (Netz-Fehler lassen den Cache-Wert unangetastet).
-          revenueCatService
-            .forceRefreshCustomerInfo()
+        // Ersten Premium-Status holen (cached innerhalb von RC SDK).
+        // isPremiumOrNull maskiert Fehler NICHT als false: null = Status
+        // unbekannt → bestehenden (Cache-)Wert behalten.
+        const isPremiumUser = await revenueCatService.isPremiumOrNull();
+        if (cancelled) return;
+        if (isPremiumUser !== null) confirmPremium(isPremiumUser);
+
+        // Sofortiger Server-Abgleich im Hintergrund (User-Vorgabe
+        // 2026-06-11: "beim Start die Käufe checken"). WICHTIG: über
+        // forceRefreshPremiumOrNull — der alte Pfad invalidierte erst den
+        // SDK-Cache und lieferte bei Netz-Fehlern Mock-false, womit er den
+        // korrekten Wert ÜBERSCHRIEB und den AsyncStorage-Cache vergiftete
+        // (Root-Cause von "Premium-User sieht Werbung, oft dauerhaft").
+        revenueCatService
+          .forceRefreshPremiumOrNull()
+          .then((premiumNow) => {
+            if (!cancelled && premiumNow !== null) confirmPremium(premiumNow);
+          })
+          .catch(() => {});
+
+        // Falls (noch) kein Premium: restore im Hintergrund versuchen.
+        // Cleanup-Flag verhindert state-set nach Unmount.
+        // NICHT im Simulator: restorePurchases triggert dort den
+        // Sandbox-Apple-ID-Login-Prompt in Endlosschleife (Sim hat
+        // keinen App-Store-Account) — blockiert jedes Sim-Testing.
+        if (isPremiumUser === false && Device.isDevice) {
+          revenueCatService.restorePurchases()
             .then(async () => {
               if (cancelled) return;
-              const premiumNow = await revenueCatService.isPremium();
-              if (!cancelled) setIsPremium(premiumNow);
+              const isPremiumNow = await revenueCatService.isPremiumOrNull();
+              if (cancelled) return;
+              if (isPremiumNow === true) confirmPremium(true);
             })
             .catch(() => {});
-
-          // Falls (noch) kein Premium: restore im Hintergrund versuchen.
-          // Cleanup-Flag verhindert state-set nach Unmount.
-          // NICHT im Simulator: restorePurchases triggert dort den
-          // Sandbox-Apple-ID-Login-Prompt in Endlosschleife (Sim hat
-          // keinen App-Store-Account) — blockiert jedes Sim-Testing.
-          if (!isPremiumUser && Device.isDevice) {
-            revenueCatService.restorePurchases()
-              .then(async () => {
-                if (cancelled) return;
-                const isPremiumNow = await revenueCatService.isPremium();
-                if (cancelled) return;
-                if (isPremiumNow) setIsPremium(true);
-              })
-              .catch(() => {});
-          }
-        } catch {
-          // Bei Fehler: cached value behalten, nicht künstlich auf false setzen
         }
 
         // Offerings parallel laden mit Timeout
@@ -187,34 +234,28 @@ export const RevenueCatProvider: React.FC<RevenueCatProviderProps> = ({ children
     };
 
     initializeRevenueCat();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      unsubscribePremium?.();
+    };
   }, [user?.uid]);
 
-  const refreshPremiumStatus = async (forceRefresh: boolean = false) => {
+  const refreshPremiumStatus = async (forceRefresh: boolean = false): Promise<boolean | null> => {
     // T17.21: KEIN reset-then-set Trick mehr. setIsPremium nur einmal
-    // mit dem echten Wert. React diffd selbst und re-rendert nur wenn
-    // sich der Wert ändert — kein "Force-Flip" nötig.
+    // mit dem echten Wert. Premium-Boot-Fix 2026-07: über die ehrlichen
+    // *OrNull-Reads — null (Status unbekannt) lässt den bestehenden State
+    // unangetastet und wird an den Caller durchgereicht (Caller dürfen
+    // null NICHT als "kein Premium" behandeln).
     try {
-      let premium: boolean;
-      try {
-        if (forceRefresh) {
-          const customerInfo = await revenueCatService.forceRefreshCustomerInfo();
-          premium = !!customerInfo?.entitlements?.active?.[REVENUECAT_CONFIG.ENTITLEMENTS.PREMIUM];
-        } else {
-          premium = await revenueCatService.isPremium();
-        }
-      } catch (error) {
-        console.warn('⚠️ Premium Check fehlgeschlagen, nutze Fallback:', error);
-        try {
-          premium = await revenueCatService.isPremium();
-        } catch {
-          // Bei doppeltem Fail: bestehenden State nicht antasten.
-          // Reset auf false würde alle Premium-User „depremium-en" bis
-          // zum nächsten erfolgreichen Check — unerwünscht.
-          return;
-        }
+      const premium = forceRefresh
+        ? await revenueCatService.forceRefreshPremiumOrNull()
+        : await revenueCatService.isPremiumOrNull();
+      if (premium === null) {
+        console.warn('⚠️ Premium Check: Status unbekannt — State unverändert.');
+        return null;
       }
-      setIsPremium(premium);
+      confirmPremium(premium);
       console.log('🛒 Premium Status refreshed:', premium, forceRefresh ? '(forced)' : '(cached)');
 
       // 2.6a (Stufe 2): Premium-Status ins User-Doc spiegeln. RevenueCat bleibt
@@ -231,8 +272,10 @@ export const RevenueCatProvider: React.FC<RevenueCatProviderProps> = ({ children
           lastSyncedPremiumRef.current = null; // Retry beim nächsten Refresh erlauben
         });
       }
+      return premium;
     } catch (error) {
       console.error('❌ Error refreshing premium status:', error);
+      return null;
     }
   };
 
@@ -371,6 +414,14 @@ export const RevenueCatProvider: React.FC<RevenueCatProviderProps> = ({ children
 
   const value: RevenueCatContextType = {
     isPremium,
+    premiumKnown,
+    // Ads NUR bei bestätigtem "kein Premium" — unbekannter Status zeigt
+    // keine Werbung (fail-closed für zahlende Kunden; Free-User sehen die
+    // erste Ad wenige hundert ms später, sobald Cache/SDK geantwortet hat).
+    showAds: premiumKnown && !isPremium,
+    // Content-Gates (Premium-Kategorien etc.): unbekannt = wie Premium
+    // behandeln, damit keine Sperren/Upsells im Boot-Fenster aufblitzen.
+    isPremiumEffective: isPremium || !premiumKnown,
     isLoading,
     offerings,
     purchasePackage,

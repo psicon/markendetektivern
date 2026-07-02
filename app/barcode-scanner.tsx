@@ -30,7 +30,7 @@ export default function BarcodeScannerScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { user } = useAuth();
-  const { isPremium } = useRevenueCat();
+  const { showAds } = useRevenueCat();
   const analytics = useAnalytics();
   const insets = useSafeAreaInsets();
   
@@ -638,8 +638,10 @@ export default function BarcodeScannerScreen() {
     // SOFORTIGE Ausführung
     searchProductByEAN(data);
     
-    // Track scan for interstitial ads
-    interstitialAdService.trackScan(isPremium);
+    // Track scan for interstitial ads. Der isPremium-Param unterdrückt das
+    // Interstitial — !showAds behandelt auch "Status unbekannt" als Premium
+    // (Premium-Boot-Fix 2026-07: kein Vollbild-Ad im Boot-Fenster).
+    interstitialAdService.trackScan(!showAds);
   };
 
   // Validiere EAN-Format

@@ -2420,7 +2420,9 @@ export default function ShoppingListScreen() {
   const insets = useSafeAreaInsets();
   const { theme, brand } = useTokens();
   const { user, userProfile, isAnonymous } = useAuth();
-  const { isPremium } = useRevenueCat();
+  // Premium-Boot-Fix 2026-07: showAds = Werbe-Gate (nur bei BESTÄTIGT kein
+  // Premium), isPremiumEffective = Content-Gate (unbekannt = wie Premium).
+  const { showAds, isPremiumEffective } = useRevenueCat();
   const analytics = useAnalytics();
 
   const favoriteMarketId: string | undefined = (userProfile as any)?.favoriteMarket;
@@ -3132,7 +3134,7 @@ export default function ShoppingListScreen() {
 
       if (categoriesArray.length === 0) {
         try {
-          const cwa = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremium);
+          const cwa = await categoryAccessService.getAllCategoriesWithAccess(userLevel, isPremiumEffective);
           setAvailableCategories(cwa.filter((c: any) => !c.isLocked));
         } catch {
           setAvailableCategories([]);
@@ -3140,7 +3142,7 @@ export default function ShoppingListScreen() {
       } else {
         const filtered: typeof categoriesArray = [];
         for (const cat of categoriesArray) {
-          const ok = await categoryAccessService.isCategoryAvailable(cat.id, userLevel, isPremium);
+          const ok = await categoryAccessService.isCategoryAvailable(cat.id, userLevel, isPremiumEffective);
           if (ok) filtered.push(cat);
         }
         setAvailableCategories(filtered);
@@ -3149,7 +3151,7 @@ export default function ShoppingListScreen() {
     } catch (error) {
       console.error('Error loading filter options:', error);
     }
-  }, [brandProducts, noNameProducts, userProfile, isPremium]);
+  }, [brandProducts, noNameProducts, userProfile, isPremiumEffective]);
 
   useEffect(() => {
     if (brandProducts.length > 0 || noNameProducts.length > 0) {
@@ -4298,7 +4300,7 @@ export default function ShoppingListScreen() {
                 }}
                 onManage={() => setShowManageSheet(true)}
               />
-              {!isPremium ? (
+              {showAds ? (
                 // Bündig mit den Cards: der Container padded schon 16 —
                 // nur im Empty-State (Container-Padding 0) selbst einrücken.
                 <View style={{ marginHorizontal: isEmpty ? 16 : 0, marginTop: 6, marginBottom: 4 }}>

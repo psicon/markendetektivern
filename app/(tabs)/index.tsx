@@ -90,7 +90,7 @@ export default function HomeScreen() {
   const isFocused = useIsFocused();
 
   const { user, userProfile, refreshUserProfile } = useAuth();
-  const { isPremium, refreshPremiumStatus } = useRevenueCat();
+  const { isPremium, showAds, refreshPremiumStatus } = useRevenueCat();
   const analytics = useAnalytics();
   const cashback = useCashbackUserState();
   // Live cart-count für das Einkaufsliste-Schnellzugriff-Card-Badge.
@@ -337,10 +337,16 @@ export default function HomeScreen() {
         const flag = await AsyncStorage.getItem('pending_onboarding_paywall');
         if (flag !== '1') return;
         await AsyncStorage.removeItem('pending_onboarding_paywall');
-        await refreshPremiumStatus();
+        // Premium-Boot-Fix 2026-07: den FRISCHEN Rückgabewert nutzen — das
+        // gecapturte `isPremium` aus dem Render-Scope war eine Stale-Closure
+        // (refreshPremiumStatus updatete zwar den Provider-State, die lokale
+        // Variable blieb false → Paywall poppte für Premium-User auf).
+        // Nur bei BESTÄTIGTEM "kein Premium" (false) zeigen — null (Status
+        // unbekannt) zeigt keine Paywall (fail-closed).
+        const premiumNow = await refreshPremiumStatus();
+        if (premiumNow !== false) return;
         const { remoteConfigService } = await import('@/lib/services/remoteConfigService');
         if (!(await remoteConfigService.shouldShowOnboardingPaywall())) return;
-        if (isPremium) return;
         try {
           const { revenueCatService } = await import('@/lib/services/revenueCatService');
           let tries = 0;
@@ -1192,7 +1198,7 @@ export default function HomeScreen() {
         )}
 
         {/* ── Banner Ad ── (C2: erst ab Session 2, siehe bannerAllowed) */}
-        {!isPremium && bannerAllowed && (
+        {showAds && bannerAllowed && (
           <View style={{ marginTop: 16 }}>
             <BannerAd
               onAdLoaded={() => {}}

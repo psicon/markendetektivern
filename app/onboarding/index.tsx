@@ -618,12 +618,16 @@ export default function OnboardingScreen() {
       // Paywall-Präsentation und ohne /(tabs)-Navigation.
       await persistOnboardingResults();
 
-      // Paywall darf nach Auth-Erfolg auf /(tabs) triggern.
-      try {
-        
-        await AsyncStorage.setItem('pending_onboarding_paywall', '1');
-      } catch (e) {
-        console.warn('⚠️ pending_onboarding_paywall set failed:', e);
+      // Paywall darf nach Auth-Erfolg auf /(tabs) triggern — aber nur für
+      // Nicht-Premium-User (Premium-Boot-Fix 2026-07: der Status wurde beim
+      // Onboarding-Mount ermittelt; Premium-Usern das Flag gar nicht erst
+      // setzen, der Home-Effect prüft zusätzlich frisch).
+      if (!isPremiumUser) {
+        try {
+          await AsyncStorage.setItem('pending_onboarding_paywall', '1');
+        } catch (e) {
+          console.warn('⚠️ pending_onboarding_paywall set failed:', e);
+        }
       }
 
       // T5: ?from=onboarding-Param damit Welcome den Back-Button
@@ -887,11 +891,14 @@ export default function OnboardingScreen() {
       // danach auf Home (inkl. refreshPremiumStatus + RevenueCat-Init-Warten +
       // presentPaywall). Die Mirror-Writes oben bleiben awaited (Firestore
       // offline-first, schnell) — nur der StoreKit-Roundtrip fällt aus dem
-      // Boot-Pfad.
-      try {
-        await AsyncStorage.setItem('pending_onboarding_paywall', '1');
-      } catch (e) {
-        console.warn('⚠️ pending_onboarding_paywall set failed:', e);
+      // Boot-Pfad. Premium-Boot-Fix 2026-07: Flag nur für Nicht-Premium-User
+      // setzen (Status wurde beim Onboarding-Mount ermittelt).
+      if (!isPremiumUser) {
+        try {
+          await AsyncStorage.setItem('pending_onboarding_paywall', '1');
+        } catch (e) {
+          console.warn('⚠️ pending_onboarding_paywall set failed:', e);
+        }
       }
 
       // Zur App navigieren
