@@ -111,6 +111,7 @@ import {
 import { updateUserStats } from '@/lib/services/userProfile';
 import {
   SharedListService,
+  type SharedListDoc,
   type SharedListItem,
 } from '@/lib/services/sharedListService';
 import {
@@ -271,6 +272,84 @@ export function buildShoppingListShareText(
   lines.push('', `${totalQty} Artikel${totalEur > 0 ? ` · ca. ${formatEur(totalEur)}` : ''}`);
   lines.push('', 'Geteilt aus der MarkenDetektive-App');
   return lines.join('\n');
+}
+
+// ─── Leiste „Geteilte Listen" (oben im Zettel) ──────────────────────
+// Additiv: zeigt die geteilten Listen des Users als horizontale Karten. Antippen
+// öffnet die geteilte Liste. Rein präsentational (Daten kommen vom Parent), damit
+// der persönliche Zettel-Datenpfad unangetastet bleibt.
+function ShoppingSharedListsStrip({
+  lists,
+  myUid,
+  theme,
+  brand,
+  onOpen,
+}: {
+  lists: SharedListDoc[];
+  myUid?: string;
+  theme: any;
+  brand: any;
+  onOpen: (id: string) => void;
+}) {
+  if (!lists.length) return null;
+  return (
+    <View style={{ marginTop: 8, marginBottom: 6 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, marginBottom: 8 }}>
+        <MaterialCommunityIcons name="account-multiple" size={15} color={theme.textSub} />
+        <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 12, color: theme.textSub, letterSpacing: 0.4, textTransform: 'uppercase' }}>
+          Geteilte Listen
+        </Text>
+      </View>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        scrollsToTop={false}
+        contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
+      >
+        {lists.map((l) => {
+          const count = l.memberIds?.length ?? 1;
+          const mine = l.ownerId === myUid;
+          return (
+            <Pressable
+              key={l.id}
+              onPress={() => onOpen(l.id)}
+              style={({ pressed }) => ({
+                width: 172,
+                backgroundColor: theme.surface,
+                borderRadius: radii.lg,
+                borderWidth: 1,
+                borderColor: theme.border,
+                padding: 12,
+                opacity: pressed ? 0.85 : 1,
+              })}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 15,
+                    backgroundColor: theme.primaryContainer ?? theme.surfaceAlt,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <MaterialCommunityIcons name="cart-outline" size={16} color={brand.primary} />
+                </View>
+                <Text numberOfLines={1} style={{ flex: 1, fontFamily, fontWeight: fontWeight.extraBold, fontSize: 13, color: theme.text, letterSpacing: -0.2 }}>
+                  {l.name}
+                </Text>
+              </View>
+              <Text numberOfLines={1} style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 11, color: theme.textMuted, marginTop: 8 }}>
+                {count} {count === 1 ? 'Mitglied' : 'Mitglieder'}
+                {mine ? ' · von dir' : l.ownerName ? ` · ${l.ownerName}` : ''}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -2332,6 +2411,18 @@ export default function ShoppingListScreen() {
   const [showShareSheet, setShowShareSheet] = useState(false);
   const [creatingShared, setCreatingShared] = useState(false);
 
+  // Meine geteilten Listen (Live) — für die Leiste ganz oben im Zettel, damit man
+  // direkt sieht, welche Listen geteilt sind. Bis die Rules deployt sind, feuert der
+  // Listener permission-denied → Service liefert [] → Leiste bleibt leer (graceful).
+  const [mySharedLists, setMySharedLists] = useState<SharedListDoc[]>([]);
+  useEffect(() => {
+    if (!user?.uid) {
+      setMySharedLists([]);
+      return;
+    }
+    return SharedListService.subscribeMySharedLists(user.uid, setMySharedLists);
+  }, [user?.uid]);
+
   const myDisplayName =
     (userProfile as any)?.display_name ||
     (user as any)?.displayName ||
@@ -2388,7 +2479,8 @@ export default function ShoppingListScreen() {
       );
       setShowShareSheet(false);
       showInfoToast('Gemeinsame Liste erstellt — jetzt Freunde einladen! 🎉', 'info');
-      router.push(`/shared-list/${id}` as any);
+      // ?share=1 → im Ziel-Screen öffnet sich das Teilen-Sheet (QR + Link) sofort.
+      router.push(`/shared-list/${id}?share=1` as any);
     } catch {
       showInfoToast('Die gemeinsame Liste konnte gerade nicht erstellt werden.', 'error');
     } finally {
@@ -3898,6 +3990,13 @@ export default function ShoppingListScreen() {
           renderItem={({ item }) => renderItem(item, { allowExpand })}
           ListHeaderComponent={
             <>
+              <ShoppingSharedListsStrip
+                lists={mySharedLists}
+                myUid={user?.uid}
+                theme={theme}
+                brand={brand}
+                onOpen={(sid) => router.push(`/shared-list/${sid}` as any)}
+              />
               {!isPremium ? (
                 <View style={{ marginHorizontal: 16, marginTop: 6, marginBottom: 4 }}>
                   <BannerAd style={{ marginHorizontal: 0 }} />

@@ -1,9 +1,10 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
-import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Platform, Pressable, ScrollView, Share, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import QRCode from 'react-native-qrcode-svg';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
 import { FilterSheet } from '@/components/design/FilterSheet';
@@ -23,7 +24,7 @@ function formatEur(v: number): string {
 }
 
 export default function SharedListScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, share } = useLocalSearchParams<{ id: string; share?: string }>();
   const listId = String(id || '');
   const { theme, brand } = useTokens();
   const insets = useSafeAreaInsets();
@@ -70,6 +71,16 @@ export default function SharedListScreen() {
       clearTimeout(t);
     };
   }, [listId]);
+
+  // Direkt nach dem Erstellen (?share=1) das Teilen-Sheet automatisch öffnen —
+  // einmalig, sobald die Liste geladen ist (dann steht der Invite-Link/QR bereit).
+  const sharePromptedRef = useRef(false);
+  useEffect(() => {
+    if (share === '1' && list && !sharePromptedRef.current) {
+      sharePromptedRef.current = true;
+      setSheet('share');
+    }
+  }, [share, list]);
 
   const isOwner = !!list && list.ownerId === user?.uid;
   const openItems = useMemo(() => items.filter((i) => !i.gekauft), [items]);
@@ -176,6 +187,13 @@ export default function SharedListScreen() {
       >
         {/* Mitglieder + Gemeinsam-gespart */}
         <View style={{ paddingHorizontal: 20, gap: 12 }}>
+          {/* Klare Kennzeichnung, dass dies eine GETEILTE (nicht die eigene) Liste ist. */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <MaterialCommunityIcons name="account-multiple" size={14} color={brand.primary} />
+            <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 11, letterSpacing: 0.8, color: brand.primary, textTransform: 'uppercase' }}>
+              Geteilte Liste
+            </Text>
+          </View>
           <Pressable
             onPress={() => setSheet('members')}
             style={({ pressed }) => ({
@@ -356,6 +374,18 @@ export default function SharedListScreen() {
             Schick den Link an deine Familie oder Freunde. Wer beitritt, sieht die
             Liste in Echtzeit. Der Link ist 48 Stunden gültig (max. {SHARED_LIST_MAX_MEMBERS} Mitglieder).
           </Text>
+          {inviteLink ? (
+            <View style={{ alignItems: 'center', paddingVertical: 2 }}>
+              {/* QR IMMER auf weißem Grund + dunkle Module — sonst nicht scanbar
+                  (v.a. im Dark-Mode). */}
+              <View style={{ padding: 14, backgroundColor: '#fff', borderRadius: 18 }}>
+                <QRCode value={inviteLink} size={172} backgroundColor="#ffffff" color="#191c1d" />
+              </View>
+              <Text style={{ fontFamily, fontWeight: fontWeight.semibold, fontSize: 12, color: theme.textMuted, marginTop: 10 }}>
+                Zum Beitreten scannen
+              </Text>
+            </View>
+          ) : null}
           <View style={{ backgroundColor: theme.surfaceAlt, borderRadius: 12, padding: 12 }}>
             <Text numberOfLines={1} style={{ fontFamily, fontSize: 13, color: theme.textSub }}>
               {inviteLink || '—'}
