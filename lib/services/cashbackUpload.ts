@@ -591,17 +591,30 @@ export interface CashbackStatusEntry {
 /**
  * Live list of the current user's bons (status mirrors). Sorted by
  * updatedAt desc on the client side.
+ *
+ * D2 (Stufe 1): Optional `sinceMs` grenzt die Query serverseitig auf
+ * `createdAt >= sinceMs` ein (z.B. Wochenstart für den Wochenzähler) —
+ * statt bei JEDEM Aufruf ALLE Bons ever zu lesen. Nutzt den automatischen
+ * Single-Field-Index auf `createdAt` (kein Composite-Index nötig). Docs
+ * ohne `createdAt` werden ausgeschlossen — identisch zum bisherigen
+ * Client-Filter (`createdAt ?? 0 < mondayMs`), also kein Verhaltens-Bruch.
  */
 export function subscribeUserCashbackHistory(
   onChange: (entries: CashbackStatusEntry[]) => void,
+  sinceMs?: number,
 ): Unsubscribe {
   const uid = auth.currentUser?.uid;
   if (!uid) {
     onChange([]);
     return () => {};
   }
+  const base = collection(db, `users/${uid}/cashback_status`);
+  const q =
+    sinceMs != null
+      ? query(base, where('createdAt', '>=', new Date(sinceMs)))
+      : base;
   return onSnapshot(
-    collection(db, `users/${uid}/cashback_status`),
+    q,
     (qs) => {
       const rows: CashbackStatusEntry[] = qs.docs.map((d: any) => ({
         id: d.id,

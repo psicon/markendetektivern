@@ -47,6 +47,7 @@ import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { AiComparisonScale } from '@/components/design/AiComparisonScale';
 import { AiHealthScale } from '@/components/design/AiHealthScale';
 import { AiManufacturerCard } from '@/components/design/AiManufacturerCard';
+import { StufenLegendSheet } from '@/components/design/StufenLegendSheet';
 import { StufenChips } from '@/components/design/StufenChips';
 import { CoachmarkScrollProvider } from '@/components/coachmarks/CoachmarkScrollContext';
 import {
@@ -351,6 +352,8 @@ export default function NoNameDetailScreen() {
     refreshCartState();
   }, [refreshCartState]);
   const [ratingsOpen, setRatingsOpen] = useState(false);
+  // Stufen-Legende (Kernkonzept erklären) — geöffnet über die Detektiv-Check-Zeile.
+  const [stufenLegendVisible, setStufenLegendVisible] = useState(false);
   // Connected Brands des Herstellers — separat geladen, weil das
   // Aggregat im Cloud-Function-Job (`connected-brands-aggregator`)
   // ein anderes Refresh-Intervall hat als das Produkt selbst.
@@ -1656,11 +1659,14 @@ export default function NoNameDetailScreen() {
                 Tour erklärt hier die Stufen 1-2 und referenziert
                 die höheren Stufen. */}
             {p ? (
-              <View
+              <Pressable
                 ref={contextAnchor.ref}
                 onLayout={contextAnchor.onLayout}
                 collapsable={false}
-                style={{
+                onPress={() => setStufenLegendVisible(true)}
+                accessibilityRole="button"
+                accessibilityLabel={`Stufe ${stufe} von 5, ${stufeInfo.label}. Antippen für die Erklärung aller Stufen.`}
+                style={({ pressed }) => ({
                   marginHorizontal: 20,
                   marginTop: 20,
                   padding: 14,
@@ -1670,7 +1676,8 @@ export default function NoNameDetailScreen() {
                   flexDirection: 'row',
                   gap: 12,
                   alignItems: 'flex-start',
-                }}
+                  opacity: pressed ? 0.85 : 1,
+                })}
               >
                 <View style={{ marginTop: 3 }}>
                   <StufenChips stufe={stufe} size="md" />
@@ -1691,7 +1698,13 @@ export default function NoNameDetailScreen() {
                   {stufeInfo.line} Kein direktes Markenprodukt zum Vergleich
                   hinterlegt.
                 </Text>
-              </View>
+                <MaterialCommunityIcons
+                  name="information-outline"
+                  size={16}
+                  color={theme.textMuted}
+                  style={{ marginTop: 3 }}
+                />
+              </Pressable>
             ) : null}
 
             {/* Tabs: Inhaltsstoffe / Nährwerte.
@@ -1818,8 +1831,32 @@ export default function NoNameDetailScreen() {
           }}
         />
 
+        {/* Preis-Fußnote — Regalpreise variieren je Markt/Region; unsere
+            Angabe ist ein Richtwert (ehrlicher Hinweis, Stufe 1). */}
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 11,
+            lineHeight: 15,
+            color: theme.textMuted,
+            textAlign: 'center',
+            paddingHorizontal: 32,
+            marginTop: 4,
+          }}
+        >
+          Preise sind Richtwerte und können je nach Markt und Region abweichen.
+        </Text>
+
         <View style={{ height: 24 }} />
       </Animated.ScrollView>
+
+      {/* Stufen-Legende — erklärt das Kernkonzept (alle 5 Stufen). */}
+      <StufenLegendSheet
+        visible={stufenLegendVisible}
+        onClose={() => setStufenLegendVisible(false)}
+        highlight={stufe}
+      />
 
       {/* RatingsSheet only mounts once the basic product is in
           state — its action button (and therefore the way to open

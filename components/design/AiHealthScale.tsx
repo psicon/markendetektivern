@@ -200,6 +200,23 @@ export function AiHealthScale({
 
       {/* Reasoning — 1 Zeile gekürzt, ganze Card klappt auf/zu. */}
       <ReasoningAccordion text={reasoning} accent={accent} expanded={expanded} />
+
+      {/* Transparenz-Hinweis — konsistent mit AiManufacturerCard: KI-
+          Einschätzung, keine Live-Daten. Sichtbar sobald der Text offen ist. */}
+      {expanded || !isLong ? (
+        <Text
+          style={{
+            fontFamily,
+            fontWeight: fontWeight.medium,
+            fontSize: 10,
+            color: theme.textMuted,
+            letterSpacing: 0.2,
+            marginTop: 8,
+          }}
+        >
+          KI-Einschätzung auf Basis von Modellwissen · keine tagesaktuellen Angaben
+        </Text>
+      ) : null}
     </AnimatedPressable>
   );
 }

@@ -38,6 +38,9 @@ export function useWeeklyReceiptCount(): number {
 
   useEffect(() => {
     const mondayMs = getMondayMidnightBerlinMs();
+    // D2 (Stufe 1): mondayMs als server-seitiges createdAt-Limit übergeben —
+    // die Query liest nur noch DIESE Woche statt aller Bons ever. Der
+    // Client-Filter bleibt als Verteidigung (superseded raus + Cutoff).
     const unsub = subscribeUserCashbackHistory((entries) => {
       const weekCount = entries.reduce((acc, e) => {
         const created = e.createdAt?.toMillis?.() ?? 0;
@@ -46,7 +49,7 @@ export function useWeeklyReceiptCount(): number {
         return acc + 1;
       }, 0);
       setCount(weekCount);
-    });
+    }, mondayMs);
     return unsub;
   }, []);
 

@@ -201,7 +201,7 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
         // Betrag ZUERST — der Hinweis-Toast kürzt lange Texte (2 Zeilen +
         // Action-Pille), sonst wird der Betrag abgeschnitten (86ca…).
         showCashbackNudgeToast(
-          `${formatCents(p.rewardCents!)} Taler gäbe es mit aktiviertem Cashback.`,
+          `${formatCents(p.rewardCents!)} Guthaben gäbe es mit aktiviertem Cashback.`,
           goToCashback,
           scheme,
         );

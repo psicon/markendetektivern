@@ -792,7 +792,7 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
                   €
                 </Text>
               </View>
-              <HeroPill icon="cash" label="Cashback-Taler" />
+              <HeroPill icon="cash" label="Guthaben" />
             </View>
           </View>
 
@@ -1436,7 +1436,7 @@ const CAMPAIGN_KINDS: Record<
     cta: 'Produktbilder einreichen',
     perLabel: 'je Produkt',
     showMinItems: false,
-    fallbackDesc: 'Fotografiere Produkte und hilf, die Datenbank zu vervollständigen — Taler sichern, solange das Budget reicht.',
+    fallbackDesc: 'Fotografiere Produkte und hilf, die Datenbank zu vervollständigen — Guthaben sichern, solange das Budget reicht.',
   },
   survey: {
     icon: 'poll',
@@ -1445,14 +1445,14 @@ const CAMPAIGN_KINDS: Record<
     cta: 'Umfrage starten',
     perLabel: 'je Umfrage',
     showMinItems: false,
-    fallbackDesc: 'Beantworte kurze Fragen und sichere dir Taler — solange das Budget reicht.',
+    fallbackDesc: 'Beantworte kurze Fragen und sichere dir Guthaben — solange das Budget reicht.',
   },
 };
 
 // Bon-Boilerplate, die geklonte survey/product_photos-Campaigns geerbt
 // haben. Wird in der Card durch die kind-passende fallbackDesc ersetzt.
 const RECEIPT_BOILERPLATE_DESC =
-  'Cashback auf jeden Einkauf in teilnehmenden Märkten — solange das Budget reicht. Bon scannen, Taler sichern.';
+  'Cashback auf jeden Einkauf in teilnehmenden Märkten — solange das Budget reicht. Bon scannen, Guthaben sichern.';
 
 function CampaignListItem({
   campaign,
@@ -1734,6 +1734,12 @@ function RewardsHelpContent() {
         iconColor="#0d8575"
         title="Auszahlen"
         body="Sobald dein Guthaben die Guthabenschwelle erreicht, kannst du es bei unseren Partnern in Gutscheine, eine PayPal-Auszahlung, eine Visa-Prepaid oder eine Spende umwandeln."
+      />
+      <HelpBlock
+        icon="scale-balance"
+        iconColor="#5b4f9c"
+        title="Punkte ≠ Geld"
+        body="Guthaben (Cashback) ist echtes Geld und wird hier ausgezahlt. Detektiv-Punkte dagegen sind dein Spielstand für Level & Bestenliste — sie sind kein Guthaben. Deine Ersparnis ist dein Spar-Nachweis."
       />
     </View>
   );

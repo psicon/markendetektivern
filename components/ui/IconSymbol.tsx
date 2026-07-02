@@ -12,6 +12,11 @@ type IconSymbolName = keyof typeof MAPPING;
  * Add your SF Symbols to Material Icons mappings here.
  * - see Material Icons in the [Icons Directory](https://icons.expo.fyi).
  * - see SF Symbols in the [SF Symbols](https://developer.apple.com/sf-symbols/) app.
+ *
+ * WICHTIG: JEDER Key darf nur EINMAL vorkommen. Doppelte Keys (früher ~22)
+ * überschrieben sich still (JS: letzter Wert gewinnt) und lösten TS1117 aus.
+ * Bei der Entdopplung wurde bewusst der zuletzt gewinnende Wert behalten,
+ * damit sich das gerenderte Icon gegenüber vorher NICHT ändert.
  */
 const MAPPING = {
   // Navigation
@@ -29,16 +34,16 @@ const MAPPING = {
   'arrow.uturn.left': 'undo',
   'arrow.uturn.right': 'redo',
   'person.crop.circle.badge.plus': 'account-plus',
-  
+
   // User/Person
   'person.circle': 'account-circle',
   'person.circle.fill': 'account-circle',
   'person.badge.plus': 'account-plus',
   'person.2': 'account-multiple',
   'person.crop.circle.badge.questionmark': 'help',
-  
+
   // Common Actions
-  'square.and.pencil': 'pencil',
+  'square.and.pencil': 'pencil-box',
   'square.and.arrow.up': 'share-variant',
   'magnifyingglass': 'magnify',
   'xmark': 'close',
@@ -54,7 +59,7 @@ const MAPPING = {
   'hand.thumbsdown.fill': 'thumb-down',
   'bell.slash': 'bell-off-outline',
   'bell': 'bell-outline',
-  
+
   // Objects
   'play.rectangle.fill': 'play-box-outline',
   'envelope': 'email-outline',
@@ -69,7 +74,7 @@ const MAPPING = {
   'star': 'star-outline',
   'star.fill': 'star',
   'lightbulb': 'lightbulb-outline',
-  'crown': 'crown',
+  'crown': 'crown-outline',
   'crown.fill': 'crown',
   'shield': 'shield-outline',
   'doc': 'file-document-outline',
@@ -97,22 +102,21 @@ const MAPPING = {
   'building.2': 'office-building',
   'leaf': 'leaf',
   'leaf.fill': 'leaf',
-  'bubble.left.and.bubble.right': 'forum',
+  'bubble.left.and.bubble.right': 'message-text',
   'camera.fill': 'camera',
   'keyboard': 'keyboard',
   'wand.and.stars': 'wizard-hat',
   'lightbulb.fill': 'lightbulb-on',
   'exclamationmark.triangle.fill': 'alert-outline',
-  
+
   // Charts/Data
   'chart.bar': 'chart-bar',
-  'chart.bar.xaxis': 'chart-line',
+  'chart.bar.xaxis': 'chart-box',
   'chart.bar.fill': 'chart-bar',
-  'chart.line.uptrend.xyaxis': 'trending-up',
-  'square.grid.2x2': 'view-grid-outline',
+  'chart.line.uptrend.xyaxis': 'chart-line',
+  'square.grid.2x2': 'view-grid',
   'list.bullet': 'format-list-bulleted',
-  'line.3.horizontal': 'menu',
-  
+
   // Business/Shop
   'storefront': 'storefront-outline',
   'cube': 'cube-outline',
@@ -120,38 +124,18 @@ const MAPPING = {
   'eurosign': 'currency-eur',
   'percent': 'percent',
   'scale.3d': 'scale-balance',
-  'chart.bar': 'chart-bar',
-  'chart.bar.xaxis': 'chart-box',
-  'chart.bar.fill': 'chart-bar',
-  'chart.line.uptrend.xyaxis': 'chart-line',
-  'percent': 'percent',
-  'square.grid.2x2': 'view-grid',
-  'square.and.pencil': 'pencil-box',
   'number': 'pound',
-  'keyboard': 'keyboard',
-  'camera.rotate': 'camera-flip',
-  'bubble.left.and.bubble.right': 'message-text',
-  'building.2': 'office-building',
-  'flame.fill': 'fire',
-  'clock.fill': 'clock',
   'spark': 'flash',
-  'clock': 'clock-outline',
-  'crown': 'crown-outline',
-  'crown.fill': 'crown',
-  'leaf': 'leaf',
   'bubble.left': 'message-outline',
-  'lock': 'lock',
   'lock.open': 'lock-open',
-  'folder.fill': 'folder',
-  'eurosign': 'currency-eur',
-  
+
   // Settings/Tools
   'gear': 'cog',
   'paperplane.fill': 'send',
   'bolt': 'flash-outline',
   'bolt.fill': 'flash',
   'camera.rotate': 'camera-switch',
-  
+
   // Alerts
   'exclamationmark.triangle': 'alert-outline',
   'questionmark.circle': 'help-circle-outline',
@@ -172,11 +156,10 @@ const MAPPING = {
   'target': 'target',
   'arrow.triangle.2.circlepath': 'sync',
   'tag': 'tag-outline',
-  
+
   // Brand specific
   'apple.logo': 'apple-ios',
   'moon': 'weather-night',
-  'number': 'pound',
   'wineglass': 'glass-wine',
   'cup.and.saucer': 'coffee',
   'birthday.cake': 'cake-variant',
@@ -210,11 +193,11 @@ export function IconSymbol({
 }) {
   // Use mapped icon or fallback to a default icon
   const iconName = MAPPING[name] || 'help-circle-outline';
-  
+
   // Log unmapped icons in development
   if (__DEV__ && !MAPPING[name]) {
     console.warn(`IconSymbol: No mapping found for "${name}", using fallback icon`);
   }
-  
+
   return <MaterialCommunityIcons color={color} size={size} name={iconName} style={style} />;
 }

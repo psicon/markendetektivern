@@ -71,25 +71,20 @@ function ThemedApp() {
     });
   }, []);
 
-  // Fix Q — Pre-warm Firestore connection + reference data at app boot.
+  // Pre-warm der leichten Reference-Collections am App-Boot.
   //
-  // Problem: Stöbern feuert beim ersten Aufruf 6+ Firestore-Queries
-  // gleichzeitig. Auf Android Web SDK muss die ERSTE dieser Queries den
-  // WebChannel-Handshake aufbauen (~2-3 s cold), die anderen warten
-  // serialisiert auf die gleiche Connection bis sie verfügbar wird.
-  // Plus jede Query selbst ist 500-1000 ms auf Web SDK Android.
+  // Historie: Dieser Trick stammt aus der Web-SDK-Zeit, wo die ERSTE
+  // Stöbern-Query den WebChannel-Handshake (~2-3 s cold) aufbauen musste.
+  // Nach der Native-RNFirebase-Migration (gRPC, kein WebChannel) ist die
+  // Connection-Warmup-Begründung obsolet.
   //
-  // Mit Pre-Warm: 4 Reference-Queries (discounter, handelsmarken,
-  // packungstypen, kategorien) feuern am App-Boot via
-  // runAfterInteractions — deferred genug damit sie nicht den App-
-  // Start blocken, früh genug damit sie meist schon durch sind wenn
-  // User auf Stöbern tippt (typisch 5-10 s nach Boot).
-  // Resultate werden im FirestoreService-Cache (5 min TTL) abgelegt
-  // → Stöbern's reference-data-useEffect findet Cache-Hits und
-  // skippt die Roundtrips.
-  // Zusätzlich: WebChannel-Connection ist warm, Stöbern's
-  // Product-Queries hängen nicht mehr am Handshake.
-  // Erwartete Einsparung: 3-5 s auf erstem Stöbern-Aufruf.
+  // D1 (Stufe 1): Der Prewarm der `handelsmarken`-Collection (~1.160 Docs)
+  // ist ENTFERNT — er lief bei JEDEM App-Start, unabhängig davon ob der
+  // User Stöbern überhaupt öffnet (größter einzelner Firestore-Kostenhebel
+  // + langsamerer Android-Start). Stöbern lädt handelsmarken bei Bedarf über
+  // seinen eigenen Reference-Data-Effect (SDK-Memory-Cache greift dort).
+  // Der leichte Warmup von discounter (Service-Cache, 5 min TTL) +
+  // packungstypen (klein) bleibt, ebenso der einmalige Negative-Cache-Purge.
   useEffect(() => {
     let cancelled = false;
     const handle = require('react-native').InteractionManager.runAfterInteractions(async () => {
@@ -99,15 +94,12 @@ function ThemedApp() {
         const { FirestoreService } = await import('@/lib/services/firestore');
         const { db } = await import('@/lib/firebase');
         const { collection, getDocs } = await import('@react-native-firebase/firestore');
-        // Alle 3 öffentlich-lesbaren Reference-Collections parallel.
-        // Errors werden geschluckt — Stöbern's eigener Fetch erholt sich.
-        // `getDiscounter` hat Service-Level-Cache → Stöbern's Aufruf
-        // wird Cache-Hit. handelsmarken/packungstypen werden im
-        // Firestore-SDK-Memory-Cache landen → Re-Query in Stöbern
-        // ist immerhin wesentlich schneller.
+        // Leichte Reference-Collections parallel. Errors werden geschluckt —
+        // Stöbern's eigener Fetch erholt sich. `getDiscounter` hat Service-
+        // Cache → Stöbern's Aufruf wird Cache-Hit; packungstypen ist klein.
+        // handelsmarken (~1.160 Docs) wird bewusst NICHT mehr geladen (D1).
         await Promise.all([
           FirestoreService.getDiscounter().catch(() => null),
-          getDocs(collection(db, 'handelsmarken')).catch(() => null),
           getDocs(collection(db, 'packungstypen')).catch(() => null),
         ]);
         // One-shot: alte 429-polluted Negative-Cache-Einträge

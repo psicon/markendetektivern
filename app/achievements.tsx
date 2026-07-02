@@ -312,7 +312,6 @@ export default function AchievementsScreen() {
             ptsPct={ptsPct}
             eurPct={eurPct}
             streak={userStats?.currentStreak ?? 0}
-            freezeTokens={userStats?.freezeTokens ?? 0}
           />
         </View>
 
@@ -591,7 +590,6 @@ function CurrentLevelHero({
   ptsPct,
   eurPct,
   streak,
-  freezeTokens,
 }: {
   level: Level | undefined;
   levelId: number;
@@ -603,7 +601,6 @@ function CurrentLevelHero({
   ptsPct: number;
   eurPct: number;
   streak: number;
-  freezeTokens: number;
 }) {
   const gradient = levelGradient(levelId, level?.color);
   const mdiIcon = mdiForLevelIcon(level?.icon);
@@ -736,15 +733,14 @@ function CurrentLevelHero({
         </View>
       )}
 
-      {/* Footer status row — three pills in the SAME HeroPill style,
+      {/* Footer status row — pills in the SAME HeroPill style,
           horizontal with flex-wrap so they reflow gracefully on
           narrow widths instead of overflowing:
             🚀 Noch X Pkt / Y € bis Lv N+1
             🔥 X Tag(e) Streak
-            ❄ X/2 Freezes
           Single visual rhythm replaces the old mix of one
           "footer banner" + two stranded top-row pills. */}
-      {showFooter || streak > 0 || freezeTokens > 0 ? (
+      {showFooter || streak > 0 ? (
         <View
           style={{
             flexDirection: 'row',
@@ -757,14 +753,12 @@ function CurrentLevelHero({
           {showFooter ? (
             <HeroPill icon="rocket-launch" label={footer} />
           ) : null}
-          <HeroPill
-            icon="fire"
-            label={`${streak} ${streak === 1 ? 'TAG' : 'TAGE'} STREAK`}
-          />
-          <HeroPill
-            icon="snowflake"
-            label={`${freezeTokens}/2 FREEZES`}
-          />
+          {streak > 0 ? (
+            <HeroPill
+              icon="fire"
+              label={`${streak} ${streak === 1 ? 'TAG' : 'TAGE'} STREAK`}
+            />
+          ) : null}
         </View>
       ) : null}
     </LinearGradient>
@@ -1379,6 +1373,11 @@ function InfoSheetContent() {
         icon="plus-circle-outline"
         title="So sammelst du Punkte"
         body="Produkt scannen +2 · Suchen +1 · Vergleich anschauen +3 · Einkaufszettel abschließen +5 · Bewertung schreiben +2 · erste Aktion +10."
+      />
+      <InfoBlock
+        icon="scale-balance"
+        title="Punkte ≠ Geld"
+        body="Detektiv-Punkte sind dein Spielstand für Level & Bestenliste — kein Guthaben und keine Auszahlung. Cashback beim Einkaufen ist echtes Geld (Belohnungen-Tab). Deine Ersparnis ist dein Spar-Nachweis."
       />
       <InfoBlock
         icon="clock-outline"

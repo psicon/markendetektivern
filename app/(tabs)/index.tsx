@@ -36,6 +36,7 @@ import {
   MORPHING_HEADER_ROW_HEIGHT,
 } from '@/components/design/MorphingHeader';
 import { ProductCard } from '@/components/design/ProductCard';
+import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { StufenChips } from '@/components/design/StufenChips';
 import { QuickAccessCard } from '@/components/design/QuickAccessCard';
 import { Shimmer } from '@/components/design/Skeletons';
@@ -57,6 +58,7 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
 import { startReceiptScanFlow } from '@/lib/services/cashbackScanStart';
+import { isAnySheetOpen, whenSheetsIdle } from '@/lib/services/sheetPresence';
 import { useShoppingCartCount } from '@/lib/hooks/useShoppingCartCount';
 import { useFavoritesCount } from '@/lib/hooks/useFavoritesCount';
 import { useSurvey } from '@/components/survey/SurveyProvider';
@@ -72,6 +74,15 @@ import { FirestoreDocument, Handelsmarken, Produkte } from '@/lib/types/firestor
 import { getProductImage } from '@/lib/utils/productImage';
 
 type DiscounterInfo = { color: string; short: string; bild?: string };
+
+// C3 (Stufe 1): Tabs für die zusammengefaltete „Top Bewertete Produkte"-
+// Sektion. `as const` → literale Key-Typen, damit SegmentedTabs korrekt
+// typt (onChange = setTopTab).
+const TOP_TABS = [
+  { key: 'overall', label: 'Gesamt' },
+  { key: 'month', label: 'Monat' },
+  { key: 'viewed', label: 'Aufgerufen' },
+] as const;
 
 export default function HomeScreen() {
   // Splash-Overlay erst ausblenden, wenn dieser Screen gerendert ist
@@ -158,6 +169,25 @@ export default function HomeScreen() {
       cancelled = true;
       unsubscribe?.();
     };
+  }, []);
+
+  // C2 (Stufe 1): Werbebanner in der ERSTEN Session unterdrücken — kein Ad,
+  // bevor der User einmal Wert gesehen hat (schützt den ersten Eindruck +
+  // Store-Bewertungen). Ab dem 2. App-Start sichtbar. Bei Storage-Fehler
+  // wird das Banner gezeigt (Monetarisierung nicht dauerhaft blockieren).
+  const [bannerAllowed, setBannerAllowed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { getAppStartCount } = await import('@/lib/services/demographicsPromptSignals');
+        const count = await getAppStartCount();
+        if (!cancelled) setBannerAllowed(count > 1);
+      } catch {
+        if (!cancelled) setBannerAllowed(true);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   // Spielerische Inhalte-Toggle — wenn aus, blenden wir die Level-
@@ -277,6 +307,9 @@ export default function HomeScreen() {
   // Bewertungen.
   const [mostViewed, setMostViewed] = useState<TopRatedItem[]>([]);
   const [mostViewedLoading, setMostViewedLoading] = useState(true);
+  // C3 (Stufe 1): die drei „Top"-Listen teilen sich EINE Sektion mit
+  // SegmentedTabs statt drei fast identischer Karussells untereinander.
+  const [topTab, setTopTab] = useState<'overall' | 'month' | 'viewed'>('overall');
 
   // ─── UMP consent SAFETY-NET (Android only) ──────────────────────────────────
   // Primary-Pfad ist seit ClickUp 86c9qd5qu in app/index.tsx (vor
@@ -305,7 +338,14 @@ export default function HomeScreen() {
   );
 
   // ─── Pending onboarding paywall ───────────────────────────────────────────
+  // C1 (Stufe 1): Die Paywall darf sich NIE über die Erklär-Tour oder ein
+  // offenes Sheet legen — zwei gleichzeitige RN-<Modal>s frieren iOS ein
+  // (dokumentiertes Doppel-Modal-Risiko). Solange die Tour läuft, startet der
+  // Effect gar nicht erst; er re-runt automatisch, sobald sie zu ist (Deps
+  // homeCoachmark.visible / anyWalkthroughActive). Direkt vor dem Präsentieren
+  // wird zusätzlich auf "kein Sheet offen" gewartet (whenSheetsIdle).
   useEffect(() => {
+    if (homeCoachmark.visible || anyWalkthroughActive) return;
     let cancelled = false;
     (async () => {
       try {
@@ -333,6 +373,13 @@ export default function HomeScreen() {
         // module and crashes. Static import side-steps it.
         await new Promise<void>(r => InteractionManager.runAfterInteractions(() => r()));
         if (cancelled) return;
+        // C1: warten bis KEIN Sheet (z.B. Demografie) mehr präsentiert ist,
+        // bevor die Paywall (selbst ein Modal) aufgeht.
+        await new Promise<void>((resolve) => {
+          if (!isAnySheetOpen()) { resolve(); return; }
+          whenSheetsIdle(() => resolve());
+        });
+        if (cancelled) return;
         try {
           const Haptics = await import('expo-haptics');
           await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -342,7 +389,7 @@ export default function HomeScreen() {
       } catch {}
     })();
     return () => { cancelled = true; };
-  }, [isPremium]);
+  }, [isPremium, homeCoachmark.visible, anyWalkthroughActive]);
 
   // ─── Demografie-Sheet (T17.15) ────────────────────────────────────────────
   // Einfache, robuste Logik — basiert auf User-Doc-State, NICHT auf
@@ -1142,8 +1189,8 @@ export default function HomeScreen() {
           </Pressable>
         )}
 
-        {/* ── Banner Ad ── */}
-        {!isPremium && (
+        {/* ── Banner Ad ── (C2: erst ab Session 2, siehe bannerAllowed) */}
+        {!isPremium && bannerAllowed && (
           <View style={{ marginTop: 16 }}>
             <BannerAd
               onAdLoaded={() => {}}
@@ -1412,11 +1459,9 @@ export default function HomeScreen() {
           </LinearGradient>
         </View>
 
-        {/* ── Top Bewertete Produkte ─────────────────────────────────
-            EIN grauer Parent-Header. Darunter DREI schwarze Sub-
-            Sections (Top 10 overall, Top 10 des Monats, Meist auf-
-            gerufen) im Original-Title-Stil OHNE Eyebrow. Reduzierte
-            Top-Margins damit der Block visuell zusammengehört. */}
+        {/* ── Top Bewertete Produkte — EIN Karussell, per SegmentedTabs
+            umschaltbar (Gesamt / Monat / Aufgerufen) statt drei fast
+            identischer Listen untereinander (C3, Stufe 1). */}
         <View style={{ marginTop: 28, paddingHorizontal: 20 }}>
           <Text
             style={{
@@ -1426,38 +1471,42 @@ export default function HomeScreen() {
               color: theme.textMuted,
               letterSpacing: 0.6,
               textTransform: 'uppercase',
+              marginBottom: 12,
             }}
           >
             Top Bewertete Produkte
           </Text>
+          <SegmentedTabs tabs={TOP_TABS} value={topTab} onChange={setTopTab} />
         </View>
 
-        <TopRatedSection
-          title="Top 10 overall"
-          topMargin={12}
-          loading={topRatedOverallLoading}
-          items={topRatedOverall}
-          emptyText="Noch keine Bewertungen vorhanden — sei der erste, der ein Produkt enttarnt und seine Meinung teilt."
-          onItemPress={handleTopRatedPress}
-        />
-
-        <TopRatedSection
-          title="Top 10 des Monats"
-          topMargin={20}
-          loading={topRatedMonthLoading}
-          items={topRatedMonth}
-          emptyText="Im letzten Monat wurden noch keine Produkte bewertet — sei der erste, der ein Produkt enttarnt und seine Meinung teilt."
-          onItemPress={handleTopRatedPress}
-        />
-
-        <TopRatedSection
-          title="Meist aufgerufen"
-          topMargin={20}
-          loading={mostViewedLoading}
-          items={mostViewed}
-          emptyText="Noch keine Aufruf-Daten vorhanden — schau dir Produkte an um die Liste zu füllen."
-          onItemPress={handleTopRatedPress}
-        />
+        {topTab === 'overall' ? (
+          <TopRatedSection
+            title=""
+            topMargin={12}
+            loading={topRatedOverallLoading}
+            items={topRatedOverall}
+            emptyText="Noch keine Bewertungen vorhanden — sei der erste, der ein Produkt enttarnt und seine Meinung teilt."
+            onItemPress={handleTopRatedPress}
+          />
+        ) : topTab === 'month' ? (
+          <TopRatedSection
+            title=""
+            topMargin={12}
+            loading={topRatedMonthLoading}
+            items={topRatedMonth}
+            emptyText="Im letzten Monat wurden noch keine Produkte bewertet — sei der erste, der ein Produkt enttarnt und seine Meinung teilt."
+            onItemPress={handleTopRatedPress}
+          />
+        ) : (
+          <TopRatedSection
+            title=""
+            topMargin={12}
+            loading={mostViewedLoading}
+            items={mostViewed}
+            emptyText="Noch keine Aufruf-Daten vorhanden — schau dir Produkte an um die Liste zu füllen."
+            onItemPress={handleTopRatedPress}
+          />
+        )}
 
       </Animated.ScrollView>
 
@@ -1569,34 +1618,38 @@ function TopRatedSection({
   const { theme, shadows } = useTokens();
   return (
     <View style={{ marginTop: topMargin ?? 28 }}>
-      <View style={{ paddingHorizontal: 20, marginBottom: 12 }}>
-        {eyebrow ? (
-          <Text
-            style={{
-              fontFamily,
-              fontWeight: fontWeight.bold,
-              fontSize: 13,
-              color: theme.textMuted,
-              letterSpacing: 0.6,
-              textTransform: 'uppercase',
-              marginBottom: 4,
-            }}
-          >
-            {eyebrow}
-          </Text>
-        ) : null}
-        <Text
-          style={{
-            fontFamily,
-            fontWeight: fontWeight.extraBold,
-            fontSize: 20,
-            color: theme.text,
-            letterSpacing: -0.2,
-          }}
-        >
-          {title}
-        </Text>
-      </View>
+      {eyebrow || title ? (
+        <View style={{ paddingHorizontal: 20, marginBottom: 12 }}>
+          {eyebrow ? (
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.bold,
+                fontSize: 13,
+                color: theme.textMuted,
+                letterSpacing: 0.6,
+                textTransform: 'uppercase',
+                marginBottom: 4,
+              }}
+            >
+              {eyebrow}
+            </Text>
+          ) : null}
+          {title ? (
+            <Text
+              style={{
+                fontFamily,
+                fontWeight: fontWeight.extraBold,
+                fontSize: 20,
+                color: theme.text,
+                letterSpacing: -0.2,
+              }}
+            >
+              {title}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
 
       {loading ? (
         <Animated.ScrollView

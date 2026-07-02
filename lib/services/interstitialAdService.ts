@@ -3,20 +3,18 @@ import { Platform } from 'react-native';
 import { isExpoGo } from '../utils/platform';
 import { adMobService } from './adMobService';
 
-// Counter Keys
+// Counter Keys — nur SCAN ist verdrahtet (barcode-scanner). Die früheren
+// PRODUCT_VIEW/SEARCH-Zähler waren nie an einer Callsite und wurden entfernt,
+// um keine zusätzliche Ad-Friktion einzuführen (Stufe 1: bessere Reviews).
 const COUNTER_KEYS = {
-  PRODUCT_VIEW: '@interstitial_product_view_count',
   SCAN: '@interstitial_scan_count',
-  SEARCH: '@interstitial_search_count',
   LAST_SHOWN: '@interstitial_last_shown',
   LIFETIME_ACTIONS: '@interstitial_lifetime_actions', // monotone Lebensdauer-Aktionen
 };
 
 // Thresholds
 const THRESHOLDS = {
-  PRODUCT_VIEW: 4, // Nach jedem 4. Produktaufruf
   SCAN: 3, // Nach jedem 3. Scan
-  SEARCH: 3, // Nach jeder 3. Suche
 };
 
 // Grace-Period für NEUE User (App-Store-Reviews: "Werbung schon nach paar
@@ -255,25 +253,6 @@ class InterstitialAdService {
     }
   }
 
-  async trackProductView(isPremium: boolean) {
-    await this.bumpLifetimeActions();
-    const countStr = await AsyncStorage.getItem(COUNTER_KEYS.PRODUCT_VIEW) || '0';
-    const count = parseInt(countStr) + 1;
-    
-    console.log(`📦 Product view count: ${count}/${THRESHOLDS.PRODUCT_VIEW}`);
-    
-    if (count >= THRESHOLDS.PRODUCT_VIEW) {
-      await AsyncStorage.setItem(COUNTER_KEYS.PRODUCT_VIEW, '0');
-      await this.showIfReady(isPremium);
-    } else {
-      await AsyncStorage.setItem(COUNTER_KEYS.PRODUCT_VIEW, count.toString());
-      // Preload ad when getting close to threshold
-      if (count === THRESHOLDS.PRODUCT_VIEW - 1) {
-        this.preloadIfNeeded();
-      }
-    }
-  }
-
   async trackScan(isPremium: boolean) {
     await this.bumpLifetimeActions();
     const countStr = await AsyncStorage.getItem(COUNTER_KEYS.SCAN) || '0';
@@ -293,25 +272,6 @@ class InterstitialAdService {
     }
   }
 
-  async trackSearch(isPremium: boolean) {
-    await this.bumpLifetimeActions();
-    const countStr = await AsyncStorage.getItem(COUNTER_KEYS.SEARCH) || '0';
-    const count = parseInt(countStr) + 1;
-    
-    console.log(`🔍 Search count: ${count}/${THRESHOLDS.SEARCH}`);
-    
-    if (count >= THRESHOLDS.SEARCH) {
-      await AsyncStorage.setItem(COUNTER_KEYS.SEARCH, '0');
-      await this.showIfReady(isPremium);
-    } else {
-      await AsyncStorage.setItem(COUNTER_KEYS.SEARCH, count.toString());
-      // Preload ad when getting close to threshold
-      if (count === THRESHOLDS.SEARCH - 1) {
-        this.preloadIfNeeded();
-      }
-    }
-  }
-
   private preloadIfNeeded() {
     if (!this.isLoaded && !this.isShowing && this.interstitialAd) {
       console.log('🔮 Preloading interstitial ad (threshold approaching)...');
@@ -322,9 +282,7 @@ class InterstitialAdService {
   // Reset all counters (useful for testing)
   async resetCounters() {
     await AsyncStorage.multiRemove([
-      COUNTER_KEYS.PRODUCT_VIEW,
       COUNTER_KEYS.SCAN,
-      COUNTER_KEYS.SEARCH,
       COUNTER_KEYS.LAST_SHOWN,
       COUNTER_KEYS.LIFETIME_ACTIONS,
     ]);

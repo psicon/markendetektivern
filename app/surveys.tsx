@@ -103,7 +103,7 @@ export default function SurveysScreen() {
             marginBottom: 4,
           }}
         >
-          Kurze Umfragen — beantworte sie und sichere dir Cashback-Taler.
+          Kurze Umfragen — beantworte sie und sichere dir Guthaben.
         </Text>
 
         {surveys === null ? null : list.length === 0 ? (

@@ -15,6 +15,7 @@ import {
   ScrollView,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import PagerView from 'react-native-pager-view';
@@ -72,6 +73,7 @@ import { SegmentedTabs } from '@/components/design/SegmentedTabs';
 import { Crossfade, ProductCardSkeleton } from '@/components/design/Skeletons';
 import { getStufeCopy, loadStufeCopy } from '@/lib/utils/stufeCopy';
 import { StufenChips } from '@/components/design/StufenChips';
+import { StufenLegendSheet } from '@/components/design/StufenLegendSheet';
 import { collection, getDocs } from '@react-native-firebase/firestore';
 
 import { BannerAd } from '@/components/ads/BannerAd';
@@ -364,6 +366,15 @@ export default function ExploreScreen() {
   const scheme = useColorScheme() ?? 'light';
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
+  // F1b: Kartenhöhe an die System-Schriftgröße koppeln. maxFontSizeMultiplier
+  // deckelt das Textwachstum bei 1.3× (androidTextFontPatch) — die Grid-Karten
+  // wachsen bis dahin mit, damit große Schrift nicht clippt (bekannter Bug bei
+  // Samsung/Xiaomi "Schrift größer"). Alle Karten teilen denselben Wert (fontScale
+  // ist geräteglobal), daher bleibt das LegendList-Recycling konsistent.
+  const { fontScale } = useWindowDimensions();
+  const cardExtraH = Math.round((Math.min(fontScale, 1.3) - 1) * 95);
+  const gridOuterH = 290 + cardExtraH;
+  const gridCardH = 278 + cardExtraH;
   // iOS-Status-Bar-Tap-Fix: scrollsToTop nur wenn dieser Tab UND
   // die jeweilige Sub-Page (alle/eigen/marken) aktiv ist.
   const isFocused = useIsFocused();
@@ -764,6 +775,14 @@ export default function ExploreScreen() {
   // angegebenes Alter). Greift NUR für die Alkohol-Kategorie und
   // führt zum DemographicsPromptSheet.
   const [showAgeGateSheet, setShowAgeGateSheet] = useState(false);
+  // Stufen-Legende (Kernkonzept erklären) — geöffnet über die Stufen-Pill auf
+  // den Produktkarten. Stabiler Handler, damit ProductCards React.memo hält.
+  const [stufeLegendVisible, setStufeLegendVisible] = useState(false);
+  const [stufeLegendHighlight, setStufeLegendHighlight] = useState<number | null>(null);
+  const handleStufePress = useCallback((s: number) => {
+    setStufeLegendHighlight(s);
+    setStufeLegendVisible(true);
+  }, []);
 
   // ─── Tab-Re-Press Scroll-to-Top ──────────────────────────────────────
   // Re-Tap auf das Stöbern-Icon im Tab-Bar scrollt die aktive Page zum
@@ -2693,7 +2712,12 @@ export default function ExploreScreen() {
           }}
         />
         {query.length > 0 ? (
-          <Pressable onPress={() => setQuery('')} hitSlop={6}>
+          <Pressable
+            onPress={() => setQuery('')}
+            hitSlop={14}
+            accessibilityRole="button"
+            accessibilityLabel="Suche löschen"
+          >
             <MaterialCommunityIcons name="close-circle" size={16} color={theme.textMuted} />
           </Pressable>
         ) : null}
@@ -2916,7 +2940,7 @@ export default function ExploreScreen() {
         const unit = packTypId ? packungstypenMap[packTypId] : undefined;
         const { sizeLabel, unitPriceLabel } = formatPack(p.packSize, unit, p.preis);
         return (
-          <View style={{ paddingHorizontal: 6, paddingBottom: 12, height: 290 }}>
+          <View style={{ paddingHorizontal: 6, paddingBottom: 12, height: gridOuterH }}>
             <ProductCard
               title={p.name ?? ''}
               brand={handelsmarkeName ?? null}
@@ -2928,9 +2952,10 @@ export default function ExploreScreen() {
               sizeLabel={sizeLabel}
               unitPriceLabel={unitPriceLabel}
               variant="grid"
-              height={278}
+              height={gridCardH}
               onPressItem={openProduct}
               itemIndex={index}
+              onStufePress={handleStufePress}
             />
           </View>
         );
@@ -2947,7 +2972,7 @@ export default function ExploreScreen() {
       const unit = packTypId ? packungstypenMap[packTypId] : undefined;
       const { sizeLabel, unitPriceLabel } = formatPack(m.packSize, unit, m.preis);
       return (
-        <View style={{ paddingHorizontal: 6, paddingBottom: 12, height: 290 }}>
+        <View style={{ paddingHorizontal: 6, paddingBottom: 12, height: gridOuterH }}>
           <BrandCard
             title={m.name ?? ''}
             brand={marke}
@@ -2957,14 +2982,14 @@ export default function ExploreScreen() {
             sizeLabel={sizeLabel}
             unitPriceLabel={unitPriceLabel}
             alternativeCount={m.relatedProdukteIDs?.length ?? 0}
-            height={278}
+            height={gridCardH}
             onPressItem={openBrand}
             itemIndex={index}
           />
         </View>
       );
     },
-    [packungstypenMap, openProduct, openBrand],
+    [packungstypenMap, openProduct, openBrand, gridOuterH, gridCardH, handleStufePress],
   );
 
   // getItemType für den gemischten 'Alle'-Tab: damit LegendList beim Recycling
@@ -4778,6 +4803,14 @@ export default function ExploreScreen() {
           }
         }}
         onSkip={() => setShowAgeGateSheet(false)}
+      />
+
+      {/* Stufen-Legende — erklärt das Kernkonzept (alle 5 Stufen). Geöffnet
+          über die antippbare Stufen-Pill auf den Produktkarten. */}
+      <StufenLegendSheet
+        visible={stufeLegendVisible}
+        onClose={() => setStufeLegendVisible(false)}
+        highlight={stufeLegendHighlight}
       />
 
       {/* ─── Locked category modal (Alkohol gating) ─────────────────── */}

@@ -109,9 +109,17 @@ function BrandCardImpl({
     else onPress?.();
   }, [onPressItem, onPress, product, itemIndex]);
 
+  // Screenreader-Label (VoiceOver/TalkBack) — Karten waren vorher stumm.
+  const a11yLabel =
+    `${brand ? `${brand}, ` : ''}${title}, ${formatEur(price)}` +
+    `${typeof savingsEur === 'number' && savingsEur > 0 ? `, bis zu ${formatEur(savingsEur)} sparen` : ''}` +
+    `${alternativeCount > 0 ? `, ${alternativeCount} Alternativen` : ''}`;
+
   return (
     <Pressable
       onPress={handlePress}
+      accessibilityRole="button"
+      accessibilityLabel={a11yLabel}
       style={({ pressed }) => ({
         width: '100%',
         ...(height ? { height } : null),
@@ -258,7 +266,8 @@ function BrandCardImpl({
                 includeFontPadding: false,
                 fontWeight: fontWeight.bold,
                 fontSize: 10,
-                color: theme.textMuted,
+                // textSub statt textMuted → besserer Kontrast (WCAG AA).
+                color: theme.textSub,
                 letterSpacing: 0.8,
                 textTransform: 'uppercase',
                 flexShrink: 1,
@@ -326,7 +335,8 @@ function BrandCardImpl({
                 includeFontPadding: false,
                 fontWeight: fontWeight.medium,
                 fontSize: 11,
-                color: theme.textMuted,
+                // textSub statt textMuted → besserer Kontrast (WCAG AA).
+                color: theme.textSub,
                 flexShrink: 1,
               }}
             >

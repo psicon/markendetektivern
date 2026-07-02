@@ -1,38 +1,35 @@
 /**
- * Android Text-Font Patch
+ * Text-Patch (zwei Anliegen, ein Render-Hook):
  *
- * Problem: React Native + Android wendet fontWeight NICHT auf custom
- * Fonts an. Wenn man `{ fontFamily: 'Nunito', fontWeight: '700' }`
- * setzt, sucht Android nach einer Font "Nunito", findet keine
- * (weil nur `Nunito_400Regular`, `Nunito_500Medium`,
- * `Nunito_600SemiBold`, `Nunito_700Bold` geladen sind) und fällt
- * auf System-Default zurück. fontWeight wird komplett ignoriert.
+ * 1) GLOBALER maxFontSizeMultiplier-Deckel (BEIDE Plattformen, A11y).
+ *    Die App hat überall FIXE Kartenhöhen. Ohne Deckel läuft schon bei
+ *    Samsung/Xiaomi „Schrift größer" (~115 %) der Karten-Text über und
+ *    schneidet ab. Wir deckeln das System-Schriftwachstum global bei
+ *    DEFAULT_MAX_FONT_SCALE (1.3 = 130 %) — Text bleibt gut lesbar, aber
+ *    sprengt die Layouts nicht mehr. Callsites können den Wert überschreiben
+ *    (eigener `maxFontSizeMultiplier`) oder mit `allowFontScaling={false}`
+ *    ganz abschalten; beides respektieren wir.
  *
- * iOS dagegen resolvet `fontFamily: 'Nunito'` + weight zur richtigen
- * Variante nativ. Dort gibt's kein Problem.
+ * 2) ANDROID Nunito-Font-Resolution (nur Android).
+ *    React Native + Android wendet fontWeight NICHT auf custom Fonts an.
+ *    `{ fontFamily: 'Nunito', fontWeight: '700' }` sucht eine Font „Nunito",
+ *    findet keine (nur `Nunito_400Regular` … `Nunito_700Bold` sind geladen)
+ *    und fällt still auf System-Default zurück. iOS resolvet das nativ
+ *    korrekt. Der Patch resolvet `Nunito` + weight zur passenden
+ *    Nunito_XXX-Variante und entfernt das (dann störende) fontWeight.
  *
- * Dieser Patch:
- *   • Hooked Text.render und TextInput.render
- *   • Sucht im finalen style nach fontFamily='Nunito' (oder unset
- *     wenn fontWeight gesetzt ist — Default-Family-Annahme)
- *   • Resolvet zu Nunito_XXX gemäß fontWeight (oder 400 wenn unset)
- *   • Ersetzt den fontFamily im style
+ * Side-effect-import: in `app/_layout.tsx` ganz oben einmal importieren,
+ * dann ist der Patch global aktiv.
  *
- * Nur Android-Pfad — auf iOS wird die Funktion gar nicht aufgerufen.
+ * Forbidden Pattern Hinweis: Text.render zu patchen ist sonst meist ein
+ * Anti-Pattern wegen RN-Version-Drift. Hier ist's der minimal-invasive Weg —
+ * die Alternative (überall manuell `maxFontSizeMultiplier` + `<NunitoText>`
+ * setzen) ist bei ~440 Callsites nicht praktikabel. Die Render-Signatur
+ * (props, ref) ist ab RN 0.76+ stabil.
  *
- * Side-effect-import: in `app/_layout.tsx` ganz oben einmal
- * importieren, dann ist der Patch global aktiv.
- *
- * Forbidden Pattern Hinweis: Text.render zu patchen ist sonst meist
- * ein Anti-Pattern wegen RN-Version-Drift. Hier ist's der minimal-
- * invasive Weg — Alternative wäre ein eigener `<NunitoText>`-Wrapper
- * der überall manuell verwendet werden muss; bei ~440 existierenden
- * `{ fontFamily, fontWeight: X }` Callsites über Dutzende Screens
- * nicht praktikabel.
- *
- * Falls dieser Patch jemals durch ein RN-Upgrade bricht, ist der
- * Sichtbarkeit-Effekt: Android-Texte rendern wieder in System-Font.
- * Die App funktioniert weiter, nur die Typo ist visuell falsch.
+ * Falls der Patch je durch ein RN-Upgrade bricht: Android-Texte rendern
+ * wieder in System-Font und der Font-Scale-Deckel entfällt — die App
+ * funktioniert weiter, nur Typo/Skalierung sind visuell nicht ideal.
  */
 
 import { Platform, Text, TextInput, type StyleProp, type TextStyle } from 'react-native';
@@ -43,68 +40,72 @@ import {
   NUNITO_SEMIBOLD,
 } from '@/constants/tokens/typography';
 
-if (Platform.OS === 'android') {
-  // ─── Style-Flattening Helper ───────────────────────────────────
-  //
-  // RN-Styles können Arrays von Arrays/Objects sein. Wir wollen den
-  // final-resolved fontFamily und fontWeight. StyleSheet.flatten()
-  // macht genau das, ohne dass wir manuell durchlaufen müssen.
-  const flatten = (style: StyleProp<TextStyle>): TextStyle => {
-    // require statt static import — vermeidet Circular falls
-    // StyleSheet selber irgendwann von dieser Datei abhängt.
-    const StyleSheet = require('react-native').StyleSheet;
-    return StyleSheet.flatten(style) || {};
-  };
+// Deckel für das System-Schriftwachstum (siehe Anliegen 1 oben).
+const DEFAULT_MAX_FONT_SCALE = 1.3;
 
-  const resolveNunito = (weight?: TextStyle['fontWeight']): string => {
-    const w = String(weight ?? '');
-    if (w === 'bold' || w === '700' || w === '800' || w === '900') return NUNITO_BOLD;
-    if (w === '600') return NUNITO_SEMIBOLD;
-    if (w === '500') return NUNITO_MEDIUM;
-    return NUNITO_REGULAR;
-  };
+const isAndroid = Platform.OS === 'android';
 
-  // Cache der Resolutions — String-Lookup ist billig, aber spart bei
-  // dichten Listen (Stöbern: 1000+ Text-Renders) noch ein bisschen.
-  const cache = new Map<string, string>();
-  const resolveCached = (weight?: TextStyle['fontWeight']): string => {
-    const key = String(weight ?? '');
-    let v = cache.get(key);
-    if (!v) {
-      v = resolveNunito(weight);
-      cache.set(key, v);
-    }
-    return v;
-  };
+// ─── Style-Flattening Helper ─────────────────────────────────────────
+// RN-Styles können Arrays von Arrays/Objects sein. StyleSheet.flatten()
+// liefert den final-resolved fontFamily/fontWeight.
+const flatten = (style: StyleProp<TextStyle>): TextStyle => {
+  // require statt static import — vermeidet Circular falls StyleSheet
+  // selber irgendwann von dieser Datei abhängt.
+  const StyleSheet = require('react-native').StyleSheet;
+  return StyleSheet.flatten(style) || {};
+};
 
-  // ─── Text.render Patch ─────────────────────────────────────────
-  type AnyComponent = any;
-  const patchRender = (Component: AnyComponent, name: string) => {
-    const originalRender = Component.render;
-    if (!originalRender) {
-      console.warn(`[androidTextFontPatch] ${name}.render unavailable — skipping`);
-      return;
-    }
-    // WICHTIG (RN 0.79): Wir resolven auf den INPUT-Props (dem `style` das
-    // an Text/TextInput übergeben wird), NICHT auf dem gerenderten
-    // Output-Element. Ab RN 0.76+ destrukturiert Text seinen `style` und gibt
-    // eine umstrukturierte Element-Struktur zurück — der User-Style liegt dann
-    // NICHT mehr auf `element.props.style`, sodass die alte (Output-basierte)
-    // Variante ein stiller No-op wurde (Android-Texte fielen auf System-Font
-    // zurück). Input-Modifikation ist version-robust: forwardRef-Render-
-    // Signatur ist (props, ref).
-    Component.render = function patchedRender(props: any, ref: any) {
-      if (props && props.style) {
+const resolveNunito = (weight?: TextStyle['fontWeight']): string => {
+  const w = String(weight ?? '');
+  if (w === 'bold' || w === '700' || w === '800' || w === '900') return NUNITO_BOLD;
+  if (w === '600') return NUNITO_SEMIBOLD;
+  if (w === '500') return NUNITO_MEDIUM;
+  return NUNITO_REGULAR;
+};
+
+// Cache der Resolutions — spart bei dichten Listen (Stöbern: 1000+ Renders).
+const cache = new Map<string, string>();
+const resolveCached = (weight?: TextStyle['fontWeight']): string => {
+  const key = String(weight ?? '');
+  let v = cache.get(key);
+  if (!v) {
+    v = resolveNunito(weight);
+    cache.set(key, v);
+  }
+  return v;
+};
+
+// ─── Render-Patch (Text + TextInput) ─────────────────────────────────
+type AnyComponent = any;
+const patchRender = (Component: AnyComponent, name: string) => {
+  const originalRender = Component.render;
+  if (!originalRender) {
+    console.warn(`[androidTextFontPatch] ${name}.render unavailable — skipping`);
+    return;
+  }
+  // WICHTIG (RN 0.79): Wir modifizieren die INPUT-Props (das `style`/die Props
+  // die an Text/TextInput übergeben werden), NICHT das gerenderte Output-
+  // Element. Ab RN 0.76+ destrukturiert Text seinen `style`, sodass der User-
+  // Style nicht mehr auf `element.props.style` liegt. Input-Modifikation ist
+  // version-robust: die forwardRef-Render-Signatur ist (props, ref).
+  Component.render = function patchedRender(props: any, ref: any) {
+    if (props) {
+      // (1) Cross-Platform: globaler maxFontSizeMultiplier-Deckel. Nur setzen
+      // wenn die Callsite nichts eigenes vorgibt UND Font-Scaling nicht
+      // explizit abgeschaltet ist.
+      if (
+        props.maxFontSizeMultiplier == null &&
+        props.allowFontScaling !== false
+      ) {
+        props = { ...props, maxFontSizeMultiplier: DEFAULT_MAX_FONT_SCALE };
+      }
+
+      // (2) Nur Android: Nunito-fontWeight-Resolution.
+      if (isAndroid && props.style) {
         const flat = flatten(props.style);
-        // Zwei Fälle, beide enden in: explizite Nunito-Variante + KEIN
-        // fontWeight (das Gewicht steckt im Familiennamen; ein zusätzliches,
-        // nicht-matchendes fontWeight lässt Android still auf System-Font
-        // zurückfallen — das war der „Header/Überschriften nicht Nunito"-Bug).
         const fam = flat.fontFamily;
         if (fam === 'Nunito') {
-          // (a) bare 'Nunito' → passende geladene Variante auflösen, Weight weg.
-          // (Den Fall "weight gesetzt, family unset" NICHT anfassen — sonst
-          //  würden 3rd-party-/Navigation-Texte ungewollt auf Nunito gemappt.)
+          // (a) bare 'Nunito' → passende geladene Variante, Weight weg.
           const resolved = resolveCached(flat.fontWeight);
           if (resolved !== 'Nunito') {
             const next: any = { ...flat, fontFamily: resolved };
@@ -116,22 +117,20 @@ if (Platform.OS === 'android') {
           fam.indexOf('Nunito_') === 0 &&
           flat.fontWeight != null
         ) {
-          // (b) bereits explizite Variante (Nunito_700Bold etc.) ABER mit einem
-          // fontWeight daneben → Weight droppen, sonst greift derselbe Mismatch-
-          // Fallback (z.B. Nunito_700Bold + '800'). Deckt Callsites ab, die die
-          // Variante direkt setzen statt über den 'Nunito'-Alias.
+          // (b) bereits explizite Variante ABER mit fontWeight daneben →
+          // Weight droppen, sonst greift derselbe Mismatch-Fallback.
           const next: any = { ...flat };
           delete next.fontWeight;
           props = { ...props, style: next };
         }
       }
-      return originalRender.call(this, props, ref);
-    };
+    }
+    return originalRender.call(this, props, ref);
   };
+};
 
-  patchRender(Text, 'Text');
-  patchRender(TextInput, 'TextInput');
-}
+patchRender(Text, 'Text');
+patchRender(TextInput, 'TextInput');
 
 // no-op default export — Datei wird via side-effect-import benutzt.
 export {};

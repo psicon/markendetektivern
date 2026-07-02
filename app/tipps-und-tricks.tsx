@@ -143,7 +143,7 @@ const TIP_CATEGORIES: TipCategory[] = [
     tips: [
       'Sammle täglich Punkte: Login, Scannen, Stöbern — jede Aktion bringt dich weiter.',
       'Erreiche höhere Level: Mit jedem Level schaltest du neue Features und Belohnungen frei.',
-      'Halte deine Streak: Tägliche Nutzung verdoppelt deine Punkte.',
+      'Halte deine Streak: Jeder Tag in Folge bringt dir einen Extra-Punkt obendrauf.',
       'Teile deine Erfolge: Zeig Freunden, wie viel du schon gespart hast.',
       'Nutze alle Features: Einkaufszettel, Favoriten, Scanner — alles bringt Punkte und Ersparnis.',
     ],
@@ -152,7 +152,7 @@ const TIP_CATEGORIES: TipCategory[] = [
     icon: 'target',
     iconColor: '#AF52DE',
     title: 'Der Weg zu 200 € Ersparnis',
-    description: 'So schaffst du es garantiert',
+    description: 'So gehst du es Schritt für Schritt an',
     tips: [
       'Woche 1–2: Scanne 10 Produkte täglich und ersetze die 5 besten Funde.',
       'Woche 3–4: Stöbere durch alle Kategorien und baue deine Favoriten-Liste auf.',

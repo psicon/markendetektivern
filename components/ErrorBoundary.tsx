@@ -86,15 +86,17 @@ const ErrorFallback: React.FC<{ error?: Error; onReset: () => void }> = ({ error
           Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es erneut.
         </Text>
         
-        {/* FEHLER-DETAILS FÜR TESTFLIGHT */}
-        {error && (
+        {/* Technische Fehlerdetails NUR im Dev-Build. Store-/TestFlight-Nutzer
+            sehen die freundliche Meldung oben; der volle Stack geht über
+            componentDidCatch an console.error + Firebase Crashlytics. */}
+        {__DEV__ && error && (
           <View style={[styles.errorDetails, { backgroundColor: colors.border }]}>
             <Text style={[styles.errorLabel, { color: colors.text }]}>Fehler:</Text>
             <Text style={[styles.errorText, { color: colors.text }]}>{error.message || 'Unbekannter Fehler'}</Text>
-            
+
             <Text style={[styles.errorLabel, { color: colors.text }]}>Typ:</Text>
             <Text style={[styles.errorText, { color: colors.text }]}>{error.name || 'Unknown'}</Text>
-            
+
             {error.stack && (
               <>
                 <Text style={[styles.errorLabel, { color: colors.text }]}>Ort:</Text>
@@ -103,13 +105,9 @@ const ErrorFallback: React.FC<{ error?: Error; onReset: () => void }> = ({ error
                 </Text>
               </>
             )}
-            
-            <Text style={[styles.errorHint, { color: colors.text }]}>
-              📸 Bitte Screenshot an Entwickler senden!
-            </Text>
           </View>
         )}
-        
+
         <TouchableOpacity 
           style={[styles.button, { backgroundColor: colors.primary }]}
           onPress={onReset}
@@ -174,11 +172,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: 'Nunito_400Regular',
     marginBottom: 8,
-  },
-  errorHint: {
-    fontSize: 14,
-    fontFamily: 'Nunito_600SemiBold',
-    marginTop: 12,
-    textAlign: 'center',
   },
 });

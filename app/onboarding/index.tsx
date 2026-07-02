@@ -1180,6 +1180,7 @@ export default function OnboardingScreen() {
           {renderProgressBar()}
           
 
+          {renderSkipPill('Onboarding überspringen', skipOnboarding)}
           <View style={styles.mainContent}>
             <Text style={styles.stepTitle}>Wieviel gibst du wöchentlich für deinen Einkauf aus?</Text>
             <Text style={styles.subtitle}>Das hilft uns, dein persönliches Sparpotenzial zu berechnen.</Text>
@@ -1245,6 +1246,7 @@ export default function OnboardingScreen() {
           {renderProgressBar()}
           
 
+          {renderSkipPill('Onboarding überspringen', skipOnboarding)}
           <View style={styles.mainContent}>
             <Text style={[styles.stepTitle, IS_SMALL_SCREEN && { fontSize: 22, marginBottom: 6 }]}>Was ist dir beim Einkauf wichtig?</Text>
             <Text style={styles.subtitle}>Wähle bis zu 3 Aspekte</Text>
@@ -1471,7 +1473,8 @@ export default function OnboardingScreen() {
                   IS_SMALL_SCREEN && { padding: 14, marginBottom: 10 },
                 ]}
               >
-                <Text style={styles.yearlyLabel}>🏆 Deine Jahresersparnis</Text>
+                <Text style={styles.yearlyLabel}>🏆 Dein Jahres-Sparpotenzial</Text>
+                <Text style={[styles.yearlySubtext, { marginBottom: 2 }]}>bis zu</Text>
                 <Text
                   style={[
                     styles.yearlyAmount,

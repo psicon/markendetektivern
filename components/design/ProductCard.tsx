@@ -1,6 +1,6 @@
 import { Image as ExpoImage } from 'expo-image';
 import React, { useState } from 'react';
-import { Platform, Pressable, Text, View } from 'react-native';
+import { Platform, Pressable, Text, View, type ViewStyle } from 'react-native';
 import {
   fontFamily,
   fontWeight,
@@ -65,6 +65,10 @@ type Props = {
    *  Hat Vorrang vor `onPress`, wenn gesetzt. */
   onPressItem?: (product: any, index: number) => void;
   itemIndex?: number;
+  /** Optional: macht die Stufen-Pill antippbar → öffnet die Stufen-Legende.
+   *  MUSS stabil sein (useCallback), sonst bricht React.memo. Bekommt die
+   *  Stufe der Karte, damit die Legende die passende Zeile hervorheben kann. */
+  onStufePress?: (stufe: number) => void;
   /** Width override (defaults: horizontal=168, grid='100%'). */
   width?: number | string;
   /** Height override — when set, the Pressable fills exactly this
@@ -115,6 +119,7 @@ function ProductCardImpl({
   onPress,
   onPressItem,
   itemIndex,
+  onStufePress,
   width,
   height,
   imageOverlayTopLeft,
@@ -164,9 +169,38 @@ function ProductCardImpl({
     else onPress?.();
   }, [onPressItem, onPress, product, itemIndex]);
 
+  // Screenreader-Label (VoiceOver/TalkBack) — vorher waren die Karten stumm.
+  // Enthält Marke, Titel, Preis und die Stufe ("Stufe X von 5").
+  const hasStufe = stufe != null && stufe !== 0;
+  const a11yLabel =
+    `${brand ? `${brand}, ` : ''}${title}, ${formatPrice(price)}` +
+    `${hasStufe ? `, Stufe ${stufe} von 5` : ''}`;
+
+  // Translucent-White-Pill für die Stufen-Chips (Lesbarkeit auf jedem Bild).
+  const stufePillStyle: ViewStyle = {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderRadius: 7,
+    backgroundColor: 'rgba(255,255,255,0.72)',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOpacity: 0.12,
+        shadowRadius: 4,
+        shadowOffset: { width: 0, height: 1 },
+      },
+      android: { elevation: 2 },
+    }),
+  };
+
   return (
     <Pressable
       onPress={handlePress}
+      accessibilityRole="button"
+      accessibilityLabel={a11yLabel}
       style={({ pressed }) => ({
         width: cardWidth,
         ...(height ? { height } : null),
@@ -255,29 +289,28 @@ function ProductCardImpl({
             instead of blur for consistent cross-platform rendering.
             Wird übersprungen wenn `stufe` undefined/null/0 ist (z.B.
             für Markenprodukte, die das Original sind). */}
-        {stufe != null && stufe !== 0 ? (
-          <View
-            style={{
-              position: 'absolute',
-              bottom: 10,
-              right: 10,
-              paddingHorizontal: 6,
-              paddingVertical: 4,
-              borderRadius: 7,
-              backgroundColor: 'rgba(255,255,255,0.72)',
-              ...Platform.select({
-                ios: {
-                  shadowColor: '#000',
-                  shadowOpacity: 0.12,
-                  shadowRadius: 4,
-                  shadowOffset: { width: 0, height: 1 },
-                },
-                android: { elevation: 2 },
-              }),
-            }}
-          >
-            <StufenChips stufe={stufe as any} size={isHorizontal ? 'sm' : 'md'} />
-          </View>
+        {hasStufe ? (
+          onStufePress ? (
+            // Antippbar → öffnet die Stufen-Legende. stopPropagation, damit der
+            // Tap NICHT zusätzlich die Karte navigiert. hitSlop vergrößert das
+            // kleine Tap-Target (Pill ~28px → komfortabel).
+            <Pressable
+              onPress={(e) => {
+                e?.stopPropagation?.();
+                onStufePress(stufe as number);
+              }}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel={`Stufe ${stufe} von 5. Antippen für die Erklärung aller Stufen.`}
+              style={({ pressed }) => ({ ...stufePillStyle, opacity: pressed ? 0.7 : 1 })}
+            >
+              <StufenChips stufe={stufe as any} size={isHorizontal ? 'sm' : 'md'} />
+            </Pressable>
+          ) : (
+            <View style={stufePillStyle}>
+              <StufenChips stufe={stufe as any} size={isHorizontal ? 'sm' : 'md'} />
+            </View>
+          )
         ) : null}
 
         {/* Optionale Overlay-Slots — wird vom Top-Rated-Card-Wrapper
@@ -419,7 +452,9 @@ function ProductCardImpl({
                 includeFontPadding: false,
                 fontWeight: fontWeight.medium,
                 fontSize: 11,
-                color: theme.textMuted,
+                // textSub statt textMuted: Einheitspreis/Größe ist information-
+                // stragend → braucht 4,5:1-Kontrast (WCAG AA), nicht 2,7:1.
+                color: theme.textSub,
                 flexShrink: 1,
               }}
             >

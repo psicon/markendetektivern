@@ -53,6 +53,7 @@ const ALLOWED_ROOTS = new Set([
   '/edit-profile',
   '/tipps-und-tricks',
   '/purchase-history',
+  '/surveys',
 ]);
 
 /** Default-Route wenn der Deep-Link fehlt / nicht parsebar / nicht erlaubt. */

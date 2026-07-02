@@ -361,6 +361,15 @@ Recent-Sessions.
   in `app/_layout.tsx` ganz oben. Patcht `Text.render` und
   `TextInput.render` auf Android — wenn `fontFamily === 'Nunito'`,
   resolvet zur expliziten Nunito_XXX Variante gemäß fontWeight.
+  **Seit Stufe 1 (86cahgwmn) macht derselbe Render-Patch zusätzlich
+  einen PLATTFORMÜBERGREIFENDEN `maxFontSizeMultiplier`-Deckel (1.3 =
+  130 %):** injiziert den Default auf JEDEM Text/TextInput (iOS + Android),
+  außer die Callsite setzt einen eigenen Wert oder `allowFontScaling={false}`.
+  Grund: fixe Kartenhöhen liefen bei großer System-Schrift über (Text-
+  Clipping-Ursache >100 %). Die Nunito-Resolution bleibt Android-gated,
+  die Multiplier-Injektion läuft auf beiden Plattformen. Wenn der Deckel je
+  stört (z.B. eine Stelle soll voll skalieren) → dort explizit
+  `maxFontSizeMultiplier` überschreiben, NICHT den globalen Default entfernen.
   Separat: in `constants/tokens/typography.ts` gibt's
   `fontFamilyVariants.{regular,medium,semibold,bold,heading,body}`
   und `nunitoFont(weight)` für Code der direkt die explizite
