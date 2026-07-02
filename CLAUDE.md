@@ -297,6 +297,23 @@ Recent-Sessions.
   setState prüfen) — sonst überschreibt ein langsamer Load der alten Quelle
   den State der neuen.
 
+- **Ad-/Paywall-/Premium-Gates auf `!isPremium` bauen ODER SDK-Fehler als
+  „kein Premium" maskieren.** Premium-Boot-Race (User-Report 2026-07-02,
+  Commit 18cc685): `isPremium` startet false, bis RevenueCat antwortet —
+  jedes `!isPremium`-Gate behandelt „Status unbekannt" als Free-User →
+  zahlende Kunden sahen beim Start Werbung + Auto-Paywall. Verstärker:
+  der Service maskierte JEDEN Fehler als Mock-false (nach Cache-Invalidate!)
+  und persistierte das in `premium_cache_v1` → nächster Boot auch false.
+  Regeln: (1) Werbung NUR bei `showAds` (= `premiumKnown && !isPremium`)
+  aus dem RevenueCatProvider, Content-Sperren/Upsells NUR bei
+  `!isPremiumEffective` (= unknown wird wie Premium behandelt, fail-closed
+  für zahlende Kunden). NIE direkt `!isPremium`. (2) Status-Reads müssen
+  Fehler als `null` (unbekannt) liefern, nie als false — `isPremiumOrNull`/
+  `forceRefreshPremiumOrNull` nutzen; ein null darf weder State noch
+  AsyncStorage-Cache anfassen. (3) Der Premium-Cache wird NUR mit
+  bestätigten Werten beschrieben (premiumKnown-Gate). (4) init-Fehler ≠
+  Mock-Mode — uninitialisiert lassen + Retry.
+
 - **Fire-and-forget `void asyncStorageWrite(...)` direkt vor
   `setVisible(false)`/`setState`** — Race-Garantie. Wenn ein Listener
   auf das State-Change wartet und dann den just-geschriebenen Wert
