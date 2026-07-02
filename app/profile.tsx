@@ -1287,9 +1287,9 @@ export default function ProfileScreen() {
             <MenuRow
               icon="account-multiple-outline"
               color="#0ea5e9"
-              label="Geteilte Listen"
+              label="Gemeinsame Listen"
               sub="Mit Familie & Freunden gemeinsam einkaufen"
-              onPress={() => safePush('/shopping-list' as any)}
+              onPress={() => safePush('/shared-lists' as any)}
             />
             <MenuRow
               icon="heart-outline"

@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import React, { useMemo } from 'react';
-import { Alert, Platform, Pressable, Share, Text, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Alert, Platform, Pressable, Share, Text, TextInput, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 
 import { FilterSheet } from '@/components/design/FilterSheet';
@@ -36,6 +36,33 @@ export function SharedListManageSheet({
   const { theme, brand } = useTokens();
   const isOwner = !!list && list.ownerId === myUid;
   const inviteLink = list?.inviteCode ? SharedListService.inviteLinkFor(list.inviteCode) : '';
+
+  // ─── Umbenennen (Owner) ───
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  useEffect(() => {
+    // Draft zurücksetzen, wenn Sheet (neu) geöffnet oder Liste gewechselt wird.
+    if (visible) {
+      setEditingName(false);
+      setNameDraft(list?.name ?? '');
+    }
+  }, [visible, list?.id, list?.name]);
+
+  const onSaveName = async () => {
+    if (!list) return;
+    const next = nameDraft.trim();
+    if (!next || next === list.name) {
+      setEditingName(false);
+      return;
+    }
+    try {
+      await SharedListService.rename(list.id, next);
+      setEditingName(false);
+      showInfoToast('Liste umbenannt.', 'success');
+    } catch {
+      showInfoToast('Konnte die Liste nicht umbenennen.', 'error');
+    }
+  };
 
   const memberEntries = useMemo(() => {
     if (!list) return [] as { uid: string; name: string; isOwner: boolean }[];
@@ -98,6 +125,67 @@ export function SharedListManageSheet({
   return (
     <FilterSheet visible={visible} title={list?.name ?? 'Geteilte Liste'} onClose={onClose}>
       <View style={{ paddingBottom: 8, gap: 14 }}>
+        {/* ── Umbenennen (Owner) ── */}
+        {isOwner ? (
+          editingName ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View
+                style={{
+                  flex: 1,
+                  height: 44,
+                  borderRadius: 12,
+                  backgroundColor: theme.surface,
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                  paddingHorizontal: 14,
+                  justifyContent: 'center',
+                }}
+              >
+                <TextInput
+                  value={nameDraft}
+                  onChangeText={setNameDraft}
+                  placeholder="Name der Liste"
+                  placeholderTextColor={theme.textMuted}
+                  autoFocus
+                  maxLength={40}
+                  onSubmitEditing={onSaveName}
+                  returnKeyType="done"
+                  style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 15, color: theme.text, paddingVertical: 0 }}
+                />
+              </View>
+              <Pressable
+                onPress={onSaveName}
+                style={({ pressed }) => ({
+                  width: 44,
+                  height: 44,
+                  borderRadius: 12,
+                  backgroundColor: brand.primary,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: pressed ? 0.85 : 1,
+                })}
+              >
+                <MaterialCommunityIcons name="check" size={22} color="#fff" />
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable
+              onPress={() => setEditingName(true)}
+              style={({ pressed }) => ({
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 8,
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <MaterialCommunityIcons name="pencil-outline" size={16} color={theme.textSub} />
+              <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 13, color: theme.textSub }}>
+                Liste umbenennen
+              </Text>
+            </Pressable>
+          )
+        ) : null}
+
         {/* ── Einladen ── */}
         <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 13, lineHeight: 19, color: theme.textSub }}>
           Alle Mitglieder sehen und bearbeiten dieselbe Liste — in Echtzeit. Der

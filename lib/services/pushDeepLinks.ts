@@ -54,6 +54,7 @@ const ALLOWED_ROOTS = new Set([
   '/tipps-und-tricks',
   '/purchase-history',
   '/surveys',
+  '/shared-lists',
   '/join-list',
 ]);
 

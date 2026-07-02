@@ -307,9 +307,9 @@ function ListSwitcherChips({
   const chipStyle = (active: boolean, pressed: boolean) => ({
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    gap: 5,
-    height: 32,
-    paddingHorizontal: 12,
+    gap: 6,
+    height: 38,
+    paddingHorizontal: 14,
     borderRadius: radii.md,
     backgroundColor: active ? (theme.primaryContainer ?? theme.surfaceAlt) : theme.surface,
     borderWidth: active ? 1.5 : 1,
@@ -317,9 +317,9 @@ function ListSwitcherChips({
     opacity: pressed ? 0.8 : 1,
   });
   const CounterPill = ({ icon, value }: { icon: any; value: number }) => (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-      <MaterialCommunityIcons name={icon} size={12} color={theme.textSub} />
-      <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 11, color: theme.textSub }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+      <MaterialCommunityIcons name={icon} size={14} color={theme.textSub} />
+      <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 12, color: theme.textSub }}>
         {value}
       </Text>
     </View>
@@ -334,14 +334,14 @@ function ListSwitcherChips({
       <Pressable onPress={() => onSelect(null)} style={({ pressed }) => chipStyle(!activeId, pressed)}>
         <MaterialCommunityIcons
           name="account"
-          size={14}
+          size={16}
           color={!activeId ? brand.primary : theme.textMuted}
         />
         <Text
           style={{
             fontFamily,
             fontWeight: fontWeight.extraBold,
-            fontSize: 12,
+            fontSize: 13,
             color: !activeId ? theme.text : theme.textSub,
           }}
         >
@@ -358,7 +358,7 @@ function ListSwitcherChips({
           >
             <MaterialCommunityIcons
               name="account-multiple"
-              size={14}
+              size={16}
               color={active ? brand.primary : theme.textMuted}
             />
             <Text
@@ -366,9 +366,9 @@ function ListSwitcherChips({
               style={{
                 fontFamily,
                 fontWeight: fontWeight.extraBold,
-                fontSize: 12,
+                fontSize: 13,
                 color: active ? theme.text : theme.textSub,
-                maxWidth: 132,
+                maxWidth: 150,
               }}
             >
               {l.name}
@@ -376,7 +376,7 @@ function ListSwitcherChips({
             <CounterPill icon="account-multiple-outline" value={l.memberIds?.length ?? 1} />
             {active ? <CounterPill icon="cart-outline" value={activeItemCount} /> : null}
             {active ? (
-              <MaterialCommunityIcons name="cog-outline" size={13} color={theme.textMuted} />
+              <MaterialCommunityIcons name="cog-outline" size={15} color={theme.textMuted} />
             ) : null}
           </Pressable>
         );
@@ -4842,7 +4842,7 @@ export default function ShoppingListScreen() {
                 justifyContent: 'center',
               }}
             >
-              <MaterialCommunityIcons name="share-variant" size={22} color={theme.text} />
+              <MaterialCommunityIcons name="message-text-outline" size={22} color={theme.text} />
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 15, color: theme.text, letterSpacing: -0.2 }}>
