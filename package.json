@@ -12,7 +12,8 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "test": "jest",
-    "test:app": "jest"
+    "test:app": "jest",
+    "test:rules": "firebase-tools emulators:exec --only firestore --project demo-rules-test \"jest -c rules-tests/jest.config.js\""
   },
   "dependencies": {
     "@backpackapp-io/react-native-toast": "^0.14.0",
@@ -97,6 +98,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@firebase/rules-unit-testing": "^5.0.1",
     "@types/jest": "^29.5.14",
     "@types/react": "~19.0.10",
     "@types/react-native": "^0.73.0",

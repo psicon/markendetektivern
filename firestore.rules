@@ -1,590 +1,118 @@
 rules_version = '2';
 
+// ─────────────────────────────────────────────────────────────────────
+// MarkenDetektive — Firestore Security Rules (Stufe-0-Härtung, 2026-07)
+//
+// Prinzipien (ClickUp 86cahgwmn, Stufe 0):
+//  • WHITELIST: alles Ungematchte fällt in den finalen deny-all.
+//  • GENAU EIN /users-Block (die alten 5 überlappenden Blöcke wurden per
+//    OR vereinigt — der lockerste gewann, jede Validierung war wirkungslos).
+//  • GELD IST SERVER-ONLY: cashback_balance/lifetime/counter-Felder und
+//    users/*/cashback_ledger sind client-seitig NICHT schreibbar. Cloud
+//    Functions nutzen das Admin-SDK und umgehen Rules — nichts bricht.
+//  • Öffentlicher Katalog bleibt read:true (Boot-Reads laufen teils vor
+//    abgeschlossenem Anonymous-Sign-In — kein Auth-Race einbauen).
+//  • Client-Nutzungs-Census 2026-07-02: jede hier erlaubte Operation hat
+//    eine nachgewiesene Callsite in lib/app/components; alles andere wurde
+//    bewusst gesperrt (Legacy: FlutterFlow-/MDM-/Scraper-Reste).
+// ─────────────────────────────────────────────────────────────────────
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /hersteller_new/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if false;
-    }
- 
-    match /{path=**}/journeys/{journeyId} {
-  allow read, list, get: if true;  // ✅ Für Analytics
-}
 
-match /users/{parent}/journeys/{document} {
-  allow create, write: if request.auth != null;
-  allow read, list: if true;  // ✅ Für Analytics
-}
-    match /onboardingspendings/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if false;
-      allow delete: if false;
+    function signedIn() {
+      return request.auth != null;
     }
-    
-        match /reweapify/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if false;
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
     }
-    
-       match /onboardingResultsV5/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if false;
-    }
-    
-    match /productRatings/{document} {
-  allow create: if request.auth != null;
-      allow read: if true;
-      allow write: if request.auth != null;
-      allow delete: if request.auth != null;
+    // Geld-Felder auf users/{uid} — schreibt AUSSCHLIESSLICH der Server
+    // (cashback-pipeline syncLedger/requestPayout/refund, survey-reward).
+    function touchesMoneyFields(keys) {
+      return keys.hasAny([
+        'cashback_balance_cents',
+        'cashback_lifetime_cents',
+        'cashback_monthly',
+        'cashback_campaign_weekly',
+        'cashback_campaign_totals',
+        'cashback_last_bon_date'
+      ]);
     }
 
-    match /onboardingwherefrom/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if false;
-      allow delete: if false;
-    }
-    
-      match /paywallCounter/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if false;
-    }
-
-
-    match /onboardingresults/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if false;
-      allow delete: if false;
-    }
-
-    match /appSettings/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if false;
-      allow delete: if false;
-    }
-
-    match /userFeedbacks/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if false;
-      allow delete: if false;
-    }
-
-    match /vetnummernat/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if false;
-      allow delete: if false;
-    }
-
-    match /abopreise/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if false;
-      allow delete: if false;
-    }
-    
-    match /aldiscrapedproducts/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if true;
-    }
-
-    match /fehler/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if false;
-      allow delete: if false;
-    }
-
-    match /neuesGeheimnis/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if false;
-      allow delete: if false;
-    }
-
-    match /produktvorschlaege/{document} {
-      allow create: if request.auth != null;
-      allow read: if true;
-      allow write: if false;
-      allow delete: if false;
-    }
-
-    match /vetnummern/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if false;
-      allow delete: if false;
-    }
-
-    match /users/{parent}/einkaufswagen/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if true;
-    }
-    
-    
-    match /users/{parent}/favorites/{document} {
-      allow create: if request.auth != null;
-      allow read: if true;
-      allow write: if request.auth != null;
-      allow delete: if request.auth != null;
-    }
-    
-  // === EXISTING RULES (behalten) ===
-    match /users/{parent}/journeys/{document} {
-      allow create: if request.auth != null;
-      allow read: if true;
-      allow write: if request.auth != null;
-      allow delete: if request.auth != null;
-    }
-    
-    // === KRITISCH: collectionGroup RULES HINZUFÜGEN ===
-    // Diese Rules ermöglichen collectionGroup('journeys') Queries
-    match /{path=**}/journeys/{journeyId} {
-      allow read: if true; // Für Analytics-Dashboard
-      allow list: if true; // Für collectionGroup Queries
-    }
-    
-    // === OPTIONAL: Spezifische User-basierte Rules ===
-    match /users/{userId} {
-      allow read: if request.auth != null;
-      
-      match /journeys/{journeyId} {
-        allow create: if request.auth != null;
-        allow read: if true; // Analytics braucht Read-Access
-        allow write: if request.auth != null && request.auth.uid == userId;
-        allow delete: if request.auth != null && request.auth.uid == userId;
-        allow list: if true; // Für Analytics-Queries
-      }
-    }
-
-   
-
-match /users/{parent}/purchases/{document} {
-  allow create: if request.auth != null;
-  allow read: if request.auth != null && request.auth.uid == parent;
-  allow write: if request.auth != null && request.auth.uid == parent;
-  allow delete: if request.auth != null && request.auth.uid == parent;
-}
-
-match /{path=**}/purchases/{document} {
-  allow read: if request.auth != null;
-}
-    
-    match /users/{parent}/scanHistory/{document} {
-      allow create: if request.auth != null;
-      allow read: if true;
-      allow write: if request.auth != null;
-      allow delete: if request.auth != null;
-    }
-
-    match /{path=**}/scanHistory/{document} {
-      allow read: if true;
-    }
-
-
-    
-    match /users/{parent}/searchHistory/{document} {
-      allow create: if request.auth != null;
-      allow read: if true;
-      allow write: if request.auth != null;
-      allow delete: if request.auth != null;
-    }
-
-    match /{path=**}/searchHistory/{document} {
-      allow read: if true;
-    }
-
-
-    
-
-    match /discounter/{document} {
-      allow create: if request.auth != null;
-      allow read: if true;
-      allow write: if false;
-      allow delete: if false;
-    }
-
-    match /handelsmarken/{document} {
-      allow create: if request.auth != null;
-      allow read: if true;
-      allow write: if false;
-      allow delete: if false;
-    }
-
-    match /hersteller/{document} {
-      allow create: if request.auth != null;
-      allow read: if true;
-      allow write: if false;
-      allow delete: if false;
-    }
-     match /pennyscrapedproducts/{document} {
-      allow create: if request.auth != null;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if true;
-    }
-     match /pennyscrapedproduct_text/{document} {
-      allow create: if request.auth != null;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if true;
-    }
- match /lidlscrapedproducts/{document} {
-      allow create: if request.auth != null;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if true;
-    }
-     match /lidlscrapedproduct_text/{document} {
-      allow create: if request.auth != null;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if true;
-    }
-     match /scraped_products/{document} {
-      allow create: if request.auth != null;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if true;
-    }
-    match /hersteller_new_formatch/{document} {
-      allow create: if request.auth != null;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if true;
-    }
-    
-    match /packungstypen/{document} {
-      allow create: if request.auth != null;
-      allow read: if true;
-      allow write: if false;
-      allow delete: if false;
-    }
-    
-
-match /markenProdukte/{document} {
-      allow create: if request.auth != null;
-      allow read: if true;
-            allow update: if true;
-      allow write: if false;
-      allow delete: if false;
-    }
+    // ── Öffentlicher Katalog (read-only für Clients) ─────────────────
+    // Client-Writes laufen für ALLE diese Collections über Cloud
+    // Functions/Pipelines (Admin-SDK). `update: if true` auf produkte/
+    // markenProdukte (jeder konnte den Katalog ändern!) ist entfernt.
     match /produkte/{document} {
-      allow create: if request.auth != null;
-      allow read: if true;
-      allow update: if true;
-      allow write: if false;
-      allow delete: if false;
-    }
-
-    match /{document=**} {
-      allow read, write: if request.auth.token.email.matches("firebase@flutterflow.io");
-    }
-
-    match /kategorien/{document} {
-      allow create: if request.auth != null;
       allow read: if true;
       allow write: if false;
-      allow delete: if false;
     }
-
-match /users/{userId} {
-  // Jeder User darf nur SEIN EIGENES Profil lesen und schreiben
-  allow read, write: if request.auth != null && request.auth.uid == userId;
-  
-  // Erstellen erlauben (wichtig für Registrierung)
-  allow create: if request.auth != null && request.auth.uid == userId;
-}
-    
-    
-    
-    // WICHTIG: Anonyme User können ihr eigenes Profil verwalten!
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-      
-      match /{subcollection}/{document} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
-      }
-    }
-    
-      
-    // Produkte können alle lesen
-    match /produkte/{productId} {
+    match /markenProdukte/{document} {
       allow read: if true;
-      
-      // Bewertungen von authentifizierten Usern (inkl. anonym)
-      match /ratings/{ratingId} {
-        allow read: if true;
-        allow create: if request.auth != null;
-        allow update, delete: if request.auth != null && 
-          request.auth.uid == resource.data.userID;
-      }
+      allow write: if false;
     }
-    
-    // Gleiche Regeln für Markenprodukte
-    match /markenprodukte/{productId} {
+    match /hersteller/{document} {
       allow read: if true;
-      
-      match /ratings/{ratingId} {
-        allow read: if true;
-        allow create: if request.auth != null;
-        allow update, delete: if request.auth != null && 
-          request.auth.uid == resource.data.userID;
-      }
+      allow write: if false;
     }
-    
-
-    
-    // Handelsmarken & Discounter
+    match /hersteller_new/{document} {
+      allow read: if true;
+      allow write: if false;
+    }
     match /handelsmarken/{document} {
       allow read: if true;
+      allow write: if false;
     }
-    
+    match /kategorien/{document} {
+      allow read: if true;
+      allow write: if false;
+    }
     match /discounter/{document} {
       allow read: if true;
+      allow write: if false;
     }
-    
-    
-    
-  // ============================================
-// GAMIFICATION SECURITY RULES - ZUM HINZUFÜGEN
-// ============================================
-
-// 1. GAMIFICATION CONFIG (Read-Only für alle authentifizierten User)
-// NEUE STRUKTUR OHNE config SUBCOLLECTION!
-match /gamification/{document} {
-  allow read: if request.auth != null;
-  allow write: if false; // Nur über Admin-Console/Cloud Functions
-}
-
-// Levels Subcollection
-match /gamification/levels/items/{levelId} {
-  allow read: if request.auth != null;
-  allow write: if false; // Nur über Admin-Console/Cloud Functions
-}
-
-// 2. ACHIEVEMENTS COLLECTION (Global, Read-Only)
-match /achievements/{achievementId} {
-  allow read: if true; // Jeder kann Achievement-Definitionen sehen
-  allow write: if false; // Nur über Admin-Console
-}
-
-// 3. USER LEDGER (Punkte-Transaktionen)
-// WICHTIG: Idealerweise nur Server-Side schreiben!
-match /users/{userId}/ledger/{transactionId} {
-  // Lesen: Nur eigene Transaktionen
-  allow read: if true;
-  //request.auth != null && request.auth.uid == userId;
-  
-  // Schreiben: Nur wenn authentifiziert und eigener User
-  // ZUSÄTZLICHE VALIDIERUNG für Anti-Abuse
-  allow create: if request.auth != null && 
-    request.auth.uid == userId &&
-    // Transaction muss timestamp haben
-    request.resource.data.keys().hasAll(['timestamp', 'action', 'points']) &&
-    // Timestamp muss aktuell sein (±5 Minuten)
-    request.resource.data.timestamp is timestamp &&
-    math.abs(request.resource.data.timestamp.seconds() - request.time.seconds()) < 300 &&
-    // Points müssen positiv sein
-    request.resource.data.points is number &&
-    request.resource.data.points > 0 &&
-    // Action muss string sein
-    request.resource.data.action is string;
-  
-  // Updates und Deletes verbieten (append-only)
-  allow update: if false;
-  allow delete: if false;
-}
-
-
-match /users/{userId} {
-  // Erlaube User-Erstellung für ALLE authentifizierten User (auch anonyme)
-  allow create: if request.auth != null && request.auth.uid == userId;
-  
-  // Lesen und Updates nur für eigenen User
-  allow read, update: if request.auth != null && request.auth.uid == userId;
-  
-  // Löschungen verbieten
-  allow delete: if false;
-}
-
-// 4. USER ACHIEVEMENTS PROGRESS (Subcollection)
-match /users/{userId}/achievements/{achievementId} {
-  // Lesen: Nur eigene Achievement-Progress
-  allow read: if request.auth != null && request.auth.uid == userId;
-  
-  // Schreiben: Nur Server/Cloud Functions sollte das updaten
-  // Falls Client-Write nötig (nicht empfohlen):
-  allow write: if request.auth != null && 
-    request.auth.uid == userId &&
-    // Nur progress, completed, completedAt, lastUpdated erlaubt
-    request.resource.data.keys().hasAll(['progress', 'completed', 'lastUpdated']) &&
-    // Progress muss >= 0 sein
-    request.resource.data.progress >= 0;
-}
-
-// 5. USER STATS ERWEITERT
-// (Bereits durch bestehende /users/{userId} Regel abgedeckt,
-// aber hier explizit für stats-Felder wenn gewünscht)
-match /users/{userId} {
-  // Stats-Updates mit Validierung
-  allow update: if request.auth != null && 
-    request.auth.uid == userId &&
-    // Verhindere dass User direkt Level manipuliert
-    (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['stats.currentLevel']) ||
-     // Oder erlaube nur Erhöhung um 1
-     request.resource.data.stats.currentLevel == resource.data.stats.currentLevel + 1) &&
-    // Points/Savings dürfen nur erhöht werden
-    request.resource.data.stats.pointsTotal >= resource.data.stats.pointsTotal &&
-    request.resource.data.stats.savingsTotal >= resource.data.stats.savingsTotal;
-}
-
-// 6. MISSIONS (Für spätere Erweiterung)
-match /missions/{missionId} {
-  allow read: if request.auth != null;
-  allow write: if false;
-}
-
-match /userfeedback/{document} {
-  allow read: if true;
-  allow write: if true; // Nur über Admin-Console/Cloud Functions
-}
-
-match /users/{userId}/missions/{missionId} {
-  allow read: if request.auth != null && request.auth.uid == userId;
-  allow write: if request.auth != null && request.auth.uid == userId;
-}
-// === MDM CORE COLLECTIONS ===
-match /master_manufacturers/{document} {
-  allow create: if true;
-  allow read: if true;
-  allow write: if true;
-  allow delete: if true;
-}
-
-match /master_brands/{document} {
-  allow create: if true;
-  allow read: if true;
-  allow write: if true;
-  allow delete: if true;
-}
-
-// === ALIAS SYSTEM ===
-match /manufacturer_aliases/{document} {
-  allow create: if true;
-  allow read: if true;
-  allow write: if true;
-  allow delete: if true;
-}
-
-match /brand_aliases/{document} {
-  allow create: if true;
-  allow read: if true;
-  allow write: if true;
-  allow delete: if true;
-}
-
-// === PROCESSING & AUDIT ===
-match /manufacturer_clusters/{document} {
-  allow create: if true;
-  allow read: if true;
-  allow write: if true;
-  allow delete: if true;
-}
-
-match /mdm_analytics/{document} {
-  allow create: if true;
-  allow read: if true;
-  allow write: if true;
-  allow delete: if true;
-}
-
-match /mdm_migration_log/{document} {
-  allow create: if true;
-  allow read: if true;
-  allow write: if true;
-  allow delete: if true;
-}
-
-
-
- // Analytics Cache - Read für alle authentifizierten, Write nur für Admin
-    match /analytics-cache/{cacheId} {
-   allow read: if true;  // ✅ Für Analytics-Dashboard
-  allow write: if true; // ✅ Später auf Admin einschränken
-
-    }
-    
-    match /custom-regions/{document} {
-  allow create: if true;
-  allow read: if true;
-  allow write: if true;
-  allow delete: if true;
-}
-
-    match /polls/{document} {
-  allow create: if true;
-  allow read: if true;
-  allow write: if true;
-  allow delete: if true;
-}
-
-    match /poll_responses/{document} {
-  allow create: if true;
-  allow read: if true;
-  allow write: if true;
-  allow delete: if true;
-}
-
-match /prlists/{document} {
-      allow create: if true;
+    match /packungstypen/{document} {
       allow read: if true;
-      allow write: if true;
-      allow delete: if true;
+      allow write: if false;
     }
- // Leaderboard rules
-    match /leaderboards/{userId} {
-      allow read: if true;  // Jeder kann Bestenlisten lesen
-      allow write: if true; // Nur Cloud Functions können schreiben
-    }
-    
-    // Leaderboard metadata
-    match /leaderboard_metadata/{document} {
+    match /merchants/{merchantId} {
       allow read: if true;
-      allow write: if true; // Nur Cloud Functions
+      allow write: if false;
     }
-   
-    // ── Leaderboard Aggregat ─────────────────────────────────────
-// Pre-computed Bestenlisten-Snapshot (16 Bundesländer +
-// Top-50 Städte + Top-50 User). Wird nur von der Cloud
-// Function `aggregateLeaderboard` geschrieben (Admin-SDK
-// umgeht Rules); Client liest readonly.
-match /aggregates/{document} {
-  allow read: if true;
-  allow write: if false;
-}
+    match /external_products/{ean} {
+      allow read: if true;
+      allow write: if false;
+    }
+    // Nutrition-Quellen (App liest Nährwerte/Zutaten; Pipelines schreiben).
+    match /reweapify/{document} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /nutritionscrape/{document} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /scraped_products/{document} {
+      allow read: if true;
+      allow write: if false;
+    }
+    // Aggregate (Bestenlisten-Snapshot, B2B) — nur CF schreibt.
+    match /aggregates/{document} {
+      allow read: if true;
+      allow write: if false;
+    }
+    // Achievement-Katalog (öffentliche Definitionen).
+    match /achievements/{achievementId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    // Gamification-Konfiguration (actions/streaks/levels/items…).
+    match /gamification/{document=**} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
 
-    // ── Cashback / Kassenbon System ──────────────────────────────
-    // Public-read config + laufende Aktionen (App zeigt Tiers, Cap,
-    // laufende Aktion + Restlaufzeit + Budget). Schreiben NUR via
-    // Cloud Function (Admin SDK umgeht Rules). Geld-Logik ist immer
-    // serverseitig — der Client liest nur.
+    // ── Cashback / Kassenbon-System ──────────────────────────────────
     match /cashback_config/{configId} {
       allow read: if true;
       allow write: if false;
@@ -595,19 +123,13 @@ match /aggregates/{document} {
     }
     // Eigene Bons + Auszahlungen lesbar, keine Client-Writes.
     match /receipts/{receiptId} {
-      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
       allow write: if false;
     }
     match /cashback_payouts/{payoutId} {
-      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
       allow write: if false;
     }
-    // Merchants — public read (Logo + kanonischer Name), admin-only write.
-    match /merchants/{merchantId} {
-      allow read: if true;
-      allow write: if false;
-    }
-    // Review-Queue + Monats-Verbrauch — nie client-lesbar.
     match /cashback_review_queue/{queueId} {
       allow read: if false;
       allow write: if false;
@@ -617,27 +139,161 @@ match /aggregates/{document} {
       allow write: if false;
     }
 
-    // Produkt-Foto Crowd-Uploads ("voller Datensatz" Wizard) — der User
-    // legt eigene Pending-Einträge an + liest sie; Review/Vergütung läuft
-    // serverseitig (Admin SDK umgeht Rules).
+    // Produkt-Foto Crowd-Uploads — User legt eigene Pending-Einträge an
+    // + liest sie; Review/Vergütung läuft serverseitig.
     match /crowd_uploads/{uploadId} {
-      allow create: if request.auth != null
+      allow create: if signedIn()
                      && request.resource.data.userId == request.auth.uid;
-      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
       allow update, delete: if false;
     }
 
-    // Externe Produkte (OpenFood/REWE/Scraper-Cache). Client liest sie für
-    // die Anzeige + die KI-Live-Subscription (aiAssessment). Writes laufen
-    // AUSSCHLIESSLICH server-seitig (cloud-functions/external-product-lookup
-    // + ai-product-comparison via Admin-SDK, das Rules umgeht) — der Client
-    // schreibt hier NICHT. external_lookup_misses bleibt server-only.
-    match /external_products/{ean} {
+    // ── Umfragen (RevealyIQ) ─────────────────────────────────────────
+    // polls schreibt NUR das Admin-Tool (Admin-SDK); rewardCents ist der
+    // Auszahlungsbetrag der survey-reward-CF → niemals client-schreibbar.
+    match /polls/{document} {
       allow read: if true;
       allow write: if false;
     }
+    // Antworten: nur eigene anlegen + lesen (App prüft "schon beantwortet"
+    // via where('userId','==',uid)). Auswertung serverseitig.
+    match /poll_responses/{document} {
+      allow create: if signedIn()
+                     && request.resource.data.userId == request.auth.uid;
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
 
-// LAST PIECE
+    // ── Bestenliste ──────────────────────────────────────────────────
+    // leaderboardService.updateUserStats schreibt das EIGENE Doc client-
+    // seitig (weekly/monthly-Counter); Woche/Monat-Listen sind eine echte
+    // Client-Query über die Collection → read für eingeloggte User.
+    // Vorher: read+write für JEDEN ohne Auth (Rang-Fälschung + PII-Scrape).
+    match /leaderboards/{userId} {
+      allow read: if signedIn();
+      allow create, update: if isOwner(userId);
+      allow delete: if false;
+    }
+
+    // ── Produkt-Bewertungen (top-level, Owner-Feld `userID`) ─────────
+    match /productRatings/{ratingId} {
+      allow read: if true;
+      allow create: if signedIn()
+                     && request.resource.data.userID == request.auth.uid;
+      allow update, delete: if signedIn()
+                     && resource.data.userID == request.auth.uid;
+    }
+
+    // ── App-Feedback (Rating-Prompt) — eigene Docs, Owner-Feld `userId` ──
+    match /userfeedback/{document} {
+      allow create: if signedIn()
+                     && request.resource.data.userId == request.auth.uid;
+      allow read, update: if signedIn()
+                     && resource.data.userId == request.auth.uid;
+      allow delete: if false;
+    }
+
+    // ── Onboarding-Analytics (write-only Telemetrie, Session-ID-Docs) ──
+    match /onboardingResultsV5/{sessionId} {
+      allow create, update: if signedIn();
+      allow read, delete: if false;
+    }
+
+    // ── Push-Token-Registry (Admin-Broadcasts; Doc-ID = Token) ───────
+    match /pushTokens/{token} {
+      allow create, update: if signedIn()
+                     && request.resource.data.userId == request.auth.uid;
+      allow read, delete: if false;
+    }
+
+    // ── User-Daten ───────────────────────────────────────────────────
+    // GENAU EIN Block. Owner-only; Geld-Felder sind ausgenommen (server-
+    // only). Der Client schreibt legitim: Profil, stats.*, cashback_consent,
+    // pushToken, Onboarding-Flags, Settings … (Census 2026-07-02: keine
+    // einzige legitime Client-Write-Stelle für die Geld-Felder).
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId)
+                     && !touchesMoneyFields(request.resource.data.keys());
+      allow update: if isOwner(userId)
+                     && !touchesMoneyFields(
+                          request.resource.data.diff(resource.data).affectedKeys());
+      allow delete: if false;
+
+      // Owner-verwaltete Subcollections (nachgewiesene Client-Writes).
+      match /einkaufswagen/{document} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+      match /favorites/{document} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+      match /journeys/{document} {
+        allow read, create, update: if isOwner(userId);
+        allow delete: if false; // Cleanup läuft serverseitig (journey-cleanup)
+      }
+      match /purchases/{document} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+      match /scanHistory/{document} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+      match /searchHistory/{document} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+      match /stats/{document} {
+        allow read, create, update: if isOwner(userId);
+        allow delete: if false;
+      }
+      match /fcmTokens/{token} {
+        allow read, create, update, delete: if isOwner(userId);
+      }
+      // Bon-Status-Mirror: Client legt Placeholder an ('uploading') und
+      // merged Updates; die Pipeline (Admin-SDK) schreibt den Rest.
+      match /cashback_status/{document} {
+        allow read, create, update: if isOwner(userId);
+        allow delete: if false;
+      }
+      // Punkte-Ledger: append-only vom Owner, Shape-validiert (alle drei
+      // Client-Write-Stellen schreiben {action, points, timestamp, …}).
+      // Punkte sind KEIN Geld — Geld liegt in cashback_ledger (server-only).
+      match /ledger/{transactionId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && request.resource.data.keys().hasAll(['action', 'points', 'timestamp'])
+          && request.resource.data.action is string
+          && request.resource.data.points is number
+          && request.resource.data.points >= 0
+          && request.resource.data.points <= 10000
+          && request.resource.data.timestamp is timestamp;
+        allow update, delete: if false;
+      }
+      // GELD-Ledger + OCR-Artikel-Trail: NUR Cloud Functions schreiben.
+      match /cashback_ledger/{document} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      match /purchased_products/{document} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+      // Fallback für alle übrigen/künftigen Subcollections: Owner darf
+      // lesen, schreiben darf nur der Server. (Explizite Blöcke oben
+      // erweitern das per OR — neue Subcollections sind damit safe-by-
+      // default und brauchen einen bewussten Rules-Eintrag für Writes.)
+      match /{subcollection}/{document=**} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+    }
+
+    // ── Finaler deny-all ─────────────────────────────────────────────
+    // Alles Ungematchte (inkl. der früher offenen Legacy-Collections:
+    // FlutterFlow-Backdoor, MDM/master_*, *_aliases, mdm_*, scraper-
+    // Write-Zugriffe, onboarding*-Altlasten, paywallCounter, prlists,
+    // custom-regions, analytics-cache, vetnummern*, abopreise,
+    // leaderboard_metadata, missions, userFeedbacks, fehler, appSettings,
+    // produktvorschlaege, neuesGeheimnis, collectionGroup-Freigaben) ist
+    // gesperrt. Admin-Tools gehören ans Admin-SDK, nicht in offene Rules.
     match /{document=**} {
       allow read, write: if false;
     }
