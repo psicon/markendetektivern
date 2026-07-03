@@ -8,8 +8,9 @@
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { Camera, CameraType, CameraView, useCameraPermissions } from 'expo-camera';
+import { Camera, CameraType, CameraView, scanFromURLAsync, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 import { Image as ExpoImage } from 'expo-image';
 import { router, useNavigation } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -352,6 +353,56 @@ export default function ProductWizardScreen() {
     },
     [step.key, capturing, cameraReady, shootCamera],
   );
+
+  // Bild aus der Galerie wählen — Alternative zur Live-Aufnahme (war in der
+  // alten App möglich). VOLLE Qualität, keine Kompression (CLAUDE.md: die
+  // Server-Analyse braucht scharfe Labels für OCR/EAN). Für den EAN-Schritt
+  // wird der Barcode aus dem gewählten Bild gelesen (scanFromURLAsync); ist
+  // keiner lesbar, bleibt der Live-Scan die Option.
+  const pickFromGallery = useCallback(async () => {
+    if (capturing) return;
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(
+          'Kein Foto-Zugriff',
+          'Wir brauchen Zugriff auf deine Fotos, um ein Bild aus der Galerie zu wählen. Du kannst das in den Einstellungen erlauben.',
+        );
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        quality: 1, // volle Qualität für die Analyse — NICHT komprimieren
+        exif: false,
+      });
+      if (result.canceled || !result.assets?.[0]?.uri) return;
+      const uri = result.assets[0].uri;
+      // EAN-Schritt: Barcode aus dem gewählten Bild lesen, sonst nur das Foto.
+      if (step.mode === 'barcode') {
+        setCapturing(true);
+        try {
+          const scans = await scanFromURLAsync(uri, ['ean13', 'ean8', 'upc_a', 'upc_e']);
+          const code = (scans?.[0]?.data || '').trim();
+          if (!code) {
+            Alert.alert(
+              'Kein Barcode erkannt',
+              'Auf dem gewählten Bild war kein Strichcode lesbar. Wähle ein schärferes Foto des Barcodes oder scanne ihn direkt mit der Kamera.',
+            );
+            return;
+          }
+          setEanCode(code);
+          barcodeHandledRef.current = true;
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        } finally {
+          setCapturing(false);
+        }
+      }
+      onCaptured(uri);
+    } catch {
+      Alert.alert('Galerie-Auswahl fehlgeschlagen', 'Bitte versuch es noch einmal.');
+    }
+  }, [capturing, step.mode, onCaptured]);
 
   // ─── Submit ───────────────────────────────────────────────────────
   const doSubmit = useCallback(async () => {
@@ -732,7 +783,13 @@ export default function ProductWizardScreen() {
               {capturing || expoNotReady ? <ActivityIndicator color={PURPLE} /> : <MaterialCommunityIcons name="camera-outline" size={28} color={PURPLE} />}
             </View>
           </Pressable>
-          <View style={styles.iconBtn} />
+          <Pressable onPress={pickFromGallery} disabled={capturing} style={styles.iconBtn} hitSlop={12}>
+            <MaterialCommunityIcons
+              name="image-multiple-outline"
+              size={26}
+              color={capturing ? 'rgba(255,255,255,0.4)' : '#fff'}
+            />
+          </Pressable>
         </View>
       </View>
     );
