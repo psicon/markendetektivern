@@ -204,7 +204,7 @@ export function SharedListManageSheet({
               Mit der Kamera scannen, um beizutreten
             </Text>
             {/* Einladungs-Code zum Vorlesen/Weitergeben — Gegenstück zur
-                Code-Eingabe im JoinListSheet. Reine Anzeige (Teilen macht
+                Code-Eingabe im Beitreten-Scanner. Reine Anzeige (Teilen macht
                 der Link-Button darunter). */}
             <View
               style={{

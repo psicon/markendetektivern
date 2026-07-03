@@ -140,6 +140,12 @@ export function FilterSheet({
       visible={mounted}
       onRequestClose={onClose}
       statusBarTranslucent
+      // Android 3-Button-Nav: ohne navigationBarTranslucent endet das Modal-
+      // Fenster ÜBER der System-Leiste, während der Code trotzdem
+      // insets.bottom addiert → doppelter Abstand = Whitespace unten
+      // (User-Report 2026-07-03). Mit translucent reicht das Fenster unter die
+      // Leiste, damit die insets.bottom-Rechnung wieder stimmt.
+      navigationBarTranslucent
     >
       <GestureHandlerRootView style={{ flex: 1 }}>
         {/* Backdrop — TWO layers stacked at absolute-fill:

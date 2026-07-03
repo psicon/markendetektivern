@@ -112,7 +112,6 @@ import { updateUserStats } from '@/lib/services/userProfile';
 import { doc } from '@react-native-firebase/firestore';
 import { db } from '@/lib/firebase';
 import { SharedListManageSheet } from '@/components/ui/SharedListManageSheet';
-import { JoinListSheet } from '@/components/ui/JoinListSheet';
 import { ActiveListService } from '@/lib/services/activeListService';
 import {
   SharedListService,
@@ -2525,7 +2524,6 @@ export default function ShoppingListScreen() {
   // FirestoreService). Umschalten über die Chips-Zeile oben; die geteilte
   // Liste rendert 1:1 wie der eigene Zettel.
   const [showShareSheet, setShowShareSheet] = useState(false);
-  const [showJoinSheet, setShowJoinSheet] = useState(false);
   const [creatingShared, setCreatingShared] = useState(false);
   const [activeSharedListId, setActiveSharedListId] = useState<string | null>(null);
   const [showManageSheet, setShowManageSheet] = useState(false);
@@ -2724,17 +2722,10 @@ export default function ShoppingListScreen() {
    *  eigentliche Join lebt im Deep-Link-Screen /join-list/<code> (Konto-Gate,
    *  Fehler, Retry) — hier nur Sheet-Wechsel + Navigation. Modal-Regel: erst
    *  das offene Sheet schließen (Dismiss abwarten), dann das nächste. */
-  const handleOpenJoinSheet = useCallback(() => {
+  const handleOpenJoinScan = useCallback(() => {
     setShowShareSheet(false);
-    setTimeout(() => setShowJoinSheet(true), 380);
-  }, []);
-  const handleJoinCode = useCallback(
-    (code: string) => {
-      setShowJoinSheet(false);
-      setTimeout(() => router.push(`/join-list/${code}` as any), 380);
-    },
-    [router],
-  );
+    setTimeout(() => router.push('/join-scan' as any), 380);
+  }, [router]);
   const [filters, setFilters] = useState<{
     markets: string[];
     categories: string[];
@@ -4360,7 +4351,7 @@ export default function ShoppingListScreen() {
                 theme={theme}
                 brand={brand}
                 bleed={!isEmpty}
-                onJoin={() => setShowJoinSheet(true)}
+                onJoin={() => router.push('/join-scan' as any)}
                 onSelect={(id) => {
                   // Guard (Review-Finding, critical): Tap auf den bereits
                   // aktiven Chip darf NICHT initialLoading=true setzen —
@@ -4982,7 +4973,7 @@ export default function ShoppingListScreen() {
           </Pressable>
 
           <Pressable
-            onPress={handleOpenJoinSheet}
+            onPress={handleOpenJoinScan}
             style={({ pressed }) => ({
               flexDirection: 'row',
               alignItems: 'center',
@@ -5019,14 +5010,6 @@ export default function ShoppingListScreen() {
           </Pressable>
         </View>
       </FilterSheet>
-
-      {/* Beitreten — QR-Scanner + Code-Eingabe (Option C aus dem Chooser
-          bzw. Chip in der Listen-Leiste). Navigiert zu /join-list/<code>. */}
-      <JoinListSheet
-        visible={showJoinSheet}
-        onClose={() => setShowJoinSheet(false)}
-        onCode={handleJoinCode}
-      />
 
       {/* Marken-Info-Sheet — getriggert vom (i)-Icon im
           Hersteller-Chip einer BrandCard. */}
