@@ -23,6 +23,7 @@ export interface DetectAndCropResult {
 
 interface BonEdgeDetectorNative {
   detectAndCropDocument(uri: string): Promise<DetectAndCropResult | null>;
+  scanBarcodeFromImage(uri: string): Promise<string | null>;
 }
 
 const native = requireOptionalNativeModule<BonEdgeDetectorNative>('BonEdgeDetector');
@@ -47,6 +48,24 @@ export async function detectAndCropDocument(
   }
 }
 
+/**
+ * Read a 1D product barcode (EAN-13/8, UPC-E) from a STATIC image via Apple
+ * Vision (VNDetectBarcodesRequest). iOS only — Android returns null (there the
+ * caller uses expo-camera scanFromURLAsync, which reads 1D codes via ML Kit).
+ * Returns the payload string, or null when nothing is readable OR the native
+ * function isn't in the running binary yet (older build) → caller falls back to
+ * manual EAN entry. Never throws.
+ */
+export async function scanBarcodeFromImage(uri: string): Promise<string | null> {
+  if (!native?.scanBarcodeFromImage) return null;
+  try {
+    const code = await native.scanBarcodeFromImage(uri);
+    return typeof code === 'string' && code.trim() ? code.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 // Live scanner (manual shutter + per-frame edge overlay).
 export {
   BonScanner,
@@ -59,4 +78,4 @@ export {
   type ScannerTuning,
 } from './BonScannerView';
 
-export default { detectAndCropDocument };
+export default { detectAndCropDocument, scanBarcodeFromImage };

@@ -33,6 +33,7 @@ import {
   BonScanner,
   DEFAULT_SCANNER_TUNING,
   isBonScannerAvailable,
+  scanBarcodeFromImage,
   type BonScannerHandle,
   type BonScannerQuality,
   type ScannerTuning,
@@ -391,8 +392,14 @@ export default function ProductWizardScreen() {
         setCapturing(true);
         let code = '';
         try {
-          const scans = await scanFromURLAsync(uri, ['ean13', 'ean8', 'upc_a', 'upc_e']);
-          code = (scans?.[0]?.data || '').trim();
+          // 1) Native Apple Vision (iOS) — liest 1D-EAN aus dem Standbild.
+          //    Im aktuellen Dev-Binary evtl. noch nicht vorhanden → null.
+          code = (await scanBarcodeFromImage(uri)) || '';
+          // 2) Fallback expo-camera (Android = ML Kit ✓; iOS = QR-only).
+          if (!code) {
+            const scans = await scanFromURLAsync(uri, ['ean13', 'ean8', 'upc_a', 'upc_e']);
+            code = (scans?.[0]?.data || '').trim();
+          }
         } catch {
           code = '';
         } finally {

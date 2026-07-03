@@ -27,6 +27,13 @@ public class BonEdgeDetectorModule: Module {
       }
     }
 
+    AsyncFunction("scanBarcodeFromImage") { (uri: String, promise: Promise) in
+      DispatchQueue.global(qos: .userInitiated).async {
+        // Resolve null (never reject) — caller falls back to manual EAN entry.
+        promise.resolve(Self.scanBarcode(uri: uri))
+      }
+    }
+
     View(BonScannerView.self) {
       Events("onCapture", "onError", "onEdgesDetected", "onQuality", "onSessionStopped")
 
@@ -62,6 +69,38 @@ public class BonEdgeDetectorModule: Module {
       ?? BonVision.detectRectangle(cgImage: cg)
     guard let rect = rect else { return nil }
     return BonVision.warpAndWriteJPEG(ciImage: inputImage, observation: rect)
+  }
+
+  // MARK: - Barcode scan (static image / gallery)
+
+  /// Read a 1D product barcode (EAN-13/8, UPC-E) from a still image via
+  /// Vision (VNDetectBarcodesRequest). expo-camera's scanFromURLAsync is
+  /// QR-only on iOS, so this is the path for reading a product EAN out of a
+  /// gallery photo. Returns the payload string, or nil when nothing readable
+  /// is found — the caller then falls back to manual EAN entry.
+  private static func scanBarcode(uri: String) -> String? {
+    guard let ciImage = loadCIImage(from: uri) else { return nil }
+    let context = CIContext()
+    guard let cg = context.createCGImage(ciImage, from: ciImage.extent) else { return nil }
+
+    let request = VNDetectBarcodesRequest()
+    // Produkt-Strichcodes: EAN-13/8 + UPC-E. UPC-A liefert Vision als EAN-13
+    // (mit führender 0) → von .ean13 mit abgedeckt.
+    request.symbologies = [.ean13, .ean8, .upce]
+
+    let handler = VNImageRequestHandler(cgImage: cg, orientation: .up, options: [:])
+    do {
+      try handler.perform([request])
+    } catch {
+      return nil
+    }
+
+    let observations = (request.results as? [VNBarcodeObservation]) ?? []
+    // EAN-13 bevorzugen (übliches Produkt-Format), sonst erster lesbarer Code.
+    let ean13 = observations.first { $0.symbology == .ean13 && ($0.payloadStringValue?.isEmpty == false) }
+    let chosen = ean13 ?? observations.first { $0.payloadStringValue?.isEmpty == false }
+    guard let code = chosen?.payloadStringValue, !code.isEmpty else { return nil }
+    return code
   }
 
   private static func loadCIImage(from uri: String) -> CIImage? {
