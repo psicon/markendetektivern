@@ -41,7 +41,14 @@
       <!-- Verified App Links (Stufe 5): Einladungs-Links öffnen die App
            DIREKT aus QR-Scannern/Messengern — ohne Browser-Zwischenschritt.
            Verifikation gegen https://markendetektive-895f7.web.app/
-           .well-known/assetlinks.json (Play-App-Signing-Fingerprint). -->
+           .well-known/assetlinks.json.
+           ACHTUNG (Task 86caj5uuu): assetlinks.json enthält derzeit NUR den
+           EAS-Upload-Key-SHA256. Aus dem Play-Store installierte Apps sind mit
+           dem Google-App-Signing-Key re-signiert → autoVerify schlägt still
+           fehl, bis der Play-App-Signing-Cert (Play Console → App-Integrität)
+           ins assetlinks.json ergänzt ist. Bis dahin greift der Browser-
+           Fallback (join.html) — kein User-sichtbarer Schaden, nur kein
+           Direkt-Öffnen aus externem QR. -->
       <intent-filter android:autoVerify="true">
         <action android:name="android.intent.action.VIEW"/>
         <category android:name="android.intent.category.DEFAULT"/>
