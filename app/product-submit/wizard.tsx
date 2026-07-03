@@ -45,6 +45,7 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 import {
   PRODUCT_PHOTO_STEPS,
   getActiveProductCampaign,
+  newImageBatchId,
   newSessionId,
   sanitizeForFilename,
   type ActiveProductCampaign,
@@ -360,15 +361,20 @@ export default function ProductWizardScreen() {
     // no network), so we never block on a foreground "uploading" screen.
     // Progress + retry live in the product-submit overview — one status
     // surface, no orphaned overlays even with many offline submissions.
+    // Eindeutiger Batch-Token pro Einreichung → hängt an JEDEN Bild-Dateinamen
+    // (front_<batch>.jpg, zutaten_<batch>.jpg …). Verhindert Basename-Kollisionen
+    // über Einreichungen/User hinweg (Schutz gegen Basename-gekeyte Server-
+    // Verarbeitung; siehe newImageBatchId). Alle Bilder dieser Einreichung teilen
+    // denselben Token → als Set erkennbar / nachordenbar.
+    const batchId = newImageBatchId();
     const steps = PRODUCT_PHOTO_STEPS.reduce<
       { key: ProductPhotoStep; uri: string; fileName?: string }[]
     >((acc, s) => {
       const local = photos[s.key];
       if (!local) return acc;
-      // EAN image filename carries the scanned code.
-      const fileName =
-        s.key === 'ean' && eanCode ? `ean_${sanitizeForFilename(eanCode)}.jpg` : undefined;
-      acc.push({ key: s.key, uri: local, fileName });
+      // EAN-Basisname trägt zusätzlich den gescannten Code.
+      const base = s.key === 'ean' && eanCode ? `ean_${sanitizeForFilename(eanCode)}` : s.key;
+      acc.push({ key: s.key, uri: local, fileName: `${base}_${batchId}.jpg` });
       return acc;
     }, []);
 

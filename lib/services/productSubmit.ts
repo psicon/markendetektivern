@@ -84,6 +84,29 @@ export function sanitizeForFilename(s: string): string {
   return s.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32);
 }
 
+/**
+ * Kurzer, global eindeutiger Token pro Produkt-Einreichung. Wird an JEDEN
+ * Bild-Dateinamen gehängt (front_<batch>.jpg, zutaten_<batch>.jpg …), sodass
+ * KEIN Basename je über Einreichungen/User hinweg kollidiert. Alle Bilder EINER
+ * Einreichung teilen denselben Token → als Set erkennbar / nachordenbar.
+ *
+ * Schutz gegen Basename-gekeyte Server-Verarbeitung: die Legacy-Storage-Function
+ * `optimizeImage` nutzte `path.basename` für ihren Temp-Pfad (/tmp/front.jpg),
+ * was bei gleichzeitigen Uploads gleicher Dateinamen Bilder über Accounts hinweg
+ * vertauschte (Vorfall 2026-07-03). Eindeutige Basenames machen diese Fehlerklasse
+ * strukturell unmöglich — unabhängig davon, welcher Prozess den Basename als
+ * Schlüssel verwendet.
+ */
+export function newImageBatchId(): string {
+  const buf = new Uint8Array(8);
+  if (typeof globalThis.crypto?.getRandomValues === 'function') {
+    globalThis.crypto.getRandomValues(buf);
+  } else {
+    for (let i = 0; i < buf.length; i++) buf[i] = Math.floor(Math.random() * 256);
+  }
+  return [...buf].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 export function productImagePath(
   uid: string,
   sessionId: string,
