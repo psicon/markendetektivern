@@ -111,6 +111,11 @@ export default function ProductWizardScreen() {
   const [campaign, setCampaign] = useState<ActiveProductCampaign | null>(null);
   const [quality, setQuality] = useState<BonScannerQuality>('none');
   const [eanCode, setEanCode] = useState<string | null>(null);
+  // Galerie-EAN: iOS kann Strichcodes NICHT aus einem Standbild lesen
+  // (expo-camera scanFromURLAsync = QR-only). Schlägt die Auto-Erkennung fehl,
+  // hält dieser State das gewählte Bild + öffnet ein Zahlenfeld für die EAN.
+  const [eanEntryUri, setEanEntryUri] = useState<string | null>(null);
+  const [eanEntryValue, setEanEntryValue] = useState('');
   // True when the capture screen was opened to RE-shoot one photo from the
   // review grid — capturing then returns straight to review (no advancing),
   // and the top-left button reads "Abbrechen".
@@ -378,31 +383,53 @@ export default function ProductWizardScreen() {
       });
       if (result.canceled || !result.assets?.[0]?.uri) return;
       const uri = result.assets[0].uri;
-      // EAN-Schritt: Barcode aus dem gewählten Bild lesen, sonst nur das Foto.
+      // EAN-Schritt: Barcode aus dem gewählten Bild lesen. Klappt auf Android
+      // (ML Kit); auf iOS liest scanFromURLAsync NUR QR-Codes → 1D-EAN wird nie
+      // erkannt. Schlägt die Auto-Erkennung fehl, öffnen wir das EAN-Zahlenfeld
+      // (statt einer Sackgasse) und übernehmen das Bild nach der Eingabe.
       if (step.mode === 'barcode') {
         setCapturing(true);
+        let code = '';
         try {
           const scans = await scanFromURLAsync(uri, ['ean13', 'ean8', 'upc_a', 'upc_e']);
-          const code = (scans?.[0]?.data || '').trim();
-          if (!code) {
-            Alert.alert(
-              'Kein Barcode erkannt',
-              'Auf dem gewählten Bild war kein Strichcode lesbar. Wähle ein schärferes Foto des Barcodes oder scanne ihn direkt mit der Kamera.',
-            );
-            return;
-          }
-          setEanCode(code);
-          barcodeHandledRef.current = true;
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+          code = (scans?.[0]?.data || '').trim();
+        } catch {
+          code = '';
         } finally {
           setCapturing(false);
         }
+        if (!code) {
+          setEanEntryValue('');
+          setEanEntryUri(uri); // öffnet das Eingabe-Overlay
+          return;
+        }
+        setEanCode(code);
+        barcodeHandledRef.current = true;
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       }
       onCaptured(uri);
     } catch {
       Alert.alert('Galerie-Auswahl fehlgeschlagen', 'Bitte versuch es noch einmal.');
     }
   }, [capturing, step.mode, onCaptured]);
+
+  // Manuell eingegebene EAN übernehmen (Fallback, wenn der Code nicht aus dem
+  // Galeriebild gelesen werden konnte). Akzeptiert 8–14 Ziffern (EAN-8/13,
+  // UPC-A/E). Das gewählte Bild wird als EAN-Foto übernommen.
+  const confirmManualEan = useCallback(() => {
+    const digits = eanEntryValue.replace(/\D/g, '');
+    if (digits.length < 8 || digits.length > 14) {
+      Alert.alert('Ungültige EAN', 'Bitte gib die 8–13-stellige Nummer unter dem Strichcode ein.');
+      return;
+    }
+    const uri = eanEntryUri;
+    setEanCode(digits);
+    barcodeHandledRef.current = true;
+    setEanEntryUri(null);
+    setEanEntryValue('');
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    if (uri) onCaptured(uri);
+  }, [eanEntryValue, eanEntryUri, onCaptured]);
 
   // ─── Submit ───────────────────────────────────────────────────────
   const doSubmit = useCallback(async () => {
@@ -791,6 +818,48 @@ export default function ProductWizardScreen() {
             />
           </Pressable>
         </View>
+
+        {/* EAN-Eingabe-Overlay — Fallback, wenn der Code nicht aus dem
+            Galeriebild gelesen werden konnte (v.a. iOS: 1D-Barcodes aus
+            Standbild nicht auto-lesbar). Oben positioniert, damit das
+            Zahlenfeld die Karte nicht verdeckt. */}
+        {eanEntryUri ? (
+          <View style={[styles.eanOverlay, { paddingTop: insets.top + 96 }]}>
+            <View style={styles.eanCard}>
+              <Text style={styles.eanTitle}>EAN eingeben</Text>
+              <Text style={styles.eanSub}>
+                Der Strichcode ließ sich aus dem Bild nicht automatisch lesen. Tippe die Nummer
+                unter dem Barcode ein — dein Bild wird trotzdem übernommen.
+              </Text>
+              <TextInput
+                style={styles.eanInput}
+                value={eanEntryValue}
+                onChangeText={(t) => setEanEntryValue(t.replace(/\D/g, '').slice(0, 14))}
+                keyboardType="number-pad"
+                placeholder="z. B. 4337256984164"
+                placeholderTextColor="rgba(0,0,0,0.35)"
+                autoFocus
+                maxLength={14}
+                returnKeyType="done"
+                onSubmitEditing={confirmManualEan}
+              />
+              <View style={styles.eanBtnRow}>
+                <Pressable
+                  onPress={() => {
+                    setEanEntryUri(null);
+                    setEanEntryValue('');
+                  }}
+                  style={[styles.eanBtn, styles.eanBtnGhost]}
+                >
+                  <Text style={styles.eanBtnGhostText}>Abbrechen</Text>
+                </Pressable>
+                <Pressable onPress={confirmManualEan} style={[styles.eanBtn, styles.eanBtnPrimary]}>
+                  <Text style={styles.eanBtnPrimaryText}>Übernehmen</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        ) : null}
       </View>
     );
   }
@@ -884,6 +953,18 @@ const styles = StyleSheet.create({
   chipThumbCheck: { position: 'absolute', top: 2, right: 2, width: 15, height: 15, borderRadius: 8, backgroundColor: PURPLE, alignItems: 'center', justifyContent: 'center' },
   shutter: { width: 76, height: 76, borderRadius: 38, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center', borderWidth: 4, borderColor: '#fff' },
   shutterInner: { width: 58, height: 58, borderRadius: 29, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+  // EAN manual-entry overlay (gallery fallback)
+  eanOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.72)', alignItems: 'center', paddingHorizontal: 24 },
+  eanCard: { width: '100%', maxWidth: 380, backgroundColor: '#fff', borderRadius: 18, padding: 20, gap: 12 },
+  eanTitle: { fontSize: 18, fontWeight: '800', color: '#191c1d', letterSpacing: -0.2 },
+  eanSub: { fontSize: 13, fontWeight: '500', color: '#5a6166', lineHeight: 18 },
+  eanInput: { height: 52, borderRadius: 12, borderWidth: 1.5, borderColor: '#d5dadd', backgroundColor: '#f6f8f9', paddingHorizontal: 14, fontSize: 18, fontWeight: '700', color: '#191c1d', letterSpacing: 1 },
+  eanBtnRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  eanBtn: { flex: 1, height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  eanBtnGhost: { backgroundColor: '#eef1f2' },
+  eanBtnGhostText: { fontSize: 15, fontWeight: '700', color: '#5a6166' },
+  eanBtnPrimary: { backgroundColor: PURPLE },
+  eanBtnPrimaryText: { fontSize: 15, fontWeight: '800', color: '#fff' },
   // review
   thumb: { width: '31%', aspectRatio: 0.8, borderRadius: 12, borderWidth: 1.5, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   thumbLabel: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.55)', paddingHorizontal: 6, paddingVertical: 4 },
