@@ -242,6 +242,42 @@ Recent-Sessions.
   byte-identische Objekte über Slots/Sessions scannen; identische Bytes =
   reused File/Frame, nie zwei echte Aufnahmen.
 
+- **Legacy-Storage-Function `optimizeImage` war die ECHTE Ursache der
+  „vertauschten Produktfotos" — nicht die Kamera (2026-07-03).** Der onCameraReady-
+  Fix oben war ein berechtigtes Hardening, aber die cross-DEVICE-/cross-ACCOUNT-
+  Vertauschung (3 verschiedene Handys, `optimized:true`, `metageneration:2`,
+  uniform 800×1067) kam serverseitig: eine **nicht im Repo liegende** Gen2-
+  Storage-Function `optimizeImage` (europe-west3, Trigger auf JEDEN Bucket-
+  `object.finalized`, Juni 2024 per Console deployt) lud jedes Bild in einen
+  Temp-Pfad, der NUR `path.basename(filePath)` nutzte → `/tmp/front.jpg`. Bei
+  gleichzeitigen Uploads gleicher Basenames (Frank+Peter je `front.jpg`)
+  überschrieb ein Lauf die Temp-Datei des anderen → fremdes Bild zurück in den
+  eigenen Pfad geschrieben. Nebenschaden: verkleinerte crowd_uploads/Bons auf
+  q40/800px (ruinierte OCR). **Fix (aktiv):** Traffic auf Cloud-Run-Revision
+  `optimizeimage-00027-dal` (skippt `crowduploads/`+`cashback-uploads/` komplett
+  + eindeutiger UUID-Temp-Pfad für alle anderen Pfade). Vorher hing 100% Traffic
+  auf der ALTEN Revision `00009-noz` (Tag „working") — deshalb wirkte ein bloßer
+  `gcloud functions deploy` NICHT (neue Revision bekam 0% Traffic). **Rollback:**
+  `gcloud run services update-traffic optimizeimage --region=europe-west3
+  --project=markendetektive-895f7 --to-revisions=optimizeimage-00009-noz=100`.
+  Durability-Risiko: die Function ist nicht im Repo → ein Console-Redeploy könnte
+  den Fix überschreiben; langfristig ins Repo/CI holen. Diagnostik-Merker:
+  `object.finalized`-Storage-Trigger sind unsichtbar, wenn man nur die Repo-
+  Codebases durchsucht — `gcloud functions list` + Storage-Metadaten
+  (`optimized:true`, `metageneration>1`) verraten sie.
+
+- **crowd_uploads-Bild-Dateinamen OHNE eindeutigen Token vergeben
+  (`{step}.jpg`).** Defense-in-Depth gegen die Basename-Kollisions-Klasse oben:
+  seit `3f38f87` hängt `newImageBatchId()` (`lib/services/productSubmit.ts`) einen
+  global eindeutigen 8-Byte-Hex-Token pro Einreichung an JEDEN Dateinamen
+  (`front_<batch>.jpg`, `ean_<code>_<batch>.jpg` …); alle Bilder EINER Einreichung
+  teilen den Token. Der Token wird EINMAL pro `doSubmit` erzeugt und für ALLE
+  Steps genutzt (nicht mehr nur EAN). Das `images`-Map im Doc bleibt per Step
+  gekeyt (`images.front` = voller Pfad) → Leser (crowd-upload-namer, Operator)
+  nutzen den Map-Key, NIE den Dateinamen parsen. Regel: NIE wieder einen festen
+  `{step}.jpg`-Basename einführen — jeder Basename muss über Einreichungen/User
+  hinweg eindeutig sein, damit kein Basename-gekeyter Prozess je Bilder vertauscht.
+
 - **Zwei React-Native-`<Modal>`s gleichzeitig sichtbar präsentieren.**
   iOS deadlockt ("Attempt to present X on Y which is already presenting Z")
   → App FRIERT EIN (kein Crash, harter Hang). Passierte als Hyperbug
