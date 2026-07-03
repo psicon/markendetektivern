@@ -27,11 +27,13 @@
       "node_modules/@expo-google-fonts/nunito/Nunito_700Bold.ttf"
     ],
     "ios": {
-      "associatedDomains": ["applinks:markendetektive-895f7.web.app"],
+      "associatedDomains": [
+        "applinks:markendetektive-895f7.web.app"
+      ],
       "supportsTablet": false,
       "requireFullScreen": true,
       "bundleIdentifier": "de.markendetektive",
-      "buildNumber": "1233",
+      "buildNumber": "1234",
       "appleTeamId": "MZD2N2F887",
       "googleServicesFile": "./GoogleService-Info.plist",
       "usesAppleSignIn": true,
@@ -74,7 +76,7 @@
       ],
       "package": "de.markendetektive",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 1193
+      "versionCode": 1194
     },
     "web": {
       "bundler": "metro",
