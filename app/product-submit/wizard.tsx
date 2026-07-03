@@ -98,6 +98,13 @@ export default function ProductWizardScreen() {
   const [photos, setPhotos] = useState<Partial<Record<ProductPhotoStep, string>>>({});
   const [stepIdx, setStepIdx] = useState(0);
   const [capturing, setCapturing] = useState(false);
+  // expo-camera MUSS bereit sein, bevor takePictureAsync aufgerufen wird —
+  // sonst liefert CameraX den letzten Puffer der VORHERIGEN Kamera-Session
+  // zurück (Foto des vorherigen Produkts). Das war die Ursache der
+  // vertauschten Produktfotos (crowd_uploads-Kontamination, 2026-07-03):
+  // der Wizard löste bei rapiden Einreichungen aus, bevor die Kamera streamte.
+  // Der Cashback-Scanner gated genau so — nur der Wizard tat es bisher nicht.
+  const [cameraReady, setCameraReady] = useState(false);
   const [flashOn, setFlashOn] = useState(false);
   const [campaign, setCampaign] = useState<ActiveProductCampaign | null>(null);
   const [quality, setQuality] = useState<BonScannerQuality>('none');
@@ -155,6 +162,10 @@ export default function ProductWizardScreen() {
   // or only for the barcode step (once the native session stopped) when it is
   // available.
   const showExpoCam = !nativeAvailable || (wantBarcode && expoActive);
+  // Auslösen blockieren, solange die expo-Kamera aktiv, aber noch nicht bereit
+  // ist (Stale-Frame-Schutz). Beim nativen Scanner (iOS non-EAN) irrelevant —
+  // der hat seine eigene Bereitschaft, expo-cameraReady bleibt dort ungenutzt.
+  const expoNotReady = showExpoCam && !cameraReady;
 
   // Re-arm the barcode scanner + reset the live hint whenever the step
   // changes (so re-entering the EAN step can scan again).
@@ -162,6 +173,14 @@ export default function ProductWizardScreen() {
     barcodeHandledRef.current = false;
     setQuality('none');
   }, [stepIdx]);
+
+  // Kamera-Bereitschaft zurücksetzen, sobald die expo-CameraView abgebaut
+  // wird (iOS: nativ↔expo-Handoff pro EAN-Step; auch beim Verlassen der
+  // Capture-Phase). Die neu gemountete Kamera muss onCameraReady erneut
+  // feuern, bevor wieder ausgelöst werden darf — sonst Stale-Frame.
+  useEffect(() => {
+    if (!showExpoCam) setCameraReady(false);
+  }, [showExpoCam]);
 
   // Keep the active step's pill scrolled into view (centered) so the user
   // always sees where they are in the strip.
@@ -277,6 +296,10 @@ export default function ProductWizardScreen() {
 
   const shootCamera = useCallback(async () => {
     if (!cameraRef.current) return;
+    // HART: nie auslösen, bevor CameraX bereit ist (Stale-Frame-Schutz).
+    // Ohne diese Zeile liefert takePictureAsync den letzten Frame der
+    // vorherigen Kamera-Session zurück → vertauschte Produktfotos.
+    if (!cameraReady) return;
     setCapturing(true);
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -288,7 +311,7 @@ export default function ProductWizardScreen() {
     } finally {
       setCapturing(false);
     }
-  }, [onCaptured]);
+  }, [onCaptured, cameraReady]);
 
   // Shutter dispatches by capture mode: document → native doc scanner
   // (flat OCR-friendly crop), else the plain camera.
@@ -316,6 +339,9 @@ export default function ProductWizardScreen() {
   const handleBarcode = useCallback(
     async (e: { data?: string }) => {
       if (step.key !== 'ean' || barcodeHandledRef.current || capturing) return;
+      // Kamera noch nicht bereit → Scan NICHT konsumieren (Ref nicht setzen),
+      // damit der nächste Frame ihn erneut liefern kann, sobald bereit.
+      if (!cameraReady) return;
       const code = (e?.data || '').trim();
       if (!code) return;
       barcodeHandledRef.current = true;
@@ -323,7 +349,7 @@ export default function ProductWizardScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       await shootCamera();
     },
-    [step.key, capturing, shootCamera],
+    [step.key, capturing, cameraReady, shootCamera],
   );
 
   // ─── Submit ───────────────────────────────────────────────────────
@@ -565,6 +591,9 @@ export default function ProductWizardScreen() {
             facing={'back' as CameraType}
             autofocus="on"
             enableTorch={flashOn}
+            // Erst wenn CameraX wirklich streamt, darf ausgelöst werden
+            // (sonst Stale-Frame der vorherigen Session).
+            onCameraReady={() => setCameraReady(true)}
             barcodeScannerSettings={
               step.mode === 'barcode'
                 ? { barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e'] }
@@ -684,16 +713,17 @@ export default function ProductWizardScreen() {
           </Pressable>
           <Pressable
             onPress={onShutter}
-            disabled={capturing}
+            disabled={capturing || expoNotReady}
             style={({ pressed }) => [
               styles.shutter,
               captured && { borderColor: '#ffd44b' },
               quality === 'ok' && { borderColor: '#5ee0a0' },
+              expoNotReady && { opacity: 0.5 },
               (pressed || capturing) && { transform: [{ scale: 0.94 }] },
             ]}
           >
             <View style={styles.shutterInner}>
-              {capturing ? <ActivityIndicator color={PURPLE} /> : <MaterialCommunityIcons name="camera-outline" size={28} color={PURPLE} />}
+              {capturing || expoNotReady ? <ActivityIndicator color={PURPLE} /> : <MaterialCommunityIcons name="camera-outline" size={28} color={PURPLE} />}
             </View>
           </Pressable>
           <View style={styles.iconBtn} />

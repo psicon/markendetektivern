@@ -219,6 +219,29 @@ werden sollten. Andere "Don't"-Regeln stehen verteilt im File
 `USE_FLYING_TABS`-Legacy etc.) — hier nur die Learnings aus
 Recent-Sessions.
 
+- **expo-camera `takePictureAsync` aufrufen, BEVOR `onCameraReady` gefeuert
+  hat.** Verletzt den dokumentierten expo-camera-Vertrag (CameraView-Doc:
+  „wait for the onCameraReady callback before calling this method"). Auf
+  Android (CameraX `ImageCapture`) liefert ein Auslösen vor dem ersten
+  Stream-Frame den **letzten Puffer der VORHERIGEN Kamera-Session** zurück
+  = das Foto eines vorher fotografierten Produkts. War die Ursache des
+  „vertauschte Produktfotos"-Bugs im Produkt-Wizard (86ca…, 2026-07-03):
+  bei rapiden Einreichungen (Wizard remountet, Kamera noch nicht bereit)
+  landeten byte-identische Fremd-Produkt-Fotos in `crowd_uploads` — forensisch
+  bewiesen per md5 (gleicher Step, cross-submission, echtes Gerät; z.B.
+  Olivenöl-Ordner enthielt die `hersteller`+`zutaten` einer früheren
+  Eiernudeln-Einreichung). Regel: JEDER `takePictureAsync`-Callsite MUSS
+  auf einen `cameraReady`-State gaten (`onCameraReady={() => setCameraReady
+  (true)}`, Shutter `disabled={capturing || !cameraReady}`, in der
+  Capture-Funktion `if (!cameraReady) return;`) und `cameraReady` beim
+  Remount/Teardown der CameraView (`if (!showExpoCam) setCameraReady(false)`)
+  zurücksetzen. `app/cashback/capture.tsx` macht es korrekt (Referenz);
+  `app/product-submit/wizard.tsx` tat es bis 2026-07-03 NICHT. Diagnose-Weg
+  bei „falsche Bilder in Uploads": NICHT die Queue/Pfade verdächtigen (die
+  waren sauber) — per Storage-`md5Hash` (JSON-API, ohne Download) auf
+  byte-identische Objekte über Slots/Sessions scannen; identische Bytes =
+  reused File/Frame, nie zwei echte Aufnahmen.
+
 - **Zwei React-Native-`<Modal>`s gleichzeitig sichtbar präsentieren.**
   iOS deadlockt ("Attempt to present X on Y which is already presenting Z")
   → App FRIERT EIN (kein Crash, harter Hang). Passierte als Hyperbug
