@@ -38,6 +38,16 @@
         <data android:scheme="markendetektivern"/>
         <data android:scheme="exp+markendetektive"/>
       </intent-filter>
+      <!-- Verified App Links (Stufe 5): Einladungs-Links öffnen die App
+           DIREKT aus QR-Scannern/Messengern — ohne Browser-Zwischenschritt.
+           Verifikation gegen https://markendetektive-895f7.web.app/
+           .well-known/assetlinks.json (Play-App-Signing-Fingerprint). -->
+      <intent-filter android:autoVerify="true">
+        <action android:name="android.intent.action.VIEW"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <category android:name="android.intent.category.BROWSABLE"/>
+        <data android:scheme="https" android:host="markendetektive-895f7.web.app" android:pathPrefix="/join-list/"/>
+      </intent-filter>
     </activity>
     <uses-library android:name="org.apache.http.legacy" android:required="false"/>
   </application>

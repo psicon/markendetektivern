@@ -112,6 +112,7 @@ import { updateUserStats } from '@/lib/services/userProfile';
 import { doc } from '@react-native-firebase/firestore';
 import { db } from '@/lib/firebase';
 import { SharedListManageSheet } from '@/components/ui/SharedListManageSheet';
+import { JoinListSheet } from '@/components/ui/JoinListSheet';
 import { ActiveListService } from '@/lib/services/activeListService';
 import {
   SharedListService,
@@ -295,6 +296,7 @@ function ListSwitcherChips({
   brand,
   onSelect,
   onManage,
+  onJoin,
   bleed = false,
 }: {
   lists: SharedListDoc[];
@@ -304,6 +306,8 @@ function ListSwitcherChips({
   brand: any;
   onSelect: (id: string | null) => void;
   onManage: (id: string) => void;
+  /** Öffnet das Beitreten-Sheet (QR/Code) — dezenter Chip am Zeilenende. */
+  onJoin: () => void;
   /** true, wenn der Parent-Container bereits 16px horizontal padded: der
    *  Scroller bricht dann mit -16 aus, damit die Chips bündig bei 16 starten
    *  (statt 32 = doppelt eingerückt), aber bis zum Screen-Rand scrollen. */
@@ -388,6 +392,24 @@ function ListSwitcherChips({
           </Pressable>
         );
       })}
+      {/* Dezenter Beitreten-Chip (nur Icon) — öffnet QR-Scan/Code-Eingabe. */}
+      <Pressable
+        onPress={onJoin}
+        accessibilityLabel="Einer Liste beitreten"
+        style={({ pressed }) => ({
+          width: 38,
+          height: 38,
+          borderRadius: radii.md,
+          backgroundColor: theme.surface,
+          borderWidth: 1,
+          borderColor: theme.border,
+          alignItems: 'center',
+          justifyContent: 'center',
+          opacity: pressed ? 0.8 : 1,
+        })}
+      >
+        <MaterialCommunityIcons name="qrcode-scan" size={17} color={theme.textMuted} />
+      </Pressable>
     </ScrollView>
   );
 }
@@ -2503,6 +2525,7 @@ export default function ShoppingListScreen() {
   // FirestoreService). Umschalten über die Chips-Zeile oben; die geteilte
   // Liste rendert 1:1 wie der eigene Zettel.
   const [showShareSheet, setShowShareSheet] = useState(false);
+  const [showJoinSheet, setShowJoinSheet] = useState(false);
   const [creatingShared, setCreatingShared] = useState(false);
   const [activeSharedListId, setActiveSharedListId] = useState<string | null>(null);
   const [showManageSheet, setShowManageSheet] = useState(false);
@@ -2653,6 +2676,11 @@ export default function ShoppingListScreen() {
    *  UIActivityViewController über einem noch präsentierten RN-Modal öffnen
    *  (sonst "already presenting"). */
   const handleShareAsText = useCallback(() => {
+    if (!brandProducts.length && !noNameProducts.length) {
+      setShowShareSheet(false);
+      showInfoToast('Dein Einkaufszettel ist noch leer.', 'info');
+      return;
+    }
     setShowShareSheet(false);
     setTimeout(() => {
       Share.share({
@@ -2692,6 +2720,21 @@ export default function ShoppingListScreen() {
       setCreatingShared(false);
     }
   }, [creatingShared, isAnonymous, user, buildSeedDocs, myDisplayName, router]);
+  /** Option C — einer bestehenden Liste beitreten (QR-Scan / Code). Der
+   *  eigentliche Join lebt im Deep-Link-Screen /join-list/<code> (Konto-Gate,
+   *  Fehler, Retry) — hier nur Sheet-Wechsel + Navigation. Modal-Regel: erst
+   *  das offene Sheet schließen (Dismiss abwarten), dann das nächste. */
+  const handleOpenJoinSheet = useCallback(() => {
+    setShowShareSheet(false);
+    setTimeout(() => setShowJoinSheet(true), 380);
+  }, []);
+  const handleJoinCode = useCallback(
+    (code: string) => {
+      setShowJoinSheet(false);
+      setTimeout(() => router.push(`/join-list/${code}` as any), 380);
+    },
+    [router],
+  );
   const [filters, setFilters] = useState<{
     markets: string[];
     categories: string[];
@@ -4317,6 +4360,7 @@ export default function ShoppingListScreen() {
                 theme={theme}
                 brand={brand}
                 bleed={!isEmpty}
+                onJoin={() => setShowJoinSheet(true)}
                 onSelect={(id) => {
                   // Guard (Review-Finding, critical): Tap auf den bereits
                   // aktiven Chip darf NICHT initialLoading=true setzen —
@@ -4700,10 +4744,6 @@ export default function ShoppingListScreen() {
                   setShowManageSheet(true);
                   return;
                 }
-                if (!brandProducts.length && !noNameProducts.length) {
-                  showInfoToast('Dein Einkaufszettel ist noch leer.', 'info');
-                  return;
-                }
                 setShowShareSheet(true);
               }}
               hitSlop={6}
@@ -4940,8 +4980,53 @@ export default function ShoppingListScreen() {
               <MaterialCommunityIcons name="chevron-right" size={22} color={brand.primary} />
             ) : null}
           </Pressable>
+
+          <Pressable
+            onPress={handleOpenJoinSheet}
+            style={({ pressed }) => ({
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 14,
+              backgroundColor: theme.surface,
+              borderRadius: radii.lg,
+              borderWidth: 1,
+              borderColor: theme.border,
+              padding: 14,
+              opacity: pressed ? 0.85 : 1,
+            })}
+          >
+            <View
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 22,
+                backgroundColor: theme.surfaceAlt,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <MaterialCommunityIcons name="qrcode-scan" size={20} color={theme.text} />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 15, color: theme.text, letterSpacing: -0.2 }}>
+                Einer Liste beitreten
+              </Text>
+              <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 12, lineHeight: 17, color: theme.textMuted, marginTop: 2 }}>
+                Scanne den QR-Code einer Einladung oder gib den Code ein.
+              </Text>
+            </View>
+            <MaterialCommunityIcons name="chevron-right" size={22} color={theme.textMuted} />
+          </Pressable>
         </View>
       </FilterSheet>
+
+      {/* Beitreten — QR-Scanner + Code-Eingabe (Option C aus dem Chooser
+          bzw. Chip in der Listen-Leiste). Navigiert zu /join-list/<code>. */}
+      <JoinListSheet
+        visible={showJoinSheet}
+        onClose={() => setShowJoinSheet(false)}
+        onCode={handleJoinCode}
+      />
 
       {/* Marken-Info-Sheet — getriggert vom (i)-Icon im
           Hersteller-Chip einer BrandCard. */}

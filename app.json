@@ -27,6 +27,7 @@
       "node_modules/@expo-google-fonts/nunito/Nunito_700Bold.ttf"
     ],
     "ios": {
+      "associatedDomains": ["applinks:markendetektive-895f7.web.app"],
       "supportsTablet": false,
       "requireFullScreen": true,
       "bundleIdentifier": "de.markendetektive",

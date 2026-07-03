@@ -1,0 +1,13 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appIDs": ["MZD2N2F887.de.markendetektive"],
+        "appID": "MZD2N2F887.de.markendetektive",
+        "paths": ["/join-list/*"],
+        "components": [{ "/": "/join-list/*" }]
+      }
+    ]
+  }
+}

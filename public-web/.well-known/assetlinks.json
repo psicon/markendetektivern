@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "de.markendetektive",
+      "sha256_cert_fingerprints": [
+        "6F:4C:C9:B7:58:3E:8A:14:36:05:29:9A:8A:49:AF:86:21:AD:8D:06:8C:34:AA:B0:9A:98:80:05:F5:F5:D8:5A"
+      ]
+    }
+  }
+]

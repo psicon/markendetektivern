@@ -56,6 +56,11 @@
       <a href="https://play.google.com/store/apps/details?id=de.markendetektive"><img class="google" src="/google-play-badge.png" alt="Jetzt bei Google Play" /></a>
     </div>
     <p class="hint">App schon installiert und nichts passiert? Tippe oben auf „In der App öffnen".</p>
+    <div id="codebox" style="display:none; margin-top:14px; padding:10px 14px; border-radius:12px; background:rgba(13,133,117,.08); cursor:pointer;">
+      <div style="font-size:11px; font-weight:800; letter-spacing:.4px; color:#0d8575;">DEIN EINLADUNGS-CODE</div>
+      <div id="codeval" style="font-size:18px; font-weight:800; letter-spacing:1px; margin-top:2px;"></div>
+      <div id="codehint" style="font-size:11px; color:#8b9498; margin-top:2px;">Zum Kopieren antippen — in der App: Einkaufszettel → Teilen → „Einer Liste beitreten“.</div>
+    </div>
   </div>
   <script>
     // Code aus dem Pfad lesen: /join-list/<code>
@@ -68,6 +73,20 @@
     // `markendetektive://` → Safari: „Adresse ungültig" (User-Report 2026-07-02).
     var appUrl = 'markendetektivern://join-list/' + code;
     var btn = document.getElementById('open');
+    // Code sichtbar machen: wer die App erst installieren muss, kann danach
+    // in der App beitreten (QR-Scanner/Code-Eingabe) ohne den Link erneut zu brauchen.
+    if (code) {
+      var box = document.getElementById('codebox');
+      document.getElementById('codeval').textContent = code;
+      box.style.display = 'block';
+      box.addEventListener('click', function () {
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(code).then(function () {
+            document.getElementById('codehint').textContent = 'Kopiert!';
+          });
+        }
+      });
+    }
     if (!code) {
       btn.textContent = 'Link unvollständig — App öffnen';
       appUrl = 'markendetektivern://';
