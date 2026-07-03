@@ -58,7 +58,7 @@
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#0d8575"
       },
-      "edgeToEdgeEnabled": false,
+      "edgeToEdgeEnabled": true,
       "compileSdkVersion": 35,
       "targetSdkVersion": 35,
       "buildToolsVersion": "35.0.0",

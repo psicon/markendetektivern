@@ -1056,7 +1056,9 @@ export default function NoNameDetailScreen() {
         scrollEventThrottle={16}
         contentContainerStyle={{
           paddingTop: insets.top + DETAIL_HEADER_ROW_HEIGHT,
-          paddingBottom: 120,
+          // Edge-to-Edge: +insets.bottom, damit das Content-Ende ÜBER der
+          // transparenten System-Navigationsleiste (3-Button: 48dp) landet.
+          paddingBottom: 120 + insets.bottom,
         }}
         showsVerticalScrollIndicator={false}
       >

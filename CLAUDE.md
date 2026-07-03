@@ -325,19 +325,26 @@ Recent-Sessions.
   (revenueCatService.restorePremiumOrNull), nie danach den Cache lesen.
   (3) „Käufe wiederherstellen" ebenso über das direkte Restore-Ergebnis.
 
-- **Edge-to-Edge auf Android aktivieren (`edgeToEdgeEnabled: true` /
-  `Theme.EdgeToEdge`).** Führte mit targetSdk 35 dazu, dass die App-UI
-  unter die System-Navigationsleiste lief (3-Button-Geräte), die Gesten-
-  Bar „verschwand", Toasts falsch saßen — und stand im Verdacht, den
-  Back-Swipe auf Android 15 zu brechen. Die App ist auf klassisches
-  Fenster-Verhalten gebaut: styles.xml AppTheme = AppCompat.DayNight.
-  NoActionBar + opake weiße navigationBarColor + android:windowOptOut
-  EdgeToEdgeEnforcement (targetApi 35) + app.json edgeToEdgeEnabled:false.
-  ACHTUNG: Der ENTSCHEIDENDE Schalter im bare workflow ist
-  **android/gradle.properties → expo.edgeToEdgeEnabled=false** — expo-modules
-  aktivieren Edge-to-Edge sonst PROGRAMMATISCH (enableEdgeToEdge) und
-  überschreiben Theme + app.json. Alle drei Stellen müssen false sein.
-  NICHT reaktivieren, ohne ALLE Screens auf insets.bottom umzubauen.
+- **Edge-to-Edge auf Android DEAKTIVIEREN (`edgeToEdgeEnabled: false` /
+  AppCompat-Theme + windowOptOutEdgeToEdgeEnforcement).** Teuerste
+  Fehldiagnose des 86cahgwmn-Zyklus (2026-07-02/03, kostete Builds
+  1191+1192): Die App ist SEIT JEHER Edge-to-Edge gebaut (5.0.5 =
+  `Theme.EdgeToEdge` + `expo.edgeToEdgeEnabled=true` + app.json true;
+  Tab-Bar/FABs/Toasts nutzen `insets.bottom` korrekt). Das Abschalten
+  „fixte" 3-Button-Geräte scheinbar, brach aber **Android-15-Geräte mit
+  Gesten-Nav** (Poco M7 Pro/HyperOS): targetSdk 35 ERZWINGT dort
+  Edge-to-Edge, das Opt-Out wird von OEMs ignoriert/inkonsistent
+  umgesetzt → Mischmodus mit insets.bottom=0 → „iOS-Bar weg", App klebt
+  am Rand, Back-Swipe tot. Altes Android (Cubot, ≤14) kaschiert das —
+  Geräte-Spaltung ist DAS Erkennungsmuster. Regeln: (1) Alle DREI
+  Schalter bleiben true (styles.xml `Theme.EdgeToEdge`,
+  android/gradle.properties `expo.edgeToEdgeEnabled=true`, app.json).
+  (2) Scheinbare „Content unter der Leiste"-Bugs sind IMMER fehlende
+  `insets.bottom` an der jeweiligen Callsite (z.B. ScrollView-
+  `contentContainerStyle.paddingBottom: X + insets.bottom` auf den
+  Produktseiten), NIE ein Grund, Edge-to-Edge global abzuschalten.
+  (3) Emulator-Falle: Pixel-3a-AVD hat nur 24dp-NavBar (statt 48dp auf
+  echten Geräten) — Überlappungen dort klein/übersehbar.
 
 - **Lokaler Android-Debug-Build (`npx expo run:android`) braucht JDK 17**
   (`/usr/local/opt/openjdk@17/...`) — das RN-Gradle-Plugin lehnt JDK 25 ab
