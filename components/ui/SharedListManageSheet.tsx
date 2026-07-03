@@ -204,15 +204,10 @@ export function SharedListManageSheet({
               Mit der Kamera scannen, um beizutreten
             </Text>
             {/* Einladungs-Code zum Vorlesen/Weitergeben — Gegenstück zur
-                Code-Eingabe im JoinListSheet. Tap → Share-Sheet mit dem Code
-                (kein Clipboard-Modul installiert; Share deckt Kopieren mit ab). */}
-            <Pressable
-              onPress={() => {
-                if (list?.inviteCode) {
-                  Share.share({ message: list.inviteCode }).catch(() => {});
-                }
-              }}
-              style={({ pressed }) => ({
+                Code-Eingabe im JoinListSheet. Reine Anzeige (Teilen macht
+                der Link-Button darunter). */}
+            <View
+              style={{
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: 6,
@@ -221,8 +216,7 @@ export function SharedListManageSheet({
                 paddingVertical: 6,
                 borderRadius: radii.md,
                 backgroundColor: theme.surfaceAlt,
-                opacity: pressed ? 0.8 : 1,
-              })}
+              }}
             >
               <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 12, color: theme.textMuted }}>
                 Code:
@@ -239,12 +233,7 @@ export function SharedListManageSheet({
               >
                 {list?.inviteCode ?? ''}
               </Text>
-              {Platform.OS === 'ios' ? (
-                <Ionicons name="share-outline" size={14} color={theme.textMuted} />
-              ) : (
-                <MaterialCommunityIcons name="share-variant" size={13} color={theme.textMuted} />
-              )}
-            </Pressable>
+            </View>
           </View>
         ) : null}
 
