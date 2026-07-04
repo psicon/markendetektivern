@@ -30,6 +30,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DetailErrorState } from '@/components/design/DetailErrorState';
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
+import { HeaderShareButton } from '@/components/design/HeaderShareButton';
+import { shareProduct } from '@/lib/services/productShare';
 import { usePressLock } from '@/lib/hooks/usePressLock';
 import { FadingImage } from '@/components/design/FadingImage';
 import { CounterBadge } from '@/components/design/CounterBadge';
@@ -645,6 +647,15 @@ export default function NoNameDetailScreen() {
     | { bezeichnung?: string; name?: string; bild?: string }
     | undefined;
   const handelsmarkeName = hm?.bezeichnung ?? hm?.name ?? null;
+
+  // Teilen: HTTPS-Link auf die Share-Landing-Page (per-Produkt OG-Vorschau);
+  // Empfänger landet per Deep-Link genau auf dieser Produktseite. Titel
+  // spiegelt den Morph-Title (Handelsmarke + Name).
+  const onShare = useCallback(() => {
+    if (!p) return;
+    const title = `${handelsmarkeName ? `${handelsmarkeName} ` : ''}${p?.name ?? ''}`.trim();
+    void shareProduct({ kind: 'n', id: String(id), name: title, uid: user?.uid ?? null });
+  }, [p, handelsmarkeName, id, user?.uid]);
   const herstellerName =
     p?.hersteller?.name ?? p?.hersteller?.herstellername ?? null;
   const categoryName = p?.kategorie?.bezeichnung ?? p?.kategorie?.name ?? null;
@@ -978,6 +989,7 @@ export default function NoNameDetailScreen() {
         scrollY={scrollY}
         swapAt={DOCK_DISTANCE}
         onBack={backOrHome}
+        right={p ? <HeaderShareButton onPress={onShare} color={theme.text} /> : undefined}
       />
 
       {/* Morph title — opacity is driven by morphTitleStyle's

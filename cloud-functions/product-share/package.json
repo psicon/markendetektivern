@@ -1,0 +1,13 @@
+{
+  "name": "product-share",
+  "description": "Landing-Page mit per-Produkt OG-Tags für geteilte Produktkarten",
+  "engines": {
+    "node": "22"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^5.0.0"
+  },
+  "private": true
+}

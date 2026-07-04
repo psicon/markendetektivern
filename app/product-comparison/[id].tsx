@@ -32,6 +32,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DetailErrorState } from '@/components/design/DetailErrorState';
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
+import { HeaderShareButton } from '@/components/design/HeaderShareButton';
+import { shareProduct } from '@/lib/services/productShare';
 import { usePressLock } from '@/lib/hooks/usePressLock';
 import {
   EnttarnteAlternativesList,
@@ -961,6 +963,20 @@ export default function ProductComparisonScreen() {
     (mp?.hersteller as any)?.herstellername
     ?? (mp?.hersteller as any)?.name
     ?? '';
+
+  // Teilen: HTTPS-Link auf die Share-Landing-Page; Empfänger landet per
+  // Deep-Link auf GENAU dieser Vergleichsseite (gleiche id + type-Anker).
+  // Nur mp.name als Titel — brandName ist der Hersteller (oft schon im
+  // Produktnamen enthalten, doppelt wäre sperrig).
+  const onShare = useCallback(() => {
+    if (!mp) return;
+    void shareProduct({
+      kind: isMarkenProdukt ? 'vm' : 'vn',
+      id: String(id),
+      name: (mp?.name ?? '').trim(),
+      uid: user?.uid ?? null,
+    });
+  }, [mp, id, isMarkenProdukt, user?.uid]);
   // Logo im Hero-/Morph-Title = MARKE (mp.marke.bild, z.B. Castello), NICHT der
   // echte Hersteller (mp.hersteller = hersteller_new, z.B. Arla → trägt das alte
   // MUH-Logo). Gleiche Quelle wie das Hersteller-Info-Sheet (marke?.bild).
@@ -1398,6 +1414,7 @@ export default function ProductComparisonScreen() {
         scrollY={scrollY}
         swapAt={DOCK_DISTANCE}
         onBack={handleBack}
+        right={mp ? <HeaderShareButton onPress={onShare} color={theme.text} /> : undefined}
       />
 
       {/* Morph title — opacity-fades in via morphTitleStyle's
