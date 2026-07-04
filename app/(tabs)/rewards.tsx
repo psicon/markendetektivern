@@ -33,6 +33,8 @@ import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
 import { getActiveCashbackCampaigns, getCashbackConfig, type ActiveCampaign } from '@/lib/services/cashbackService';
+import { consentService } from '@/lib/services/consentService';
+import { startProductSubmitFlow } from '@/lib/services/productSubmitStart';
 import { useSurvey } from '@/components/survey/SurveyProvider';
 import { getGeneralSurveys } from '@/lib/services/surveyService';
 import type { Poll } from '@/lib/types/survey';
@@ -616,7 +618,11 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
         return;
       }
       if (cashback.hasConsent) {
-        router.push('/cashback/capture');
+        // 86cagb57g: beim App-Start abgelehnten Tracking-Consent (UMP,
+        // Android) einmal pro Session erneut anbieten, DANN in den Scanner.
+        void consentService.ensureTrackingConsentAtCashback().finally(() => {
+          router.push('/cashback/capture');
+        });
       } else {
         // Scan-Intent (Kampagne gewählt) → nach Consent in den Scanner.
         router.push('/cashback/consent?from=receipt');
@@ -624,6 +630,13 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
     },
     [cashback.uid, cashback.hasConsent],
   );
+
+  // Produktbilder-Einstieg (86cagb5gh): gated auf den Cashback-Consent,
+  // wenn gerade eine product_photos-Aktion mit Reward läuft (Gate-Logik im
+  // Service — Single Source für Tile, Kampagnen-Card und Home).
+  const onProductSubmit = useCallback(() => {
+    void startProductSubmitFlow(cashback.hasConsent);
+  }, [cashback.hasConsent]);
 
   // Schnellzugriff-Tile „Kassenbon scannen": Aktions-Auswahl je nach
   // Lage. Ohne Aktions-Modus → wie bisher (keine Aktion). Mit Modus:
@@ -924,7 +937,7 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
                 a.k === 'receipt'
                   ? startReceiptScan
                   : a.k === 'photo'
-                    ? () => router.push('/product-submit')
+                    ? onProductSubmit
                     : a.k === 'survey' && availableSurveys.length > 0
                       ? openSurveys
                       : undefined
@@ -1116,7 +1129,7 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
           />
           <View style={{ gap: 10, marginTop: 10 }}>
             {cardCampaigns.map((c) => (
-              <CampaignListItem key={c.id} campaign={c} onScanBon={onScanBon} scheme={scheme} />
+              <CampaignListItem key={c.id} campaign={c} onScanBon={onScanBon} onProductSubmit={onProductSubmit} scheme={scheme} />
             ))}
           </View>
         </View>
@@ -1457,10 +1470,12 @@ const RECEIPT_BOILERPLATE_DESC =
 function CampaignListItem({
   campaign,
   onScanBon,
+  onProductSubmit,
   scheme,
 }: {
   campaign: ActiveCampaign;
   onScanBon: (campaignId: string | null) => void;
+  onProductSubmit: () => void;
   scheme: 'light' | 'dark';
 }) {
   const { theme } = useTokens();
@@ -1490,7 +1505,8 @@ function CampaignListItem({
     if (kind === 'receipt') {
       onScanBon(campaign.id);
     } else if (kind === 'product_photos') {
-      router.push('/product-submit');
+      // Consent-gated Einstieg (86cagb5gh) — gleiche Gate wie das Tile.
+      onProductSubmit();
     }
     // survey-Campaigns rendern nicht als Card (Umfragen leben im Tile) —
     // daher kein survey-Zweig hier.

@@ -57,9 +57,18 @@ import {
   getCashbackConfig,
   hasValidCashbackConsent,
 } from '@/lib/services/cashbackService';
+import { consentService } from '@/lib/services/consentService';
 
 const PRIVACY_URL = 'https://markendetektive.de/datenschutz';
 const TERMS_URL = 'https://markendetektive.de/agb';
+
+// Drei Anzeige-Varianten desselben (EINEN) Cashback-Consents — je nachdem,
+// aus welchem Verdien-Flow der User kommt (ClickUp 86cagb5gh): Bons (Default),
+// Produktbilder, Umfragen. Rechtlich ist es dieselbe Einwilligung
+// (users/{uid}.cashback_consent, eine Version) — nur Hero + Steps + CTA
+// sprechen die jeweilige Aktion an, damit "Bons" nicht in einem
+// Produktbilder-/Umfragen-Kontext steht.
+type ConsentVariant = 'receipt' | 'product' | 'survey';
 
 // Three-step "so einfach" flow — numbered circles + crisp labels.
 // Concrete (not "wie magisch"), but the magic of the auto-OCR is the
@@ -68,23 +77,86 @@ const TERMS_URL = 'https://markendetektive.de/agb';
 // wissen "wann bekomme ich was?". Schritt 1+2 sind Aktionen, Schritt 3
 // die Belohnung. Mit Hinweis dass Cashback automatisch gutgeschrieben
 // wird sobald der Bon geprüft ist (meist Minuten).
-const STEPS: { icon: string; title: string; sub: string }[] = [
-  {
-    icon: 'camera-outline',
-    title: 'Foto vom Bon machen',
-    sub: 'Direkt nach dem Einkauf',
+const PRAEMIEN_STEP = {
+  icon: 'gift-outline',
+  title: 'Attraktive Prämien & Gutscheine',
+  sub: 'Ab 10 € einlösen — Gutschein deiner Wahl oder Auszahlung aufs Konto',
+};
+
+const STEPS_BY_VARIANT: Record<ConsentVariant, { icon: string; title: string; sub: string }[]> = {
+  receipt: [
+    {
+      icon: 'camera-outline',
+      title: 'Foto vom Bon machen',
+      sub: 'Direkt nach dem Einkauf',
+    },
+    {
+      icon: 'auto-fix',
+      title: 'Cashback wird gutgeschrieben',
+      sub: 'Sobald der Bon geprüft ist — meist in wenigen Minuten',
+    },
+    PRAEMIEN_STEP,
+  ],
+  product: [
+    {
+      icon: 'camera-outline',
+      title: 'Produkt im Markt fotografieren',
+      sub: 'Ein paar Fotos direkt am Regal — die App führt dich durch',
+    },
+    {
+      icon: 'auto-fix',
+      title: 'Cashback wird gutgeschrieben',
+      sub: 'Sobald dein Datensatz geprüft ist',
+    },
+    PRAEMIEN_STEP,
+  ],
+  survey: [
+    {
+      icon: 'message-question-outline',
+      title: 'Umfrage beantworten',
+      sub: 'Direkt in der App — in wenigen Minuten erledigt',
+    },
+    {
+      icon: 'auto-fix',
+      title: 'Cashback wird gutgeschrieben',
+      sub: 'Direkt nach dem Absenden',
+    },
+    PRAEMIEN_STEP,
+  ],
+};
+
+// Hero-Copy pro Variante. Produkt-Wortlaut ist User-Vorgabe (86cagb5gh):
+// "Hol dir Geld für echte Detektivarbeit und unterstütze uns beim
+// Enttarnen neuer Produkte." `bodyBold` wird im Body fett hervorgehoben.
+const HERO_BY_VARIANT: Record<
+  ConsentVariant,
+  { eyebrow: string; title: string; bodyPre: string; bodyBold: string; bodyPost: string }
+> = {
+  receipt: {
+    eyebrow: 'Geld zurück fürs Einkaufen',
+    title: 'Hol dir Geld für deine Bons',
+    // Keine hardcodierten Konditionen (Cent-Beträge, Wochen-Limits) — die
+    // sind config-/aktionsgetrieben und würden hier veralten. Einzige
+    // stabile Aussage: bis zu 1 € pro Bon (User-Vorgabe 2026-06-10).
+    bodyPre: 'Bon fotografieren, hochladen und ',
+    bodyBold: 'bis zu 1 € pro Bon',
+    bodyPost: ' sichern — die aktuellen Aktionen siehst du in der App.',
   },
-  {
-    icon: 'auto-fix',
-    title: 'Cashback wird gutgeschrieben',
-    sub: 'Sobald der Bon geprüft ist — meist in wenigen Minuten',
+  product: {
+    eyebrow: 'Geld für Detektivarbeit',
+    title: 'Hol dir Geld für echte Detektivarbeit',
+    bodyPre: 'Unterstütze uns beim ',
+    bodyBold: 'Enttarnen neuer Produkte',
+    bodyPost: ' — fotografiere Produkte im Markt und sichere dir die Prämie der aktuellen Aktion.',
   },
-  {
-    icon: 'gift-outline',
-    title: 'Attraktive Prämien & Gutscheine',
-    sub: 'Ab 10 € einlösen — Gutschein deiner Wahl oder Auszahlung aufs Konto',
+  survey: {
+    eyebrow: 'Geld für deine Meinung',
+    title: 'Hol dir Geld für deine Antworten',
+    bodyPre: 'Kurze Umfrage beantworten und ',
+    bodyBold: 'Cashback sichern',
+    bodyPost: ' — die aktuellen Umfragen siehst du in der App.',
   },
-];
+};
 
 // Prämien-Katalog für den Auto-Marquee unter Schritt 3. `image` ist
 // optional vorbereitet: sobald echte Logo-Assets definiert sind
@@ -365,15 +437,27 @@ export default function CashbackConsentScreen() {
   // (bzw. wenn Consent schon gültig ist) geht, hängt vom `from`-Parameter ab:
   //   • 'receipt'  → Bon-Scanner (/cashback/capture)  — NUR echte Scan-Intents
   //   • 'product'  → Produkt-Einreichung (/product-submit)
-  //   • sonst (settings/rewards/survey/leer) → zurück (kein Auto-Scanner)
+  //   • 'survey'   → Umfragen-Übersicht (/surveys)
+  //   • sonst (settings/rewards/leer) → zurück (kein Auto-Scanner)
   const params = useLocalSearchParams<{ from?: string }>();
   const from = params.from ?? '';
+
+  // Anzeige-Variante (86cagb5gh): Copy folgt dem Verdien-Flow, aus dem der
+  // User kommt. rewards/settings/leer bleiben bei der Bon-Copy (Default).
+  const variant: ConsentVariant =
+    from === 'product' ? 'product' : from === 'survey' ? 'survey' : 'receipt';
+  const steps = STEPS_BY_VARIANT[variant];
+  const hero = HERO_BY_VARIANT[variant];
 
   const goAfterConsent = useCallback(() => {
     if (from === 'receipt') {
       router.replace('/cashback/capture');
     } else if (from === 'product') {
       router.replace('/product-submit' as any);
+    } else if (from === 'survey') {
+      // Umfragen-Intent (86cagb5gh) → zurück in die Umfragen-Übersicht
+      // (replace, damit der Consent nicht im Back-Stack bleibt).
+      router.replace('/surveys' as any);
     } else if (from === 'rewards') {
       // Aktivierung aus dem Rewards-Kontext (Card / Umfrage-Nudge / Auto-
       // Prompt) → nach dem Akzeptieren auf den Rewards-Tab (replace, damit
@@ -391,7 +475,7 @@ export default function CashbackConsentScreen() {
   const ctaFollowupLabel =
     from === 'receipt'
       ? 'Akzeptieren & Bon scannen'
-      : from === 'product'
+      : from === 'product' || from === 'survey'
         ? 'Akzeptieren & fortfahren'
         : 'Akzeptieren';
 
@@ -466,6 +550,11 @@ export default function CashbackConsentScreen() {
     try {
       await acceptCashbackConsent(user.uid);
       setHasAccepted(true);
+      // 86cagb57g: Wer den App-Start-Tracking-Consent (UMP, Android)
+      // abgelehnt hatte, bekommt ihn beim Cashback-Aktivieren erneut —
+      // VOR der Navigation, damit das native Formular nicht über einem
+      // bereits ersetzten Screen hängt. iOS/erteilter Consent: No-op.
+      await consentService.ensureTrackingConsentAtCashback();
       setTimeout(() => {
         goAfterConsent();
       }, 300);
@@ -739,18 +828,17 @@ export default function CashbackConsentScreen() {
               color="#fff"
             />
           </View>
-          <Text style={styles.heroEyebrow}>Geld zurück fürs Einkaufen</Text>
-          <Text style={styles.heroTitle}>Hol dir Geld für deine Bons</Text>
-          {/* Keine hardcodierten Konditionen (Cent-Beträge, Wochen-Limits)
-              — die sind config-/aktionsgetrieben und würden hier veralten.
-              Einzige stabile Aussage: bis zu 1 € pro Bon (User-Vorgabe
-              2026-06-10). Aktuelle Aktionen zeigt der Rewards-Tab. */}
+          <Text style={styles.heroEyebrow}>{hero.eyebrow}</Text>
+          <Text style={styles.heroTitle}>{hero.title}</Text>
+          {/* Copy pro Variante aus HERO_BY_VARIANT (86cagb5gh) — keine
+              hardcodierten Konditionen, die sind config-/aktionsgetrieben.
+              Aktuelle Aktionen zeigt der Rewards-Tab. */}
           <Text style={styles.heroBody}>
-            Bon fotografieren, hochladen und{' '}
+            {hero.bodyPre}
             <Text style={{ fontWeight: fontWeight.extraBold as any, color: '#fff' }}>
-              bis zu 1 € pro Bon
+              {hero.bodyBold}
             </Text>
-            {' '}sichern — die aktuellen Aktionen siehst du in der App.
+            {hero.bodyPost}
           </Text>
         </LinearGradient>
 
@@ -761,7 +849,7 @@ export default function CashbackConsentScreen() {
             Border, shadows.sm wie die Belohnungen-Cards). */}
         <Text style={styles.sectionLabel}>So einfach geht's</Text>
         <View style={styles.stepsCard}>
-          {STEPS.map((step, idx) => (
+          {steps.map((step, idx) => (
             <View key={step.title}>
             {idx > 0 ? <View style={styles.stepConnector} /> : null}
             <View style={styles.stepRow}>

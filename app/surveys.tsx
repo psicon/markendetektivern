@@ -10,6 +10,8 @@ import { useSurvey } from '@/components/survey/SurveyProvider';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
+import { consentService } from '@/lib/services/consentService';
 import { getGeneralSurveys } from '@/lib/services/surveyService';
 import { formatCents } from '@/lib/types/cashback';
 import type { Poll } from '@/lib/types/survey';
@@ -40,6 +42,10 @@ export default function SurveysScreen() {
   // Konto-Angebot VORHER. `accountOffer` = die angetippte vergütete Umfrage.
   const [accountOffer, setAccountOffer] = useState<Poll | null>(null);
   const isAnon = (user as any)?.isAnonymous === true;
+  // 86cagb5gh: vergütete Umfragen sind Cashback → registrierte User ohne
+  // gültigen Consent sehen VOR der Umfrage den Consent (Umfragen-Variante),
+  // statt erst nach dem Beantworten genudgt zu werden.
+  const cashback = useCashbackUserState();
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
@@ -161,14 +167,29 @@ export default function SurveysScreen() {
             <Pressable
               key={s.id}
               onPress={() => {
-                // 2.5: Anonyme + vergütete Umfrage → erst Konto-Angebot, sonst
-                // direkt starten. (Registrierte ohne Consent fängt weiterhin
-                // der bestehende Nudge nach dem Beantworten ab.)
-                if (isAnon && typeof s.rewardCents === 'number' && s.rewardCents > 0) {
+                const rewarded = typeof s.rewardCents === 'number' && s.rewardCents > 0;
+                // 2.5: Anonyme + vergütete Umfrage → erst Konto-Angebot.
+                if (isAnon && rewarded) {
                   setAccountOffer(s);
-                } else {
-                  showSurvey(s);
+                  return;
                 }
+                // 86cagb5gh: Registrierte ohne gültigen Cashback-Consent →
+                // Consent VOR der vergüteten Umfrage (Umfragen-Variante).
+                // `!isLoading`-Guard: während der Snapshot bootstrappt nicht
+                // fälschlich gaten — dann greift wie bisher der Nudge danach.
+                if (rewarded && !isAnon && !cashback.isLoading && !cashback.hasConsent) {
+                  router.push('/cashback/consent?from=survey' as any);
+                  return;
+                }
+                if (rewarded && cashback.hasConsent) {
+                  // 86cagb57g: beim App-Start abgelehnten Tracking-Consent
+                  // (UMP, Android) einmal pro Session erneut anbieten.
+                  void consentService.ensureTrackingConsentAtCashback().finally(() => {
+                    showSurvey(s);
+                  });
+                  return;
+                }
+                showSurvey(s);
               }}
               style={({ pressed }) => ({
                 flexDirection: 'row',

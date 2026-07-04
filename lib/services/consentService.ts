@@ -22,6 +22,11 @@ class ConsentService {
   private isInitialized = false;
   private isPromptInFlight = false;
   private hasShownThisSession = false;
+  // Eigener Session-Zähler für den Cashback-Re-Ask (86cagb57g) — bewusst
+  // GETRENNT von hasShownThisSession: das Boot-Formular kann in derselben
+  // Session schon gezeigt (und abgelehnt) worden sein, der Cashback-Einstieg
+  // soll trotzdem genau EINMAL erneut fragen.
+  private hasReAskedAtCashbackThisSession = false;
 
   async initialize(): Promise<ConsentStatus> {
     try {
@@ -151,6 +156,54 @@ class ConsentService {
     }
   }
 
+  /**
+   * Re-Ask des App-Start-Tracking-Consents (Google UMP) beim Cashback-
+   * Einstieg (ClickUp 86cagb57g): Wer das Formular beim Boot abgelehnt
+   * (OBTAINED ohne Personalisierungs-Zustimmung) oder weggedrückt hat
+   * (weiter REQUIRED), bekommt es beim aktiven Cashback-Engagement genau
+   * EINMAL pro Session erneut — Cashback lebt von Marktdaten.
+   *
+   * iOS: No-op — dort gibt es beim App-Start keinen Tracking-Consent
+   * (kein UMP, ATT wird nicht angefragt). Fehler sind nie fatal: der
+   * Cashback-Flow läuft immer weiter.
+   */
+  async ensureTrackingConsentAtCashback(): Promise<void> {
+    if (Platform.OS === 'ios') {
+      return;
+    }
+    if (this.hasReAskedAtCashbackThisSession || this.isPromptInFlight) {
+      return;
+    }
+    try {
+      await this.initialize();
+
+      // Außerhalb des EEA verlangt Google keinen Consent → nichts zu fragen.
+      if (this.consentStatus === 'NOT_REQUIRED') {
+        return;
+      }
+
+      if (this.consentStatus === 'REQUIRED') {
+        // Boot-Formular nie abgeschlossen (weggedrückt/Fehler) → regulär zeigen.
+        this.hasReAskedAtCashbackThisSession = true;
+        await this.showConsentFormIfRequired({ force: true });
+        return;
+      }
+
+      // Formular abgeschlossen, aber OHNE Tracking-Zustimmung (beim Start
+      // abgelehnt) → erneut präsentieren, sofern das SDK ein Formular hat.
+      if (
+        this.consentStatus === 'OBTAINED' &&
+        !this.canShowPersonalizedAds() &&
+        this.consentInfo?.isConsentFormAvailable !== false
+      ) {
+        this.hasReAskedAtCashbackThisSession = true;
+        await this.forceShowConsentForm();
+      }
+    } catch (error) {
+      console.warn('⚠️ ensureTrackingConsentAtCashback failed:', error);
+    }
+  }
+
   async resetConsent(): Promise<void> {
     try {
       console.log('🗑️ Resetting consent...');
@@ -164,6 +217,7 @@ class ConsentService {
       this.consentInfo = null;
       this.isInitialized = false;
       this.hasShownThisSession = false;
+      this.hasReAskedAtCashbackThisSession = false;
       
       if (Platform.OS === 'android') {
         try {

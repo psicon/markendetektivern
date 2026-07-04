@@ -19,6 +19,7 @@ import { router } from 'expo-router';
 
 import { getActiveCashbackCampaigns, getCashbackConfig } from '@/lib/services/cashbackService';
 import { setSelectedCampaignId } from '@/lib/services/cashbackUpload';
+import { consentService } from '@/lib/services/consentService';
 
 export async function startReceiptScanFlow(
   uid: string | null,
@@ -50,6 +51,14 @@ export async function startReceiptScanFlow(
   setSelectedCampaignId(
     campaignsEnabled && receiptCampaigns.length === 1 ? receiptCampaigns[0].id : null,
   );
+  if (hasConsent) {
+    // 86cagb57g: beim App-Start abgelehnten Tracking-Consent (UMP, Android)
+    // einmal pro Session erneut anbieten — DANN in den Scanner (das native
+    // Formular soll nicht über der Kamera-Permission hängen).
+    await consentService.ensureTrackingConsentAtCashback();
+    router.push('/cashback/capture');
+    return;
+  }
   // Echter Scan-Intent → nach Consent in den Bon-Scanner (from=receipt).
-  router.push(hasConsent ? '/cashback/capture' : '/cashback/consent?from=receipt');
+  router.push('/cashback/consent?from=receipt');
 }

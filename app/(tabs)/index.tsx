@@ -57,6 +57,7 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
 import { startReceiptScanFlow } from '@/lib/services/cashbackScanStart';
+import { startProductSubmitFlow } from '@/lib/services/productSubmitStart';
 import { isAnySheetOpen, whenSheetsIdle } from '@/lib/services/sheetPresence';
 import { useShoppingCartCount } from '@/lib/hooks/useShoppingCartCount';
 import { useFavoritesCount } from '@/lib/hooks/useFavoritesCount';
@@ -128,6 +129,14 @@ export default function HomeScreen() {
   const onScanBon = useCallback(
     () => startReceiptScanFlow(cashback.uid, cashback.hasConsent),
     [cashback.uid, cashback.hasConsent],
+  );
+
+  // Tap target "Produkte einreichen" — consent-gated, wenn gerade eine
+  // product_photos-Aktion mit Reward läuft (86cagb5gh; Gate im Service,
+  // geteilt mit dem Rewards-Tab).
+  const onProductSubmit = useCallback(
+    () => void startProductSubmitFlow(cashback.hasConsent),
+    [cashback.hasConsent],
   );
 
   // Coachmark — per-Screen-Erklär-Overlay, fires nur beim ersten
@@ -949,7 +958,7 @@ export default function HomeScreen() {
   // tick.
   const schnellzugriff = useMemo(() => [
     { icon: 'receipt' as const, label: 'Kassenbon\nscannen', background: '#0d8575', dark: true as const,  onPress: onScanBon },
-    { icon: 'camera-plus-outline'  as const, label: 'Produkte\neinreichen', background: '#5b4f9c', dark: true as const,  onPress: () => safePush('/product-submit' as any) },
+    { icon: 'camera-plus-outline'  as const, label: 'Produkte\neinreichen', background: '#5b4f9c', dark: true as const,  onPress: onProductSubmit },
     // Cart-Glyph (gefüllt) — entspricht dem `cart.fill` der alten
     // Homepage und matcht den schwebenden Einkaufszettel-FAB rechts
     // unten, sodass Schnellzugriff + FAB visuell verbunden sind.
@@ -963,7 +972,7 @@ export default function HomeScreen() {
     // sich in beiden Modi korrekt.
     { icon: 'heart-outline'        as const, label: 'Deine\nFavoriten',    background: theme.surfaceAlt, dark: false as const, onPress: () => safePush('/favorites' as any) },
     { icon: 'poll'                 as const, label: 'Umfragen',            background: theme.surfaceAlt, dark: false as const, onPress: () => safePush('/surveys' as any) },
-  ], [onScanBon, theme.surfaceAlt]);
+  ], [onScanBon, onProductSubmit, theme.surfaceAlt]);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>

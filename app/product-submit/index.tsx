@@ -20,6 +20,8 @@ import { FilterSheet } from '@/components/design/FilterSheet';
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { storage } from '@/lib/firebase';
 import { useTokens } from '@/hooks/useTokens';
+import { useAuth } from '@/lib/contexts/AuthContext';
+import { hasValidCashbackConsent } from '@/lib/services/cashbackService';
 import {
   PRODUCT_PHOTO_STEPS,
   getActiveProductCampaign,
@@ -149,6 +151,25 @@ export default function ProductSubmitOverview() {
       alive = false;
     };
   }, []);
+
+  // Hard guard (86cagb5gh, Spiegel von cashback/capture.tsx): Läuft gerade
+  // eine product_photos-Aktion MIT Reward und der Consent fehlt, zurück in
+  // den Consent (Produktbilder-Variante) — fängt Deep-Links/alte Callsites,
+  // die am Gate-Service (startProductSubmitFlow) vorbei hierher routen.
+  // OHNE laufende Aktion bleibt der Screen ungegatet (Datensammlung ist
+  // immer möglich, auch anonym).
+  const { user } = useAuth();
+  useEffect(() => {
+    if (!campaign || campaign.rewardCents <= 0) return;
+    let alive = true;
+    (async () => {
+      const valid = user?.uid ? await hasValidCashbackConsent(user.uid) : false;
+      if (alive && !valid) router.replace('/cashback/consent?from=product' as any);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [campaign, user?.uid]);
 
   // Resolve the selected submission's image paths to download URLs.
   useEffect(() => {
