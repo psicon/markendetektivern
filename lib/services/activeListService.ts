@@ -86,9 +86,18 @@ export const ActiveListService = {
           return null;
         }
         validatedForUid = uid;
-      } catch {
-        // Offline/Fehler: Wert optimistisch behalten (Rules blocken im
-        // Zweifel den Write; der Zettel-Screen korrigiert beim Besuch).
+      } catch (e: any) {
+        // permission-denied ist das DEFINITIVE "kein Zugriff mehr"-Signal:
+        // die Rules lehnen den Doc-Read für Nicht-Mitglieder ab (auch bei
+        // gelöschter Liste) — der !exists/!member-Zweig oben ist für genau
+        // diese Fälle unerreichbar (er setzt lesbares Doc voraus). Ohne
+        // Reset lädt sonst JEDE Session einen permission-denied-Zettel.
+        if (String(e?.code ?? '').includes('permission-denied')) {
+          await ActiveListService.setActiveList(null);
+          return null;
+        }
+        // Offline/sonstige Fehler: Wert optimistisch behalten (Rules
+        // blocken im Zweifel den Write; der Zettel korrigiert beim Besuch).
       }
     }
     return inMemory;
