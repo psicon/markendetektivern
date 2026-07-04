@@ -90,7 +90,7 @@ export default function HomeScreen() {
   // (alle 3 Tabs bleiben gemountet) und blockt den Tap komplett.
   const isFocused = useIsFocused();
 
-  const { user, userProfile, refreshUserProfile } = useAuth();
+  const { user, userProfile, profileKnown, refreshUserProfile } = useAuth();
   const { isPremium, showAds, refreshPremiumStatus } = useRevenueCat();
   const analytics = useAnalytics();
   const cashback = useCashbackUserState();
@@ -1103,7 +1103,11 @@ export default function HomeScreen() {
             shorter (≈ 64 px instead of the previous ~88 px).
             Wird komplett ausgeblendet wenn der User die
             spielerischen Inhalte deaktiviert hat (Profil-Toggle). */}
-        {!gamificationEnabled ? null : levelsLoading || levels.length === 0 ? (
+        {/* Anti-Flash (User-Report 2026-07-04): Skeleton auch solange das
+            PROFIL noch lädt — sonst rendert die Card "Level 1" aus dem
+            `?? 1`-Fallback und poppt aufs echte Level. profileKnown wird
+            auch bei Load-FEHLER true → kein Ewig-Skeleton offline. */}
+        {!gamificationEnabled ? null : levelsLoading || levels.length === 0 || (!userProfile && !profileKnown) ? (
           <View
             style={{
               marginHorizontal: 20,

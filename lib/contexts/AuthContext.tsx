@@ -104,6 +104,10 @@ interface AdditionalProfileData {
 interface AuthContextType {
   user: User | null;
   userProfile: UserProfile | null;
+  /** True, sobald der Profil-Load für den aktuellen User einmal durch ist
+   *  (Erfolg oder Fehler). Anti-Flash-Gate: solange false, Skeleton statt
+   *  der "?? 1"-Level-/Punkte-Fallbacks rendern (analog premiumKnown). */
+  profileKnown: boolean;
   loading: boolean;
   isAnonymous: boolean;
   /** True während logout() läuft — kurzes Fenster zwischen Firebase
@@ -186,6 +190,12 @@ export const useAuth = () => {
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  // Anti-Flash-Signal (analog premiumKnown): true, sobald refreshUserProfile
+  // für den AKTUELLEN User einmal durchgelaufen ist (Erfolg ODER Fehler).
+  // Consumer (Home-Level-Card) zeigen bis dahin Skeleton statt der
+  // "?? 1"-Fallbacks — behebt das "Level 1 poppt aufs echte Level".
+  const [profileKnown, setProfileKnown] = useState(false);
+  const profileKnownUidRef = useRef<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAnonymous, setIsAnonymous] = useState(false);
   // ClickUp 86cacp92p (1.19): Pending FB-Credential fürs geführte Linking.
@@ -243,10 +253,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         
         if (isStale()) return; // neuerer Refresh laeuft — nicht clobbern
         setUserProfile(enrichedProfile);
+        setProfileKnown(true);
         console.log('🔄 AuthContext: User profile + stats refreshed (anonymous:', user.isAnonymous, ')');
       } catch (error) {
         console.warn('⚠️ Profil konnte nicht geladen werden:', error);
-        if (!isStale()) setUserProfile(null);
+        if (!isStale()) {
+          setUserProfile(null);
+          // Auch "bekannt gescheitert" zählt als known — Consumer dürfen
+          // dann ihre Fallbacks rendern statt ewig Skeleton zu zeigen.
+          setProfileKnown(true);
+        }
       }
     }
     // Phase 0 B: Deps sind string/boolean primitives statt das ganze
@@ -277,6 +293,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('🔄 AuthContext: Auth state changed:', user ? `User: ${user.uid} (anonymous: ${user.isAnonymous})` : 'No user');
       setUser(user);
       setIsAnonymous(user?.isAnonymous || false);
+      // profileKnown gilt pro User: bei echtem Wechsel (Login/Logout/
+      // Account-Switch) zurücksetzen, damit das alte Profil nicht als
+      // "bekannt" fürs neue Konto durchgeht.
+      if ((user?.uid ?? null) !== profileKnownUidRef.current) {
+        profileKnownUidRef.current = user?.uid ?? null;
+        setProfileKnown(false);
+      }
       
       // 🔐 BACKUP: Speichere User-ID zusätzlich (falls AsyncStorage teilweise gelöscht wird)
       if (user?.uid) {
@@ -1265,6 +1288,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     () => ({
       user,
       userProfile,
+      profileKnown,
       loading,
       isAnonymous,
       isLoggingOut,
@@ -1285,6 +1309,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     [
       user,
       userProfile,
+      profileKnown,
       loading,
       isAnonymous,
       isLoggingOut,
@@ -1306,6 +1331,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     : {
         user,
         userProfile,
+        profileKnown,
         loading,
         isAnonymous,
         signIn,
