@@ -661,10 +661,8 @@ export default function NoNameDetailScreen() {
     // mit derselben Beide->0-Regel wie savings.ts Stufe 1.
     const sv = calculateSavings((p?.markenProdukt as any) ?? null, p as any);
     let pct = sv.pct;
-    let eur = sv.eur;
     if (pct <= 0 && Number(p?.ersparnis) > 0 && Number(p?.ersparnisProz) > 0) {
       pct = Math.round(Number(p.ersparnisProz));
-      eur = Number(p.ersparnis);
     }
     void shareProduct({
       kind: 'n',
@@ -672,8 +670,10 @@ export default function NoNameDetailScreen() {
       name: title,
       uid: user?.uid ?? null,
       savingsPct: pct,
-      savingsEur: eur,
       vsBrandName: (p?.markenProdukt as any)?.name ?? null,
+      // "Gleiches Werk"-Twist nur, wenn die App es selbst behauptet
+      // (Stufe ≥ 3 = Hersteller produziert beide Produkte).
+      sameFactory: Number(p?.stufe) >= 3 && !!(p?.markenProdukt as any)?.name,
     });
   }, [p, handelsmarkeName, id, user?.uid]);
   const herstellerName =

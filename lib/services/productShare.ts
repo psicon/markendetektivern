@@ -37,9 +37,11 @@ export async function shareProduct(opts: {
   /** Ersparnis fürs Message-Copy — nur bei >0 gerendert (Copy-Ton-Regel:
    *  Abwesenheit nie negativ formulieren). */
   savingsPct?: number | null;
-  savingsEur?: number | null;
   /** Name des Marken-Originals für "gegenüber X". */
   vsBrandName?: string | null;
+  /** true nur bei Stufe ≥ 3 (App-Aussage: Hersteller produziert BEIDE
+   *  Produkte) — schaltet den "aus dem gleichen Werk"-Twist frei. */
+  sameFactory?: boolean;
 }): Promise<void> {
   const url = productShareUrl(opts.kind, opts.id);
   const name = (opts.name || '').trim();
@@ -47,18 +49,22 @@ export async function shareProduct(opts: {
     typeof opts.savingsPct === 'number' && opts.savingsPct > 0
       ? Math.round(opts.savingsPct)
       : null;
-  const eur = typeof opts.savingsEur === 'number' && opts.savingsEur > 0 ? opts.savingsEur : null;
   const vs = (opts.vsBrandName || '').trim();
 
-  // Message = Mini-Pitch, nicht nur ein Link (User-Vorgabe 2026-07-04):
-  // konkreter Fund + harte Zahl + Aufforderung. Emoji bewusst nur hier im
-  // Outward-Share-Text (App-UI bleibt emoji-frei).
-  const lines = [name ? `🕵️ Detektiv-Fund: ${name}` : '🕵️ Detektiv-Fund bei MarkenDetektive'];
+  // Message = Mini-Pitch mit Neugier-Teaser (User-Wortlaut 2026-07-04):
+  // "Dieses Produkt" statt Name — das Produktbild liefert die Link-Karte.
+  // Emoji bewusst nur hier im Outward-Share-Text (App-UI bleibt emoji-frei).
+  const lines: string[] = [];
   if (pct) {
-    const eurPart = eur ? ` – das sind ${eur.toFixed(2).replace('.', ',')} € pro Packung` : '';
-    lines.push(`Spart ${pct} % gegenüber ${vs || 'dem Markenprodukt'}${eurPart}.`);
+    lines.push('🕵️ MarkenDetektiv-Fund: Dieses Produkt');
+    lines.push(
+      `Spart ${pct} % gegenüber ${vs || 'dem Markenprodukt'}${
+        opts.sameFactory ? ' – und das, obwohl es aus dem gleichen Werk kommt' : ''
+      }!`,
+    );
     lines.push('Selbst nachprüfen & mitsparen – kostenlos in der MarkenDetektive-App:');
   } else {
+    lines.push(name ? `🕵️ MarkenDetektiv-Fund: ${name}` : '🕵️ MarkenDetektiv-Fund');
     lines.push('Preis-Check & günstige Alternativen – kostenlos in der MarkenDetektive-App:');
   }
   const text = lines.join('\n');

@@ -978,8 +978,10 @@ export default function ProductComparisonScreen() {
       name: (picked?.name ?? mp?.name ?? '').trim(),
       uid: user?.uid ?? null,
       savingsPct: sv.pct,
-      savingsEur: sv.eur,
       vsBrandName: (mp?.name ?? '').trim() || null,
+      // "Gleiches Werk"-Twist nur, wenn die App es selbst behauptet
+      // (Stufe ≥ 3 = Hersteller produziert beide Produkte).
+      sameFactory: Number((picked as any)?.stufe) >= 3,
     });
   }, [mp, picked, id, isMarkenProdukt, user?.uid]);
   // Logo im Hero-/Morph-Title = MARKE (mp.marke.bild, z.B. Castello), NICHT der
