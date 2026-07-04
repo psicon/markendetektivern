@@ -966,17 +966,22 @@ export default function ProductComparisonScreen() {
 
   // Teilen: HTTPS-Link auf die Share-Landing-Page; Empfänger landet per
   // Deep-Link auf GENAU dieser Vergleichsseite (gleiche id + type-Anker).
-  // Nur mp.name als Titel — brandName ist der Hersteller (oft schon im
-  // Produktnamen enthalten, doppelt wäre sperrig).
+  // Der "Star" der Message ist die gewählte NoName-Alternative (picked)
+  // mit ihrer Ersparnis gegenüber dem Markenprodukt (mp) — gleiche
+  // savings()-Logik wie das Badge im Karussell.
   const onShare = useCallback(() => {
     if (!mp) return;
+    const sv = savings(mp as any, (picked as any) ?? null);
     void shareProduct({
       kind: isMarkenProdukt ? 'vm' : 'vn',
       id: String(id),
-      name: (mp?.name ?? '').trim(),
+      name: (picked?.name ?? mp?.name ?? '').trim(),
       uid: user?.uid ?? null,
+      savingsPct: sv.pct,
+      savingsEur: sv.eur,
+      vsBrandName: (mp?.name ?? '').trim() || null,
     });
-  }, [mp, id, isMarkenProdukt, user?.uid]);
+  }, [mp, picked, id, isMarkenProdukt, user?.uid]);
   // Logo im Hero-/Morph-Title = MARKE (mp.marke.bild, z.B. Castello), NICHT der
   // echte Hersteller (mp.hersteller = hersteller_new, z.B. Arla → trägt das alte
   // MUH-Logo). Gleiche Quelle wie das Hersteller-Info-Sheet (marke?.bild).

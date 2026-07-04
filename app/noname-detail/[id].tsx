@@ -32,6 +32,7 @@ import { DetailErrorState } from '@/components/design/DetailErrorState';
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
 import { HeaderShareButton } from '@/components/design/HeaderShareButton';
 import { shareProduct } from '@/lib/services/productShare';
+import { calculateSavings } from '@/lib/utils/savings';
 import { usePressLock } from '@/lib/hooks/usePressLock';
 import { FadingImage } from '@/components/design/FadingImage';
 import { CounterBadge } from '@/components/design/CounterBadge';
@@ -654,7 +655,26 @@ export default function NoNameDetailScreen() {
   const onShare = useCallback(() => {
     if (!p) return;
     const title = `${handelsmarkeName ? `${handelsmarkeName} ` : ''}${p?.name ?? ''}`.trim();
-    void shareProduct({ kind: 'n', id: String(id), name: title, uid: user?.uid ?? null });
+    // Ersparnis für den Message-Pitch: gleiche Logik wie das In-App-Badge
+    // (calculateSavings). Stufe-1/2-Waisen ohne markenProdukt-Ref liefern
+    // dort ZERO (brand-Arg fehlt) → dann die precomputed Felder direkt,
+    // mit derselben Beide->0-Regel wie savings.ts Stufe 1.
+    const sv = calculateSavings((p?.markenProdukt as any) ?? null, p as any);
+    let pct = sv.pct;
+    let eur = sv.eur;
+    if (pct <= 0 && Number(p?.ersparnis) > 0 && Number(p?.ersparnisProz) > 0) {
+      pct = Math.round(Number(p.ersparnisProz));
+      eur = Number(p.ersparnis);
+    }
+    void shareProduct({
+      kind: 'n',
+      id: String(id),
+      name: title,
+      uid: user?.uid ?? null,
+      savingsPct: pct,
+      savingsEur: eur,
+      vsBrandName: (p?.markenProdukt as any)?.name ?? null,
+    });
   }, [p, handelsmarkeName, id, user?.uid]);
   const herstellerName =
     p?.hersteller?.name ?? p?.hersteller?.herstellername ?? null;
