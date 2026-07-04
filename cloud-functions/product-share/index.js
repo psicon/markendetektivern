@@ -109,7 +109,7 @@ async function resolveSavingsPct(nonameData) {
   return null;
 }
 
-function renderPage({ deepPath, title, description, imageUrl, canonicalUrl, savingsPct, found }) {
+function renderPage({ deepPath, title, ogTitle, description, imageUrl, canonicalUrl, savingsPct, found }) {
   const ogImage = imageUrl || `${SITE_ORIGIN}/app-icon.png`;
   const h1 = found ? escapeHtml(title) : 'Produkt in MarkenDetektive ansehen';
   const sub = escapeHtml(description);
@@ -131,7 +131,7 @@ function renderPage({ deepPath, title, description, imageUrl, canonicalUrl, savi
   <meta name="robots" content="noindex" />
   <meta property="og:site_name" content="MarkenDetektive" />
   <meta property="og:type" content="website" />
-  <meta property="og:title" content="${escapeHtml(title)}" />
+  <meta property="og:title" content="${escapeHtml(ogTitle || title)}" />
   <meta property="og:description" content="${sub}" />
   <meta property="og:image" content="${escapeHtml(ogImage)}" />
   <meta property="og:url" content="${escapeHtml(canonicalUrl)}" />
@@ -246,8 +246,9 @@ exports.productShare = onRequest(
 
     let found = false;
     let title = 'MarkenDetektive';
+    let ogTitle = null;
     let description =
-      'Preise vergleichen & günstige Alternativen entdecken — mit der MarkenDetektive-App.';
+      'Jetzt kostenlos Preise vergleichen & günstige Alternativen entdecken — mit der MarkenDetektive-App.';
     let imageUrl = null;
     let savingsPct = null;
     // Ohne gültigen Pfad: generische Seite, App öffnet auf Home.
@@ -269,9 +270,14 @@ exports.productShare = onRequest(
           if (kind.collection === 'produkte') {
             savingsPct = await resolveSavingsPct(data);
           }
+          // Der Hook gehört in den og:title — Messenger-Karten (iMessage!)
+          // zeigen primär Titel + Bild, die Description oft gar nicht.
+          ogTitle = savingsPct
+            ? `${title} — spare ${savingsPct} %`
+            : `${title} — jetzt Preise vergleichen`;
           description = savingsPct
-            ? `Spare ${savingsPct} % gegenüber dem Markenprodukt — Preisvergleich in der MarkenDetektive-App.`
-            : 'Preise vergleichen & günstige Alternativen entdecken — mit der MarkenDetektive-App.';
+            ? `Die günstige Alternative zum Markenprodukt — jetzt kostenlos in der MarkenDetektive-App vergleichen.`
+            : 'Jetzt kostenlos Preise vergleichen & günstige Alternativen entdecken — mit der MarkenDetektive-App.';
         } else {
           logger.info('product not found', { kind: kindKey, id });
         }
@@ -283,6 +289,6 @@ exports.productShare = onRequest(
 
     res.set('Cache-Control', 'public, max-age=300, s-maxage=600');
     res.set('Content-Type', 'text/html; charset=utf-8');
-    res.status(200).send(renderPage({ deepPath, title, description, imageUrl, canonicalUrl, savingsPct, found }));
+    res.status(200).send(renderPage({ deepPath, title, ogTitle, description, imageUrl, canonicalUrl, savingsPct, found }));
   },
 );
