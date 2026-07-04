@@ -30,6 +30,43 @@ const writeCachedPremium = (value: boolean) => {
   AsyncStorage.setItem(PREMIUM_CACHE_KEY, value ? 'true' : 'false').catch(() => {});
 };
 
+// Boot-Restore-Throttle (User-Anforderung 2026-07-04 „Premium wird oft
+// nicht sauber gezogen"): Ergebnis + Zeitpunkt des letzten erfolgreichen
+// Restores persistieren. Ein kürzlich (<30 Tage) Restore-validiertes
+// "kein Premium" wird beim Boot NICHT erneut restored (kein StoreKit-
+// Hammering bei jedem Start); ein persistiertes true bei SDK-false ist
+// dagegen GENAU der "Premium verloren"-Fall → Restore sofort, ohne
+// Throttle. Key device-global wie premium_cache_v1 (Premium hängt am
+// Store-Account, nicht an der uid). Einziger Schreiber: dieses File.
+const BOOT_RESTORE_KEY = 'premium_boot_restore_v1';
+const BOOT_RESTORE_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
+
+type BootRestoreRecord = { at: number; result: boolean };
+
+const readBootRestoreRecord = async (): Promise<BootRestoreRecord | null> => {
+  try {
+    const raw = await AsyncStorage.getItem(BOOT_RESTORE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.at !== 'number' || typeof parsed?.result !== 'boolean') return null;
+    return parsed as BootRestoreRecord;
+  } catch {
+    return null;
+  }
+};
+
+const writeBootRestoreRecord = (result: boolean) => {
+  AsyncStorage.setItem(BOOT_RESTORE_KEY, JSON.stringify({ at: Date.now(), result })).catch(
+    () => {},
+  );
+};
+
+const isFreshRestoreRecord = (rec: BootRestoreRecord | null): rec is BootRestoreRecord => {
+  if (!rec || !Number.isFinite(rec.at)) return false;
+  const age = Date.now() - rec.at;
+  return Number.isFinite(age) && age >= 0 && age < BOOT_RESTORE_COOLDOWN_MS;
+};
+
 interface RevenueCatContextType {
   isPremium: boolean;
   /** true, sobald der Status aus einer VERLÄSSLICHEN Quelle stammt
@@ -208,17 +245,46 @@ export const RevenueCatProvider: React.FC<RevenueCatProviderProps> = ({ children
             // Read (der stale sein konnte: „Restore bringt es nur
             // MANCHMAL zurück"). NICHT im Simulator: restorePurchases
             // triggert dort den Sandbox-Apple-ID-Prompt in Endlosschleife.
-            revenueCatService
-              .restorePremiumOrNull()
-              .then((restored) => {
-                if (cancelled || restored === null) return;
-                confirmPremium(restored);
-              })
-              .catch(() => {});
+            // GEDROSSELT (2026-07-04): ein <30 Tage altes, Restore-
+            // validiertes false gilt ohne erneuten StoreKit-Restore.
+            void (async () => {
+              const rec = await readBootRestoreRecord();
+              if (cancelled) return;
+              if (isFreshRestoreRecord(rec) && rec.result === false) {
+                // Kürzlich per Restore bestätigt: wirklich kein Premium →
+                // SDK-false darf ohne neuen Restore final werden.
+                confirmPremium(false);
+                return;
+              }
+              // Kein/veralteter Datensatz ODER zuletzt true (= Premium
+              // verloren → sofort zurückholen, kein Throttle für Kunden).
+              const restored = await revenueCatService.restorePremiumOrNull().catch(() => null);
+              if (cancelled || restored === null) return; // Fehler: nichts persistieren/confirmen
+              writeBootRestoreRecord(restored);
+              confirmPremium(restored);
+            })();
           } else {
             // Simulator: kein Restore möglich → SDK-false gilt.
             confirmPremium(false);
           }
+        } else if (isPremiumUser === null && Device.isDevice) {
+          // NEU (User-Report „Premium wird oft nicht sauber gezogen"):
+          // auch bei UNBEKANNTEM SDK-Status (Offline-Start, SDK-Fehler)
+          // einen Restore versuchen — aber NUR-TRUE übernehmen (Forbidden
+          // Pattern 18cc685: unbekannt darf nie als false enden). Ein
+          // frisches Restore-Record blockt auch hier (kürzlich validiert).
+          void (async () => {
+            const rec = await readBootRestoreRecord();
+            if (cancelled || isFreshRestoreRecord(rec)) return;
+            const restored = await revenueCatService.restorePremiumOrNull().catch(() => null);
+            if (cancelled) return;
+            if (restored === true) {
+              writeBootRestoreRecord(true);
+              confirmPremium(true);
+            }
+            // false bei unbekanntem Ausgangsstatus: weder confirmen noch
+            // persistieren — der nächste saubere SDK-Read entscheidet.
+          })();
         }
 
         // Offerings parallel laden mit Timeout
@@ -343,6 +409,8 @@ export const RevenueCatProvider: React.FC<RevenueCatProviderProps> = ({ children
       // → „Käufe wiederherstellen bringt es nur MANCHMAL zurück".
       const restored = await revenueCatService.restorePremiumOrNull();
       if (restored !== null) {
+        // Manueller Restore resettet die 30-Tage-Uhr des Boot-Restores mit.
+        writeBootRestoreRecord(restored);
         confirmPremium(restored);
       }
       console.log('✅ Purchases restored, premium:', restored);
