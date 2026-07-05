@@ -703,6 +703,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   ) => {
     try {
       const currentUser = auth.currentUser;
+      // VOR dem Link festhalten — das native User-Objekt kann nach
+      // linkWithCredential mutieren (isAnonymous flippt am selben Objekt).
+      const wasAnonymous = currentUser?.isAnonymous === true;
       let userCredential: FirebaseAuthTypes.UserCredential;
 
       if (currentUser?.isAnonymous) {
@@ -770,6 +773,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             },
             { merge: true },
           );
+        }
+      }
+
+      // Tester-Finding 1.15 (Build 1242): Nach Anon→Email-Upgrade blieb die
+      // UI bis zum App-Neustart beim "Anonymen Detektiv". Grund: linking
+      // behält die UID → RNFirebase feuert KEIN onAuthStateChanged (gleiche
+      // Firebase-Eigenheit wie beim R2-Fix aadcad4 für Google/Apple/FB in
+      // linkOrSignIn) → setUser/setIsAnonymous/userProfile blieben stale.
+      // Analog R2: Context-State manuell nachziehen. BEWUSST nach
+      // updateProfile + setDoc, damit refreshUserProfile den echten Namen
+      // lädt (Spiegel des Google-Pfads). Im email-already-in-use-Fallback
+      // (UID-Wechsel → onAuthStateChanged feuert) ist der Block idempotent.
+      if (wasAnonymous) {
+        const upgraded = auth.currentUser;
+        if (upgraded) {
+          setUser(upgraded);
+          setIsAnonymous(upgraded.isAnonymous ?? false);
+          // Refresh NUR im Gleiche-UID-Pfad (erfolgreicher Link): die
+          // refreshUserProfile-Closure hält noch die Vor-Link-UID. Im
+          // Fallback (UID-Wechsel) feuert onAuthStateChanged und lädt
+          // das Profil selbst — ein Refresh hier könnte dort das ALTE
+          // Profil laden.
+          if (upgraded.uid === currentUser?.uid) {
+            await refreshUserProfile();
+          }
         }
       }
     } catch (error) {
