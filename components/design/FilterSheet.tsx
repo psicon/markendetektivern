@@ -2,6 +2,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import React, { useEffect, useState } from 'react';
 import {
   Dimensions,
+  KeyboardAvoidingView,
   Modal,
   Pressable,
   ScrollView,
@@ -40,6 +41,14 @@ type Props = {
    * `false`, sonst zählte sie sich selbst.
    */
   registerPresence?: boolean;
+  /**
+   * Opt-in: Sheet über die Tastatur heben — für KURZE Sheets mit TextInput
+   * (z.B. „Neue Liste"), die die Tastatur sonst komplett überdeckt.
+   * Default false = exakt das bisherige Verhalten für alle Callsites.
+   * NICHT für hohe Sheets aktivieren (Input sitzt dort oben und bliebe
+   * sichtbar; mit Padding würde das Sheet oben rauslaufen).
+   */
+  avoidKeyboard?: boolean;
 };
 
 const SWIPE_CLOSE_THRESHOLD = 100;
@@ -59,6 +68,7 @@ export function FilterSheet({
   children,
   maxHeightRatio = 0.78,
   registerPresence = true,
+  avoidKeyboard = false,
 }: Props) {
   const { theme } = useTokens();
   const insets = useSafeAreaInsets();
@@ -174,9 +184,16 @@ export function FilterSheet({
         {/* Sheet container — anchored to the bottom, taps in empty
             area pass through (`pointerEvents="box-none"` on the
             wrapper) to the backdrop Pressable below. The sheet
-            itself catches its own touches. */}
-        <View
+            itself catches its own touches.
+            KeyboardAvoidingView mit enabled={avoidKeyboard}: bei false
+            (Default) verhält es sich exakt wie die vorherige plain View —
+            null Verhaltensänderung für bestehende Sheets. behavior="padding"
+            auf BEIDEN Plattformen: im translucent Modal (statusBar+navBar)
+            greift Androids adjustResize nicht, der padding-Pfad schon. */}
+        <KeyboardAvoidingView
           pointerEvents="box-none"
+          behavior="padding"
+          enabled={avoidKeyboard}
           style={{ flex: 1, justifyContent: 'flex-end' }}
         >
           <Animated.View
@@ -264,7 +281,7 @@ export function FilterSheet({
               {children}
             </ScrollView>
           </Animated.View>
-        </View>
+        </KeyboardAvoidingView>
       </GestureHandlerRootView>
     </Modal>
   );

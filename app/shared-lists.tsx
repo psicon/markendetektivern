@@ -197,8 +197,14 @@ export default function SharedListsOverviewScreen() {
 
       <DetailHeader title="Gemeinsame Listen" onBack={() => router.back()} />
 
-      {/* Erstellen-Sheet (Name) */}
-      <FilterSheet visible={createOpen} title="Neue Liste" onClose={() => setCreateOpen(false)}>
+      {/* Erstellen-Sheet (Name) — avoidKeyboard: das kurze Sheet würde
+          sonst komplett von der iOS-Tastatur überdeckt (autoFocus-Input). */}
+      <FilterSheet
+        visible={createOpen}
+        title="Neue Liste"
+        onClose={() => setCreateOpen(false)}
+        avoidKeyboard
+      >
         <View style={{ paddingBottom: 8, gap: 14 }}>
           <View
             style={{
