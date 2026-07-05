@@ -520,6 +520,14 @@ export default function ExploreScreen() {
   const [stufeSelection, setStufeSelection] = useState<number[]>([]);
   const [brandId, setBrandId] = useState<string>('all');
   const [sort, setSort] = useState<SortKey>('name');
+  // Tester-Finding 2.13 (Build 1242): Sortierung war im SUCH-Modus tot —
+  // 7219e8b hatte den Such-Pfad bewusst ausgespart (Algolia-Relevanz),
+  // die UI bot sie dort aber weiter an. userSortActive = User hat aktiv
+  // sortiert → Such-Treffer werden client-seitig sortiert; ohne aktive
+  // Wahl bleibt das Relevanz-Ranking (Chip zeigt dann "Relevanz").
+  // State statt Ref: die Wahl "Name (A–Z)" bei Default 'name' wäre sonst
+  // ein React-Bailout (setSort ändert nichts) und würde nie anwenden.
+  const [userSortActive, setUserSortActive] = useState(false);
   // Slice C: Inhalt & Qualität — additiv, default-AUS (Pass-Through).
   const [contentFilters, setContentFilters] = useState<ContentFilters>(EMPTY_CONTENT_FILTERS);
   const contentFiltersActive = useMemo(
@@ -2118,8 +2126,17 @@ export default function ExploreScreen() {
       ) : null}
       <FilterChip
         icon="swap-vertical"
-        label={sort === 'preis' ? 'Preis' : 'A–Z'}
-        strong={sort !== 'name'}
+        // 2.13: Im Such-Modus ohne aktive Sortier-Wahl zeigt die Liste das
+        // Algolia-Relevanz-Ranking — das Label sagt das jetzt ehrlich,
+        // statt fälschlich "A–Z" zu behaupten.
+        label={
+          searchActiveQuery && !userSortActive
+            ? 'Relevanz'
+            : sort === 'preis'
+              ? 'Preis'
+              : 'A–Z'
+        }
+        strong={searchActiveQuery ? userSortActive : sort !== 'name'}
         onPress={() => setSheet('sort')}
       />
       <View style={{ width: 1, backgroundColor: theme.border, marginVertical: 4, marginHorizontal: 4 }} />
@@ -2889,8 +2906,10 @@ export default function ExploreScreen() {
         return stufeSelection.includes(s);
       });
     }
+    // 2.13: aktive User-Sortierung schlägt das Relevanz-Ranking.
+    if (userSortActive) items = [...items].sort(productSorter);
     return items;
-  }, [searchHitsEigen, cat, market, handels, stufeSelection]);
+  }, [searchHitsEigen, cat, market, handels, stufeSelection, userSortActive, productSorter]);
 
   const filteredSearchMarken = useMemo<AlgoliaSearchResult[]>(() => {
     let items: any[] = searchHitsMarken as any;
@@ -2911,8 +2930,10 @@ export default function ExploreScreen() {
           getRefId(p.hersteller) === brandId,
       );
     }
+    // 2.13: aktive User-Sortierung schlägt das Relevanz-Ranking.
+    if (userSortActive) items = [...items].sort(productSorter);
     return items;
-  }, [searchHitsMarken, cat, brandId]);
+  }, [searchHitsMarken, cat, brandId, userSortActive, productSorter]);
 
   // Same merge as alleItems (browse) but for filtered search hits.
   const alleSearchItems = useMemo<Array<any>>(() => {
@@ -2920,6 +2941,9 @@ export default function ExploreScreen() {
       ...filteredSearchEigen.map((p) => ({ ...(p as any), __kind: 'eigen' as const })),
       ...filteredSearchMarken.map((p) => ({ ...(p as any), __kind: 'marken' as const })),
     ];
+    // 2.13: aktive User-Sortierung → global sortieren statt Relevanz-
+    // Interleave (die Einzel-Listen sind dann bereits sortiert).
+    if (userSortActive) return tagged.sort(productSorter);
     // Preserve Algolia's relevance-ranked order WITHIN each kind, but
     // interleave by alternating eigen/marken so both types are
     // visible in the first viewport rather than all-eigen-first.
@@ -2936,7 +2960,7 @@ export default function ExploreScreen() {
       const bRank = bIdx * 2 + (b.__kind === 'eigen' ? 0 : 1);
       return aRank - bRank;
     });
-  }, [filteredSearchEigen, filteredSearchMarken]);
+  }, [filteredSearchEigen, filteredSearchMarken, userSortActive, productSorter]);
 
   // ─── Single-item renderer for LegendList. Pure JSX builder; lives
   // outside renderGrid so LegendList can recycle item views without
@@ -4356,6 +4380,7 @@ export default function ExploreScreen() {
           ] as const}
           onChange={(v) => {
             userTouchedSortRef.current = true; // Slice D: User-Wahl gewinnt immer
+            setUserSortActive(true); // 2.13: Sortierung greift auch im Such-Modus
             setSort(v);
             setSheet(null);
           }}
