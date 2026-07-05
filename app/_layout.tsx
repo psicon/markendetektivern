@@ -137,7 +137,13 @@ function ThemedApp() {
         
         // Set custom attributes
         crashlytics().setAttribute('platform', Platform.OS);
-        crashlytics().setAttribute('app_version', '5.0.4');
+        // Dynamisch statt Hardcode — der alte Literal ('5.0.4') hinkte drei
+        // Releases hinterher und hätte bei jedem Versions-Bump manuell
+        // nachgezogen werden müssen.
+        crashlytics().setAttribute(
+          'app_version',
+          Constants.expoConfig?.version ?? 'unknown',
+        );
         
         console.log('✅ Firebase Crashlytics initialized');
       } catch (error) {

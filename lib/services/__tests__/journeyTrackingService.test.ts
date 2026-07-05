@@ -30,7 +30,7 @@ jest.mock('@/lib/firebase', () => ({ db: { __mockDb: true } }));
 
 // expo-application liest beim Modul-Load APP_INFO (Version/Build/OS).
 jest.mock('expo-application', () => ({
-  nativeApplicationVersion: '5.0.7',
+  nativeApplicationVersion: '6.0.0',
   applicationId: 'de.markendetektive',
   nativeBuildVersion: '1186',
 }));
