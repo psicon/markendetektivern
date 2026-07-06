@@ -1466,6 +1466,14 @@ class JourneyTrackingService {
     // ENTFERNT: Journey sollte NICHT nach Purchase beendet werden!
     // User kann weiter einkaufen, umwandeln, etc.
     // this.completeJourney('purchase');
+
+    // WICHTIG: Persistiere zu Firestore! (User-Report 2026-07: trackPurchase
+    // war die EINZIGE Track-Methode ohne Persist — die 'purchased'-Action
+    // blieb rein im RAM und ging bei App-Kill vor dem nächsten Event verloren.
+    // Jetzt wie alle Geschwister debounced schreiben.)
+    if (userId) {
+      this.persistJourneyToFirestore(userId);
+    }
   }
 
 

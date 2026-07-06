@@ -3969,7 +3969,6 @@ export default function ShoppingListScreen() {
       ).then((m) => m.default);
 
       let productsForJourneyTracking: any[] = [];
-      let productsWithIndices: any[] = [];
 
       if (dbProducts.length > 0) {
         productsForJourneyTracking = dbProducts.map((item) => ({
@@ -3983,17 +3982,6 @@ export default function ShoppingListScreen() {
           viewedProductIndex: (item as any).viewedProductIndex,
           quantity: (item as any).anzahl ?? 1, // NEU: Bulk-Purchase weiß wieviele
         }));
-        if (
-          productsForJourneyTracking.length > 0 &&
-          productsForJourneyTracking[0].journeyId
-        ) {
-          productsWithIndices = productsForJourneyTracking.map((p) => ({
-            ...p,
-            viewedProductIndex: journeyTrackingService.getViewedProductIndexAfterAction(
-              p.productId,
-            ),
-          }));
-        }
       }
 
       const promises: Promise<any>[] = [];
@@ -4100,33 +4088,69 @@ export default function ShoppingListScreen() {
           currentItem: 'Achievement wird getrackt...',
           processedItems: totalCount,
         }));
-        if (
-          productsForJourneyTracking.length > 0 &&
-          productsForJourneyTracking[0].journeyId &&
-          productsWithIndices
-        ) {
-          journeyTrackingService
-            .trackBulkPurchaseInSpecificJourney(
-              productsForJourneyTracking[0].journeyId,
-              productsWithIndices,
-              totalSavings,
-              user.uid,
-            )
-            .then(() =>
-              achievementService.trackAction(user.uid, 'complete_shopping', {
-                productCount: productsToAdd,
-                totalSavings,
-              }),
-            )
-            .catch((error) => console.error('Sequential tracking error', error));
-        } else {
-          achievementService
-            .trackAction(user.uid, 'complete_shopping', {
-              productCount: productsToAdd,
-              totalSavings,
-            })
-            .catch((error) => console.error('Achievement tracking error', error));
+        // Journey-Kauf-Tracking PRO HERKUNFTS-JOURNEY (User-Report 2026-07).
+        // Vorher am [0]-Element gegatet → zwei Bugs: (a) GETEILTE Listen tragen
+        // per Design nie eine journeyId → das Gate scheiterte → gar KEIN
+        // Kauf-Event landete in der Journey; (b) bei gemischten/fehlenden
+        // journeyIds wurde die ganze Charge übersprungen bzw. alles der Journey
+        // von Item[0] zugeschlagen. Jetzt exakt wie der Einzel-Kauf
+        // (markAsPurchased): pro Item entscheiden.
+        const currentJid = journeyTrackingService.getCurrentJourneyId();
+        const groups = new Map<string, any[]>();
+        const fallbackItems: any[] = [];
+        for (const p of productsForJourneyTracking) {
+          // In GETEILTEN Listen gehört eine evtl. (Alt-Doc-)journeyId einem
+          // ANDEREN Mitglied → immer Fallback in die Journey des Abhakenden.
+          if (p.journeyId && !activeSharedListId) {
+            const arr = groups.get(p.journeyId) ?? [];
+            arr.push({
+              ...p,
+              // Der viewedProductIndex gilt NUR für die AKTUELLE Journey; für
+              // fremde (historische) Journeys undefined lassen → das Ziel findet
+              // per productId (verhindert Zuordnung an den falschen Slot).
+              viewedProductIndex:
+                p.journeyId === currentJid
+                  ? journeyTrackingService.getViewedProductIndexAfterAction(p.productId)
+                  : undefined,
+            });
+            groups.set(p.journeyId, arr);
+          } else {
+            fallbackItems.push(p);
+          }
         }
+        const sumSavings = (items: any[]) =>
+          items.reduce((s, it) => s + (it.finalSavings || 0) * (it.quantity ?? 1), 0);
+
+        // Pro Herkunfts-Journey ein Bulk-Write (der historische Flush batcht
+        // gleiche journeyIds ohnehin zusammen).
+        groups.forEach((items, jid) => {
+          journeyTrackingService
+            .trackBulkPurchaseInSpecificJourney(jid, items, sumSavings(items), user.uid)
+            .catch((error) =>
+              console.warn('[bulk-purchase] journey group track failed', error),
+            );
+        });
+        // Items ohne eigene Journey (kein journeyId ODER geteilte Liste) → in
+        // die aktive Journey des Abhakenden (persistiert dank trackPurchase-Fix).
+        // Exakt der Einzel-Kauf-Fallback (markAsPurchased).
+        if (fallbackItems.length > 0) {
+          try {
+            journeyTrackingService.trackPurchase(
+              fallbackItems,
+              sumSavings(fallbackItems),
+              user.uid,
+            );
+          } catch (error) {
+            console.warn('[bulk-purchase] journey fallback track failed', error);
+          }
+        }
+        // complete_shopping IMMER genau einmal (unabhängig vom Journey-Pfad).
+        achievementService
+          .trackAction(user.uid, 'complete_shopping', {
+            productCount: productsToAdd,
+            totalSavings,
+          })
+          .catch((error) => console.error('Achievement complete_shopping error:', error));
       }
 
       setPurchaseLoaderState((prev) => ({
