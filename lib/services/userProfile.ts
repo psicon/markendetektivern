@@ -92,15 +92,29 @@ export const createUserProfile = async (user: any, additionalData: Partial<UserP
         lastActivityAt: serverTimestamp(),
         ...additionalData
       };
-      
-      await setDoc(userRef, profileData);
+
+      // merge:true — falls ein paralleler Service (Attribution-Mirror aus
+      // dem AnalyticsProvider, achievementService) das Doc im Race zwischen
+      // unserem getDoc und diesem Write bereits per setDoc(merge) angelegt
+      // hat, würde ein Voll-setDoc dessen Felder (z.B. attribution) wegbügeln.
+      await setDoc(userRef, profileData, { merge: true });
       console.log('✅ User-Profil erstellt für:', user.uid, '(anonymous:', user.isAnonymous, ')');
     } else {
-      // Update lastLoginAt
-      await updateDoc(userRef, {
+      // Doc existiert bereits — Login-Zeit aktualisieren.
+      const update: any = {
         lastLoginAt: serverTimestamp(),
-        lastActivityAt: serverTimestamp()
-      });
+        lastActivityAt: serverTimestamp(),
+      };
+      // Backfill created_time (User-Report 2026-07-06): das Doc kann von
+      // einem anderen Service (Attribution-Mirror / achievementService)
+      // per setDoc(merge) angelegt worden sein, BEVOR diese Funktion lief.
+      // Dann fehlt created_time dauerhaft, weil es nur im Create-Zweig oben
+      // gesetzt wird. Nur nachtragen wenn es WIRKLICH fehlt — einen
+      // bestehenden Wert (wiederkehrender User) NIE überschreiben.
+      if (!(userDoc.data() as any)?.created_time) {
+        update.created_time = serverTimestamp();
+      }
+      await updateDoc(userRef, update);
       console.log('🔄 Login-Zeit aktualisiert für:', user.uid);
     }
   } catch (error) {
