@@ -31,7 +31,7 @@ import {
   FirebaseAuthTypes,
 } from '@react-native-firebase/auth';
 import * as WebBrowser from 'expo-web-browser';
-import { Platform } from 'react-native';
+import { NativeModules, Platform } from 'react-native';
 
 const FB_APP_ID = '1757877148062670';
 const FB_REDIRECT_URI = `fb${FB_APP_ID}://authorize`;
@@ -82,19 +82,25 @@ export const isFacebookAuthAvailable = async (): Promise<boolean> => true;
  * sonst lehnt Facebook den nativen Login ab.
  */
 const getFacebookCredentialAndroid = async (): Promise<FacebookCredentialBundle | null> => {
-  // Lazy require: NUR auf Android — react-native-fbsdk-next darf auf iOS
-  // nicht mal geladen werden (SIGABRT). Kein `react-native`-Import, daher
-  // erlaubt.
-  const FBSDK = require('react-native-fbsdk-next');
-  const { LoginManager, AccessToken, Settings } = FBSDK;
-
-  // Plugin-Config hat `isAutoInitEnabled: false` → SDK explizit hochfahren.
+  // SDK ZUERST initialisieren — direkt über das native FBSettings-Modul,
+  // BEVOR das Paket geladen wird. Grund (am Gerät bewiesen, Build 1203):
+  // `require('react-native-fbsdk-next')` zieht über den index auch
+  // FBAccessToken.ts rein (`const AccessToken = NativeModules.FBAccessToken`),
+  // dessen nativer initialize() eine AccessTokenTracker baut und mit
+  // "SDK has not been initialized" CRASHT, wenn das SDK noch nicht läuft
+  // (Plugin: isAutoInitEnabled:false). NativeModules.FBSettings triggert
+  // FBAccessToken NICHT → wir initialisieren darüber, DANN erst das Paket.
+  const NativeSettings: any = NativeModules.FBSettings;
   try {
-    Settings.setAppID(FB_APP_ID);
-    Settings.initializeSDK();
+    NativeSettings?.setAppID(FB_APP_ID);
+    NativeSettings?.initializeSDK();
   } catch (e: any) {
-    if (__DEV__) console.warn('[facebookAuth][android] initializeSDK failed:', e?.message);
+    if (__DEV__) console.warn('[facebookAuth][android] native initializeSDK failed:', e?.message);
   }
+
+  // Jetzt ist das SDK hochgefahren → das Paket lädt ohne AccessToken-Crash.
+  // Lazy require: NUR auf Android — auf iOS wird das SDK nie angefasst (SIGABRT).
+  const { LoginManager, AccessToken } = require('react-native-fbsdk-next');
 
   let result: any;
   try {
