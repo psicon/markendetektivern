@@ -38,6 +38,7 @@ interface AnalyticsContextType {
   trackJourneyAbandonment: (reason: 'filter_timeout' | 'app_backgrounded' | 'filters_cleared' | 'no_results' | 'too_complex' | 'price_too_high' | 'tab_switched', context?: any) => void;
   trackFilterCleared: () => void;
   trackNoResultsFound: (searchQuery?: string, activeFilters?: any) => void;
+  trackSearchQuery: (searchQuery: string, resultCount?: number) => void;
   trackTabSwitched: (fromTab: string, toTab: string) => void;
   checkFilterComplexityOverload: () => void;
   trackProductViewWithJourney: (productId: string, productType: 'brand' | 'noname', productName: string, position?: number) => void;
@@ -345,6 +346,12 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
     journeyTrackingService.trackNoResultsFound(searchQuery, activeFilters, user?.uid);
   }, [user?.uid]);
 
+  // Journey-Such-Tracking (Regression e0591bc reaktiviert): Suchbegriff in
+  // die Journey (searchedproducts[]) — Such-Intent wieder B2B-sichtbar.
+  const trackSearchQuery = useCallback((searchQuery: string, resultCount?: number) => {
+    journeyTrackingService.trackSearchQuery(searchQuery, resultCount, user?.uid);
+  }, [user?.uid]);
+
   const trackTabSwitched = useCallback((fromTab: string, toTab: string) => {
     journeyTrackingService.trackTabSwitched(fromTab, toTab, user?.uid);
   }, [user?.uid]);
@@ -489,6 +496,7 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
       trackProductComparison,
       trackComparisonEnd,
       trackRemoveFromCartWithJourney,
+      trackSearchQuery,
     }),
     [
       trackProductView,
@@ -518,6 +526,7 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
       trackProductComparison,
       trackComparisonEnd,
       trackRemoveFromCartWithJourney,
+      trackSearchQuery,
     ],
   );
 
@@ -551,6 +560,7 @@ export const AnalyticsProvider: React.FC<AnalyticsProviderProps> = ({ children }
         trackProductComparison,
         trackComparisonEnd,
         trackRemoveFromCartWithJourney,
+        trackSearchQuery,
       };
 
   return (

@@ -1707,6 +1707,16 @@ export default function ExploreScreen() {
     setSearchQueryIdEigen(undefined);
     setSearchQueryIdMarken(undefined);
     setQuery('');
+    // Journey: kompletter Reset (Filter UND Suche). activeFilters explizit leeren —
+    // der Change-Effekt unten ist auf hasAny gated und feuert nach einem Full-Reset
+    // NICHT, und trackFilterCleared() räumt activeFilters nicht auf (nur Abandonment-
+    // Log). Ohne diesen expliziten Reset bliebe der letzte Filter-Snapshot (inkl.
+    // searchQuery) stale in der Journey kleben.
+    try {
+      analytics?.updateJourneyFilters?.({ sortBy: 'name' }, { action: 'cleared', filterType: 'all', filterValue: '' });
+    } catch {
+      /* fire-and-forget */
+    }
   }, [analytics]);
 
   // 📊 Analytics — change-detection: when any filter state flips,
@@ -1813,6 +1823,12 @@ export default function ExploreScreen() {
   // ersetzt activeFilters komplett) immer wenn sich etwas ändert.
   const buildJourneyActiveFilters = useCallback(() => {
     const af: any = { sortBy: sort === 'preis' ? 'price' : 'name' };
+    // Such-Kontext in die Journey (Regression e0591bc reaktiviert): solange eine
+    // Suche aktiv ist, trägt der Snapshot searchQuery mit — updateFilters ersetzt
+    // activeFilters komplett, also MUSS searchQuery hier drin sein, sonst würde der
+    // nächste View-/Filter-Write ihn wieder wegräumen. trackProductView liest
+    // activeFilters.searchQuery und schreibt daraus discoveryContext.searchQuery.
+    if (searchActiveQuery) af.searchQuery = searchActiveQuery;
     if (market !== 'all') af.markets = [{ id: market, name: market }];
     if (cat !== 'all') af.categories = [{ id: cat, name: cat }];
     if (handels !== 'all') af.handelsmarke = handels;
@@ -1830,7 +1846,7 @@ export default function ExploreScreen() {
     }
     if (contentFilters.ki !== 'off') af.kiQuality = contentFilters.ki;
     return af;
-  }, [market, cat, handels, brandId, sort, stufeSelection, contentFilters]);
+  }, [market, cat, handels, brandId, sort, stufeSelection, contentFilters, searchActiveQuery]);
 
   useEffect(() => {
     const hasAny =
@@ -2458,6 +2474,22 @@ export default function ExploreScreen() {
         // Stash queryIDs for Insights click-tracking on the next tap.
         setSearchQueryIdEigen(res.queryIdEigen);
         setSearchQueryIdMarken(res.queryIdMarken);
+        // Journey-Tracking (Regression e0591bc reaktiviert): Such-Intent zurück in
+        // die B2B-Journey. (1) searchedproducts[] via trackSearchQuery,
+        // (2) activeFilters.searchQuery — damit jeder folgende Treffer-Tap
+        // discoveryContext.searchQuery trägt ("gesucht X → gesehen Y → gekauft Z").
+        analytics?.trackSearchQuery?.(trimmed, res.totalHits);
+        try {
+          const jf = buildJourneyActiveFilters();
+          jf.searchQuery = trimmed;
+          analytics?.updateJourneyFilters?.(jf, {
+            action: 'added',
+            filterType: 'search',
+            filterValue: trimmed,
+          });
+        } catch {
+          /* fire-and-forget */
+        }
       } catch (e) {
         if (isStale()) return;
         console.warn('Stöbern in-place search failed', e);
@@ -2471,7 +2503,7 @@ export default function ExploreScreen() {
         if (!isStale()) setSearchLoading(false);
       }
     },
-    [tab, analytics, enrichWithFirestore, searchFacetsEigen, searchFacetsMarken, searchContentFilters, user?.uid],
+    [tab, analytics, enrichWithFirestore, searchFacetsEigen, searchFacetsMarken, searchContentFilters, user?.uid, buildJourneyActiveFilters],
   );
   runSearchRef.current = runSearch;
 
@@ -2673,7 +2705,20 @@ export default function ExploreScreen() {
     setSearchQueryIdEigen(undefined);
     setSearchQueryIdMarken(undefined);
     setQuery('');
-  }, []);
+    // Journey: Such-Kontext beenden. activeFilters ohne searchQuery neu setzen —
+    // updateFilters ERSETZT komplett (kein Merge), also bleiben aktive Filter
+    // erhalten, nur searchQuery fällt raus. Ohne das würde der Suchbegriff nach
+    // dem ✕ ewig in activeFilters (und damit discoveryContext künftiger Views)
+    // kleben. buildJourneyActiveFilters trägt hier noch searchQuery (State-Flip
+    // ist async) → explizit löschen.
+    try {
+      const jf = buildJourneyActiveFilters();
+      delete jf.searchQuery;
+      analytics?.updateJourneyFilters?.(jf, { action: 'cleared', filterType: 'search', filterValue: '' });
+    } catch {
+      /* fire-and-forget */
+    }
+  }, [analytics, buildJourneyActiveFilters]);
 
   const renderSearchInput = (forTab: Tab) => (
     <View
