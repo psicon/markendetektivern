@@ -138,22 +138,28 @@ export function AuthMethodButtons({
         </Pressable>
       )}
 
-      {/* Facebook — UI fertig, Handler placeholder. Lowercase "facebook"
-          ist Facebook-Brand-Style (eigene Wordmark seit 2019). */}
-      <Pressable
-        onPress={onFacebook}
-        disabled={busy}
-        style={({ pressed }) => [
-          styles.btnBase,
-          styles.btnFacebook,
-          (pressed || busy) && styles.btnPressed,
-        ]}
-      >
-        <Text style={[styles.fbF]}>f</Text>
-        <Text style={[styles.btnText, styles.btnTextWhite]}>
-          {socialLabel('facebook')}
-        </Text>
-      </Pressable>
+      {/* Facebook — NUR iOS. Auf Android ist der FB-Login deaktiviert:
+          der Browser-Flow bounct in den Play Store (fb://authorize-Redirect
+          = Native-Handoff, am Gerät belegt), und das native SDK crasht unter
+          New Architecture beim Init (react-native-fbsdk-next lädt FBAccessToken
+          eager → "SDK not initialized"). iOS-Browser-Flow läuft unverändert.
+          Lowercase "facebook" ist Facebook-Brand-Style (Wordmark seit 2019). */}
+      {Platform.OS !== 'android' && (
+        <Pressable
+          onPress={onFacebook}
+          disabled={busy}
+          style={({ pressed }) => [
+            styles.btnBase,
+            styles.btnFacebook,
+            (pressed || busy) && styles.btnPressed,
+          ]}
+        >
+          <Text style={[styles.fbF]}>f</Text>
+          <Text style={[styles.btnText, styles.btnTextWhite]}>
+            {socialLabel('facebook')}
+          </Text>
+        </Pressable>
+      )}
 
       {/* Trust-Hint — optional ausblendbar. */}
       {showTrustHint && (
