@@ -31,6 +31,7 @@ import {
   FirebaseAuthTypes,
 } from '@react-native-firebase/auth';
 import * as WebBrowser from 'expo-web-browser';
+import { Platform } from 'react-native';
 
 const FB_APP_ID = '1757877148062670';
 const FB_REDIRECT_URI = `fb${FB_APP_ID}://authorize`;
@@ -61,10 +62,109 @@ export const lastFbDebug: { tokenPrefix: string; tokenLen: number; graphStatus: 
 export const isFacebookAuthAvailable = async (): Promise<boolean> => true;
 
 /**
- * Browser-based Facebook OAuth flow.
+ * ANDROID-ONLY: nativer react-native-fbsdk-next LoginManager-Flow.
+ *
+ * Grund (2026-07-07, am echten Gerät per `adb logcat` bewiesen): der
+ * Browser-OAuth-Flow unten bounct auf Android in den Play Store. Facebook
+ * behandelt das `fb<APPID>://authorize`-Redirect auf Android als
+ * Native-App-Handoff und leitet `market://details/…` statt zum Scheme —
+ * `fb…://authorize` erscheint nie, die FB-App wird nicht aufgerufen.
+ * Das native SDK handhabt den Custom-Tab-Redirect (`fbconnect://cct.<pkg>`)
+ * korrekt und umgeht das Problem.
+ *
+ * iOS bleibt BEWUSST beim Browser-Flow (siehe Datei-Header): dort wirft das
+ * FB-SDK bei jedem Init einen SIGABRT (FBSDKCoreKit + iOS 26 + New Arch,
+ * Build 1180). Deshalb wird das SDK hier NUR auf Android geladen (lazy
+ * `require` im Android-Zweig) — auf iOS fasst es nie jemand an.
+ *
+ * Voraussetzung: die Android-Key-Hashes des Builds müssen in der
+ * FB-Console (App-Einstellungen → Android → Key-Hashes) hinterlegt sein,
+ * sonst lehnt Facebook den nativen Login ab.
+ */
+const getFacebookCredentialAndroid = async (): Promise<FacebookCredentialBundle | null> => {
+  // Lazy require: NUR auf Android — react-native-fbsdk-next darf auf iOS
+  // nicht mal geladen werden (SIGABRT). Kein `react-native`-Import, daher
+  // erlaubt.
+  const FBSDK = require('react-native-fbsdk-next');
+  const { LoginManager, AccessToken, Settings } = FBSDK;
+
+  // Plugin-Config hat `isAutoInitEnabled: false` → SDK explizit hochfahren.
+  try {
+    Settings.setAppID(FB_APP_ID);
+    Settings.initializeSDK();
+  } catch (e: any) {
+    if (__DEV__) console.warn('[facebookAuth][android] initializeSDK failed:', e?.message);
+  }
+
+  let result: any;
+  try {
+    result = await LoginManager.logInWithPermissions(['public_profile', 'email']);
+  } catch (error: any) {
+    if (__DEV__) console.error('[facebookAuth][android] logInWithPermissions error:', error);
+    throw new Error('Facebook-Login konnte nicht geöffnet werden.');
+  }
+  // isCancelled → User hat abgebrochen (kein Fehler)
+  if (!result || result.isCancelled) {
+    if (__DEV__) console.log('[facebookAuth][android] login cancelled');
+    return null;
+  }
+
+  const tokenData = await AccessToken.getCurrentAccessToken();
+  const accessToken = tokenData?.accessToken ? String(tokenData.accessToken) : null;
+  if (!accessToken) {
+    if (__DEV__) console.warn('[facebookAuth][android] no access token after login');
+    return null;
+  }
+  lastFbDebug.tokenPrefix = accessToken.slice(0, 12);
+  lastFbDebug.tokenLen = accessToken.length;
+  lastFbDebug.graphStatus = 'pending';
+
+  // Graph-Verify + Profildaten — identische Logik wie der iOS-Pfad, damit
+  // beide Plattformen dieselbe FacebookCredentialBundle liefern.
+  let email: string | null = null;
+  let displayName: string | null = null;
+  let photoURL: string | null = null;
+  let graphProfileOk = false;
+  try {
+    const profileRes = await fetch(
+      `https://graph.facebook.com/v22.0/me?fields=id,email,name,picture&access_token=${encodeURIComponent(accessToken)}`,
+    );
+    if (profileRes.ok) {
+      const profile = await profileRes.json();
+      graphProfileOk = true;
+      lastFbDebug.graphStatus = `OK id=${profile?.id ?? '?'}`;
+      if (typeof profile?.email === 'string') email = profile.email;
+      if (typeof profile?.name === 'string') displayName = profile.name;
+      if (profile?.picture?.data?.url) photoURL = profile.picture.data.url;
+    } else {
+      const errBody = await profileRes.text();
+      lastFbDebug.graphStatus = `${profileRes.status}: ${errBody.slice(0, 100)}`;
+      if (__DEV__) console.warn('[facebookAuth][android] Graph /me failed:', profileRes.status, errBody);
+    }
+  } catch (graphErr: any) {
+    lastFbDebug.graphStatus = `fetch err: ${graphErr?.message ?? '?'}`;
+    if (__DEV__) console.warn('[facebookAuth][android] Graph fetch failed:', graphErr?.message);
+  }
+  if (!graphProfileOk) {
+    throw new Error(
+      'Facebook-Login fehlgeschlagen: Token von Facebook abgelehnt. Bitte erneut versuchen.',
+    );
+  }
+
+  const credential = FacebookAuthProvider.credential(accessToken);
+  return { credential, email, displayName, photoURL };
+};
+
+/**
+ * Browser-based Facebook OAuth flow (iOS).
  * Returns null bei User-Cancel, sonst die Firebase-Credential.
  */
 export const getFacebookCredential = async (): Promise<FacebookCredentialBundle | null> => {
+  // Android → nativer SDK-Flow (Browser-OAuth bounct dort in den Play Store).
+  // iOS fällt durch zum UNVERÄNDERTEN Browser-Flow darunter.
+  if (Platform.OS === 'android') {
+    return getFacebookCredentialAndroid();
+  }
   // Build OAuth URL — implicit flow (response_type=token gibt direkt
   // access_token zurück im URL-Fragment, kein Token-Exchange nötig).
   // T17.17: `auth_type=rerequest` raus — triggert Limited Login auf iOS,
