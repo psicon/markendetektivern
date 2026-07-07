@@ -662,9 +662,11 @@ class JourneyTrackingService {
           activeFilters: data.activeFilters,
           filterMetrics: data.filterMetrics,
           viewedProducts: data.viewedProducts || [],
-          addedToCart: data.addedToCart || [],
-          addedToFavorites: data.addedToFavorites,
-          purchased: data.purchased,
+          // ENTFERNT (Journey-Audit 2026-07): addedToCart/addedToFavorites/
+          // purchased waren tote Top-Level-Felder (nicht im Interface, seit
+          // der actions[]-Migration ungelesen). Der Restore kopierte sie nur
+          // ins RAM, wo sie niemand las; der Persist schrieb sie nie zurück.
+          // Entfernt = 4 tsc-Fehler weg, kein Verhaltensunterschied.
           converted: data.converted || [], // NEU: Lade converted Array
           location: data.location, // NEU: Location-Daten laden
           consumerProfile: data.consumerProfile, // 86ca2ruh9: Snapshot beibehalten (nicht neu lesen)
@@ -2205,8 +2207,16 @@ class JourneyTrackingService {
         lastUpdated: serverTimestamp(),
         completionReason,
         journeyDurationMs: Date.now() - journeyToFinalize.startTime,
-        finalStatus: journeyToFinalize.purchased ? 'purchased' :
-                    (journeyToFinalize.addedToCart && journeyToFinalize.addedToCart.length > 0) ? 'in_cart' :
+        // BUGFIX (Journey-Audit 2026-07): finalStatus wurde aus den toten
+        // Top-Level-Feldern .purchased/.addedToCart abgeleitet, die die
+        // Live-Session seit der actions[]-Migration NIE mehr setzt (nur ein
+        // Restore alter Docs füllte sie). Folge: JEDE finalisierte Journey
+        // wurde 'completed'/'abandoned' — ein Kauf war im Headline-Feld nie
+        // sichtbar und finalStatus widersprach dem korrekt aus actions[]
+        // abgeleiteten status-Feld (Z. 2090). Jetzt identische Ableitung wie
+        // status, nur mit terminaler Basis 'completed' statt 'active'.
+        finalStatus: (journeyToFinalize.viewedProducts || []).some(p => this.getFinalStatusFromActions(p.actions).wasPurchased) ? 'purchased' :
+                    (journeyToFinalize.viewedProducts || []).some(p => this.getFinalStatusFromActions(p.actions).wasAddedToCart) ? 'in_cart' :
                     journeyToFinalize.abandoned ? 'abandoned' : 'completed'
       };
 
@@ -2540,6 +2550,19 @@ class JourneyTrackingService {
     // Consent-Gate (ClickUp 86ca6u6xd): Journey-Outcome-Writes nur mit
     // gültigem Markt-Daten-Consent.
     if (!isMarketDataConsentGranted()) return;
+    // BUGFIX (Journey-Audit 2026-07, Lost-Update-Race): Wenn das Ziel die
+    // AKTUELLE (im RAM lebende) Journey ist, NICHT über den historischen
+    // Buffer+Flush schreiben. Sonst konkurrieren zwei nicht-transaktionale
+    // Read-Modify-Write-Writer auf demselben Doc: der debounced RAM-Persist
+    // schreibt sein RAM-viewedProducts (das den Kauf nie sah, weil er nur
+    // über den Flush lief) und clobbert die frisch geflushte 'purchased'-
+    // Action. trackPurchase (RAM-Pfad) = EIN Writer → kein Race; findet das
+    // viewedProduct per productId (korrekt für die aktuelle Journey) und
+    // persistiert via denselben debounced Persist.
+    if (this.currentJourney && journeyId === this.currentJourney.journeyId) {
+      this.trackPurchase(products, totalSavings, userId);
+      return;
+    }
     // Fix (2026-05-07): in per-Journey-Buffer akkumulieren statt direkt
     // schreiben. Verhindert WriteStream-Drops bei Mark-as-Purchased-Burst.
     let entry = this.historicalJourneyDebounce.get(journeyId);
@@ -2679,14 +2702,24 @@ class JourneyTrackingService {
     // Consent-Gate (ClickUp 86ca6u6xd): Journey-Outcome-Writes nur mit
     // gültigem Markt-Daten-Consent.
     if (!isMarketDataConsentGranted()) return;
+    // BUGFIX (Journey-Audit 2026-07, Lost-Update-Race): Ziel = aktuelle
+    // RAM-Journey → über trackPurchase (EIN Writer) statt getDocs+updateDoc,
+    // das sonst mit dem debounced Persist um dasselbe Doc racet und die
+    // frisch geschriebene 'purchased'-Action clobbert. Analog zum Single-Pfad
+    // trackPurchaseInSpecificJourney. Ältere (inaktive) Journeys laufen
+    // weiter über den getDocs+updateDoc-Pfad (kein Race, anderes Doc).
+    if (this.currentJourney && journeyId === this.currentJourney.journeyId) {
+      this.trackPurchase(products, totalSavings, userId);
+      return;
+    }
     try {
       const { query, where, getDocs, updateDoc, collection } = await import('@react-native-firebase/firestore');
-      
+
       // Finde die spezifische Journey
       const userJourneysRef = collection(db, 'users', userId, 'journeys');
       const q = query(userJourneysRef, where('journeyId', '==', journeyId));
       const snapshot = await getDocs(q);
-      
+
       if (!snapshot.empty) {
         const journeyDoc = snapshot.docs[0];
         const journeyData = journeyDoc.data() as JourneyContext;
