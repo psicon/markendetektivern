@@ -88,6 +88,7 @@ import BatchActionLoader from '@/components/ui/BatchActionLoader';
 import { ImageWithShimmer } from '@/components/ui/ImageWithShimmer';
 import { TOAST_MESSAGES } from '@/constants/ToastMessages';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
+import { backOrHome } from '@/lib/utils/nav';
 import { getProductImage } from '@/lib/utils/productImage';
 import { calculateSavings } from '@/lib/utils/savings';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -2546,8 +2547,18 @@ export default function ShoppingListScreen() {
 
   // Deep-Link/Join-Einstieg: /shopping-list?list=<id> aktiviert die Liste direkt.
   const { list: listParam } = useLocalSearchParams<{ list?: string }>();
+  // Frisch beigetretene Liste (Join-CF war erfolgreich, sonst gäbe es den
+  // Param nicht): der mySharedLists-Listener kann seinen ersten Snapshot
+  // noch OHNE die neue Mitgliedschaft liefern (Server-Propagation). Bis die
+  // Liste einmal im Snapshot war, gilt sie als "pending" und ist vom
+  // Nicht-mehr-verfügbar-Rauswurf unten ausgenommen — deterministisch über
+  // das Listener-Signal, bewusst KEIN Timer (Forbidden Pattern). Fällt die
+  // Liste tatsächlich weg, greift das Sicherheitsnetz: der Items-Listener
+  // resettet bei permission-denied auf „Meine Liste".
+  const pendingJoinListIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (typeof listParam === 'string' && listParam.trim()) {
+      pendingJoinListIdRef.current = listParam.trim();
       setActiveSharedListId(listParam.trim());
     }
   }, [listParam]);
@@ -2581,15 +2592,24 @@ export default function ShoppingListScreen() {
 
   // Wenn ich aus der aktiven Liste entfernt wurde / sie gelöscht wurde
   // (Liste verschwindet aus der Subscription), zurück auf „Meine Liste".
+  // Ausnahme: die frisch beigetretene Deep-Link-Liste (pendingJoinListIdRef)
+  // bleibt verschont, bis der Listener sie einmal geliefert hat — sonst wirft
+  // der Erst-Snapshot-Race den User direkt nach dem Join wieder raus
+  // (User-Report 2026-07: „beigetreten, aber Liste nicht ausgewählt").
   useEffect(() => {
-    if (
-      activeSharedListId &&
-      mySharedLists.length > 0 &&
-      !mySharedLists.some((l) => l.id === activeSharedListId)
-    ) {
-      setActiveSharedListId(null);
-      showInfoToast('Diese geteilte Liste ist nicht mehr verfügbar.', 'info');
+    if (!activeSharedListId) return;
+    if (mySharedLists.some((l) => l.id === activeSharedListId)) {
+      // Liste ist (jetzt) im Snapshot → Join bestätigt, Pending auflösen.
+      // Ab hier gilt wieder der normale Rauswurf (Kick/Löschung).
+      if (pendingJoinListIdRef.current === activeSharedListId) {
+        pendingJoinListIdRef.current = null;
+      }
+      return;
     }
+    if (pendingJoinListIdRef.current === activeSharedListId) return;
+    if (mySharedLists.length === 0) return; // leerer Erst-Snapshot (wie bisher)
+    setActiveSharedListId(null);
+    showInfoToast('Diese geteilte Liste ist nicht mehr verfügbar.', 'info');
   }, [mySharedLists, activeSharedListId]);
 
   const myDisplayName =
@@ -4747,7 +4767,10 @@ export default function ShoppingListScreen() {
           tab bar. zIndex 10, absolute over the scrollable body. */}
       <Chrome
         title={activeSharedList?.name ?? 'Einkaufszettel'}
-        onBack={() => router.back()}
+        // backOrHome statt router.back(): via Join-Deep-Link (QR-Scan,
+        // Kalt-Start) ist dieser Screen der EINZIGE im Stack — ein nacktes
+        // back() wäre ein No-op und der User steckt fest (User-Report 2026-07).
+        onBack={backOrHome}
         right={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Pressable
