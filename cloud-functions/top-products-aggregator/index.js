@@ -224,6 +224,13 @@ async function aggregateMostViewed() {
       const uniqInJourney = new Set();
       for (const vp of arr) {
         if (!vp?.productId) continue;
+        // ClickUp 86cape99c: Views aus dem Onboarding-Walkthrough sind
+        // aufgeforderte Taps (Demo-Karte "Tippe diese Karte") — der Client
+        // stempelt sie mit discoveryContext.method='coachmark'. Nicht als
+        // organischen Aufruf zählen, sonst verzerrt jeder neue User die
+        // "meist aufgerufen"-Liste (Feedback-Schleife: Demo-Produkt →
+        // Ranking → noch mehr Views).
+        if (vp?.discoveryContext?.method === 'coachmark') continue;
         const type = vp.productType === 'brand' || vp.productType === 'marken'
           ? 'marken'
           : 'noname';

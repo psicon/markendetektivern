@@ -134,8 +134,14 @@ async function aggregate() {
     if (Array.isArray(vps)) {
       for (const vp of vps) {
         const actions = Array.isArray(vp.actions) ? vp.actions : [];
-        if (actions.some((a) => a && a.type === 'viewed')) funnel.viewed += 1;
-        if (actions.some((a) => a && a.type === 'compared')) funnel.compared += 1;
+        // ClickUp 86cape99c: Walkthrough-Demo-Views (discoveryContext.method
+        // ='coachmark') sind aufgeforderte Taps — sie zählen NICHT in den
+        // View-/Compare-Funnel. Entscheidungen (Cart/Kauf, decisionOf unten)
+        // bleiben drin: die trifft der User danach real.
+        const isCoachmarkView =
+          vp && vp.discoveryContext && vp.discoveryContext.method === 'coachmark';
+        if (!isCoachmarkView && actions.some((a) => a && a.type === 'viewed')) funnel.viewed += 1;
+        if (!isCoachmarkView && actions.some((a) => a && a.type === 'compared')) funnel.compared += 1;
         const decision = decisionOf(vp);
         if (decision === 'cart') funnel.cart += 1;
         if (decision === 'purchased') funnel.purchased += 1;

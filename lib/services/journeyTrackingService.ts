@@ -115,9 +115,11 @@ export interface JourneyContext {
     position?: number; // Position in Liste
     fromScreen: string; // Screen von dem das Produkt aufgerufen wurde
     
-    // NEU: Discovery Context - wie wurde das Produkt gefunden
+    // NEU: Discovery Context - wie wurde das Produkt gefunden.
+    // 'coachmark' = aufgeforderter Tap aus dem Onboarding-Walkthrough
+    // (ClickUp 86cape99c) — Aggregatoren zählen ihn nicht als organisch.
     discoveryContext: {
-      method: 'browse' | 'search' | 'scan' | 'category' | 'favorites' | 'repurchase' | 'comparison' | 'conversion_source' | 'conversion_result';
+      method: 'browse' | 'search' | 'scan' | 'category' | 'favorites' | 'repurchase' | 'comparison' | 'conversion_source' | 'conversion_result' | 'coachmark';
       searchQuery?: string;
       activeFiltersSnapshot?: any; // Filter zum Zeitpunkt der Entdeckung
       comparedWithProducts?: { // Bei Vergleichsansicht
@@ -877,12 +879,16 @@ class JourneyTrackingService {
     productType: 'brand' | 'noname' | 'external',
     productName: string,
     userId?: string,
+    // Durchreiche für den Coachmark-Stempel (siehe trackProductView).
+    // Greift nur beim NEU-Anlegen — ein bereits organisch getracktes
+    // Produkt wird nie nachträglich umgestempelt (early return oben).
+    discoveryMethodOverride?: 'coachmark',
   ): void {
     try {
       if (!productId) return;
       const exists = this.currentJourney?.viewedProducts?.some((p) => p.productId === productId);
       if (exists) return;
-      this.trackProductView(productId, productType, productName, undefined, userId);
+      this.trackProductView(productId, productType, productName, undefined, userId, discoveryMethodOverride);
     } catch (e) {
       console.warn('ensureProductTracked failed (ignored)', (e as any)?.message);
     }
@@ -893,7 +899,14 @@ class JourneyTrackingService {
     productType: 'brand' | 'noname' | 'external',
     productName: string,
     position?: number,
-    userId?: string
+    userId?: string,
+    // ClickUp 86cape99c: Views aus dem Onboarding-Walkthrough sind
+    // AUFGEFORDERTE Taps ("Tippe diese Karte") — kein organisches Signal.
+    // 'coachmark' stempelt den viewedProducts-Eintrag (discoveryContext
+    // .method), damit die Aggregatoren (top-products "meist aufgerufen",
+    // b2b-insights-Funnel) ihn rausfiltern. Daten bleiben erhalten
+    // (transparent + reversibel), zählen nur nicht als organisch.
+    discoveryMethodOverride?: 'coachmark',
   ): void {
     // CRITICAL: Tracking is fire-and-forget — it MUST never crash the
     // UI. The whole body is wrapped in try/catch because any thrown
@@ -930,7 +943,7 @@ class JourneyTrackingService {
         timestamp: Date.now(), // Arrays unterstützen kein serverTimestamp()
         fromScreen: this.currentJourney.screenName,
         discoveryContext: {
-          method: this.currentJourney.discoveryMethod,
+          method: discoveryMethodOverride ?? this.currentJourney.discoveryMethod,
         },
         actions: [
           {

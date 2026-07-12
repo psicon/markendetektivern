@@ -58,7 +58,13 @@ async function resolveDemoProductId(): Promise<string | null> {
     console.warn('Coachmark: Remote Config read failed (non-fatal):', e);
   }
   try {
-    const top = await FirestoreService.getTopEnttarnteProdukteRandomized(10, 1);
+    // ClickUp 86cape99c: Pool 10 → 200. Mit poolSize=10 war der Pool die
+    // ERSTEN 10 Docs der Stufe-3-5-Query in stabiler Firestore-Reihenfolge —
+    // jeder neue User bekam eines von denselben ~10 Produkten (verzerrte
+    // "meist aufgerufen"-Daten massiv). 200 = Default-Pool der Funktion,
+    // teilt den 3-Min-Cache mit dem Home-Feed (gleicher Cache-Key) →
+    // keine zusätzlichen Reads, echte Streuung.
+    const top = await FirestoreService.getTopEnttarnteProdukteRandomized(200, 1);
     if (top && top.length > 0) {
       return (top[0] as any).id ?? null;
     }
@@ -149,12 +155,15 @@ export function HomeWalkthrough({
       return;
     }
     const stufeNum = parseInt(String((demoProduct as any).stufe ?? '1')) || 1;
+    // src=coachmark (ClickUp 86cape99c): der Tap ist AUFGEFORDERT ("Tippe
+    // diese Karte") — die Detail-Screens stempeln den Journey-Eintrag damit
+    // als 'coachmark', die Aggregatoren zählen ihn nicht als organischen View.
     if (stufeNum <= 2) {
       FirestoreService.prefetchProductDetails(demoProduct.id);
-      safePush(`/noname-detail/${demoProduct.id}` as any);
+      safePush(`/noname-detail/${demoProduct.id}?src=coachmark` as any);
     } else {
       FirestoreService.prefetchComparisonData(demoProduct.id, false);
-      safePush(`/product-comparison/${demoProduct.id}?type=noname` as any);
+      safePush(`/product-comparison/${demoProduct.id}?type=noname&src=coachmark` as any);
     }
   }, [demoProduct, onDismiss]);
 

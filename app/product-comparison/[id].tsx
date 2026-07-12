@@ -204,7 +204,9 @@ function savings(
 // ────────────────────────────────────────────────────────────────────────
 
 export default function ProductComparisonScreen() {
-  const { id, type } = useLocalSearchParams<{ id: string; type?: string }>();
+  // src=coachmark: Einstieg aus dem Onboarding-Walkthrough (aufgeforderter
+  // Tap) — der Journey-View wird gestempelt statt organisch gezählt.
+  const { id, type, src } = useLocalSearchParams<{ id: string; type?: string; src?: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { theme, brand, shadows, stufen, isDark } = useTokens();
@@ -512,8 +514,9 @@ export default function ProductComparisonScreen() {
       type === 'marken' ? 'brand' : 'noname',
       (picked as any)?.name ?? 'Produkt',
       user?.uid,
+      src === 'coachmark' ? 'coachmark' : undefined,
     );
-  }, [id, picked, type, user?.uid]);
+  }, [id, picked, type, user?.uid, src]);
 
   // #5: Scroll-Stop-Lesen der KI-Sektion (1,2s ruhig + sichtbar via measure()).
   useEffect(() => {

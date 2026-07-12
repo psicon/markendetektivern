@@ -143,7 +143,9 @@ function formatPack(size?: number, unit?: string, price?: number): string | null
 // ────────────────────────────────────────────────────────────────────────
 
 export default function NoNameDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // src=coachmark: Einstieg aus dem Onboarding-Walkthrough (aufgeforderter
+  // Tap) — der Journey-View wird gestempelt statt organisch gezählt.
+  const { id, src } = useLocalSearchParams<{ id: string; src?: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { theme, brand, shadows, isDark } = useTokens();
@@ -235,8 +237,9 @@ export default function NoNameDetailScreen() {
       'noname',
       (product as any)?.name ?? 'Produkt',
       user?.uid,
+      src === 'coachmark' ? 'coachmark' : undefined,
     );
-  }, [id, product, user?.uid]);
+  }, [id, product, user?.uid, src]);
 
   // Gap 2b: bei Scroll-Stopp prüfen, ob die KI-Analyse-Sektion sichtbar ist
   // (≥1,2 s ruhig) → als "gelesen" werten. Feuert genau EINMAL pro Produkt.
