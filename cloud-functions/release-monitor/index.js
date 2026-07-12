@@ -71,7 +71,11 @@ async function sampleBetween(from, to, limit) {
     .limit(limit)
     .get();
   const rows = [];
-  snap.forEach((d) => rows.push(d.data() || {}));
+  snap.forEach((d) => rows.push({
+    ...(d.data() || {}),
+    // users/{uid}/journeys/{id} → uid für die Pro-User-Metriken.
+    _uid: d.ref.parent.parent ? d.ref.parent.parent.id : null,
+  }));
   return rows;
 }
 
@@ -122,6 +126,56 @@ function metrics(rows) {
   };
 }
 
+// ─── Pro-User-Metriken (Audit 12.07.2026) ────────────────────────
+// Der Journey-Schnappschuss (consumerProfile) wird beim Journey-START
+// aus dem users-Doc gezogen — Neu-User setzen Markt/Demografie aber
+// erst SPÄTER im Onboarding derselben Session, Resume-Journeys lesen
+// nie neu. Die Session-Quote unterzählt daher strukturell (gemessen:
+// nur ~54 % der Sessions von Markt-Usern trugen den Stempel). Für
+// Demografie/Markt/Onboarding daher direkt das users-Doc der im
+// Fenster aktiven User lesen — pro User, nicht pro Sitzung.
+
+function distinctUids(rows) {
+  return [...new Set(rows.map((r) => r._uid).filter(Boolean))];
+}
+
+async function loadUserFacts(uids) {
+  const map = new Map();
+  for (let i = 0; i < uids.length; i += 100) {
+    const chunk = uids.slice(i, i + 100);
+    // eslint-disable-next-line no-await-in-loop
+    const snaps = await db.getAll(
+      ...chunk.map((u) => db.doc(`users/${u}`)),
+      { fieldMask: ['favoriteMarket', 'age', 'gender', 'onboardingCompletedAt'] },
+    );
+    for (const s of snaps) {
+      if (!s.exists) continue;
+      const d = s.data() || {};
+      map.set(s.id, {
+        markt: !!d.favoriteMarket,
+        demo: (d.age != null && d.age !== '') || (d.gender != null && d.gender !== ''),
+        onboarding: !!d.onboardingCompletedAt,
+      });
+    }
+  }
+  return map;
+}
+
+function perUserMetrics(rows, facts) {
+  const uids = distinctUids(rows);
+  let markt = 0;
+  let demo = 0;
+  let onboarding = 0;
+  for (const u of uids) {
+    const f = facts.get(u);
+    if (!f) continue;
+    if (f.markt) markt += 1;
+    if (f.demo) demo += 1;
+    if (f.onboarding) onboarding += 1;
+  }
+  return { usersN: uids.length, userMarkt: markt, userDemo: demo, userOnboarding: onboarding };
+}
+
 async function aggregate() {
   const startedAt = Date.now();
 
@@ -145,6 +199,10 @@ async function aggregate() {
   const v6ios = v6.filter((r) => (r.app || {}).os === 'ios');
   const v6android = v6.filter((r) => (r.app || {}).os === 'android');
 
+  // 2b) Pro-User-Fakten für die im v6-Fenster aktiven User (ein
+  // getAll-Read pro 100 User; bei ~500 Usern ≈ 500 Reads pro Lauf).
+  const facts = await loadUserFacts(distinctUids(v6));
+
   // 3) Vor-Release-Baseline (fix) — alles außer 6.x-TestFlight.
   const oldRows = dedupe(await sampleBetween(OLD_FROM, OLD_TO, 3000)).filter((r) => !isV6(r));
 
@@ -158,9 +216,9 @@ async function aggregate() {
     },
     daily,
     v6: {
-      all: metrics(v6),
-      ios: metrics(v6ios),
-      android: metrics(v6android),
+      all: { ...metrics(v6), ...perUserMetrics(v6, facts) },
+      ios: { ...metrics(v6ios), ...perUserMetrics(v6ios, facts) },
+      android: { ...metrics(v6android), ...perUserMetrics(v6android, facts) },
     },
     old: metrics(oldRows),
   };
