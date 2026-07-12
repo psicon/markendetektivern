@@ -132,17 +132,12 @@ async function doAttempt(): Promise<boolean> {
 
     // Zurück in die alte Identität. onAuthStateChanged übernimmt den Rest
     // (Profil, Gamification, Journeys — alles Standard-User-Wechsel).
+    // BEWUSST OHNE User-Feedback: die Reparatur ist unsichtbar-instant
+    // beim Boot; ein Toast würde nur auf ein Problem hinweisen, das der
+    // User nie bemerkt hat (Copy-Regel: nie Frustration erzeugen).
     await signInWithCustomToken(auth, result.customToken);
     await AsyncStorage.setItem(KEY_STATE, 'done');
     console.log('✅ [legacyRescue] Alte Session wiederhergestellt:', result.oldUid, '(registriert:', result.oldWasRegistered, ')');
-
-    // Feedback — non-fatal, lazy (Service bleibt boot-leichtgewichtig).
-    try {
-      const { showInfoToast } = await import('@/lib/services/ui/toast');
-      showInfoToast('Willkommen zurück! Dein Fortschritt ist wieder da.', 'info');
-    } catch {
-      // Toast ist Kosmetik
-    }
     return true;
   } catch (e) {
     // Nie werfen — Boot-Pfad. Transient → nächster Boot probiert erneut.
