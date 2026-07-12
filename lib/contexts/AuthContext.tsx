@@ -34,6 +34,7 @@ import {
   lastFbDebug,
   signOutFacebook,
 } from '../services/auth/facebookAuth';
+import journeyTrackingService from '../services/journeyTrackingService';
 import { createUserProfile, getUserProfile, patchUserProfile, syncProfileFromAuth, UserProfile } from '../services/userProfile';
 import { scheduleRegionGuess } from '../services/regionGuess';
 import { isOnline } from '../services/network';
@@ -804,6 +805,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             },
             { merge: true },
           );
+          // Journey-Snapshot der laufenden Session mitziehen — die
+          // Registrierung hat gerade Alter/Geschlecht/Markt geschrieben
+          // (Audit 12.07.2026).
+          journeyTrackingService.refreshConsumerProfile();
         }
       }
 

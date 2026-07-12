@@ -41,6 +41,7 @@ import { LocationPicker } from '@/components/ui/LocationPicker';
 import { MarketSelector } from '@/components/ui/MarketSelector';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { db, storage } from '@/lib/firebase';
+import journeyTrackingService from '@/lib/services/journeyTrackingService';
 import {
   showInfoToast,
   showRetryableErrorToast,
@@ -226,6 +227,10 @@ export default function EditProfileScreen() {
       refreshUserProfile().catch((e) =>
         console.warn('EditProfile: post-save refresh failed', e),
       );
+      // Journey-Snapshot (Markt/Demografie) der laufenden Session
+      // mitziehen — sonst trackt sie bis zum Ende die alten Werte
+      // (Audit 12.07.2026).
+      journeyTrackingService.refreshConsumerProfile();
       showInfoToast('Profil aktualisiert', 'info', scheme);
       router.back();
     } catch (e) {

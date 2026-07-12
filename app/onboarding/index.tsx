@@ -46,6 +46,7 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useRevenueCat } from '@/lib/contexts/RevenueCatProvider';
 import { FirestoreService } from '@/lib/services/firestore';
+import journeyTrackingService from '@/lib/services/journeyTrackingService';
 import { OnboardingService } from '@/lib/services/onboardingService';
 import { revenueCatService } from '@/lib/services/revenueCatService';
 import { detectCountry, type DachCountry } from '@/lib/utils/country';
@@ -722,6 +723,10 @@ export default function OnboardingScreen() {
         }
         await setDoc(doc(db, 'users', uid), userPrefs, { merge: true });
         console.log('✅ Onboarding answers mirrored to users/' + uid);
+        // Läuft bereits eine Journey, bekommt sie den frisch gesetzten
+        // Markt sofort in ihren consumerProfile-Snapshot — der Start-
+        // Snapshot entstand VOR dem Onboarding (Audit 12.07.2026).
+        journeyTrackingService.refreshConsumerProfile();
       }
     } catch (mirrorErr) {
       console.warn('⚠️ Failed to mirror onboarding answers:', mirrorErr);
@@ -855,6 +860,10 @@ export default function OnboardingScreen() {
           // doc (level, points, displayName, photo_url, …).
           await setDoc(doc(db, 'users', uid), userPrefs, { merge: true });
           console.log('✅ Onboarding answers mirrored to users/' + uid);
+          // Läuft bereits eine Journey, bekommt sie den frisch gesetzten
+          // Markt sofort in ihren consumerProfile-Snapshot — der Start-
+          // Snapshot entstand VOR dem Onboarding (Audit 12.07.2026).
+          journeyTrackingService.refreshConsumerProfile();
         }
       } catch (mirrorErr) {
         console.warn('⚠️ Failed to mirror onboarding answers to user doc:', mirrorErr);

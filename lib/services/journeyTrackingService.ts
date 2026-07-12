@@ -277,11 +277,14 @@ export interface JourneyContext {
     timestamp: number;
   }>;
 
-  // NEU (86ca2ruh9): Verbraucher-Eigenschaften — EINMALIG beim Journey-Start
-  // aus dem User-Doc gelesen (Lieblingsmarkt, Geschlecht, Alter, Gamification-
-  // Level, bisherige Ersparnis). Snapshot zum Start, wird in der Journey NICHT
-  // mehr aktualisiert. Nur gesetzte Felder werden geschrieben (keine null/
-  // undefined-Rauschwerte). Quelle: users/{uid}.
+  // NEU (86ca2ruh9): Verbraucher-Eigenschaften — beim Journey-Start aus dem
+  // User-Doc gelesen (Lieblingsmarkt, Geschlecht, Alter, Gamification-Level,
+  // bisherige Ersparnis). Seit Audit 12.07.2026: Callsites, die diese Felder
+  // WÄHREND der Session schreiben (Onboarding-Abschluss, Profil-Editor,
+  // Demografie-Sheet), stoßen refreshConsumerProfile() an — sonst bliebe die
+  // erste Session eines Neu-Users für immer ohne Markt/Demografie, weil die
+  // Journey VOR dem Onboarding startet. Nur gesetzte Felder werden
+  // geschrieben (keine null/undefined-Rauschwerte). Quelle: users/{uid}.
   consumerProfile?: {
     favoriteMarket?: string;       // Discounter-Id
     favoriteMarketName?: string;
@@ -529,12 +532,15 @@ class JourneyTrackingService {
    * die Journey funktioniert auch ohne. Wird NICHT pro Event neu gelesen.
    */
   private consumerProfileResolved = false; // 86ca2ruh9: pro Journey 1× versucht
-  private async addConsumerProfileToJourney(userId?: string): Promise<void> {
+  private async addConsumerProfileToJourney(userId?: string, force = false): Promise<void> {
     if (!this.currentJourney || !userId) return;
     // Idempotent: einmal gesetzt/versucht, nicht erneut lesen (z.B. bei Resume
     // oder bei jedem debounced Persist). resolved wird in startJourney je neuer
     // Journey zurückgesetzt; bei einem echten Fehler unten wieder freigegeben.
-    if (this.currentJourney.consumerProfile || this.consumerProfileResolved) return;
+    // force (= refreshConsumerProfile): Gates überspringen und den Snapshot
+    // mit frischen Werten ERSETZEN; der alte bleibt stehen, falls der Read
+    // failt oder leer zurückkommt.
+    if (!force && (this.currentJourney.consumerProfile || this.consumerProfileResolved)) return;
     this.consumerProfileResolved = true; // up-front → dedupe paralleler Persist-Calls
 
     try {
@@ -582,6 +588,23 @@ class JourneyTrackingService {
       this.consumerProfileResolved = false;
       console.warn('addConsumerProfileToJourney failed (ignored)', (error as any)?.message);
     }
+  }
+
+  /**
+   * Audit 12.07.2026: Den consumerProfile-Snapshot der LAUFENDEN Journey aus
+   * dem users-Doc neu ziehen. Aufrufen, NACHDEM eine Callsite Markt/Demografie
+   * geschrieben hat (Onboarding-Abschluss, Profil-Editor-Save, Demografie-
+   * Sheet) — der Start-Snapshot entsteht bei Neu-Usern VOR dem Onboarding und
+   * wäre sonst für die gesamte erste Session leer (gemessen: nur ~54 % der
+   * Sessions von Markt-Usern trugen den Stempel). Firestore garantiert
+   * Read-your-writes (pending Mutations landen im getDoc-Ergebnis), daher darf
+   * der Aufruf direkt nach einem nicht-awaiteten setDoc erfolgen.
+   * Fire-and-forget: no-op ohne laufende Journey/uid, Fehler bleiben intern.
+   */
+  refreshConsumerProfile(): void {
+    const userId = this.currentJourneyUserId ?? this.lastUserId ?? undefined;
+    if (!this.currentJourney || !userId) return;
+    void this.addConsumerProfileToJourney(userId, true);
   }
 
   // ENTFERNT: updateOriginalJourney - alles wird direkt in viewedProducts[].actions getrackt

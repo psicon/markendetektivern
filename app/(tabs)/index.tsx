@@ -66,6 +66,7 @@ import { getGeneralSurveys } from '@/lib/services/surveyService';
 import { achievementService } from '@/lib/services/achievementService';
 import { AlgoliaService } from '@/lib/services/algolia';
 import { FirestoreService } from '@/lib/services/firestore';
+import journeyTrackingService from '@/lib/services/journeyTrackingService';
 import { useNetworkStatus } from '@/lib/services/network';
 import searchHistoryService from '@/lib/services/searchHistoryService';
 import WordPressService, { WordPressPost } from '@/lib/services/wordpress';
@@ -510,6 +511,10 @@ export default function HomeScreen() {
           },
           { merge: true },
         ).catch((err) => console.warn('[Home] demographics save failed:', err));
+        // Journey-Snapshot der laufenden Session mitziehen — Firestore
+        // liefert Read-your-writes, das nicht-awaitete setDoc oben ist
+        // im folgenden getDoc bereits sichtbar (Audit 12.07.2026).
+        journeyTrackingService.refreshConsumerProfile();
         await AsyncStorage.removeItem('pending_demographics_prompt');
       } catch (err) {
         console.warn('[Home] demographics save failed:', err);
