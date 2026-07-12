@@ -184,7 +184,11 @@ export default function ProfileScreen() {
   // Resolved user data
   const displayName = userProfile?.display_name || user?.displayName || 'Detektiv';
   const realName = (userProfile as any)?.real_name || '';
-  const email = userProfile?.email || user?.email || '';
+  // Auth ist die Identitäts-Wahrheit — das Doc kann durch den Anlage-Race
+  // (Attribution-Mirror/achievementService legen es zuerst an) den
+  // Anon-Platzhalter tragen. Platzhalter nie anzeigen (Audit 2026-07-12).
+  const rawEmail = user?.email || userProfile?.email || '';
+  const email = rawEmail === 'anonymous@markendetektive.app' ? '' : rawEmail;
 
   // Debug-Section-Gate. Im DEV-Build immer sichtbar. In Production-
   // Builds (TestFlight + Play-Internal) nur für ein spezifisches
@@ -908,7 +912,7 @@ export default function ProfileScreen() {
                 Nicht alle Features verfügbar — sichere deine Daten mit
                 einem Account.
               </Text>
-            ) : (
+            ) : email ? (
               <Text
                 numberOfLines={1}
                 style={{
@@ -921,7 +925,7 @@ export default function ProfileScreen() {
               >
                 {email}
               </Text>
-            )}
+            ) : null}
             {!isAnonymous && (favoriteMarket || city) ? (
               <View
                 style={{

@@ -332,7 +332,7 @@ async function fetchLivePeriodTop(
     );
     const snap = await getDocs(q);
     const rows: Omit<LbUser, 'isMe'>[] = [];
-    snap.forEach((d, idx) => {
+    snap.forEach((d: any) => {
       const data = d.data() as any;
       const stats = data.stats || {};
       const ptsTotal = Number(stats.points?.[periodKey] || 0);
@@ -352,7 +352,10 @@ async function fetchLivePeriodTop(
       const city = data.city ? normalizeCityName(data.city) : null;
       rows.push({
         id: d.id,
-        rank: idx + 1,
+        // Nach den Skip-Filtern oben (Nullwert/Platzhalter-Name) neu
+        // durchnummerieren — der Query-Index (idx) zählt übersprungene
+        // Zeilen mit und erzeugte Rang-Lücken (1, 4, 7 …).
+        rank: rows.length + 1,
         name: displayName,
         avatar: '🦉',
         photoUrl: data.photoUrl ?? null,

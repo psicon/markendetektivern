@@ -1,3 +1,4 @@
+import type { FirebaseAuthTypes } from '@react-native-firebase/auth';
 import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from '@react-native-firebase/firestore';
 import { db } from '../firebase';
 import leaderboardService from './leaderboardService';
@@ -176,6 +177,62 @@ export const patchUserProfile = async (
   fields: Partial<UserProfile>,
 ): Promise<void> => {
   await updateDoc(doc(db, 'users', uid), fields as any);
+};
+
+// Platzhalter, die createUserProfile für anonyme User schreibt — dürfen
+// von echten Auth-Daten überschrieben werden, echte Werte NIE.
+const PLACEHOLDER_EMAIL = 'anonymous@markendetektive.app';
+const PLACEHOLDER_NAMES = ['Anonymer Nutzer', 'Anonymer Detektiv'];
+const isPlaceholderEmail = (e?: string) => {
+  const t = String(e || '').trim();
+  return !t || t === PLACEHOLDER_EMAIL;
+};
+const isPlaceholderName = (n?: string) => {
+  const t = String(n || '').trim();
+  return !t || PLACEHOLDER_NAMES.includes(t);
+};
+
+/**
+ * Konservativer fill-only-Sync users-Doc ← Firebase Auth (Audit 2026-07-12).
+ *
+ * Hintergrund: nach `linkWithCredential` (Anon→Provider-Upgrade) setzt
+ * Firebase displayName/photoURL NICHT auf den Auth-User — die Werte hängen
+ * nur in `providerData[]`. Gleichzeitig konnte das users-Doc durch einen
+ * Race (Attribution-Mirror/achievementService legen es zuerst an) mit
+ * Platzhaltern oder ganz ohne Identitätsfelder dastehen. Ergebnis: 616
+ * Docs ohne Identität + „anonymous@…" in Profilen registrierter User.
+ *
+ * Diese Funktion füllt NUR Lücken/Platzhalter aus Auth + providerData —
+ * ein echter Wert im Doc wird niemals überschrieben, es wird nichts
+ * gelöscht, und ein fehlendes Doc wird NICHT angelegt (das bleibt
+ * createUserProfile). Fire-and-forget-tauglich: wirft nur nach oben,
+ * Caller entscheidet über catch.
+ */
+export const syncProfileFromAuth = async (
+  fbUser: FirebaseAuthTypes.User,
+): Promise<void> => {
+  if (!fbUser || fbUser.isAnonymous) return;
+  const prov = (fbUser.providerData || []).filter(
+    (p) => p && p.providerId !== 'firebase',
+  );
+  const email = (fbUser.email || prov.find((p) => !!p.email)?.email || '').trim();
+  const name = (
+    fbUser.displayName || prov.find((p) => !!p.displayName)?.displayName || ''
+  ).trim();
+  const photo = fbUser.photoURL || prov.find((p) => !!p.photoURL)?.photoURL || '';
+  if (!email && !name && !photo) return;
+
+  const ref = doc(db, 'users', fbUser.uid);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const d = (snap.data() as UserProfile) || {};
+  const patch: Partial<UserProfile> = {};
+  if (email && isPlaceholderEmail(d.email)) patch.email = email;
+  if (name && isPlaceholderName(d.display_name)) patch.display_name = name;
+  if (photo && !String(d.photo_url || '').trim()) patch.photo_url = photo;
+  if (Object.keys(patch).length === 0) return;
+  await updateDoc(ref, patch as any);
+  console.log('🔄 Profil aus Auth aufgefüllt:', fbUser.uid, Object.keys(patch));
 };
 
 /**

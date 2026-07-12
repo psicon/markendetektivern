@@ -34,7 +34,7 @@ import {
   lastFbDebug,
   signOutFacebook,
 } from '../services/auth/facebookAuth';
-import { createUserProfile, getUserProfile, patchUserProfile, UserProfile } from '../services/userProfile';
+import { createUserProfile, getUserProfile, patchUserProfile, syncProfileFromAuth, UserProfile } from '../services/userProfile';
 import { scheduleRegionGuess } from '../services/regionGuess';
 import { isOnline } from '../services/network';
 import { FirestoreService } from '../services/firestore';
@@ -539,8 +539,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
    * (UID + Daten bleiben), sonst signInWithCredential (normaler
    * Login). Bei `credential-already-in-use` wird der User gefragt
    * ob er zum bestehenden Account wechseln will.
+   *
+   * Kern-Logik — Aufrufer nutzen den `linkOrSignIn`-Wrapper darunter,
+   * der nach JEDEM Erfolgs-Exit das users-Doc konservativ aus Auth
+   * auffüllt (Audit 2026-07-12).
    */
-  const linkOrSignIn = async (
+  const linkOrSignInCore = async (
     credential: FirebaseAuthTypes.AuthCredential,
     // R3-deeper (ClickUp 86cacp8xx): optionaler Refresher für ein FRISCHES
     // Provider-Credential. Apple-idTokens sind bei Firebase EINMALIG einlösbar:
@@ -667,6 +671,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  /**
+   * Wrapper um linkOrSignInCore: nach jedem erfolgreichen Provider-
+   * Login/-Link (Google/Apple/Facebook, alle 4 Exit-Pfade des Cores)
+   * das users-Doc konservativ aus Firebase Auth auffüllen — fill-only,
+   * echte Werte werden nie überschrieben (syncProfileFromAuth).
+   * Fire-and-forget: der Login darf daran weder scheitern noch hängen
+   * (Firestore-Await im kritischen Pfad = Offline-Hänger, CLAUDE.md).
+   */
+  const linkOrSignIn = async (
+    credential: FirebaseAuthTypes.AuthCredential,
+    refreshCredential?: () => Promise<FirebaseAuthTypes.AuthCredential | null>,
+  ): Promise<FirebaseAuthTypes.UserCredential> => {
+    const result = await linkOrSignInCore(credential, refreshCredential);
+    const authedUser = result?.user ?? auth.currentUser;
+    if (authedUser && !authedUser.isAnonymous) {
+      void syncProfileFromAuth(authedUser).catch((e) =>
+        console.warn('syncProfileFromAuth fehlgeschlagen (non-fatal):', e),
+      );
+    }
+    return result;
+  };
+
   const signIn = async (email: string, password: string) => {
     try {
       // Login = "I HAVE this account, log me in". Das ist NICHT
@@ -762,14 +788,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               ...agePatch,
               gender: additionalData.gender || '',
               location: additionalData.location || '',
-              photo_url: '',
+              // photo_url/totalSavings hier NICHT setzen (Audit 2026-07-12):
+              // beim Anon→Email-Upgrade bleibt die UID gleich, das Doc
+              // existiert bereits aus der Gast-Phase — `photo_url: ''`
+              // löschte ein als Gast gesetztes Foto und `totalSavings: 0`
+              // nullte die per increment() gepflegte Anzeige-Ersparnis
+              // PERMANENT (kein Self-Heal, siehe updateUserTotalSavings).
+              // Frische Accounts bekommen ihre Defaults aus createUserProfile.
               // created_time NICHT überschreiben wenn der User vorher
               // anonym war — der existiert dann schon mit serverTimestamp
               // aus der Anon-Phase. Beim merge:true ohne created_time
               // bleibt der bestehende Wert erhalten.
               ...(currentUser?.isAnonymous ? {} : { created_time: serverTimestamp() }),
               lastLoginAt: serverTimestamp(),
-              totalSavings: 0,
             },
             { merge: true },
           );

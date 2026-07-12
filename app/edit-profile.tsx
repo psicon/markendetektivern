@@ -136,9 +136,17 @@ export default function EditProfileScreen() {
         } else if (data.birthDate?.toDate) {
           prefilledAge = ageFromBirthDate(data.birthDate.toDate());
         }
+        // Anon-Platzhalter aus dem Doc-Anlage-Race nie als editierbaren
+        // Namen vorbefüllen — sonst speichert der User ihn unbemerkt
+        // zurück (Audit 2026-07-12). Auth-Name ist dann der Fallback.
+        const docName = ['Anonymer Nutzer', 'Anonymer Detektiv'].includes(
+          String(data.display_name || '').trim(),
+        )
+          ? ''
+          : data.display_name || '';
         setFormData((prev) => ({
           ...prev,
-          displayName: data.display_name || user.displayName || '',
+          displayName: docName || user.displayName || '',
           realName: data.real_name || '',
           age: prefilledAge,
           // Legacy-Werte ('Divers', lowercase, ...) auf die aktuellen
