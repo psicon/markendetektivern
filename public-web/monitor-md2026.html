@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>MD-Monitor · v6 vs. vorher</title>
+<style>
+  :root{
+    --ground:#f2f5f4; --surface:#fff; --ink:#191c1d; --sub:#4d5c58; --muted:#7d8c88;
+    --petrol:#0d8575; --petrol-deep:#0a4038; --petrol-soft:#e2f1ee;
+    --grey-bar:#b9c6c2; --amber:#c25a05; --amber-soft:#fdeede;
+    --good:#1e7d46; --good-soft:#e2f2e7; --bad:#c62828; --bad-soft:#fbe7e7;
+    --border:#dfe7e5;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);font-size:15px;line-height:1.5}
+  .wrap{max-width:880px;margin:0 auto;padding:0 20px 64px}
+  header{background:var(--petrol-deep);color:#fff;padding:24px 0 20px}
+  .eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8fc4ba;font-weight:700}
+  h1{margin:4px 0 4px;font-size:23px;font-weight:800;letter-spacing:-.02em}
+  header p{margin:0;font-size:13px;color:#a9c9c1}
+  .filterbar{position:sticky;top:0;z-index:5;background:var(--ground);padding:14px 0 10px;
+    display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--border);margin-bottom:6px}
+  .seg{display:inline-flex;background:#e6edeb;border-radius:12px;padding:3px}
+  .seg button{border:0;background:transparent;padding:8px 18px;border-radius:9px;font-size:14px;
+    font-weight:700;color:var(--sub);cursor:pointer;font-family:inherit}
+  .seg button.on{background:#fff;color:var(--petrol);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+  .seg button:focus-visible{outline:2px solid var(--petrol);outline-offset:1px}
+  .actions{margin-left:auto;display:flex;gap:8px}
+  .btn{border:1px solid var(--border);background:#fff;color:var(--sub);border-radius:9px;
+    padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit}
+  .btn:hover{color:var(--petrol)}
+  .legend{display:flex;gap:14px;font-size:12.5px;color:var(--sub)}
+  .legend span::before{content:"";display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  .legend .l6::before{background:var(--petrol)} .legend .lo::before{background:var(--grey-bar)}
+  .honest{background:#fff8ef;border:1px solid #f0ddc2;border-radius:12px;padding:13px 16px;margin:16px 0 6px;font-size:13.5px;color:#6b4a1b}
+  .honest b{color:#8a4a05}
+  h2{font-size:16px;font-weight:800;margin:30px 0 4px;letter-spacing:-.01em}
+  .sectionnote{font-size:13px;color:var(--muted);margin:0 0 12px}
+  .metric{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:15px 18px;margin-bottom:10px}
+  .mhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .mtitle{font-size:14.5px;font-weight:800}
+  .mwhat{font-size:12.5px;color:var(--muted)}
+  .badge{margin-left:auto;font-size:12px;font-weight:800;padding:3px 10px;border-radius:999px;white-space:nowrap}
+  .badge.good{background:var(--good-soft);color:var(--good)}
+  .badge.bad{background:var(--bad-soft);color:var(--bad)}
+  .badge.neutral{background:#edf1f0;color:var(--sub)}
+  .badge.new{background:var(--petrol-soft);color:var(--petrol)}
+  .rows{margin-top:10px;display:grid;gap:6px}
+  .brow{display:grid;grid-template-columns:64px 1fr 74px;align-items:center;gap:10px}
+  .brow .who{font-size:12px;font-weight:700;color:var(--sub)}
+  .track{background:#eef2f1;border-radius:6px;height:22px;position:relative;overflow:hidden}
+  .fill{height:100%;border-radius:6px;background:var(--petrol);transition:width .35s ease}
+  .brow.old .fill{background:var(--grey-bar)}
+  .brow .num{font-size:14px;font-weight:800;text-align:right;font-variant-numeric:tabular-nums}
+  .brow.old .num{color:var(--sub);font-weight:700}
+  .brow .na{font-size:12.5px;color:var(--muted);font-style:italic}
+  .mfoot{font-size:12px;color:var(--muted);margin-top:8px}
+  .spark{display:flex;align-items:flex-end;gap:6px;height:130px;padding-top:6px}
+  .spark .col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;min-width:0}
+  .spark .bar2{width:100%;border-radius:5px 5px 0 0;background:var(--grey-bar)}
+  .spark .col.v6 .bar2{background:var(--petrol)}
+  .spark .cl{font-size:10px;color:var(--muted);white-space:nowrap}
+  .spark .cv{font-size:10.5px;font-weight:800;color:var(--sub);font-variant-numeric:tabular-nums}
+  #loading{padding:60px 20px;text-align:center;color:var(--muted)}
+  footer{margin-top:36px;font-size:12.5px;color:var(--muted);border-top:1px solid var(--border);padding-top:14px}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="eyebrow">MarkenDetektive · Monitor</div>
+    <h1>Version 6.0 vs. vorher — auf einen Blick</h1>
+    <p id="stand">Lade aktuelle Zahlen …</p>
+  </div>
+</header>
+
+<div class="wrap">
+  <div id="loading">Zahlen werden geladen …</div>
+  <div id="app" style="display:none">
+    <div class="filterbar">
+      <div class="seg" role="tablist" aria-label="Plattform-Filter">
+        <button class="on" data-seg="all">Alle</button>
+        <button data-seg="ios">iOS</button>
+        <button data-seg="android">Android</button>
+      </div>
+      <div class="legend"><span class="l6">Version 6.0</span><span class="lo">Vorher (Public 5.x)</span></div>
+      <div class="actions">
+        <button class="btn" id="recompute" title="Aggregator neu rechnen lassen (max. alle 10 Min)">↻ Neu berechnen</button>
+      </div>
+    </div>
+
+    <div class="honest">
+      <b>Lesehinweis:</b> „Vorher" ist eine fixe Baseline aus <span id="oldwin"></span> —
+      echte Sitzungen der alten Store-Version. „v6" ist ein rollierendes 72-Stunden-Fenster.
+      Der Plattform-Filter wirkt auf die v6-Balken; „vorher" bleibt Gesamt (Alt-Sitzungen tragen
+      keine Plattform-Info). Eine Sitzung startet automatisch beim App-Öffnen (mit Einwilligung).
+    </div>
+
+    <h2>Sitzungen pro Tag</h2>
+    <p class="sectionnote">Grün = ab Store-Release 6.0 (11.07.). Letzter Tag ist unvollständig.</p>
+    <div class="metric"><div class="spark" id="spark"></div></div>
+
+    <h2>Kernfragen</h2>
+    <div id="core"></div>
+
+    <h2>Verhalten in der Sitzung</h2>
+    <div id="behavior"></div>
+
+    <h2>Einkauf &amp; Abschluss</h2>
+    <p class="sectionnote">v6-Sitzungen sind jung (72h-Fenster), Alt-Sitzungen hatten Tage zu reifen — v6-Werte sind eher Untergrenzen.</p>
+    <div id="closing"></div>
+
+    <footer>
+      <p><b>Definitionen:</b> „Ohne Aktion geschlossen" = kein Produkt angesehen, kein Filter geändert, kein Scan, keine Suche, kein Freitext. Sitzungen pro Journey-ID dedupliziert. Demografie/Markt werden erst seit 6.0 im Sitzungs-Profil erfasst. Sitzungsdauer wird nicht verglichen (Alt-Daten dafür defekt).</p>
+      <p><b>Quelle:</b> <code>aggregates/releaseMonitor_v1</code> (nur aggregierte Kennzahlen, keine personenbezogenen Daten) — neu berechnet alle 6 Stunden automatisch, per Button on-demand (Schutz: max. alle 10 Min).</p>
+    </footer>
+  </div>
+</div>
+
+<script>
+const PROJECT='markendetektive-895f7';
+const API_KEY='AIzaSyDZ6xtYoJcu1mJvFQpsV3aC2Qgs3UipZR8';
+const DOC_URL=`https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/(default)/documents/aggregates/releaseMonitor_v1?key=${API_KEY}`;
+const RECOMPUTE_URL='https://europe-west1-markendetektive-895f7.cloudfunctions.net/aggregateReleaseMonitorHttp';
+
+// Firestore-REST-Typwerte → JS
+function val(v){
+  if(v==null) return null;
+  const t=Object.keys(v)[0], x=v[t];
+  if(t==='mapValue') return Object.fromEntries(Object.entries(x.fields||{}).map(([k,w])=>[k,val(w)]));
+  if(t==='arrayValue') return (x.values||[]).map(val);
+  if(t==='integerValue') return parseInt(x,10);
+  if(t==='doubleValue') return x;
+  return x;
+}
+
+const METRICS={
+  core:[
+    {key:'bounce',type:'pct',dir:'down',title:'App geschlossen ohne Aktion',what:'nichts angesehen, kein Filter, kein Scan, keine Suche'},
+    {key:'demo',type:'pct',dir:'up',title:'Demografie ausgefüllt (Alter/Geschlecht)',what:'Sitzung mit Profil-Angabe',oldNA:true},
+    {key:'markt',type:'pct',dir:'up',title:'Lieblingsmarkt gesetzt',what:'Sitzung mit gewähltem Markt',oldNA:true},
+    {key:'avgViews',type:'num',dir:'up',title:'Produkte angesehen (Ø pro Sitzung)',what:'Produkt-Detailaufrufe'},
+    {key:'filter',type:'pct',dir:'up',title:'Filter genutzt',what:'mind. ein Filter gesetzt oder geändert'}
+  ],
+  behavior:[
+    {key:'zero',type:'pct',dir:'down',title:'Kein Produkt angesehen',what:'0 Produktaufrufe (Filter/Scan zählen nicht)'},
+    {key:'such',type:'pct',dir:'up',title:'Suche genutzt',what:'mind. eine Produktsuche'},
+    {key:'scan',type:'pct',dir:'up',title:'Barcode gescannt',what:'mind. ein Scan'},
+    {key:'cust',type:'pct',dir:'up',title:'Freitext auf den Zettel',what:'eigener Eintrag ohne Katalog-Produkt'}
+  ],
+  closing:[
+    {key:'cart',type:'pct',dir:'up',title:'Einkaufszettel befüllt',what:'Sitzung endete mit Produkten im Zettel'},
+    {key:'purch',type:'pct',dir:'up',title:'Kauf abgehakt',what:'mind. ein Produkt als gekauft markiert'},
+    {key:'conv',type:'pct',dir:'up',title:'Marke → NoName umgewandelt',what:'Markenprodukt durch Alternative ersetzt'}
+  ]
+};
+
+let DATA=null;
+function fmtPct(v,n){const p=100*v/n;return (p<1&&v>0?p.toFixed(1).replace('.',','):Math.round(p))+' %';}
+function fmt(m,v,n){return m.type==='pct'?fmtPct(v,n):(Math.round(v*10)/10).toLocaleString('de-DE');}
+
+function render(seg){
+  const v6=DATA.v6[seg], old=DATA.old;
+  for(const [sec,list] of Object.entries(METRICS)){
+    const el=document.getElementById(sec); el.innerHTML='';
+    for(const m of list){
+      const v=v6[m.key]??0, o=m.oldNA?null:(old[m.key]??0);
+      const vP=m.type==='pct'?100*v/Math.max(v6.n,1):null, oP=(o!=null&&m.type==='pct')?100*o/Math.max(old.n,1):null;
+      const mx=m.type==='num'?Math.max(v,o??0,0.001):100;
+      const wV=m.type==='num'?100*v/mx:vP, wO=o==null?0:(m.type==='num'?100*o/mx:oP);
+      let cls='neutral',txt='≈ gleich';
+      if(m.oldNA){cls='new';txt='neu ab 6.0';}
+      else{
+        const a=m.type==='pct'?vP:v,b=m.type==='pct'?oP:o;
+        const better=m.dir==='down'?a<b:a>b, worse=m.dir==='down'?a>b*1.1:a<b*0.9;
+        const diff=m.type==='pct'?Math.abs(a-b):Math.abs(a-b)/Math.max(b,0.001)*100;
+        if(diff<3){cls='neutral';txt='≈ gleich';}
+        else if(better){cls='good';txt='v6 besser';}
+        else if(worse){cls='bad';txt='v6 schlechter';}
+      }
+      el.insertAdjacentHTML('beforeend',`
+      <div class="metric">
+        <div class="mhead"><span class="mtitle">${m.title}</span><span class="mwhat">${m.what}</span><span class="badge ${cls}">${txt}</span></div>
+        <div class="rows">
+          <div class="brow"><span class="who">v6</span>
+            <div class="track"><div class="fill" style="width:${Math.max(wV,1.5)}%"></div></div>
+            <span class="num">${fmt(m,v,v6.n)}</span></div>
+          <div class="brow old"><span class="who">vorher</span>
+            ${o==null?`<div class="na">— wurde in der alten Version nicht erfasst —</div><span></span>`
+             :`<div class="track"><div class="fill" style="width:${Math.max(wO,1.5)}%"></div></div><span class="num">${fmt(m,o,old.n)}</span>`}
+          </div>
+        </div>
+        ${m.type==='pct'&&o!=null?`<div class="mfoot">v6: ${v} von ${v6.n} Sitzungen · vorher: ${o} von ${old.n}</div>`
+          :m.oldNA?`<div class="mfoot">v6: ${v} von ${v6.n} Sitzungen</div>`:''}
+      </div>`);
+    }
+  }
+  const daily=DATA.daily||[];
+  const mx=Math.max(...daily.map(d=>d.n),1);
+  document.getElementById('spark').innerHTML=daily.map(d=>{
+    const isV6=d.day>='2026-07-11';
+    const label=d.day.slice(8,10).replace(/^0/,'')+'.'+d.day.slice(5,7).replace(/^0/,'')+'.';
+    return `<div class="col ${isV6?'v6':''}"><span class="cv">${d.n.toLocaleString('de-DE')}</span>
+      <div class="bar2" style="height:${Math.max(6,95*d.n/mx)}px"></div><span class="cl">${label}</span></div>`;
+  }).join('');
+}
+
+async function load(){
+  const r=await fetch(DOC_URL);
+  if(!r.ok){document.getElementById('loading').textContent='Konnte die Zahlen nicht laden ('+r.status+') — Seite neu laden versuchen.';return;}
+  const doc=await r.json();
+  const f=Object.fromEntries(Object.entries(doc.fields||{}).map(([k,v])=>[k,val(v)]));
+  DATA=f;
+  const upd=f.updatedAt?new Date(f.updatedAt):null;
+  document.getElementById('stand').textContent='Stand: '+(upd?upd.toLocaleString('de-DE',{dateStyle:'medium',timeStyle:'short'})+' Uhr':'unbekannt')
+    +' · v6 n = '+f.v6.all.n+' (72h) · vorher n = '+f.old.n;
+  document.getElementById('oldwin').textContent=(f.windows&&f.windows.old)||'04.–06.07.2026';
+  document.getElementById('loading').style.display='none';
+  document.getElementById('app').style.display='';
+  render('all');
+}
+
+document.addEventListener('click',e=>{
+  const b=e.target.closest('.seg button');
+  if(b){document.querySelectorAll('.seg button').forEach(x=>x.classList.toggle('on',x===b));render(b.dataset.seg);}
+});
+document.getElementById('recompute').addEventListener('click',async()=>{
+  const btn=document.getElementById('recompute');
+  btn.disabled=true;btn.textContent='rechnet …';
+  try{
+    const r=await fetch(RECOMPUTE_URL);const j=await r.json();
+    btn.textContent=j.skipped?'noch frisch (max. alle 10 Min)':'fertig — lade neu …';
+    if(!j.skipped) setTimeout(()=>location.reload(),800); else setTimeout(()=>{btn.textContent='↻ Neu berechnen';btn.disabled=false;},2500);
+  }catch(_){btn.textContent='Fehler';setTimeout(()=>{btn.textContent='↻ Neu berechnen';btn.disabled=false;},2500);}
+});
+load();
+</script>
+</body>
+</html>

@@ -247,6 +247,10 @@
         "firebase-debug.*.log",
         "*.local"
       ]
+    },
+    {
+      "codebase": "release-monitor",
+      "source": "cloud-functions/release-monitor"
     }
   ],
   "hosting": [

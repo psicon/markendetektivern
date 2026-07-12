@@ -1,0 +1,14 @@
+{
+  "name": "release-monitor",
+  "version": "1.0.0",
+  "description": "Aggregator für das Release-Monitor-Dashboard (v6 vs. vorher): Sessions/Tag, Verhaltens-Metriken pro Plattform, Vor-Release-Baseline. Schreibt aggregates/releaseMonitor_v1.",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^5.0.0"
+  },
+  "private": true
+}
