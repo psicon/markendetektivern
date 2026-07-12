@@ -107,7 +107,7 @@
     <div id="core"></div>
 
     <h2>Onboarding-Funnel</h2>
-    <p class="sectionnote">Neu-Installs = im 72h-Fenster angelegte User mit 6.0-Session. „Begonnen" = mindestens eine bewusste Interaktion im Flow (der Start-Screen schreibt nichts — in alter wie neuer Version identisch gemessen). Vorher = fixes 5.x-Fenster 04.–06.07. Der Plattform-Filter wirkt hier nicht.</p>
+    <p class="sectionnote">Neu-Installs = im 72h-Fenster angelegte User mit 6.0-Session. „Begonnen" = mindestens eine bewusste Interaktion im Flow (der Start-Screen schreibt nichts — in alter wie neuer Version identisch gemessen). Vorher = fixes 5.x-Fenster 04.–06.07.; „aktiv geworden" vorher = Stichprobe (n=500, ±4pp). Der Plattform-Filter wirkt hier nicht. <b>Caveat:</b> „Neu-Installs" enthält aktuell auch Bestands-User, die das 5.x→6.0-Update neu anonymisiert hat (Session-Verlust der Migration) — sie überspringen das Onboarding und drücken die Start-Quote nach unten.</p>
     <div id="onbfunnel"></div>
 
     <h2>Verhalten in der Sitzung</h2>
@@ -225,6 +225,7 @@ function renderOnboarding(ob){
   if(!el||!ob){if(el)el.innerHTML='<p class="sectionnote">Noch keine Funnel-Daten — einmal „Neu berechnen" tippen.</p>';return;}
   el.innerHTML='';
   const tiles=[
+    {title:'In der App aktiv geworden',what:'von Neu-Installs; Produkt/Suche/Scan/Zettel — egal ob Onboarding gemacht',v:[ob.v6.aktiv??0,ob.v6.installs],o:[ob.old.aktiv??0,ob.old.installs]},
     {title:'Onboarding begonnen',what:'von Neu-Installs; mind. eine Interaktion',v:[ob.v6.started,ob.v6.installs],o:[ob.old.started,ob.old.installs]},
     {title:'Abgeschlossen — von Begonnenen',what:'Flow bis zum Ende durchlaufen',v:[ob.v6.completed,ob.v6.started],o:[ob.old.completed,ob.old.started]},
     {title:'Abgeschlossen — von Neu-Installs',what:'Ende erreicht, gemessen an allen neuen Usern',v:[ob.v6.completed,ob.v6.installs],o:[ob.old.completed,ob.old.installs]},

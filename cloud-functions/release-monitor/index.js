@@ -173,16 +173,34 @@ async function loadUserFacts(uids) {
 // Fixe Alt-Baseline (Fenster 04.–06.07. ist abgeschlossen, live
 // gemessen 12.07.2026): 1.599 Neu-User · 1.474 Sessions · 1.110
 // abgeschlossen (75,3 % der Begonnenen — „die 70+ %").
-const OLD_ONBOARDING = { installs: 1599, started: 1474, completed: 1110 };
+// `aktiv` alt: Stichprobe n=500 der Kohorte (60,4 % ±4,3pp) hochgerechnet.
+const OLD_ONBOARDING = { installs: 1599, started: 1474, completed: 1110, aktiv: 966 };
 
 async function onboardingFunnel(v6rows, facts, fromDate) {
   // Neu-Installs = im Fenster angelegte User mit 6.0-Session (jeder
   // App-Open erzeugt eine Journey → Bounce-Installs sind enthalten).
+  // ACHTUNG (Befund 12.07.2026): enthält auch re-anonymisierte
+  // Bestands-User — das 5.x→6.0-Update verliert die Auth-Session
+  // (Web-SDK AsyncStorage ≠ RNFirebase-Keychain), Anon-Veteranen
+  // bekommen eine frische UID und zählen hier als "neu". Sie landen
+  // direkt in der App (lokales Onboarding-Flag überlebt das Update)
+  // → drückt die Start-Quote, hebt die Aktiv-Quote. Bis zur
+  // Identitäts-Rettung als Caveat im Dashboard vermerkt.
   const fromMs = fromDate.getTime();
+  const nonEmpty = (a) => Array.isArray(a) && a.length > 0;
+  const sessionActive = (r) => (r.viewedProductsCount || 0) > 0
+    || nonEmpty(r.scannedcodes) || nonEmpty(r.searchedproducts) || nonEmpty(r.customItems)
+    || ['in_cart', 'purchased', 'inactive_with_cart'].includes(r.status)
+    || (r.convertedCount || 0) > 0;
+  const activeUids = new Set(v6rows.filter(sessionActive).map((r) => r._uid).filter(Boolean));
   let installs = 0;
+  let aktiv = 0;
   for (const u of distinctUids(v6rows)) {
     const f = facts.get(u);
-    if (f && f.createdAtMs != null && f.createdAtMs >= fromMs) installs += 1;
+    if (f && f.createdAtMs != null && f.createdAtMs >= fromMs) {
+      installs += 1;
+      if (activeUids.has(u)) aktiv += 1;
+    }
   }
   // v3-Sessions im Fenster. Version-Filter in-memory — 5.x-Rest-
   // installs schreiben weiterhin v1-Docs in dieselbe Collection, und
@@ -209,7 +227,7 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
     last = snap.docs[snap.docs.length - 1];
     if (snap.size < 1000) break;
   }
-  return { v6: { installs, started, completed }, old: OLD_ONBOARDING };
+  return { v6: { installs, started, completed, aktiv }, old: OLD_ONBOARDING };
 }
 
 function perUserMetrics(rows, facts) {
