@@ -35,6 +35,8 @@ import {
   signOutFacebook,
 } from '../services/auth/facebookAuth';
 import journeyTrackingService from '../services/journeyTrackingService';
+import { attemptLegacySessionRescue } from '../services/legacyRescueService';
+import { isEffectivelyAnonymous } from '../utils/authIdentity';
 import { createUserProfile, getUserProfile, patchUserProfile, syncProfileFromAuth, UserProfile } from '../services/userProfile';
 import { scheduleRegionGuess } from '../services/regionGuess';
 import { isOnline } from '../services/network';
@@ -283,6 +285,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let anonymousSignInTimeout: NodeJS.Timeout | null = null;
     let isMounted = true;
     let hasInitialAuthState = false;
+    // Session-Rettung nur 1× pro App-Start anstoßen (der Service selbst
+    // ist zusätzlich über AsyncStorage-Endzustände idempotent).
+    let legacyRescueKickedThisLaunch = false;
     
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       // Verhindere State Updates wenn Component unmounted ist
@@ -293,7 +298,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       console.log('🔄 AuthContext: Auth state changed:', user ? `User: ${user.uid} (anonymous: ${user.isAnonymous})` : 'No user');
       setUser(user);
-      setIsAnonymous(user?.isAnonymous || false);
+      // isEffectivelyAnonymous statt user.isAnonymous: per Custom-Token
+      // gerettete Gäste (Session-Rettung 5.x→6.0) haben isAnonymous=false
+      // bei leerem providerData — fürs UI/Verhalten sind sie Gäste.
+      setIsAnonymous(isEffectivelyAnonymous(user));
       // profileKnown gilt pro User: bei echtem Wechsel (Login/Logout/
       // Account-Switch) zurücksetzen, damit das alte Profil nicht als
       // "bekannt" fürs neue Konto durchgeht.
@@ -319,7 +327,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const crashlytics = require('@react-native-firebase/crashlytics').default;
             if (user?.uid) {
               await crashlytics().setUserId(user.uid);
-              crashlytics().setAttribute('is_anonymous', user.isAnonymous ? 'true' : 'false');
+              crashlytics().setAttribute('is_anonymous', isEffectivelyAnonymous(user) ? 'true' : 'false');
             }
           } catch (error) {
             console.log('⚠️ Crashlytics not available:', error);
@@ -334,6 +342,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           console.log('✅ Timeout gecancelt - User gefunden');
         }
         hasInitialAuthState = true;
+
+        // Session-Rettung 5.x→6.0 (Audit 12.07.): Geräte, deren Update die
+        // alte Web-SDK-Session verloren hat, laufen hier bereits mit einer
+        // FRISCHEN Anon-UID (nativ persistiert). Einmal pro App-Start
+        // prüfen, ob der alte Session-Rest im AsyncStorage liegt und die
+        // alte Identität zurückholen. Fire-and-forget: der Service ist
+        // idempotent (Endzustands-Flags), wirft nie, und ein Erfolg feuert
+        // schlicht ein weiteres onAuthStateChanged mit der alten UID.
+        if (!legacyRescueKickedThisLaunch && isEffectivelyAnonymous(user)) {
+          legacyRescueKickedThisLaunch = true;
+          void attemptLegacySessionRescue();
+        }
 
         // WSOD-Fix (ClickUp 86ca8c9rn): setLoading(false) SOFORT,
         // sobald der Auth-State steht — NICHT erst nach der
@@ -416,11 +436,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // Prüfe nochmal ob inzwischen User geladen wurde
             const currentUser = auth.currentUser;
             if (!currentUser) {
+              // Session-Rettung 5.x→6.0 (Audit 12.07.): VOR jeder Anon-
+              // Neuanlage prüfen, ob der alte Web-SDK-Session-Rest im
+              // AsyncStorage liegt. Erfolg = signInWithCustomToken mit der
+              // ALTEN UID → onAuthStateChanged feuert, hier ist Schluss.
+              // Deckt Gäste (kein Wegwerf-Anon nötig) UND Registrierte
+              // (automatischer Re-Login statt Login-Screen) ab.
+              legacyRescueKickedThisLaunch = true;
+              const rescued = await attemptLegacySessionRescue();
+              if (rescued) {
+                anonymousSignInTimeout = null;
+                return;
+              }
+
               // Prüfe ob es einen Backup gibt (deutet auf verlorene Session hin)
               try {
                 const backupUserId = await AsyncStorage.getItem('@auth_user_id_backup');
                 const backupEmail = await AsyncStorage.getItem('@auth_user_email_backup');
-                
+
                 if (backupUserId && backupEmail && backupEmail !== 'anonymous') {
                   // User hatte eine registrierte Session - nicht überschreiben!
                   console.warn('⚠️ Registrierte Session verloren - bitte User neu anmelden lassen');
@@ -434,7 +467,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               } catch (error) {
                 console.warn('⚠️ Konnte Backup nicht prüfen:', error);
               }
-              
+
               console.log('👤 Kein User nach Wartezeit gefunden - starte anonyme Anmeldung...');
               try {
                 await signInAnonymously(auth);
@@ -592,7 +625,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return false;
     };
 
-    if (currentUser?.isAnonymous) {
+    // isEffectivelyAnonymous: auch per Custom-Token gerettete Gäste
+    // (Session-Rettung 5.x→6.0, isAnonymous=false bei 0 Providern) müssen
+    // hier LINKEN — ein signInWithCredential würde ihre Daten erneut von
+    // der UID trennen. linkWithCredential ist für Custom-Token-User erlaubt.
+    if (currentUser && isEffectivelyAnonymous(currentUser)) {
       const anonUid = currentUser.uid;
       try {
         const linked = await linkWithCredential(currentUser, credential);
@@ -611,7 +648,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const upgraded = auth.currentUser;
         if (upgraded) {
           setUser(upgraded);
-          setIsAnonymous(upgraded.isAnonymous ?? false);
+          setIsAnonymous(isEffectivelyAnonymous(upgraded));
         }
         return linked;
       } catch (e: any) {
@@ -704,8 +741,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Korrektes Verhalten bei Anon-User der sich auf ein
       // existierendes Konto einloggen will: warnen dass die
       // Anon-Daten verloren gehen, dann signInWithEmailAndPassword.
+      // (isEffectivelyAnonymous: gilt auch für gerettete Legacy-Gäste.)
       const currentUser = auth.currentUser;
-      if (currentUser?.isAnonymous) {
+      if (currentUser && isEffectivelyAnonymous(currentUser)) {
         const confirmed = await confirmAccountSwitch();
         if (!confirmed) {
           const err: any = new Error('Anmeldung abgebrochen');
@@ -732,10 +770,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const currentUser = auth.currentUser;
       // VOR dem Link festhalten — das native User-Objekt kann nach
       // linkWithCredential mutieren (isAnonymous flippt am selben Objekt).
-      const wasAnonymous = currentUser?.isAnonymous === true;
+      // isEffectivelyAnonymous: gerettete Legacy-Gäste (Custom-Token,
+      // isAnonymous=false, 0 Provider) müssen ebenfalls LINKEN, damit
+      // ihre wiederhergestellten Daten an der UID bleiben.
+      const wasAnonymous = currentUser ? isEffectivelyAnonymous(currentUser) : false;
       let userCredential: FirebaseAuthTypes.UserCredential;
 
-      if (currentUser?.isAnonymous) {
+      if (currentUser && isEffectivelyAnonymous(currentUser)) {
         // Anon → upgrade zu Email/Password-Account, UID + Daten
         // bleiben erhalten.
         const credential = EmailAuthProvider.credential(email, password);
@@ -800,7 +841,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               // anonym war — der existiert dann schon mit serverTimestamp
               // aus der Anon-Phase. Beim merge:true ohne created_time
               // bleibt der bestehende Wert erhalten.
-              ...(currentUser?.isAnonymous ? {} : { created_time: serverTimestamp() }),
+              ...(wasAnonymous ? {} : { created_time: serverTimestamp() }),
               lastLoginAt: serverTimestamp(),
             },
             { merge: true },
@@ -822,16 +863,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // lädt (Spiegel des Google-Pfads). Im email-already-in-use-Fallback
       // (UID-Wechsel → onAuthStateChanged feuert) ist der Block idempotent.
       if (wasAnonymous) {
-        const upgraded = auth.currentUser;
-        if (upgraded) {
-          setUser(upgraded);
-          setIsAnonymous(upgraded.isAnonymous ?? false);
+        const upgradedAfterSignUp = auth.currentUser;
+        if (upgradedAfterSignUp) {
+          setUser(upgradedAfterSignUp);
+          setIsAnonymous(isEffectivelyAnonymous(upgradedAfterSignUp));
           // Refresh NUR im Gleiche-UID-Pfad (erfolgreicher Link): die
           // refreshUserProfile-Closure hält noch die Vor-Link-UID. Im
           // Fallback (UID-Wechsel) feuert onAuthStateChanged und lädt
           // das Profil selbst — ein Refresh hier könnte dort das ALTE
           // Profil laden.
-          if (upgraded.uid === currentUser?.uid) {
+          if (upgradedAfterSignUp.uid === currentUser?.uid) {
             await refreshUserProfile();
           }
         }

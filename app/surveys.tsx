@@ -31,7 +31,7 @@ export default function SurveysScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, isAnonymous } = useAuth();
   const { showSurvey, activityNonce } = useSurvey();
 
   const [surveys, setSurveys] = useState<Poll[] | null>(null);
@@ -41,7 +41,10 @@ export default function SurveysScreen() {
   // NACH dem Beantworten zu enttäuschen, zeigen wir die Bedingung + ein
   // Konto-Angebot VORHER. `accountOffer` = die angetippte vergütete Umfrage.
   const [accountOffer, setAccountOffer] = useState<Poll | null>(null);
-  const isAnon = (user as any)?.isAnonymous === true;
+  // Kontext-isAnonymous statt user.isAnonymous: deckt auch per Custom-Token
+  // gerettete Legacy-Gäste ab (Session-Rettung 5.x→6.0) — die brauchen fürs
+  // Auszahlen genauso ein Konto.
+  const isAnon = !!user && isAnonymous;
   // 86cagb5gh: vergütete Umfragen sind Cashback → registrierte User ohne
   // gültigen Consent sehen VOR der Umfrage den Consent (Umfragen-Variante),
   // statt erst nach dem Beantworten genudgt zu werden.

@@ -1,0 +1,14 @@
+{
+  "name": "legacy-rescue",
+  "version": "1.0.0",
+  "description": "Callable rescueLegacySession: tauscht den 5.x-Web-SDK-Refresh-Token (Besitznachweis) gegen einen Custom-Token der ALTEN UID — repariert den Session-Verlust der RNFirebase-Migration (Update 5.x→6.0), ohne Daten zu bewegen.",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^5.0.0"
+  },
+  "private": true
+}

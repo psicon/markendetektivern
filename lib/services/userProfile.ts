@@ -1,6 +1,7 @@
 import type { FirebaseAuthTypes } from '@react-native-firebase/auth';
 import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from '@react-native-firebase/firestore';
 import { db } from '../firebase';
+import { isEffectivelyAnonymous } from '../utils/authIdentity';
 import leaderboardService from './leaderboardService';
 
 export interface UserProfile {
@@ -211,7 +212,9 @@ const isPlaceholderName = (n?: string) => {
 export const syncProfileFromAuth = async (
   fbUser: FirebaseAuthTypes.User,
 ): Promise<void> => {
-  if (!fbUser || fbUser.isAnonymous) return;
+  // isEffectivelyAnonymous: gerettete Legacy-Gäste (Custom-Token, keine
+  // Provider) haben nichts zu syncen — spart den getDoc pro Login.
+  if (!fbUser || isEffectivelyAnonymous(fbUser)) return;
   const prov = (fbUser.providerData || []).filter(
     (p) => p && p.providerId !== 'firebase',
   );
