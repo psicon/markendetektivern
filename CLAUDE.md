@@ -771,6 +771,19 @@ fehlte). Vor jedem Build: Diff muss leer sein, applesignin drin.
 **2. buildNumber-Check** (siehe Abschnitt oben — `eas build:list`,
 höchste FINISHED-Nummer = lokale Nummer; autoIncrement macht +1).
 
+**2b. Version-Train-Check (Vorfall Build 1248, ITMS-90186/90062):** Sobald
+Apple eine App-Version APPROVED/RELEASED hat, ist deren „Train" (z.B. 6.0.0)
+für neue Build-Uploads GESCHLOSSEN — jeder weitere iOS-Build braucht eine
+HÖHERE `CFBundleShortVersionString` (6.0.1), sonst lehnt Apple den Upload ab
+(Build-Minuten verbrannt, Submission scheitert still; Fehlertext kommt nur
+per Apple-Mail/ASC, die EAS-CLI zeigt nur „Something went wrong"). Vor jedem
+iOS-Build nach einem App-Store-Release: `expo.version` (app.json) +
+`CFBundleShortVersionString` (Info.plist) + `versionName` (build.gradle,
+Konsistenz) bumpen. Symptom-Merker: Build FINISHED, aber in ASC/TestFlight
+taucht er auch nach 30+ Min NICHT auf (nicht mal „Wird verarbeitet").
+Die In-App-Anzeige liest `nativeApplicationVersion` aus dem Binary — nur die
+drei Config-Stellen bumpen, kein Code.
+
 **3. Image-Check: `eas.json` → `production.ios.image` MUSS ein
 konkretes Xcode-Image sein (Stand: `macos-tahoe-26.4-xcode-26.4`).**
 - NIE `"latest"`: EAS dreht das Image still weiter (latest sprang
