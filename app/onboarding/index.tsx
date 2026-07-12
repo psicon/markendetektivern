@@ -412,22 +412,30 @@ export default function OnboardingScreen() {
       // erzeugen falls noch keiner da ist + Onboarding-Status auf
       // 'in_progress' setzen.
       if (currentStep === 1) {
-        try {
-          const auth = authMod;
-          if (!auth.currentUser) {
-            await signInAnonymously();
-            console.log('✅ Anon-UUID auto-erzeugt am Onboarding-Start');
+        // Audit 12.07.2026: NICHT auf Netz warten — der blockierende
+        // signInAnonymously-Await ließ den CTA auf schlechtem Netz
+        // sekundenlang tot wirken (Einstiegs-Drop). Der Boot-Auto-Anon
+        // (AuthContext, +1 s) hat den User ohnehin fast immer schon;
+        // das hier ist nur der Fallback, und das Step-Tracking hat für
+        // die Rest-Lücke den userId-Fallback 'anonymous'.
+        void (async () => {
+          try {
+            const auth = authMod;
+            if (!auth.currentUser) {
+              await signInAnonymously();
+              console.log('✅ Anon-UUID auto-erzeugt am Onboarding-Start');
+            }
+          } catch (e) {
+            console.warn('⚠️ Anon-Auto-Login fehlgeschlagen:', e);
+            // Non-fatal — userId fällt auf "anonymous" zurück im Tracking
           }
-        } catch (e) {
-          console.warn('⚠️ Anon-Auto-Login fehlgeschlagen:', e);
-          // Non-fatal — userId fällt auf "anonymous" zurück im Tracking
-        }
-        // Status-Übergang pending → in_progress (Service als SoT).
-        try {
-          await OnboardingService.markStarted();
-        } catch (e) {
-          console.warn('⚠️ markStarted failed:', e);
-        }
+          // Status-Übergang pending → in_progress (Service als SoT).
+          try {
+            await OnboardingService.markStarted();
+          } catch (e) {
+            console.warn('⚠️ markStarted failed:', e);
+          }
+        })();
       }
 
       // Tracking beim Weiterklicken (nicht bei jeder Auswahl).

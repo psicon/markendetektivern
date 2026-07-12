@@ -38,13 +38,29 @@ export default function IndexScreen() {
       // Onboarding-View schon gerendert war. Jetzt: linear in der
       // Boot-Sequenz, vor jedem Routing.
       try {
-        const status = await consentService.initialize();
+        // Audit 12.07.2026: initialize() macht beim Erstlauf einen
+        // Netz-Call (AdsConsent.requestInfoUpdate) OHNE eigenes Timeout —
+        // hing der, saß der User für immer auf dem Splash. Timeboxen:
+        // nach Ablauf weiter booten, der Safety-Net-Pfad in
+        // (tabs)/index.tsx bietet den Consent später erneut an.
+        const withTimeout = <T,>(p: Promise<T>, ms: number, tag: string): Promise<T> =>
+          new Promise<T>((resolve, reject) => {
+            const t = setTimeout(() => reject(new Error(`${tag}-timeout`)), ms);
+            p.then(
+              (v) => { clearTimeout(t); resolve(v); },
+              (err) => { clearTimeout(t); reject(err); },
+            );
+          });
+        const status = await withTimeout(consentService.initialize(), 6000, 'consent-init');
         if (Platform.OS === 'android' && status === 'REQUIRED') {
           console.log('🔒 Consent REQUIRED — zeige UMP-Form vor Routing');
-          await consentService.showConsentFormIfRequired();
+          // Form-Laden ebenfalls timeboxen (großzügig): läuft das Race ab,
+          // während das Form schon SICHTBAR ist, bleibt der native Dialog
+          // schlicht über der App liegen — kein Abriss für den User.
+          await withTimeout(consentService.showConsentFormIfRequired(), 20000, 'consent-form');
         }
       } catch (e) {
-        console.warn('⚠️ Consent-Init/Show fehlgeschlagen, fahre fort:', e);
+        console.warn('⚠️ Consent-Init/Show fehlgeschlagen/timeout, fahre fort:', e);
         // Non-fatal: User soll nicht in der App stecken bleiben weil
         // Google's SDK Probleme hat. Status wird ggf. später per
         // Safety-Net-Pfad nochmal angeboten (s. (tabs)/index.tsx).
