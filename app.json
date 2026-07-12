@@ -2,7 +2,7 @@
   "expo": {
     "name": "MarkenDetektive",
     "slug": "markendetektive",
-    "version": "6.0.0",
+    "version": "6.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": [
