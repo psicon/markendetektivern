@@ -106,6 +106,10 @@
     <h2>Kernfragen</h2>
     <div id="core"></div>
 
+    <h2>Onboarding-Funnel</h2>
+    <p class="sectionnote">Neu-Installs = im 72h-Fenster angelegte User mit 6.0-Session. „Begonnen" = mindestens eine bewusste Interaktion im Flow (der Start-Screen schreibt nichts — in alter wie neuer Version identisch gemessen). Vorher = fixes 5.x-Fenster 04.–06.07. Der Plattform-Filter wirkt hier nicht.</p>
+    <div id="onbfunnel"></div>
+
     <h2>Verhalten in der Sitzung</h2>
     <div id="behavior"></div>
 
@@ -203,6 +207,7 @@ function render(seg){
       </div>`);
     }
   }
+  renderOnboarding(DATA.onboarding);
   const daily=DATA.daily||[];
   const mx=Math.max(...daily.map(d=>d.n),1);
   document.getElementById('spark').innerHTML=daily.map(d=>{
@@ -211,6 +216,38 @@ function render(seg){
     return `<div class="col ${isV6?'v6':''}"><span class="cv">${d.n.toLocaleString('de-DE')}</span>
       <div class="bar2" style="height:${Math.max(6,95*d.n/mx)}px"></div><span class="cl">${label}</span></div>`;
   }).join('');
+}
+
+// Onboarding-Funnel: eigene Kacheln, weil jede einen anderen Nenner hat
+// (Installs bzw. Begonnene) — passt nicht ins generische METRICS-Raster.
+function renderOnboarding(ob){
+  const el=document.getElementById('onbfunnel');
+  if(!el||!ob){if(el)el.innerHTML='<p class="sectionnote">Noch keine Funnel-Daten — einmal „Neu berechnen" tippen.</p>';return;}
+  el.innerHTML='';
+  const tiles=[
+    {title:'Onboarding begonnen',what:'von Neu-Installs; mind. eine Interaktion',v:[ob.v6.started,ob.v6.installs],o:[ob.old.started,ob.old.installs]},
+    {title:'Abgeschlossen — von Begonnenen',what:'Flow bis zum Ende durchlaufen',v:[ob.v6.completed,ob.v6.started],o:[ob.old.completed,ob.old.started]},
+    {title:'Abgeschlossen — von Neu-Installs',what:'Ende erreicht, gemessen an allen neuen Usern',v:[ob.v6.completed,ob.v6.installs],o:[ob.old.completed,ob.old.installs]},
+  ];
+  for(const t of tiles){
+    const vP=100*t.v[0]/Math.max(t.v[1],1), oP=100*t.o[0]/Math.max(t.o[1],1);
+    let cls='neutral',txt='≈ gleich';
+    if(Math.abs(vP-oP)>=3){ if(vP>oP){cls='good';txt='v6 besser';} else {cls='bad';txt='v6 schlechter';} }
+    const p=(x)=>(x<1&&x>0?x.toFixed(1).replace('.',','):Math.round(x))+' %';
+    el.insertAdjacentHTML('beforeend',`
+    <div class="metric">
+      <div class="mhead"><span class="mtitle">${t.title}</span><span class="mwhat">${t.what}</span><span class="badge ${cls}">${txt}</span></div>
+      <div class="rows">
+        <div class="brow"><span class="who">v6</span>
+          <div class="track"><div class="fill" style="width:${Math.max(Math.min(vP,100),1.5)}%"></div></div>
+          <span class="num">${p(vP)}</span></div>
+        <div class="brow old"><span class="who">vorher</span>
+          <div class="track"><div class="fill" style="width:${Math.max(Math.min(oP,100),1.5)}%"></div></div>
+          <span class="num">${p(oP)}</span></div>
+      </div>
+      <div class="mfoot">v6: ${t.v[0]} von ${t.v[1]} · vorher: ${t.o[0]} von ${t.o[1]} (04.–06.07.)</div>
+    </div>`);
+  }
 }
 
 async function load(){

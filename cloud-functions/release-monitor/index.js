@@ -146,7 +146,7 @@ async function loadUserFacts(uids) {
     // eslint-disable-next-line no-await-in-loop
     const snaps = await db.getAll(
       ...chunk.map((u) => db.doc(`users/${u}`)),
-      { fieldMask: ['favoriteMarket', 'age', 'gender', 'onboardingCompletedAt'] },
+      { fieldMask: ['favoriteMarket', 'age', 'gender', 'onboardingCompletedAt', 'created_time'] },
     );
     for (const s of snaps) {
       if (!s.exists) continue;
@@ -155,10 +155,61 @@ async function loadUserFacts(uids) {
         markt: !!d.favoriteMarket,
         demo: (d.age != null && d.age !== '') || (d.gender != null && d.gender !== ''),
         onboarding: !!d.onboardingCompletedAt,
+        createdAtMs: d.created_time && d.created_time.toMillis ? d.created_time.toMillis() : null,
       });
     }
   }
   return map;
+}
+
+// ─── Onboarding-Funnel (Audit 12.07.2026, User-Frage „70 %?") ────
+// Quelle: onboardingResultsV5 — ein Doc pro Onboarding-Session.
+// „Begonnen" = mind. eine bewusste Interaktion (Schritt-Submit oder
+// „Später"-Tap); der Start-Screen schreibt NICHTS — das galt in v1
+// (5.x-Store) exakt wie in v3 (6.0, Variante B), Messung ist also
+// version-übergreifend identisch (git-verifiziert: `currentStep <= 1
+// → return` in beiden Ständen).
+//
+// Fixe Alt-Baseline (Fenster 04.–06.07. ist abgeschlossen, live
+// gemessen 12.07.2026): 1.599 Neu-User · 1.474 Sessions · 1.110
+// abgeschlossen (75,3 % der Begonnenen — „die 70+ %").
+const OLD_ONBOARDING = { installs: 1599, started: 1474, completed: 1110 };
+
+async function onboardingFunnel(v6rows, facts, fromDate) {
+  // Neu-Installs = im Fenster angelegte User mit 6.0-Session (jeder
+  // App-Open erzeugt eine Journey → Bounce-Installs sind enthalten).
+  const fromMs = fromDate.getTime();
+  let installs = 0;
+  for (const u of distinctUids(v6rows)) {
+    const f = facts.get(u);
+    if (f && f.createdAtMs != null && f.createdAtMs >= fromMs) installs += 1;
+  }
+  // v3-Sessions im Fenster. Version-Filter in-memory — 5.x-Rest-
+  // installs schreiben weiterhin v1-Docs in dieselbe Collection, und
+  // ein where(version) bräuchte einen Composite-Index.
+  let started = 0;
+  let completed = 0;
+  let last = null;
+  for (;;) {
+    let q = db.collection('onboardingResultsV5')
+      .where('lastUpdateTime', '>=', ts(fromDate))
+      .orderBy('lastUpdateTime', 'asc')
+      .select('lastUpdateTime', 'status', 'version')
+      .limit(1000);
+    if (last) q = q.startAfter(last);
+    // eslint-disable-next-line no-await-in-loop
+    const snap = await q.get();
+    if (snap.empty) break;
+    snap.forEach((d) => {
+      const x = d.data() || {};
+      if ((x.version || 'v1') !== 'v3') return;
+      started += 1;
+      if (x.status === 'completed') completed += 1;
+    });
+    last = snap.docs[snap.docs.length - 1];
+    if (snap.size < 1000) break;
+  }
+  return { v6: { installs, started, completed }, old: OLD_ONBOARDING };
 }
 
 function perUserMetrics(rows, facts) {
@@ -203,6 +254,9 @@ async function aggregate() {
   // getAll-Read pro 100 User; bei ~500 Usern ≈ 500 Reads pro Lauf).
   const facts = await loadUserFacts(distinctUids(v6));
 
+  // 2c) Onboarding-Funnel (Begonnen/Abgeschlossen vs. Neu-Installs).
+  const onboarding = await onboardingFunnel(v6, facts, new Date(now.getTime() - V6_WINDOW_MS));
+
   // 3) Vor-Release-Baseline (fix) — alles außer 6.x-TestFlight.
   const oldRows = dedupe(await sampleBetween(OLD_FROM, OLD_TO, 3000)).filter((r) => !isV6(r));
 
@@ -221,6 +275,7 @@ async function aggregate() {
       android: { ...metrics(v6android), ...perUserMetrics(v6android, facts) },
     },
     old: metrics(oldRows),
+    onboarding,
   };
   doc.computeMs = Date.now() - startedAt;
 
