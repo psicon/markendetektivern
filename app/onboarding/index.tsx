@@ -391,9 +391,20 @@ export default function OnboardingScreen() {
     }
   };
 
-  const trackCurrentStep = () => {
+  // marketsOverride: bei „Tap = Markt + weiter" (Option A) ist die frische
+  // Auswahl beim Aufruf noch NICHT im State (setState ist async) — der Markt
+  // wird dann explizit durchgereicht, damit das Tracking den getippten Markt
+  // sieht statt den veralteten State. Format bleibt identisch.
+  const trackCurrentStep = (marketsOverride?: any[]) => {
     // Nur tracken wenn der User mindestens einen Step abgeschlossen hat.
     if (currentStep <= 1) return;
+
+    // Array.isArray-Guard: die bestehenden onPress={() => nextStep()}-Callsites
+    // (Budget/Prioritäten/Hero) reichen das Press-Event durch → das ist
+    // KEIN Markt-Array. Nur ein echtes Array (aus handleMarketPick) zählt
+    // als Override; sonst der State.
+    const sel = Array.isArray(marketsOverride) ? marketsOverride : selectedMarkets;
+    const firstReal = sel.find((m) => !m.isOther);
 
     const stepData: any = {
       currentStep,
@@ -407,11 +418,11 @@ export default function OnboardingScreen() {
     }
 
     // Schritt-akkumulative Daten — alles was bis hierhin beantwortet wurde.
-    if (currentStep >= 2 && selectedMarkets.length > 0) {
-      stepData.favoriteMarkets = selectedMarkets.map(m => m.name);
+    if (currentStep >= 2 && sel.length > 0) {
+      stepData.favoriteMarkets = sel.map(m => m.name);
       // primaryMarket nur bei ECHTEM Discounter (kein 'isOther'/Anderer).
-      if (firstRealMarket) {
-        stepData.primaryMarket = firstRealMarket.name;
+      if (firstReal) {
+        stepData.primaryMarket = firstReal.name;
       }
       if (marketOther) stepData.marketOther = marketOther;
     }
@@ -438,7 +449,7 @@ export default function OnboardingScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const nextStep = async () => {
+  const nextStep = async (marketsOverride?: any[]) => {
     if (currentStep < TOTAL_STEPS) {
       // Auf "Los geht's"-Tap (Step 1 → 2): SOFORT anonyme UUID
       // erzeugen falls noch keiner da ist + Onboarding-Status auf
@@ -475,7 +486,9 @@ export default function OnboardingScreen() {
       }
 
       // Tracking beim Weiterklicken — fire-and-forget (nie awaiten).
-      trackCurrentStep();
+      // marketsOverride durchreichen (Option A: Tap-and-go auf dem Markt-
+      // Schritt — die frische Auswahl ist noch nicht im State).
+      trackCurrentStep(marketsOverride);
 
       // Spezielle Animation für Übergang von Hero (Step 1) zu Step 2
       if (currentStep === 1) {
@@ -540,6 +553,34 @@ export default function OnboardingScreen() {
         });
       }
     }
+  };
+
+  // Option A (6.0.5): „Tap = Hauptmarkt wählen + weiter". Beseitigt den toten
+  // „Weiter"-Button als ersten Eindruck (Absprung-Ursache) und erfasst den
+  // fürs B2B wertvollsten Hauptmarkt (`favoriteMarket`) sauber + massenhaft.
+  // Markt bleibt Pflicht (einziger Weg vorwärts ist ein Tap oder „überspringen"),
+  // es wird NICHTS vorausgewählt/gefaked. Zweit-/Cross-Shopping-Signale kommen
+  // fürs B2B aus echten Bons (purchased_products), nicht aus dem Onboarding.
+  const handleMarketPick = (item: any) => {
+    if (item?.isOther) {
+      // „Anderer" braucht Freitext → NICHT auto-weiter. Auswählen, Eingabe
+      // einblenden; der Weiter-Button (nur in diesem Fall sichtbar) schaltet
+      // nach Texteingabe weiter.
+      const already = selectedMarkets.some((m) => m.isOther);
+      if (already) {
+        setSelectedMarkets([]);
+        setMarketOther('');
+      } else {
+        setSelectedMarkets([item]);
+        setTimeout(() => marketsListRef.current?.scrollToEnd({ animated: true }), 50);
+      }
+      return;
+    }
+    // Echter Markt: als (einzige) Auswahl setzen + sofort weiter. Den frisch
+    // getippten Markt explizit ans Tracking geben (State ist noch nicht aktuell).
+    const sel = [item];
+    setSelectedMarkets(sel);
+    nextStep(sel);
   };
 
   const skipOnboarding = async () => {
@@ -1058,7 +1099,7 @@ export default function OnboardingScreen() {
                 {/* Hero hat NUR den Primary-CTA. Skip-Option ist
                     auf dem nächsten Step (Märkte) als dezente Pill
                     oben rechts — so will's der ClickUp-Task. */}
-                <TouchableOpacity style={styles.heroPrimaryButton} onPress={nextStep}>
+                <TouchableOpacity style={styles.heroPrimaryButton} onPress={() => nextStep()}>
                   <Text style={styles.heroPrimaryButtonText}>Los geht's! 🚀</Text>
                 </TouchableOpacity>
 
@@ -1120,26 +1161,12 @@ export default function OnboardingScreen() {
                  </TouchableOpacity>
                ))}
              </View>
-             <Text style={[styles.counter, IS_SMALL_SCREEN && { marginBottom: 4 }]}>{selectedMarkets.length}/3 ausgewählt</Text>
-             {/* Hinweis dass der ERSTE ausgewählte Markt zum Lieblingsmarkt
-                 wird. Sichtbar erst nachdem mindestens ein Markt
-                 selektiert ist — sonst zeigt der Satz ins Leere. Der
-                 Code unten setzt zusätzlich ein gold-Heart-Badge auf
-                 selectedMarkets[0], sodass der Zusammenhang
-                 "erster = Liebling" auch visuell verankert ist. */}
-             {firstRealMarket ? (
-               <View style={styles.primaryMarketHintRow}>
-                 <MaterialCommunityIcons
-                   name="heart"
-                   size={13}
-                   color={Colors.light.tint}
-                   style={{ marginRight: 6 }}
-                 />
-                 <Text style={styles.primaryMarketHint}>
-                   Dein zuerst gewählter Markt wird zu deinem Lieblingsmarkt
-                 </Text>
-               </View>
-             ) : null}
+             {/* Option A (6.0.5): Tap-and-go. Anleitung statt „0/3 ausgewählt"-
+                 Zähler + gesperrtem Button — der Tap auf einen Markt setzt ihn
+                 als Lieblingsmarkt und schaltet sofort weiter. */}
+             <Text style={[styles.primaryMarketHint, { textAlign: 'center', marginBottom: 8 }, IS_SMALL_SCREEN && { marginBottom: 4 }]}>
+               Tippe deinen Hauptmarkt an — die App zeigt dir sofort die besten Alternativen dort.
+             </Text>
 
             <FlatList
               ref={marketsListRef}
@@ -1162,12 +1189,9 @@ export default function OnboardingScreen() {
               keyboardShouldPersistTaps="handled"
               renderItem={({ item }) => {
                 const isSelected = selectedMarkets.some(m => m.id === item.id);
-                const isDisabled = !isSelected && selectedMarkets.length >= 3;
-                // Lieblingsmarkt = ERSTER NICHT-isOther im Array.
-                // Wenn User zuerst "Anderer" und dann "Aldi" wählt,
-                // bekommt Aldi das Heart (firstRealMarket), nicht
-                // Anderer. Das verhindert kaputte favoriteMarket-
-                // Refs ('other'-ID hat kein echtes Discounter-Doc).
+                // Option A: Einzelauswahl, kein 3er-Cap → nie „disabled".
+                const isDisabled = false;
+                // Primär-Markt = der gewählte echte Markt (Einzelauswahl).
                 const isPrimary =
                   isSelected &&
                   !item.isOther &&
@@ -1178,29 +1202,10 @@ export default function OnboardingScreen() {
                     style={[
                       styles.marketOption,
                       isSelected && styles.optionSelected,
-                      isDisabled && styles.optionDisabled
                     ]}
-                    onPress={() => {
-                      if (isSelected) {
-                        setSelectedMarkets(selectedMarkets.filter(m => m.id !== item.id));
-                        if (item.isOther) {
-                          setMarketOther('');
-                        }
-                      } else if (selectedMarkets.length < 3) {
-                        setSelectedMarkets([...selectedMarkets, item]);
-                        // Wenn 'Anderer' frisch hinzugefügt wird:
-                        // FlatList nach unten scrollen damit das gleich
-                        // unter dem letzten Item erscheinende TextInput
-                        // im sichtbaren Bereich ist (sonst klebt's
-                        // unter der Liste off-screen).
-                        if (item.isOther) {
-                          setTimeout(() => {
-                            marketsListRef.current?.scrollToEnd({ animated: true });
-                          }, 50);
-                        }
-                      }
-                    }}
-                    disabled={isDisabled}
+                    // Option A: Tap = Hauptmarkt setzen + sofort weiter
+                    // (echter Markt) bzw. Eingabe zeigen („Anderer").
+                    onPress={() => handleMarketPick(item)}
                   >
                     {item.bild ? (
                       <Image source={{ uri: item.bild }} style={styles.marketLogo} />
@@ -1256,16 +1261,19 @@ export default function OnboardingScreen() {
             )}
           </View>
 
-          <View style={styles.buttonContainer}>
-            <OnboardingButton
-              title="Weiter"
-              onPress={nextStep}
-              disabled={
-                selectedMarkets.length === 0 ||
-                (selectedMarkets.some(m => m.isOther) && marketOther.trim() === '')
-              }
-            />
-          </View>
+          {/* Option A: Kein „Weiter"-Button mehr für echte Märkte (Tap-and-go).
+              Nur wenn „Anderer" gewählt ist, braucht es einen Bestätigen-
+              Button — der Freitext muss erst eingegeben werden, bevor es
+              weitergeht (kein Auto-Advance beim Freitext). */}
+          {selectedMarkets.some(m => m.isOther) && (
+            <View style={styles.buttonContainer}>
+              <OnboardingButton
+                title="Weiter"
+                onPress={() => nextStep()}
+                disabled={marketOther.trim() === ''}
+              />
+            </View>
+          )}
         </Animated.View>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -1328,7 +1336,7 @@ export default function OnboardingScreen() {
           </View>
 
           <View style={styles.buttonContainer}>
-            <OnboardingButton title="Weiter" onPress={nextStep} />
+            <OnboardingButton title="Weiter" onPress={() => nextStep()} />
           </View>
         </Animated.View>
       </SafeAreaView>
@@ -1436,7 +1444,7 @@ export default function OnboardingScreen() {
           <View style={styles.buttonContainer}>
             <OnboardingButton 
               title="Weiter" 
-              onPress={nextStep}
+              onPress={() => nextStep()}
               disabled={
                 priorities.length === 0 ||
                 (priorities.includes('anderes') && prioritiesOther.trim() === '')
