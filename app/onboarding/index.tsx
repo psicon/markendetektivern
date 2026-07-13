@@ -661,11 +661,24 @@ export default function OnboardingScreen() {
     try {
       const skipUid = authMod.currentUser?.uid;
       if (skipUid) {
-        await setDoc(
-          doc(db, 'users', skipUid),
-          { onboardingCompletedAt: serverTimestamp() },
-          { merge: true },
-        );
+        // 6.0.6-FIX: Wer per Option-A einen Hauptmarkt getippt hat (step_2
+        // passiert) und DANN skippt, muss den B2B-kritischen Markt GENAUSO
+        // aufs Profil bekommen wie im Completion-Pfad — sonst gilt der User
+        // als „onboarded", aber favoriteMarket fehlt (getippte Marktwahl
+        // verloren). Bis 6.0.5 schrieb der Skip nur onboardingCompletedAt.
+        const skipPrefs: any = { onboardingCompletedAt: serverTimestamp() };
+        if (firstRealMarket) {
+          skipPrefs.country = country;
+          skipPrefs.favoriteMarkets = selectedMarkets.map((market) =>
+            market.isOther ? { id: 'other', name: marketOther, isCustom: true } : market,
+          );
+          if (firstRealMarket.id) {
+            skipPrefs.favoriteMarket = firstRealMarket.id;
+            skipPrefs.favoriteMarketName = firstRealMarket.name ?? '';
+          }
+          skipPrefs.primaryMarket = firstRealMarket;
+        }
+        await setDoc(doc(db, 'users', skipUid), skipPrefs, { merge: true });
       }
     } catch (e) {
       console.warn('⚠️ skip onboardingCompletedAt write failed:', e);
