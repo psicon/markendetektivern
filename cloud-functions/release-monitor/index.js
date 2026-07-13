@@ -46,7 +46,21 @@ const SELECT_FIELDS = [
   'journeyId', 'viewedProductsCount', 'convertedCount', 'status',
   'completionReason', 'filterMetrics', 'consumerProfile', 'app',
   'scannedcodes', 'searchedproducts', 'customItems',
+  // screenName + startTime: für die „Wer landet in der App?"-Buckets
+  // (erste Journey pro User → Onboarding-Screen vs. App-Screen).
+  'screenName', 'startTime',
 ];
+
+// App-interne Screens (= User ist am Onboarding vorbei in die App geroutet).
+const APP_SCREEN_PREFIXES = [
+  'home', 'explore', 'rewards', 'product-comparison', 'noname-detail',
+  'external-product', 'achievements', 'profile', 'barcode', 'shopping',
+  'favorites', 'cashback', 'purchase', 'history',
+];
+const isAppScreen = (name) => {
+  const s = String(name || '');
+  return APP_SCREEN_PREFIXES.some((p) => s.startsWith(p));
+};
 
 function ts(d) {
   return admin.firestore.Timestamp.fromDate(d);
@@ -208,12 +222,27 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
     || (r.convertedCount || 0) > 0;
   const activeUids = new Set(v6rows.filter(sessionActive).map((r) => r._uid).filter(Boolean));
 
+  // Erste Journey pro uid (früheste startTime) → für die „Wer landet in der
+  // App?"-Buckets: startet der User auf einem App-Screen (home/explore/…),
+  // wurde er am Onboarding vorbei in die App geroutet (Veteran/Bypass);
+  // startet er auf app_start/onboarding, ist er ein echter Onboarding-/
+  // Boot-Abbrecher.
+  const firstScreenByUid = new Map();
+  for (const r of v6rows) {
+    const u = r._uid;
+    if (!u) continue;
+    const t = r.startTime && r.startTime.toMillis ? r.startTime.toMillis() : 0;
+    const prev = firstScreenByUid.get(u);
+    if (!prev || t < prev.t) firstScreenByUid.set(u, { t, screen: r.screenName });
+  }
+
   // v3-Onboarding-Sessions im Fenster → distinct uids die das Onboarding
   // begonnen bzw. abgeschlossen haben. userId mitselektieren, damit wir
   // pro Neu-Install klassifizieren können. (5.x-Rest schreibt v1-Docs in
   // dieselbe Collection → Version-Filter in-memory, kein Composite-Index.)
   const sawUids = new Set();
   const completedUids = new Set();
+  const skippedUids = new Set(); // hat ein abandoned-Doc (Onboarding übersprungen)
   // Weitester erreichter Schritt pro uid (für den Schritt-Funnel).
   // completed → 99; sonst abandonedAtStep bzw. currentStep.
   const reachedByUid = new Map();
@@ -262,6 +291,8 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
       if (isDone) {
         completed += 1;
         if (uid && uid !== 'anonymous') completedUids.add(uid);
+      } else if (x.status === 'abandoned' && uid && uid !== 'anonymous') {
+        skippedUids.add(uid);
       }
     });
     last = snap.docs[snap.docs.length - 1];
@@ -293,6 +324,13 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
   let stBudget = 0;
   let stPrio = 0;
   let stSkipMaerkte = 0;
+  // „Wer landet in der App?"-Buckets (exklusiv, priorisiert) über ALLE
+  // Neu-Installs — beantwortet „egal ob geskippt oder durchlaufen".
+  let lAktiv = 0;
+  let lCompleted = 0;
+  let lSkipped = 0;
+  let lBypass = 0;
+  let lHero = 0;
   for (const u of distinctUids(v6rows)) {
     const f = facts.get(u);
     if (!(f && f.createdAtMs != null && f.createdAtMs >= fromMs)) continue;
@@ -300,6 +338,13 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
     const isActive = activeUids.has(u);
     if (isActive) aktiv += 1;
     if (f.registered) registered += 1;
+    // Landed-Bucket: aktiv > Onboarding fertig > übersprungen >
+    // am Onboarding vorbei in App (Veteran/Bypass) > nur Hero/Boot gesehen.
+    if (isActive) lAktiv += 1;
+    else if (completedUids.has(u)) lCompleted += 1;
+    else if (skippedUids.has(u)) lSkipped += 1;
+    else if (isAppScreen((firstScreenByUid.get(u) || {}).screen)) lBypass += 1;
+    else lHero += 1;
     if (sawUids.has(u)) {
       sawOnb += 1;
       if (completedUids.has(u)) completedUsers += 1;
@@ -325,6 +370,8 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
       // maerkte = Markt gewählt + Weiter (echt bestanden); skipMaerkte =
       // auf dem Märkte-Screen „Onboarding überspringen" getippt.
       stepFunnel: { hero: correctedDenom, maerkte: stMaerkte, budget: stBudget, prioritaeten: stPrio, done: completedUsers, skipMaerkte: stSkipMaerkte },
+      // „Wer landet in der App?" über ALLE Neu-Installs (nicht correctedDenom):
+      landed: { installs, aktiv: lAktiv, completed: lCompleted, skipped: lSkipped, bypass: lBypass, heroBounce: lHero },
     },
     old: { ...OLD_ONBOARDING, stepFunnel: OLD_STEPFUNNEL },
   };

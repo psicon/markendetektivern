@@ -106,6 +106,10 @@
     <h2>Kernfragen</h2>
     <div id="core"></div>
 
+    <h2>Wer landet in der App?</h2>
+    <p class="sectionnote">Von allen v6-Neu-Installs — <b>egal ob Onboarding durchlaufen, übersprungen oder vorbeigeroutet</b>. Das ist die ehrliche „wie viele nutzen die App wirklich"-Sicht. Der Onboarding-Funnel weiter unten ist eine engere Teilmenge (nur wer den Flow durchläuft) und darf NICHT als „App-Verlust" gelesen werden.</p>
+    <div id="landed"></div>
+
     <h2>Onboarding-Funnel</h2>
     <p class="sectionnote"><b>Echte Zahlen:</b> Die re-anonymisierten Bestands-User (Session-Verlust des 5.x→6.0-Updates) werden aus dem Nenner herausgerechnet — die Quoten unten beziehen sich auf <b>echte Neu-Installs</b> (= die das Onboarding überhaupt sehen konnten: Onboarding-Session ODER am ersten Screen abgesprungen). Die oberste Kachel zeigt, wie viele „Neu-Installs" in Wahrheit Bestands-User sind — diese Zahl muss mit 6.0.3 gegen 0 gehen. „Begonnen" = mind. eine Interaktion (Start-Screen schreibt nichts; in v1 wie v3 identisch gemessen). Vorher = fixes 5.x-Fenster 04.–06.07. (keine Re-Anon-Verzerrung). Plattform-Filter wirkt hier nicht.</p>
     <div id="onbfunnel"></div>
@@ -211,6 +215,7 @@ function render(seg){
       </div>`);
     }
   }
+  renderLanded(DATA.onboarding);
   renderOnboarding(DATA.onboarding);
   renderStepFunnel(DATA.onboarding);
   const daily=DATA.daily||[];
@@ -221,6 +226,42 @@ function render(seg){
     return `<div class="col ${isV6?'v6':''}"><span class="cv">${d.n.toLocaleString('de-DE')}</span>
       <div class="bar2" style="height:${Math.max(6,95*d.n/mx)}px"></div><span class="cl">${label}</span></div>`;
   }).join('');
+}
+
+// „Wer landet in der App?" — 5 exklusive Outcome-Buckets als Karten +
+// große Zusammenfassung (grün = in der App, rot = nie eingestiegen).
+function renderLanded(ob){
+  const el=document.getElementById('landed');
+  if(!el||!ob||!ob.v6||!ob.v6.landed){if(el)el.innerHTML='<p class="sectionnote">Noch keine Daten — einmal „Neu berechnen" tippen.</p>';return;}
+  const L=ob.v6.landed, n=Math.max(L.installs||0,1);
+  const landed=(L.aktiv||0)+(L.completed||0)+(L.skipped||0)+(L.bypass||0);
+  const hero=L.heroBounce||0;
+  const p=x=>Math.round(100*x/n)+' %';
+  const cards=[
+    {ic:'🟢',lab:'Aktiv in der App',sub:'Produkt/Suche/Scan/Zettel genutzt',v:L.aktiv||0,col:'#0d8575'},
+    {ic:'🟢',lab:'Onboarding abgeschlossen',sub:'in der App, noch nicht aktiv',v:L.completed||0,col:'#0d8575'},
+    {ic:'🟢',lab:'Onboarding übersprungen',sub:'überspringen getippt → in App',v:L.skipped||0,col:'#0d8575'},
+    {ic:'🟡',lab:'Am Onboarding vorbei',sub:'direkt in die App geroutet (Veteran/Bypass)',v:L.bypass||0,col:'#c9a227'},
+    {ic:'🔴',lab:'Nur Hero/Boot gesehen',sub:'nie eingestiegen',v:hero,col:'#c0392b'},
+  ];
+  el.innerHTML=`
+    <div class="metric" style="margin-bottom:12px">
+      <div class="mhead"><span class="mtitle" style="font-size:1.15em">➡️ ${p(landed)} landen in der App</span>
+        <span class="mwhat">${landed} von ${n} Neu-Installs · nur ${hero} (${p(hero)}) steigen nie ein</span></div>
+      <div class="rows"><div class="brow"><span class="who">App</span>
+        <div class="track" style="height:22px"><div class="fill" style="width:${Math.max(100*landed/n,1.5)}%;background:#0d8575"></div></div>
+        <span class="num">${p(landed)}</span></div></div>
+      <div class="mfoot">20–40 % First-Open-Bounce sind für Apps normal. Der „46 % spurlos"-Wert im Onboarding-Funnel ist ein Nenner-Artefakt (v5 hatte einen „Später"-Button, der Abbrecher als „begonnen" zählte; v6 hat zusätzlich Re-Anon-Veteranen). Diese Karte ist die ehrliche Sicht.</div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:10px">
+      ${cards.map(c=>`
+        <div class="metric" style="flex:1;min-width:150px;border-left:4px solid ${c.col};margin:0">
+          <div style="font-size:1.8em;font-weight:800;color:${c.col};line-height:1.1">${c.v}</div>
+          <div style="font-size:1.1em;font-weight:700">${p(c.v)}</div>
+          <div style="font-weight:700;margin-top:4px">${c.ic} ${c.lab}</div>
+          <div class="mwhat" style="display:block;margin-top:2px">${c.sub}</div>
+        </div>`).join('')}
+    </div>`;
 }
 
 // Onboarding-Funnel: eigene Kacheln, weil jede einen anderen Nenner hat
