@@ -188,7 +188,7 @@ const OLD_ONBOARDING = {
 // 5.x-Schritt-Funnel (fix, live gemessen 13.07. über 04.–06.07.-Fenster).
 // Semantische Stufen, auf den 5.x-Flow gemappt (Märkte war dort Step 3,
 // Budget Step 5, Prioritäten Step 6 — Land+Auth + Akquise lagen dazwischen).
-const OLD_STEPFUNNEL = { hero: 1599, maerkte: 1138, budget: 1117, prioritaeten: 1108, done: 1104 };
+const OLD_STEPFUNNEL = { hero: 1599, maerkte: 1138, budget: 1117, prioritaeten: 1108, done: 1104, skipMaerkte: 0 };
 
 async function onboardingFunnel(v6rows, facts, fromDate) {
   // Neu-Installs = im Fenster angelegte User mit 6.0-Session (jeder
@@ -238,8 +238,26 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
       const isDone = x.status === 'completed';
       if (uid && uid !== 'anonymous') {
         sawUids.add(uid);
-        const reached = isDone ? 99 : (typeof x.abandonedAtStep === 'number' ? x.abandonedAtStep : (x.currentStep || 0));
-        reachedByUid.set(uid, Math.max(reachedByUid.get(uid) || 0, reached));
+        // rank = weitester BESTANDENER Schritt (Weiter getippt), NICHT nur
+        // erreicht. completed=4 · in_progress currentStep=N bedeutet Schritt N
+        // bestanden · abandoned (Skip) bei Schritt N bedeutet nur die Schritte
+        // VOR N bestanden (N selbst wurde übersprungen, nicht bestanden).
+        // rank: 1=Märkte, 2=Budget, 3=Prioritäten, 4=abgeschlossen, 0=nichts.
+        let rank = 0;
+        let skipAtMaerkte = false;
+        if (isDone) {
+          rank = 4;
+        } else if (x.status === 'abandoned') {
+          const s = typeof x.abandonedAtStep === 'number' ? x.abandonedAtStep : 0;
+          rank = s > 4 ? 3 : s > 3 ? 2 : s > 2 ? 1 : 0; // Skip bei ≤2 = Märkte NICHT bestanden
+          if (s <= 2) skipAtMaerkte = true;
+        } else { // in_progress: currentStep = zuletzt bestandener Schritt
+          const c = x.currentStep || 0;
+          rank = c >= 4 ? 3 : c >= 3 ? 2 : c >= 2 ? 1 : 0;
+        }
+        const prev = reachedByUid.get(uid);
+        if (!prev || rank > prev.rank) reachedByUid.set(uid, { rank, skipAtMaerkte });
+        else if (rank === prev.rank && skipAtMaerkte) reachedByUid.set(uid, { rank, skipAtMaerkte: true });
       }
       if (isDone) {
         completed += 1;
@@ -269,10 +287,12 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
   let reAnon = 0;
   let bounced = 0;
   let registered = 0;
-  // Schritt-Funnel v6 (Schwellen: Märkte=Step 2, Budget=3, Prioritäten=4).
+  // Schritt-Funnel v6 (rank: 1=Märkte bestanden, 2=Budget, 3=Prioritäten,
+  // 4=abgeschlossen). stSkipMaerkte = auf dem Märkte-Screen „übersprungen".
   let stMaerkte = 0;
   let stBudget = 0;
   let stPrio = 0;
+  let stSkipMaerkte = 0;
   for (const u of distinctUids(v6rows)) {
     const f = facts.get(u);
     if (!(f && f.createdAtMs != null && f.createdAtMs >= fromMs)) continue;
@@ -283,10 +303,11 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
     if (sawUids.has(u)) {
       sawOnb += 1;
       if (completedUids.has(u)) completedUsers += 1;
-      const reached = reachedByUid.get(u) || 0;
-      if (reached >= 2) stMaerkte += 1;
-      if (reached >= 3) stBudget += 1;
-      if (reached >= 4) stPrio += 1;
+      const o = reachedByUid.get(u) || { rank: 0, skipAtMaerkte: false };
+      if (o.rank >= 1) stMaerkte += 1; // Markt gewählt + Weiter (nicht Skip)
+      if (o.rank >= 2) stBudget += 1;
+      if (o.rank >= 3) stPrio += 1;
+      if (o.rank === 0 && o.skipAtMaerkte) stSkipMaerkte += 1;
     } else if (isActive) {
       reAnon += 1;
     } else {
@@ -301,7 +322,9 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
       installs, started, completed, aktiv,
       sawOnb, completedUsers, reAnon, bounced, correctedDenom, correctedAktiv, registered,
       // Schritt-Funnel gegen echte Neu-Installs (correctedDenom):
-      stepFunnel: { hero: correctedDenom, maerkte: stMaerkte, budget: stBudget, prioritaeten: stPrio, done: completedUsers },
+      // maerkte = Markt gewählt + Weiter (echt bestanden); skipMaerkte =
+      // auf dem Märkte-Screen „Onboarding überspringen" getippt.
+      stepFunnel: { hero: correctedDenom, maerkte: stMaerkte, budget: stBudget, prioritaeten: stPrio, done: completedUsers, skipMaerkte: stSkipMaerkte },
     },
     old: { ...OLD_ONBOARDING, stepFunnel: OLD_STEPFUNNEL },
   };

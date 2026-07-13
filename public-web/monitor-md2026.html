@@ -287,7 +287,7 @@ function renderStepFunnel(ob){
   const v=ob.v6.stepFunnel, o=(ob.old&&ob.old.stepFunnel)||{hero:1599,maerkte:1138,budget:1117,prioritaeten:1108,done:1104};
   const stages=[
     {k:'hero',label:'App geöffnet · Hero',sub:'„Los geht\'s"-Screen (Tap selbst nicht geloggt)'},
-    {k:'maerkte',label:'Märkte bestanden',sub:'Markt gewählt + Weiter — erster messbarer Punkt'},
+    {k:'maerkte',label:'Märkte bestanden',sub:'Markt GEWÄHLT + Weiter (Skip zählt hier NICHT)'},
     {k:'budget',label:'Budget bestanden',sub:'Wocheneinkauf in € angegeben'},
     {k:'prioritaeten',label:'Prioritäten bestanden',sub:'„Was ist dir wichtig?"'},
     {k:'done',label:'Abgeschlossen',sub:'Climax + Konto-Angebot erreicht'},
@@ -313,10 +313,24 @@ function renderStepFunnel(ob){
           <div class="track"><div class="fill" style="width:${Math.max(Math.min(oP,100),1.5)}%"></div></div>
           <span class="num">${p(oP)}</span></div>
       </div>
-      <div class="mfoot">v6: ${v[s.k]||0} von ${v.hero} · v5: ${o[s.k]||0} von ${o.hero}</div>
+      <div class="mfoot">v6: ${v[s.k]||0} von ${v.hero} · v5: ${o[s.k]||0} von ${o.hero}${
+        s.k==='maerkte' && (v.skipMaerkte||0)>0
+          ? ` · <b>davon NICHT: ${v.skipMaerkte} „übersprungen" (${p(100*v.skipMaerkte/vH)}), Rest still verlassen</b>`
+          : ''}</div>
     </div>`);
     prevV=vP; prevO=oP;
   });
+  // Aufschlüsselung des großen Hero→Märkte-Absprungs: Skip vs. still weg.
+  const lost=Math.max(vH-(v.maerkte||0),0), skip=v.skipMaerkte||0, silent=Math.max(lost-skip,0);
+  el.insertAdjacentHTML('beforeend',`
+    <div class="metric" style="border-left:4px solid var(--bad,#c0392b)">
+      <div class="mhead"><span class="mtitle">🔍 Wo genau geht der Märkte-Absprung hin?</span>
+        <span class="mwhat">Zerlegung der ${lost} verlorenen echten Neu-Installs</span></div>
+      <div class="mfoot" style="line-height:1.7">
+        <b>${skip}</b> (${p(100*skip/vH)}) tippten auf dem Märkte-Screen aktiv <b>„Onboarding überspringen"</b> — sie SAHEN die Frage und lehnten ab.<br>
+        <b>${silent}</b> (${p(100*silent/vH)}) verschwanden <b>ohne Spur</b> — entweder nie „Los geht's" getippt (Hero) oder auf dem Märkte-Screen die App geschlossen. Server-seitig nicht trennbar → dafür bräuchte es je ein Tracking-Event für „Los geht's"-Tap + „Märkte-Screen gesehen".
+      </div>
+    </div>`);
 }
 
 async function load(){
