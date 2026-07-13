@@ -107,7 +107,7 @@
     <div id="core"></div>
 
     <h2>Onboarding-Funnel</h2>
-    <p class="sectionnote">Neu-Installs = im 72h-Fenster angelegte User mit 6.0-Session. „Begonnen" = mindestens eine bewusste Interaktion im Flow (der Start-Screen schreibt nichts — in alter wie neuer Version identisch gemessen). Vorher = fixes 5.x-Fenster 04.–06.07.; „aktiv geworden" vorher = Stichprobe (n=500, ±4pp). Der Plattform-Filter wirkt hier nicht. <b>Caveat:</b> „Neu-Installs" enthält aktuell auch Bestands-User, die das 5.x→6.0-Update neu anonymisiert hat (Session-Verlust der Migration) — sie überspringen das Onboarding und drücken die Start-Quote nach unten.</p>
+    <p class="sectionnote"><b>Echte Zahlen:</b> Die re-anonymisierten Bestands-User (Session-Verlust des 5.x→6.0-Updates) werden aus dem Nenner herausgerechnet — die Quoten unten beziehen sich auf <b>echte Neu-Installs</b> (= die das Onboarding überhaupt sehen konnten: Onboarding-Session ODER am ersten Screen abgesprungen). Die oberste Kachel zeigt, wie viele „Neu-Installs" in Wahrheit Bestands-User sind — diese Zahl muss mit 6.0.3 gegen 0 gehen. „Begonnen" = mind. eine Interaktion (Start-Screen schreibt nichts; in v1 wie v3 identisch gemessen). Vorher = fixes 5.x-Fenster 04.–06.07. (keine Re-Anon-Verzerrung). Plattform-Filter wirkt hier nicht.</p>
     <div id="onbfunnel"></div>
 
     <h2>Verhalten in der Sitzung</h2>
@@ -224,11 +224,32 @@ function renderOnboarding(ob){
   const el=document.getElementById('onbfunnel');
   if(!el||!ob){if(el)el.innerHTML='<p class="sectionnote">Noch keine Funnel-Daten — einmal „Neu berechnen" tippen.</p>';return;}
   el.innerHTML='';
+  const v6=ob.v6, old=ob.old;
+  // Echter Nenner = Neu-Installs OHNE die re-anonymisierten Bestands-User.
+  const vDenom=v6.correctedDenom??Math.max((v6.installs||0)-(v6.reAnon||0),0);
+  const oDenom=old.correctedDenom??old.installs;
+  const vSaw=v6.sawOnb??v6.started, oSaw=old.sawOnb??old.started;
+  const vComp=v6.completedUsers??v6.completed, oComp=old.completedUsers??old.completed;
+  const vAkt=v6.correctedAktiv??v6.aktiv, oAkt=old.correctedAktiv??old.aktiv;
+
+  // ── Re-Anon-KPI oben: die Zahl, die mit 6.0.3 gegen 0 gehen MUSS ──
+  const reA=v6.reAnon||0, inst=v6.installs||0;
+  const reaP=inst?Math.round(100*reA/inst):0;
+  el.insertAdjacentHTML('beforeend',`
+    <div class="metric" style="border-left:4px solid var(--bad,#c0392b)">
+      <div class="mhead"><span class="mtitle">⚠️ Bestands-User durch Session-Verlust (Re-Anon)</span>
+        <span class="mwhat">im Fenster als „neu" fehlgezählt — sollte mit 6.0.3 gegen 0 gehen</span></div>
+      <div class="rows"><div class="brow"><span class="who">v6</span>
+        <div class="track"><div class="fill" style="width:${Math.max(Math.min(reaP,100),1.5)}%;background:var(--bad,#c0392b)"></div></div>
+        <span class="num">${reaP} %</span></div></div>
+      <div class="mfoot">${reA} von ${inst} „Neu-Installs" sind in Wahrheit re-anonymisierte Bestands-User. Sie werden aus den Onboarding-Quoten unten herausgerechnet.</div>
+    </div>`);
+
   const tiles=[
-    {title:'In der App aktiv geworden',what:'von Neu-Installs; Produkt/Suche/Scan/Zettel — egal ob Onboarding gemacht',v:[ob.v6.aktiv??0,ob.v6.installs],o:[ob.old.aktiv??0,ob.old.installs]},
-    {title:'Onboarding begonnen',what:'von Neu-Installs; mind. eine Interaktion',v:[ob.v6.started,ob.v6.installs],o:[ob.old.started,ob.old.installs]},
-    {title:'Abgeschlossen — von Begonnenen',what:'Flow bis zum Ende durchlaufen',v:[ob.v6.completed,ob.v6.started],o:[ob.old.completed,ob.old.started]},
-    {title:'Abgeschlossen — von Neu-Installs',what:'Ende erreicht, gemessen an allen neuen Usern',v:[ob.v6.completed,ob.v6.installs],o:[ob.old.completed,ob.old.installs]},
+    {title:'Onboarding begonnen',what:'von echten Neu-Installs; mind. eine Interaktion',v:[vSaw,vDenom],o:[oSaw,oDenom],dir:'up'},
+    {title:'Abgeschlossen — von Begonnenen',what:'Flow bis zum Ende durchlaufen',v:[vComp,vSaw],o:[oComp,oSaw],dir:'up'},
+    {title:'Abgeschlossen — von echten Neu-Installs',what:'Ende erreicht, echte neue User',v:[vComp,vDenom],o:[oComp,oDenom],dir:'up'},
+    {title:'Echtes Konto angelegt (Registrierung)',what:'von echten Neu-Installs mit E-Mail/Provider statt Gast',v:[v6.registered??0,vDenom],o:[old.registered??0,oDenom],dir:'up'},
   ];
   for(const t of tiles){
     const vP=100*t.v[0]/Math.max(t.v[1],1), oP=100*t.o[0]/Math.max(t.o[1],1);

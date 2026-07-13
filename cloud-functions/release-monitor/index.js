@@ -146,16 +146,19 @@ async function loadUserFacts(uids) {
     // eslint-disable-next-line no-await-in-loop
     const snaps = await db.getAll(
       ...chunk.map((u) => db.doc(`users/${u}`)),
-      { fieldMask: ['favoriteMarket', 'age', 'gender', 'onboardingCompletedAt', 'created_time'] },
+      { fieldMask: ['favoriteMarket', 'age', 'gender', 'onboardingCompletedAt', 'created_time', 'email'] },
     );
     for (const s of snaps) {
       if (!s.exists) continue;
       const d = s.data() || {};
+      const email = String(d.email || '').trim();
       map.set(s.id, {
         markt: !!d.favoriteMarket,
         demo: (d.age != null && d.age !== '') || (d.gender != null && d.gender !== ''),
         onboarding: !!d.onboardingCompletedAt,
         createdAtMs: d.created_time && d.created_time.toMillis ? d.created_time.toMillis() : null,
+        // Echtes Konto = nicht-leere, nicht-Platzhalter-Mail.
+        registered: !!email && email !== 'anonymous@markendetektive.app',
       });
     }
   }
@@ -174,7 +177,14 @@ async function loadUserFacts(uids) {
 // gemessen 12.07.2026): 1.599 Neu-User · 1.474 Sessions · 1.110
 // abgeschlossen (75,3 % der Begonnenen — „die 70+ %").
 // `aktiv` alt: Stichprobe n=500 der Kohorte (60,4 % ±4,3pp) hochgerechnet.
-const OLD_ONBOARDING = { installs: 1599, started: 1474, completed: 1110, aktiv: 966 };
+// 5.x hatte KEINE Re-Anon-Verzerrung (alle Neu-User echt) → corrected*
+// = roh, reAnon = 0. `registered` alt: 97/1599 = 6,1 % (live gemessen
+// 13.07., echte Mail im 04.–06.07.-Fenster).
+const OLD_ONBOARDING = {
+  installs: 1599, started: 1474, completed: 1110, aktiv: 966,
+  sawOnb: 1474, completedUsers: 1110, reAnon: 0, bounced: 125,
+  correctedDenom: 1599, correctedAktiv: 966, registered: 97,
+};
 
 async function onboardingFunnel(v6rows, facts, fromDate) {
   // Neu-Installs = im Fenster angelegte User mit 6.0-Session (jeder
@@ -193,18 +203,13 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
     || ['in_cart', 'purchased', 'inactive_with_cart'].includes(r.status)
     || (r.convertedCount || 0) > 0;
   const activeUids = new Set(v6rows.filter(sessionActive).map((r) => r._uid).filter(Boolean));
-  let installs = 0;
-  let aktiv = 0;
-  for (const u of distinctUids(v6rows)) {
-    const f = facts.get(u);
-    if (f && f.createdAtMs != null && f.createdAtMs >= fromMs) {
-      installs += 1;
-      if (activeUids.has(u)) aktiv += 1;
-    }
-  }
-  // v3-Sessions im Fenster. Version-Filter in-memory — 5.x-Rest-
-  // installs schreiben weiterhin v1-Docs in dieselbe Collection, und
-  // ein where(version) bräuchte einen Composite-Index.
+
+  // v3-Onboarding-Sessions im Fenster → distinct uids die das Onboarding
+  // begonnen bzw. abgeschlossen haben. userId mitselektieren, damit wir
+  // pro Neu-Install klassifizieren können. (5.x-Rest schreibt v1-Docs in
+  // dieselbe Collection → Version-Filter in-memory, kein Composite-Index.)
+  const sawUids = new Set();
+  const completedUids = new Set();
   let started = 0;
   let completed = 0;
   let last = null;
@@ -212,7 +217,7 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
     let q = db.collection('onboardingResultsV5')
       .where('lastUpdateTime', '>=', ts(fromDate))
       .orderBy('lastUpdateTime', 'asc')
-      .select('lastUpdateTime', 'status', 'version')
+      .select('lastUpdateTime', 'status', 'version', 'userId')
       .limit(1000);
     if (last) q = q.startAfter(last);
     // eslint-disable-next-line no-await-in-loop
@@ -222,12 +227,62 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
       const x = d.data() || {};
       if ((x.version || 'v1') !== 'v3') return;
       started += 1;
-      if (x.status === 'completed') completed += 1;
+      const uid = x.userId;
+      if (uid && uid !== 'anonymous') sawUids.add(uid);
+      if (x.status === 'completed') {
+        completed += 1;
+        if (uid && uid !== 'anonymous') completedUids.add(uid);
+      }
     });
     last = snap.docs[snap.docs.length - 1];
     if (snap.size < 1000) break;
   }
-  return { v6: { installs, started, completed, aktiv }, old: OLD_ONBOARDING };
+
+  // Jeden Neu-Install (created_time im Fenster) in einen Bucket einsortieren:
+  //  • sawOnb   = hat eine v3-Onboarding-Session → ECHTER Neu-Install, der
+  //               das Onboarding gesehen hat.
+  //  • reAnon   = aktiv in der App, aber KEINE Onboarding-Session → mit hoher
+  //               Wahrscheinlichkeit ein re-anonymisierter Bestands-User
+  //               (landet dank überlebendem lokalen Flag direkt in der App;
+  //               enthält auch die wenigen Deep-Link-Installs).
+  //  • bounced  = weder Onboarding-Session noch aktiv → echter Neu-Install,
+  //               der am ersten Screen abgesprungen ist.
+  // Der EHRLICHE Nenner für die Onboarding-Quoten ist installs − reAnon
+  // (= sawOnb + bounced): nur echte Neu-Installs, die überhaupt die Chance
+  // hatten, das Onboarding zu starten.
+  let installs = 0;
+  let aktiv = 0;
+  let sawOnb = 0;
+  let completedUsers = 0;
+  let reAnon = 0;
+  let bounced = 0;
+  let registered = 0;
+  for (const u of distinctUids(v6rows)) {
+    const f = facts.get(u);
+    if (!(f && f.createdAtMs != null && f.createdAtMs >= fromMs)) continue;
+    installs += 1;
+    const isActive = activeUids.has(u);
+    if (isActive) aktiv += 1;
+    if (f.registered) registered += 1;
+    if (sawUids.has(u)) {
+      sawOnb += 1;
+      if (completedUids.has(u)) completedUsers += 1;
+    } else if (isActive) {
+      reAnon += 1;
+    } else {
+      bounced += 1;
+    }
+  }
+  const correctedDenom = installs - reAnon; // echte Neu-Installs
+  const correctedAktiv = aktiv - reAnon; // aktive echte Neu-Installs (alle reAnon sind aktiv)
+
+  return {
+    v6: {
+      installs, started, completed, aktiv,
+      sawOnb, completedUsers, reAnon, bounced, correctedDenom, correctedAktiv, registered,
+    },
+    old: OLD_ONBOARDING,
+  };
 }
 
 function perUserMetrics(rows, facts) {
