@@ -30,7 +30,7 @@
       "supportsTablet": false,
       "requireFullScreen": true,
       "bundleIdentifier": "de.markendetektive",
-      "buildNumber": "1254",
+      "buildNumber": "1255",
       "appleTeamId": "MZD2N2F887",
       "googleServicesFile": "./GoogleService-Info.plist",
       "usesAppleSignIn": true,
@@ -73,7 +73,7 @@
       ],
       "package": "de.markendetektive",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 1212
+      "versionCode": 1213
     },
     "web": {
       "bundler": "metro",
