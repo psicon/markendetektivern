@@ -110,6 +110,10 @@
     <p class="sectionnote"><b>Echte Zahlen:</b> Die re-anonymisierten Bestands-User (Session-Verlust des 5.x→6.0-Updates) werden aus dem Nenner herausgerechnet — die Quoten unten beziehen sich auf <b>echte Neu-Installs</b> (= die das Onboarding überhaupt sehen konnten: Onboarding-Session ODER am ersten Screen abgesprungen). Die oberste Kachel zeigt, wie viele „Neu-Installs" in Wahrheit Bestands-User sind — diese Zahl muss mit 6.0.3 gegen 0 gehen. „Begonnen" = mind. eine Interaktion (Start-Screen schreibt nichts; in v1 wie v3 identisch gemessen). Vorher = fixes 5.x-Fenster 04.–06.07. (keine Re-Anon-Verzerrung). Plattform-Filter wirkt hier nicht.</p>
     <div id="onbfunnel"></div>
 
+    <h2>Onboarding-Flow Schritt für Schritt · v5 vs v6</h2>
+    <p class="sectionnote">Jede Stufe = Anteil der <b>echten Neu-Installs</b>, die diesen Schritt bestanden haben. So siehst du genau, WO die Leute abspringen. <b>Wichtig zum Verständnis:</b> Der „Los geht's"-Tap auf dem Hero wird server-seitig <b>nicht</b> geloggt — der erste messbare Punkt ist „Märkte bestanden" (Markt gewählt + Weiter). Der Sprung Hero→Märkte enthält also beides: wer nicht auf „Los geht's" getippt hat UND wer auf dem Märkte-Screen absprang. Die Schritte sind zwischen v5/v6 semantisch gemappt (v5 hatte dazwischen noch Land+Auth + „Wie gehört?" — in v6 entfernt).</p>
+    <div id="stepfunnel"></div>
+
     <h2>Verhalten in der Sitzung</h2>
     <div id="behavior"></div>
 
@@ -208,6 +212,7 @@ function render(seg){
     }
   }
   renderOnboarding(DATA.onboarding);
+  renderStepFunnel(DATA.onboarding);
   const daily=DATA.daily||[];
   const mx=Math.max(...daily.map(d=>d.n),1);
   document.getElementById('spark').innerHTML=daily.map(d=>{
@@ -270,6 +275,48 @@ function renderOnboarding(ob){
       <div class="mfoot">v6: ${t.v[0]} von ${t.v[1]} · vorher: ${t.o[0]} von ${t.o[1]} (04.–06.07.)</div>
     </div>`);
   }
+}
+
+// Schritt-für-Schritt-Funnel v5 vs v6: pro Stufe der Anteil echter
+// Neu-Installs, plus der Absprung gegenüber der Vorstufe (rot markiert,
+// wo v6 mehr verliert als v5 → dort sitzt das Problem).
+function renderStepFunnel(ob){
+  const el=document.getElementById('stepfunnel');
+  if(!el||!ob||!ob.v6||!ob.v6.stepFunnel){if(el)el.innerHTML='<p class="sectionnote">Noch keine Schritt-Daten — einmal „Neu berechnen" tippen.</p>';return;}
+  el.innerHTML='';
+  const v=ob.v6.stepFunnel, o=(ob.old&&ob.old.stepFunnel)||{hero:1599,maerkte:1138,budget:1117,prioritaeten:1108,done:1104};
+  const stages=[
+    {k:'hero',label:'App geöffnet · Hero',sub:'„Los geht\'s"-Screen (Tap selbst nicht geloggt)'},
+    {k:'maerkte',label:'Märkte bestanden',sub:'Markt gewählt + Weiter — erster messbarer Punkt'},
+    {k:'budget',label:'Budget bestanden',sub:'Wocheneinkauf in € angegeben'},
+    {k:'prioritaeten',label:'Prioritäten bestanden',sub:'„Was ist dir wichtig?"'},
+    {k:'done',label:'Abgeschlossen',sub:'Climax + Konto-Angebot erreicht'},
+  ];
+  const vH=Math.max(v.hero,1), oH=Math.max(o.hero,1);
+  const p=(x)=>(x<1&&x>0?x.toFixed(1).replace('.',','):Math.round(x))+' %';
+  let prevV=100, prevO=100;
+  stages.forEach((s,i)=>{
+    const vP=100*(v[s.k]||0)/vH, oP=100*(o[s.k]||0)/oH;
+    const vDrop=i===0?0:prevV-vP, oDrop=i===0?0:prevO-oP;
+    // Rot, wenn v6 an dieser Stufe deutlich mehr verliert als v5.
+    const bad=i>0 && vDrop-oDrop>=5;
+    const dropHtml=i===0?'<span class="mwhat">Startpunkt = 100 %</span>'
+      :`<span class="badge ${bad?'bad':(vDrop<=oDrop+1?'good':'neutral')}">v6 −${p(vDrop)} · v5 −${p(oDrop)}${bad?' ⚠ hier bricht v6 ein':''}</span>`;
+    el.insertAdjacentHTML('beforeend',`
+    <div class="metric"${bad?' style="border-left:4px solid var(--bad,#c0392b)"':''}>
+      <div class="mhead"><span class="mtitle">${i+1}. ${s.label}</span><span class="mwhat">${s.sub}</span>${dropHtml}</div>
+      <div class="rows">
+        <div class="brow"><span class="who">v6</span>
+          <div class="track"><div class="fill" style="width:${Math.max(Math.min(vP,100),1.5)}%"></div></div>
+          <span class="num">${p(vP)}</span></div>
+        <div class="brow old"><span class="who">v5</span>
+          <div class="track"><div class="fill" style="width:${Math.max(Math.min(oP,100),1.5)}%"></div></div>
+          <span class="num">${p(oP)}</span></div>
+      </div>
+      <div class="mfoot">v6: ${v[s.k]||0} von ${v.hero} · v5: ${o[s.k]||0} von ${o.hero}</div>
+    </div>`);
+    prevV=vP; prevO=oP;
+  });
 }
 
 async function load(){

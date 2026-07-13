@@ -185,6 +185,10 @@ const OLD_ONBOARDING = {
   sawOnb: 1474, completedUsers: 1110, reAnon: 0, bounced: 125,
   correctedDenom: 1599, correctedAktiv: 966, registered: 97,
 };
+// 5.x-Schritt-Funnel (fix, live gemessen 13.07. über 04.–06.07.-Fenster).
+// Semantische Stufen, auf den 5.x-Flow gemappt (Märkte war dort Step 3,
+// Budget Step 5, Prioritäten Step 6 — Land+Auth + Akquise lagen dazwischen).
+const OLD_STEPFUNNEL = { hero: 1599, maerkte: 1138, budget: 1117, prioritaeten: 1108, done: 1104 };
 
 async function onboardingFunnel(v6rows, facts, fromDate) {
   // Neu-Installs = im Fenster angelegte User mit 6.0-Session (jeder
@@ -210,6 +214,9 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
   // dieselbe Collection → Version-Filter in-memory, kein Composite-Index.)
   const sawUids = new Set();
   const completedUids = new Set();
+  // Weitester erreichter Schritt pro uid (für den Schritt-Funnel).
+  // completed → 99; sonst abandonedAtStep bzw. currentStep.
+  const reachedByUid = new Map();
   let started = 0;
   let completed = 0;
   let last = null;
@@ -217,7 +224,7 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
     let q = db.collection('onboardingResultsV5')
       .where('lastUpdateTime', '>=', ts(fromDate))
       .orderBy('lastUpdateTime', 'asc')
-      .select('lastUpdateTime', 'status', 'version', 'userId')
+      .select('lastUpdateTime', 'status', 'version', 'userId', 'currentStep', 'abandonedAtStep')
       .limit(1000);
     if (last) q = q.startAfter(last);
     // eslint-disable-next-line no-await-in-loop
@@ -228,8 +235,13 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
       if ((x.version || 'v1') !== 'v3') return;
       started += 1;
       const uid = x.userId;
-      if (uid && uid !== 'anonymous') sawUids.add(uid);
-      if (x.status === 'completed') {
+      const isDone = x.status === 'completed';
+      if (uid && uid !== 'anonymous') {
+        sawUids.add(uid);
+        const reached = isDone ? 99 : (typeof x.abandonedAtStep === 'number' ? x.abandonedAtStep : (x.currentStep || 0));
+        reachedByUid.set(uid, Math.max(reachedByUid.get(uid) || 0, reached));
+      }
+      if (isDone) {
         completed += 1;
         if (uid && uid !== 'anonymous') completedUids.add(uid);
       }
@@ -257,6 +269,10 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
   let reAnon = 0;
   let bounced = 0;
   let registered = 0;
+  // Schritt-Funnel v6 (Schwellen: Märkte=Step 2, Budget=3, Prioritäten=4).
+  let stMaerkte = 0;
+  let stBudget = 0;
+  let stPrio = 0;
   for (const u of distinctUids(v6rows)) {
     const f = facts.get(u);
     if (!(f && f.createdAtMs != null && f.createdAtMs >= fromMs)) continue;
@@ -267,6 +283,10 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
     if (sawUids.has(u)) {
       sawOnb += 1;
       if (completedUids.has(u)) completedUsers += 1;
+      const reached = reachedByUid.get(u) || 0;
+      if (reached >= 2) stMaerkte += 1;
+      if (reached >= 3) stBudget += 1;
+      if (reached >= 4) stPrio += 1;
     } else if (isActive) {
       reAnon += 1;
     } else {
@@ -280,8 +300,10 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
     v6: {
       installs, started, completed, aktiv,
       sawOnb, completedUsers, reAnon, bounced, correctedDenom, correctedAktiv, registered,
+      // Schritt-Funnel gegen echte Neu-Installs (correctedDenom):
+      stepFunnel: { hero: correctedDenom, maerkte: stMaerkte, budget: stBudget, prioritaeten: stPrio, done: completedUsers },
     },
-    old: OLD_ONBOARDING,
+    old: { ...OLD_ONBOARDING, stepFunnel: OLD_STEPFUNNEL },
   };
 }
 
