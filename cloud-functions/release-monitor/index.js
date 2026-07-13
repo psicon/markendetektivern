@@ -36,11 +36,14 @@ const db = admin.firestore();
 const AGG_PATH = ['aggregates', 'releaseMonitor_v1'];
 const MIN_RECOMPUTE_GAP_MS = 10 * 60 * 1000;
 
-// Fixe Vor-Release-Baseline (Public 5.x, vor dem 6.0-Store-Release am 11.07).
+// Fixe Vor-Release-Baseline (Public 5.x, vor dem 6.0-Store-Release am 12.07).
 const OLD_FROM = new Date('2026-07-04T00:00:00Z');
 const OLD_TO = new Date('2026-07-06T00:00:00Z');
 // v6-Fenster: rollierend 72 h.
 const V6_WINDOW_MS = 72 * 60 * 60 * 1000;
+// Store-Release 6.0 = 12.07.2026 (in den journeys-Daten belegt: 6.x-Session-
+// Anteil 07-10/11 = 0 %, springt 07-12 auf 41 %). Trennt v5-Ära/v6-Ära beim Feedback.
+const RELEASE_ISO = '2026-07-12';
 
 const SELECT_FIELDS = [
   'journeyId', 'viewedProductsCount', 'convertedCount', 'status',
@@ -66,11 +69,13 @@ function ts(d) {
   return admin.firestore.Timestamp.fromDate(d);
 }
 
-async function countBetween(from, to) {
+// Neue User (Neu-Installs) im Zeitraum — via users.created_time (Registrierungs-
+// Zeitpunkt). Single-Field-Range → automatischer Index, kein Composite nötig.
+async function newUsersBetween(from, to) {
   const snap = await db
-    .collectionGroup('journeys')
-    .where('startTime', '>=', ts(from))
-    .where('startTime', '<', ts(to))
+    .collection('users')
+    .where('created_time', '>=', ts(from))
+    .where('created_time', '<', ts(to))
     .count()
     .get();
   return snap.data().count;
@@ -228,12 +233,19 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
   // startet er auf app_start/onboarding, ist er ein echter Onboarding-/
   // Boot-Abbrecher.
   const firstScreenByUid = new Map();
+  // App-Version pro uid (der jüngsten Session) → für die reAnon-Segmentierung
+  // nach Version. Die Sessions tragen app.version bereits; damit lässt sich die
+  // Re-Anon-Rate 6.0.5 vs. 6.0.3/6.0.2 isolieren (ohne Client-Änderung).
+  const versionByUid = new Map();
   for (const r of v6rows) {
     const u = r._uid;
     if (!u) continue;
     const t = r.startTime && r.startTime.toMillis ? r.startTime.toMillis() : 0;
     const prev = firstScreenByUid.get(u);
     if (!prev || t < prev.t) firstScreenByUid.set(u, { t, screen: r.screenName });
+    const ver = String((r.app || {}).version || '');
+    const vprev = versionByUid.get(u);
+    if (ver && (!vprev || t >= vprev.t)) versionByUid.set(u, { t, ver });
   }
 
   // v3-Onboarding-Sessions im Fenster → distinct uids die das Onboarding
@@ -331,13 +343,23 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
   let lSkipped = 0;
   let lBypass = 0;
   let lHero = 0;
+  // Pro-Version-Segmentierung der Kern-Buckets → Re-Anon-Rate je App-Version
+  // (6.0.5 vs. 6.0.3/6.0.2) im Dashboard sichtbar machen. Rein aus der
+  // Session-app.version, kein Client-Write nötig.
+  const perV = {};
+  const bumpV = (u, key) => {
+    const ver = (versionByUid.get(u) || {}).ver || 'unknown';
+    if (!perV[ver]) perV[ver] = { installs: 0, reAnon: 0, sawOnb: 0, bounced: 0, aktiv: 0, registered: 0 };
+    perV[ver][key] += 1;
+  };
   for (const u of distinctUids(v6rows)) {
     const f = facts.get(u);
     if (!(f && f.createdAtMs != null && f.createdAtMs >= fromMs)) continue;
     installs += 1;
+    bumpV(u, 'installs');
     const isActive = activeUids.has(u);
-    if (isActive) aktiv += 1;
-    if (f.registered) registered += 1;
+    if (isActive) { aktiv += 1; bumpV(u, 'aktiv'); }
+    if (f.registered) { registered += 1; bumpV(u, 'registered'); }
     // Landed-Bucket: aktiv > Onboarding fertig > übersprungen >
     // am Onboarding vorbei in App (Veteran/Bypass) > nur Hero/Boot gesehen.
     if (isActive) lAktiv += 1;
@@ -347,6 +369,7 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
     else lHero += 1;
     if (sawUids.has(u)) {
       sawOnb += 1;
+      bumpV(u, 'sawOnb');
       if (completedUids.has(u)) completedUsers += 1;
       const o = reachedByUid.get(u) || { rank: 0, skipAtMaerkte: false };
       if (o.rank >= 1) stMaerkte += 1; // Markt gewählt + Weiter (nicht Skip)
@@ -355,8 +378,10 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
       if (o.rank === 0 && o.skipAtMaerkte) stSkipMaerkte += 1;
     } else if (isActive) {
       reAnon += 1;
+      bumpV(u, 'reAnon');
     } else {
       bounced += 1;
+      bumpV(u, 'bounced');
     }
   }
   const correctedDenom = installs - reAnon; // echte Neu-Installs
@@ -372,6 +397,9 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
       stepFunnel: { hero: correctedDenom, maerkte: stMaerkte, budget: stBudget, prioritaeten: stPrio, done: completedUsers, skipMaerkte: stSkipMaerkte },
       // „Wer landet in der App?" über ALLE Neu-Installs (nicht correctedDenom):
       landed: { installs, aktiv: lAktiv, completed: lCompleted, skipped: lSkipped, bypass: lBypass, heroBounce: lHero },
+      // Re-Anon pro App-Version (installs/reAnon je 6.0.x) → zeigt, ob 6.0.3+
+      // die Re-Anon-Rate gesenkt hat oder ob es laufend passiert.
+      byVersion: perV,
     },
     old: { ...OLD_ONBOARDING, stepFunnel: OLD_STEPFUNNEL },
   };
@@ -392,10 +420,148 @@ function perUserMetrics(rows, facts) {
   return { usersN: uids.length, userMarkt: markt, userDemo: demo, userOnboarding: onboarding };
 }
 
+// Userfeedback (In-App-Rating-Prompt) aggregieren. `userfeedback` ist per Rules
+// owner-only lesbar → nur das Admin-SDK (hier) kommt dran; das öffentliche
+// Dashboard sieht ausschließlich diese anonymisierte Zusammenfassung.
+// Felder: rating ('positive'|'negative'), feedbackText (oft null), triggerLevel,
+// timestamp. Kommentare werden OHNE userId übernommen (anonymisiert), gekürzt.
+async function feedbackSummary() {
+  const LIMIT = 600;
+  let snap;
+  try {
+    snap = await db.collection('userfeedback')
+      .orderBy('timestamp', 'desc')
+      .limit(LIMIT)
+      .select('rating', 'feedbackText', 'timestamp', 'triggerLevel')
+      .get();
+  } catch (e) {
+    console.warn('feedbackSummary failed:', e.message);
+    return null;
+  }
+  let positive = 0;
+  let negative = 0;
+  let withText = 0;
+  let v5t = 0; let v5p = 0; let v5n = 0; // Feedback der v5-Ära (vor Release)
+  let v6t = 0; let v6p = 0; let v6n = 0; // Feedback der v6-Ära (ab Release)
+  let minDay = null;
+  let maxDay = null;
+  const comments = [];
+  snap.forEach((docSnap) => {
+    const f = docSnap.data();
+    const rating = f.rating === 'negative' ? 'negative' : 'positive';
+    if (rating === 'negative') negative += 1; else positive += 1;
+    const day = f.timestamp && f.timestamp.toDate ? f.timestamp.toDate().toISOString().slice(0, 10) : null;
+    if (day) {
+      if (!minDay || day < minDay) minDay = day;
+      if (!maxDay || day > maxDay) maxDay = day;
+      if (day >= RELEASE_ISO) { v6t += 1; if (rating === 'negative') v6n += 1; else v6p += 1; }
+      else { v5t += 1; if (rating === 'negative') v5n += 1; else v5p += 1; }
+    }
+    const txt = typeof f.feedbackText === 'string' ? f.feedbackText.trim() : '';
+    if (txt) {
+      withText += 1;
+      if (comments.length < 20) {
+        comments.push({ rating, day, text: txt.slice(0, 240), level: f.triggerLevel || null });
+      }
+    }
+  });
+  const total = positive + negative;
+  return {
+    window: minDay && maxDay ? `${minDay} … ${maxDay}` : `letzte ${LIMIT}`,
+    scanned: total,
+    total,
+    positive,
+    negative,
+    positivePct: total ? Math.round((100 * positive) / total) : 0,
+    withText,
+    releaseDate: RELEASE_ISO,
+    eraV5: { total: v5t, positive: v5p, negative: v5n, positivePct: v5t ? Math.round((100 * v5p) / v5t) : 0 },
+    eraV6: { total: v6t, positive: v6p, negative: v6n, positivePct: v6t ? Math.round((100 * v6p) / v6t) : 0 },
+    comments, // newest-first (Query desc), nur Text-Kommentare, anonymisiert
+  };
+}
+
+// Primäre-Markt-Verteilung aus users.favoriteMarketName (String). Bounded Scan
+// der zuletzt aktiven User → repräsentativ + günstig. KEIN v5/v6-Split (Markt ist
+// Profil-Attribut, nicht versioniert) — bewusst „aktueller Stand".
+async function marketsSummary() {
+  const LIMIT = 15000;
+  let snap;
+  try {
+    snap = await db.collection('users')
+      .orderBy('lastActivityAt', 'desc')
+      .limit(LIMIT)
+      .select('favoriteMarketName')
+      .get();
+  } catch (e) {
+    console.warn('marketsSummary failed:', e.message);
+    return null;
+  }
+  const counts = new Map();
+  let withMarket = 0;
+  snap.forEach((d) => {
+    const name = String(d.data().favoriteMarketName || '').trim();
+    if (!name) return;
+    withMarket += 1;
+    counts.set(name, (counts.get(name) || 0) + 1);
+  });
+  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  const TOP = 12;
+  return {
+    scanned: snap.size,
+    withMarket,
+    coveragePct: snap.size ? Math.round((100 * withMarket) / snap.size) : 0,
+    distinct: counts.size,
+    top: sorted.slice(0, TOP).map(([name, count]) => ({ name, count })),
+    other: sorted.slice(TOP).reduce((s, [, c]) => s + c, 0),
+    otherMarkets: Math.max(sorted.length - TOP, 0),
+  };
+}
+
+// User-Basis-Totals über Aggregations-Queries (count/sum/avg) — server-seitig,
+// KEIN Full-Scan (≈ wenige Reads statt 236k). Felder liegen top-level auf users/*.
+// „aktueller Stand" der Voll-DB, kein v5/v6-Split.
+async function userBaseSummary() {
+  try {
+    const { AggregateField } = admin.firestore;
+    const usersCol = db.collection('users');
+    const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
+    // WICHTIG: Einzelfeld-Aggregationen (NICHT kombiniert) — eine kombinierte
+    // aggregate({avg,sum,sum}) über mehrere Felder verlangt einen Composite-Index
+    // (FAILED_PRECONDITION). Einzeln nutzen sie den automatischen Single-Field-
+    // Index → kein Index-Management nötig. Kosten bleiben minimal (Aggregations-
+    // Reads, kein Doc-Scan).
+    const [totalAgg, avgLvlAgg, sumSavAgg, sumSavedAgg, activeAgg] = await Promise.all([
+      usersCol.count().get(),
+      usersCol.aggregate({ v: AggregateField.average('level') }).get(),
+      usersCol.aggregate({ v: AggregateField.sum('totalSavings') }).get(),
+      usersCol.aggregate({ v: AggregateField.sum('productsSaved') }).get(),
+      usersCol.where('lastActivityAt', '>=', ts(sevenDaysAgo)).count().get(),
+    ]);
+    const total = totalAgg.data().count || 0;
+    const avgLevel = avgLvlAgg.data().v || 0;
+    const sumSavings = sumSavAgg.data().v || 0;
+    const sumSaved = sumSavedAgg.data().v || 0;
+    const active7d = activeAgg.data().count || 0;
+    return {
+      totalUsers: total,
+      active7d,
+      active7dPct: total ? Math.round((1000 * active7d) / total) / 10 : 0,
+      avgLevel: Math.round(avgLevel * 100) / 100,
+      totalSavings: Math.round(sumSavings * 100) / 100,
+      productsSaved: sumSaved,
+      avgSavings: total ? Math.round((100 * sumSavings) / total) / 100 : 0,
+    };
+  } catch (e) {
+    console.warn('userBaseSummary failed:', e.message);
+    return null;
+  }
+}
+
 async function aggregate() {
   const startedAt = Date.now();
 
-  // 1) Sessions/Tag — letzte 14 Kalendertage (UTC-Tagesgrenzen).
+  // 1) Neue User/Tag (Neu-Installs) — letzte 14 Kalendertage (UTC-Tagesgrenzen).
   const daily = [];
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
@@ -403,7 +569,7 @@ async function aggregate() {
     const from = new Date(today.getTime() - i * 86400000);
     const to = new Date(from.getTime() + 86400000);
     // eslint-disable-next-line no-await-in-loop
-    const n = await countBetween(from, to);
+    const n = await newUsersBetween(from, to);
     daily.push({ day: from.toISOString().slice(0, 10), n });
   }
 
@@ -421,6 +587,13 @@ async function aggregate() {
 
   // 2c) Onboarding-Funnel (Begonnen/Abgeschlossen vs. Neu-Installs).
   const onboarding = await onboardingFunnel(v6, facts, new Date(now.getTime() - V6_WINDOW_MS));
+
+  // 2d) Userfeedback (In-App-Rating-Prompt) — anonymisierte Zusammenfassung.
+  const feedback = await feedbackSummary();
+
+  // 2e) Primäre Märkte + User-Basis-Totals (aktueller Stand, kein v5/v6-Split).
+  const markets = await marketsSummary();
+  const userBase = await userBaseSummary();
 
   // 3) Vor-Release-Baseline (fix) — alles außer 6.x-TestFlight.
   const oldRows = dedupe(await sampleBetween(OLD_FROM, OLD_TO, 3000)).filter((r) => !isV6(r));
@@ -441,6 +614,9 @@ async function aggregate() {
     },
     old: metrics(oldRows),
     onboarding,
+    feedback,
+    markets,
+    userBase,
   };
   doc.computeMs = Date.now() - startedAt;
 

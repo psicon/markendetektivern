@@ -7,127 +7,244 @@
 <title>MD-Monitor · v6 vs. vorher</title>
 <style>
   :root{
-    --ground:#f2f5f4; --surface:#fff; --ink:#191c1d; --sub:#4d5c58; --muted:#7d8c88;
-    --petrol:#0d8575; --petrol-deep:#0a4038; --petrol-soft:#e2f1ee;
-    --grey-bar:#b9c6c2; --amber:#c25a05; --amber-soft:#fdeede;
-    --good:#1e7d46; --good-soft:#e2f2e7; --bad:#c62828; --bad-soft:#fbe7e7;
-    --border:#dfe7e5;
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --ground:#eef2f1; --surface:#ffffff; --surface-2:#f3f6f5;
+    --ink:#12201d; --sub:#4d5c58; --muted:#82918c;
+    --brand:#0d8575; --brand-soft:#e3f1ee; --brand-ink:#0a6d60;
+    --grey-bar:#c4cfcb;
+    --good:#0ca30c; --good-soft:#e5f5e5; --good-ink:#0a7d17;
+    --warn:#c9820a; --warn-soft:#fbf0dc; --warn-ink:#a86b06;
+    --crit:#d03b3b; --crit-soft:#fbe6e6; --crit-ink:#c0392b;
+    --blue:#2a78d6; --violet:#5b4f9c;
+    --border:#dde6e3; --hair:#e9efed;
+    --shadow:0 1px 2px rgba(10,40,35,.04),0 3px 12px rgba(10,40,35,.05);
+    --radius:16px;
+    font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   }
   *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
   body{margin:0;background:var(--ground);color:var(--ink);font-size:15px;line-height:1.5}
-  .wrap{max-width:880px;margin:0 auto;padding:0 20px 64px}
-  header{background:var(--petrol-deep);color:#fff;padding:24px 0 20px}
-  .eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8fc4ba;font-weight:700}
-  h1{margin:4px 0 4px;font-size:23px;font-weight:800;letter-spacing:-.02em}
-  header p{margin:0;font-size:13px;color:#a9c9c1}
-  .filterbar{position:sticky;top:0;z-index:5;background:var(--ground);padding:14px 0 10px;
-    display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--border);margin-bottom:6px}
-  .seg{display:inline-flex;background:#e6edeb;border-radius:12px;padding:3px}
-  .seg button{border:0;background:transparent;padding:8px 18px;border-radius:9px;font-size:14px;
-    font-weight:700;color:var(--sub);cursor:pointer;font-family:inherit}
-  .seg button.on{background:#fff;color:var(--petrol);box-shadow:0 1px 3px rgba(0,0,0,.12)}
-  .seg button:focus-visible{outline:2px solid var(--petrol);outline-offset:1px}
-  .actions{margin-left:auto;display:flex;gap:8px}
+  .wrap{max-width:1440px;margin:0 auto;padding:0 24px 72px}
+
+  /* Top bar — hell */
+  .topbar{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--border)}
+  .topbar .inner{max-width:1440px;margin:0 auto;padding:13px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .brandmark{display:flex;flex-direction:column;gap:1px;min-width:0}
+  .eyebrow{font-size:10.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--brand-ink);font-weight:800}
+  .topbar h1{margin:0;font-size:19px;font-weight:800;letter-spacing:-.02em;color:var(--ink);white-space:nowrap}
+  .stand{font-size:12px;color:var(--muted);margin-left:2px}
+  .spacer{margin-left:auto}
+  .seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--border);border-radius:11px;padding:3px}
+  .seg button{border:0;background:transparent;padding:7px 15px;border-radius:8px;font-size:13px;
+    font-weight:800;color:var(--sub);cursor:pointer;font-family:inherit;transition:.15s}
+  .seg button.on{background:#fff;color:var(--brand-ink);box-shadow:0 1px 3px rgba(0,0,0,.1)}
+  .seg button:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
   .btn{border:1px solid var(--border);background:#fff;color:var(--sub);border-radius:9px;
-    padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit}
-  .btn:hover{color:var(--petrol)}
-  .legend{display:flex;gap:14px;font-size:12.5px;color:var(--sub)}
-  .legend span::before{content:"";display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
-  .legend .l6::before{background:var(--petrol)} .legend .lo::before{background:var(--grey-bar)}
-  .honest{background:#fff8ef;border:1px solid #f0ddc2;border-radius:12px;padding:13px 16px;margin:16px 0 6px;font-size:13.5px;color:#6b4a1b}
-  .honest b{color:#8a4a05}
-  h2{font-size:16px;font-weight:800;margin:30px 0 4px;letter-spacing:-.01em}
-  .sectionnote{font-size:13px;color:var(--muted);margin:0 0 12px}
-  .metric{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:15px 18px;margin-bottom:10px}
-  .mhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-  .mtitle{font-size:14.5px;font-weight:800}
-  .mwhat{font-size:12.5px;color:var(--muted)}
-  .badge{margin-left:auto;font-size:12px;font-weight:800;padding:3px 10px;border-radius:999px;white-space:nowrap}
-  .badge.good{background:var(--good-soft);color:var(--good)}
-  .badge.bad{background:var(--bad-soft);color:var(--bad)}
-  .badge.neutral{background:#edf1f0;color:var(--sub)}
-  .badge.new{background:var(--petrol-soft);color:var(--petrol)}
-  .rows{margin-top:10px;display:grid;gap:6px}
-  .brow{display:grid;grid-template-columns:64px 1fr 74px;align-items:center;gap:10px}
-  .brow .who{font-size:12px;font-weight:700;color:var(--sub)}
-  .track{background:#eef2f1;border-radius:6px;height:22px;position:relative;overflow:hidden}
-  .fill{height:100%;border-radius:6px;background:var(--petrol);transition:width .35s ease}
-  .brow.old .fill{background:var(--grey-bar)}
-  .brow .num{font-size:14px;font-weight:800;text-align:right;font-variant-numeric:tabular-nums}
-  .brow.old .num{color:var(--sub);font-weight:700}
-  .brow .na{font-size:12.5px;color:var(--muted);font-style:italic}
-  .mfoot{font-size:12px;color:var(--muted);margin-top:8px}
-  .spark{display:flex;align-items:flex-end;gap:6px;height:130px;padding-top:6px}
-  .spark .col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;min-width:0}
-  .spark .bar2{width:100%;border-radius:5px 5px 0 0;background:var(--grey-bar)}
-  .spark .col.v6 .bar2{background:var(--petrol)}
-  .spark .cl{font-size:10px;color:var(--muted);white-space:nowrap}
-  .spark .cv{font-size:10.5px;font-weight:800;color:var(--sub);font-variant-numeric:tabular-nums}
-  #loading{padding:60px 20px;text-align:center;color:var(--muted)}
-  footer{margin-top:36px;font-size:12.5px;color:var(--muted);border-top:1px solid var(--border);padding-top:14px}
+    padding:7px 13px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap}
+  .btn:hover{color:var(--brand-ink);border-color:var(--brand)}
+  .btn:disabled{opacity:.6;cursor:default}
+
+  .banner{border-radius:12px;padding:11px 15px;font-size:13px;margin:18px 0 0;display:flex;gap:10px;align-items:flex-start}
+  .banner.offline{background:var(--warn-soft);border:1px solid var(--warn);color:var(--warn-ink)}
+  .banner.new{background:var(--brand-soft);border:1px solid var(--brand);color:var(--brand-ink)}
+  .banner b{color:var(--ink)}
+  .banner .ic{font-size:15px;line-height:1.4}
+
+  /* Section head */
+  .shead{display:flex;align-items:baseline;gap:12px;margin:32px 2px 14px;flex-wrap:wrap}
+  .shead h2{font-size:17px;font-weight:800;margin:0;letter-spacing:-.02em}
+  .shead .tag{font-size:10.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;padding:3px 9px;border-radius:999px}
+  .shead .tag.cmp{background:var(--brand-soft);color:var(--brand-ink)}
+  .shead .tag.now{background:var(--surface-2);color:var(--muted)}
+  .shead .hint{font-size:12.5px;color:var(--muted)}
+
+  /* KPI grid + card */
+  .kgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
+  .kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow)}
+  .kpi .klabel{font-size:12.5px;font-weight:700;color:var(--muted);display:flex;gap:7px;align-items:center}
+  .kpi .kbig{font-size:34px;font-weight:800;letter-spacing:-.03em;line-height:1.05;margin:8px 0 4px}
+  .kpi .kbig.good{color:var(--good-ink)} .kpi .kbig.bad{color:var(--crit-ink)}
+  .kpi .kbig.warn{color:var(--warn-ink)} .kpi .kbig.brand{color:var(--brand-ink)} .kpi .kbig.ink{color:var(--ink)}
+  .kpi .kcmp{font-size:12.5px;color:var(--sub);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .kpi .ksub{font-size:12px;color:var(--muted)}
+  .kdelta{font-weight:800;white-space:nowrap}
+  .kdelta.good{color:var(--good-ink)} .kdelta.bad{color:var(--crit-ink)} .kdelta.flat{color:var(--muted)}
+  .kv5{color:var(--muted)}
+
+  /* Chart card */
+  .chartcard{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;box-shadow:var(--shadow);margin-top:14px}
+  .chartcard h3{margin:0 0 3px;font-size:14.5px;font-weight:800}
+  .chartcard .csub{font-size:12px;color:var(--muted);margin:0 0 16px}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+  @media(max-width:860px){.two{grid-template-columns:1fr}}
+
+  /* Funnel (horizontale Balken, v6 gefüllt + v5 Referenz-Zahl) */
+  .frow{display:grid;grid-template-columns:170px 1fr 120px;align-items:center;gap:12px;margin-bottom:9px}
+  @media(max-width:640px){.frow{grid-template-columns:120px 1fr 92px}}
+  .frow .fl{font-size:13px;font-weight:700}
+  .frow .fl small{display:block;font-weight:500;color:var(--muted);font-size:11px}
+  .ftrack{background:var(--surface-2);border-radius:7px;height:24px;position:relative;overflow:hidden}
+  .ffill{height:100%;border-radius:7px;background:var(--brand);transition:width .5s cubic-bezier(.2,.7,.2,1)}
+  .frow.hit .ffill{background:var(--crit)}
+  .fmeta{font-size:12px;text-align:right;font-variant-numeric:tabular-nums}
+  .fmeta .fv6{font-weight:800} .fmeta .fv5{color:var(--muted)}
+
+  /* Bar chart (Märkte) */
+  .bar{display:grid;grid-template-columns:150px 1fr 88px;align-items:center;gap:12px;margin-bottom:8px}
+  @media(max-width:640px){.bar{grid-template-columns:104px 1fr 74px}}
+  .bar .bl{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bartrack{background:var(--surface-2);border-radius:6px;height:20px;overflow:hidden}
+  .barfill{height:100%;border-radius:6px;background:var(--brand)}
+  .bar .bv{font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums;color:var(--sub)}
+  .bar .bv b{color:var(--ink)}
+
+  /* Donut (Feedback) */
+  .donutwrap{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
+  .donut{width:150px;height:150px;border-radius:50%;flex:none;position:relative}
+  .donut::after{content:"";position:absolute;inset:26px;background:var(--surface);border-radius:50%}
+  .donut .dc{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:1}
+  .donut .dc b{font-size:26px;font-weight:800;color:var(--good-ink);line-height:1}
+  .donut .dc span{font-size:10.5px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+  .dlgd{display:grid;gap:8px}
+  .dlgd .dli{display:flex;align-items:center;gap:9px;font-size:13px}
+  .dlgd .dli i{width:12px;height:12px;border-radius:3px}
+  .dlgd .dli b{font-variant-numeric:tabular-nums}
+
+  /* Feedback comments */
+  .fblist{display:grid;gap:10px;margin-top:14px;max-height:420px;overflow-y:auto;padding-right:4px}
+  .fbc{border:1px solid var(--border);border-left:4px solid var(--crit);border-radius:12px;padding:11px 13px;background:var(--surface-2)}
+  .fbc-h{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+  .fbc-badge{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:999px;background:var(--crit-soft);color:var(--crit-ink)}
+  .fbc-day{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .fbc-t{font-size:13px;line-height:1.5;color:var(--ink)}
+
+  /* Trend */
+  .trend{display:flex;align-items:flex-end;gap:5px;height:120px;padding-top:20px;position:relative}
+  .trend .tcol{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;min-width:0}
+  .trend .tbar{width:100%;max-width:34px;border-radius:5px 5px 0 0;background:var(--grey-bar);transition:height .4s ease}
+  .trend .tcol.v6 .tbar{background:var(--brand)}
+  .trend .tcol.partial .tbar{opacity:.5}
+  .trend .tcl{font-size:9.5px;color:var(--muted);white-space:nowrap}
+  .trend .tcv{font-size:9.5px;font-weight:800;color:var(--sub);font-variant-numeric:tabular-nums}
+  .relmark{position:absolute;top:0;bottom:18px;border-left:2px dashed var(--brand)}
+  .relmark span{position:absolute;top:-2px;left:5px;font-size:9.5px;font-weight:800;color:var(--brand-ink);white-space:nowrap}
+
+  /* Intro / Erklärung */
+  .intro{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px 18px;margin:18px 0 0;box-shadow:var(--shadow);font-size:13px;color:var(--sub);line-height:1.6}
+  .intro b{color:var(--ink)}
+  .intro .pill{display:inline-block;font-size:11px;font-weight:800;padding:2px 8px;border-radius:999px;background:var(--brand-soft);color:var(--brand-ink);margin-right:4px}
+
+  /* Gesamturteil */
+  .vhero{border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow);border:1px solid var(--border);background:var(--surface);border-top:5px solid var(--warn)}
+  .vhero.good{border-top-color:var(--good)} .vhero.bad{border-top-color:var(--crit)} .vhero.warn{border-top-color:var(--warn)}
+  .vbig{font-size:26px;font-weight:800;letter-spacing:-.02em;margin-bottom:12px}
+  .vhero.good .vbig{color:var(--good-ink)} .vhero.bad .vbig{color:var(--crit-ink)} .vhero.warn .vbig{color:var(--warn-ink)}
+  .vsplit{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  .vpill{font-size:13px;font-weight:800;padding:5px 12px;border-radius:999px}
+  .vpill.good{background:var(--good-soft);color:var(--good-ink)} .vpill.warn{background:var(--surface-2);color:var(--sub)} .vpill.bad{background:var(--crit-soft);color:var(--crit-ink)}
+  .vof{font-size:12.5px;color:var(--muted)}
+  .vmovers{display:grid;gap:7px;font-size:12.5px;color:var(--sub)}
+  .vmovers b{color:var(--ink)}
+  .mv{display:inline-block;font-size:12px;font-weight:700;padding:2px 8px;border-radius:7px;margin:2px 3px 0 0}
+  .mv.good{background:var(--good-soft);color:var(--good-ink)} .mv.bad{background:var(--crit-soft);color:var(--crit-ink)}
+  .vcaveat{margin-top:14px;padding-top:13px;border-top:1px solid var(--hair);font-size:12px;color:var(--sub);line-height:1.65}
+  .vcaveat b{color:var(--ink)}
+  .vdetails{margin-top:32px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow);overflow:hidden}
+  .vdetails summary{cursor:pointer;padding:16px 20px;font-size:14px;font-weight:800;color:var(--sub);list-style:none;display:flex;align-items:center;gap:8px;user-select:none}
+  .vdetails summary::-webkit-details-marker{display:none}
+  .vdetails summary::before{content:"▸";color:var(--muted);transition:transform .2s;font-size:12px}
+  .vdetails[open] summary::before{transform:rotate(90deg)}
+  .vdetails summary:hover{color:var(--brand-ink)}
+  .vdetails[open] summary{border-bottom:1px solid var(--hair)}
+  .vdetails > div{padding:0 20px 20px}
+  .vdetails .vhero{box-shadow:none;border:0;border-top:0;background:transparent;padding:6px 0 0}
+  .vdetails[open] .vhero{border-top:4px solid transparent}
+  .help{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;background:var(--surface-2);border:1px solid var(--border);color:var(--muted);font-size:9.5px;font-weight:800;cursor:help;margin-left:5px}
+  #loading{padding:80px 20px;text-align:center;color:var(--muted)}
+  footer{margin-top:40px;font-size:12px;color:var(--muted);border-top:1px solid var(--border);padding-top:16px;line-height:1.65}
+  footer b{color:var(--sub)} footer code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:11.5px}
 </style>
 </head>
 <body>
-<header>
-  <div class="wrap">
-    <div class="eyebrow">MarkenDetektive · Monitor</div>
-    <h1>Version 6.0 vs. vorher — auf einen Blick</h1>
-    <p id="stand">Lade aktuelle Zahlen …</p>
+<div class="topbar">
+  <div class="inner">
+    <div class="brandmark">
+      <span class="eyebrow">MarkenDetektive · Release-Monitor</span>
+      <h1>Version 6.0 <span style="opacity:.5;font-weight:600">vs. Public 5.x</span></h1>
+    </div>
+    <span class="stand" id="stand">lädt …</span>
+    <div class="spacer"></div>
+    <div class="seg" role="tablist" aria-label="Plattform">
+      <button class="on" data-seg="all">Alle</button>
+      <button data-seg="ios">iOS</button>
+      <button data-seg="android">Android</button>
+    </div>
+    <button class="btn" id="recompute" title="Aggregator neu rechnen (max. alle 10 Min)">↻ Neu berechnen</button>
   </div>
-</header>
+</div>
 
 <div class="wrap">
   <div id="loading">Zahlen werden geladen …</div>
   <div id="app" style="display:none">
-    <div class="filterbar">
-      <div class="seg" role="tablist" aria-label="Plattform-Filter">
-        <button class="on" data-seg="all">Alle</button>
-        <button data-seg="ios">iOS</button>
-        <button data-seg="android">Android</button>
-      </div>
-      <div class="legend"><span class="l6">Version 6.0</span><span class="lo">Vorher (Public 5.x)</span></div>
-      <div class="actions">
-        <button class="btn" id="recompute" title="Aggregator neu rechnen lassen (max. alle 10 Min)">↻ Neu berechnen</button>
-      </div>
+
+    <div id="offline" class="banner offline" style="display:none"><span class="ic">⚠️</span><span></span></div>
+
+    <div class="intro">
+      <span class="pill">v6</span>App 6.x, <b>live seit 12.07.</b> (72-h-Fenster) &nbsp;·&nbsp;
+      <span class="pill" style="background:var(--surface-2);color:var(--sub)">v5</span>letzte 5.x-Woche <b>04.–06.07.</b> ·
+      „v5 vs v6"-Karten vergleichen neu gegen alt, „aktueller Stand" = Voll-DB · OS-Filter (oben rechts) wirkt aufs Verhalten ·
+      <b>Gesamturteil (v5 vs v6 in Summe) steht ganz unten.</b>
     </div>
 
-    <div class="honest">
-      <b>Lesehinweis:</b> „Vorher" ist eine fixe Baseline aus <span id="oldwin"></span> —
-      echte Sitzungen der alten Store-Version. „v6" ist ein rollierendes 72-Stunden-Fenster.
-      Der Plattform-Filter wirkt auf die v6-Balken; „vorher" bleibt Gesamt (Alt-Sitzungen tragen
-      keine Plattform-Info). Eine Sitzung startet automatisch beim App-Öffnen (mit Einwilligung).
+    <!-- ══ 1 · ONBOARDING ══ -->
+    <div class="shead"><h2>Onboarding</h2><span class="tag cmp">v5 vs v6</span>
+      <span class="hint">Nenner = echte Neu-Installs (Re-Anon herausgerechnet)</span></div>
+    <div class="kgrid" id="k-onb"></div>
+    <div class="chartcard">
+      <h3>Wo springen die Leute ab?</h3>
+      <p class="csub">Anteil echter Neu-Installs pro Schritt · <b style="color:var(--brand-ink)">v6</b> Balken, v5 als Referenz · rot = wo v6 stärker verliert</p>
+      <div id="funnel"></div>
+    </div>
+    <div class="chartcard">
+      <h3>Session-Verlust (Re-Anon) pro App-Version</h3>
+      <p class="csub">Beweist, ob der Identitäts-Fix wirkt: hohe Rate = User verlieren beim Update ihren Stand. Ziel ab dem Fix: 0 %.</p>
+      <div id="reanon-versions"></div>
     </div>
 
-    <h2>Sitzungen pro Tag</h2>
-    <p class="sectionnote">Grün = ab Store-Release 6.0 (11.07.). Letzter Tag ist unvollständig.</p>
-    <div class="metric"><div class="spark" id="spark"></div></div>
+    <!-- ══ 2 · FEEDBACK ══ -->
+    <div class="shead"><h2>Userfeedback</h2><span class="tag now">aktueller Stand</span>
+      <span class="hint">In-App-Rating · anonymisiert · Freitext = actionable</span></div>
+    <div class="kgrid" id="k-fb"></div>
+    <div class="two">
+      <div class="chartcard"><h3>Stimmung</h3><p class="csub" id="fb-window"></p><div id="fb-donut"></div></div>
+      <div class="chartcard"><h3>⚠️ Kritische Rückmeldungen</h3><p class="csub">Negative Bewertungen mit Kommentar — neueste zuerst</p><div class="fblist" id="fb-list"></div></div>
+    </div>
 
-    <h2>Kernfragen</h2>
-    <div id="core"></div>
+    <!-- ══ 3 · PRIMÄRE MÄRKTE ══ -->
+    <div class="shead"><h2>Primäre Märkte</h2><span class="tag now">aktueller Stand</span>
+      <span class="hint">Hauptmarkt der User (aus Profil)</span></div>
+    <div class="kgrid" id="k-mk"></div>
+    <div class="chartcard"><h3>Top-Einkaufsmärkte</h3><p class="csub" id="mk-sub"></p><div id="mk-bars"></div></div>
 
-    <h2>Wer landet in der App?</h2>
-    <p class="sectionnote">Von allen v6-Neu-Installs — <b>egal ob Onboarding durchlaufen, übersprungen oder vorbeigeroutet</b>. Das ist die ehrliche „wie viele nutzen die App wirklich"-Sicht. Der Onboarding-Funnel weiter unten ist eine engere Teilmenge (nur wer den Flow durchläuft) und darf NICHT als „App-Verlust" gelesen werden.</p>
-    <div id="landed"></div>
+    <!-- ══ 4 · VERHALTEN ══ -->
+    <div class="shead"><h2>Verhalten in der Sitzung</h2><span class="tag cmp">v5 vs v6</span>
+      <span class="hint" id="beh-hint">Plattform-Filter wirkt hier</span></div>
+    <div class="kgrid" id="k-beh"></div>
 
-    <h2>Onboarding-Funnel</h2>
-    <p class="sectionnote"><b>Echte Zahlen:</b> Die re-anonymisierten Bestands-User (Session-Verlust des 5.x→6.0-Updates) werden aus dem Nenner herausgerechnet — die Quoten unten beziehen sich auf <b>echte Neu-Installs</b> (= die das Onboarding überhaupt sehen konnten: Onboarding-Session ODER am ersten Screen abgesprungen). Die oberste Kachel zeigt, wie viele „Neu-Installs" in Wahrheit Bestands-User sind — diese Zahl muss mit 6.0.3 gegen 0 gehen. „Begonnen" = mind. eine Interaktion (Start-Screen schreibt nichts; in v1 wie v3 identisch gemessen). Vorher = fixes 5.x-Fenster 04.–06.07. (keine Re-Anon-Verzerrung). Plattform-Filter wirkt hier nicht.</p>
-    <div id="onbfunnel"></div>
+    <!-- ══ 5 · USER-BASIS ══ -->
+    <div class="shead"><h2>User-Basis &amp; Engagement</h2><span class="tag now">aktueller Stand · Voll-DB</span></div>
+    <div class="kgrid" id="k-ub"></div>
+    <div class="chartcard"><h3>Neue User pro Tag</h3><p class="csub">Neu-Installs (Registrierungen) · grün = ab Store-Release 6.0 (12.07.) · letzter Tag unvollständig</p><div class="trend" id="trend"></div></div>
 
-    <h2>Onboarding-Flow Schritt für Schritt · v5 vs v6</h2>
-    <p class="sectionnote">Jede Stufe = Anteil der <b>echten Neu-Installs</b>, die diesen Schritt bestanden haben. So siehst du genau, WO die Leute abspringen. <b>Wichtig zum Verständnis:</b> Der „Los geht's"-Tap auf dem Hero wird server-seitig <b>nicht</b> geloggt — der erste messbare Punkt ist „Märkte bestanden" (Markt gewählt + Weiter). Der Sprung Hero→Märkte enthält also beides: wer nicht auf „Los geht's" getippt hat UND wer auf dem Märkte-Screen absprang. Die Schritte sind zwischen v5/v6 semantisch gemappt (v5 hatte dazwischen noch Land+Auth + „Wie gehört?" — in v6 entfernt).</p>
-    <div id="stepfunnel"></div>
-
-    <h2>Verhalten in der Sitzung</h2>
-    <div id="behavior"></div>
-
-    <h2>Einkauf &amp; Abschluss</h2>
-    <p class="sectionnote">v6-Sitzungen sind jung (72h-Fenster), Alt-Sitzungen hatten Tage zu reifen — v6-Werte sind eher Untergrenzen.</p>
-    <div id="closing"></div>
+    <!-- ══ GESAMTURTEIL — unten + ausklappbar (Investoren: erst das Positive) ══ -->
+    <details class="vdetails">
+      <summary>⚖️ Gesamturteil ansehen: v5 vs v6 in Summe — welche Version schlägt sich besser?</summary>
+      <div id="verdict" style="margin-top:14px"></div>
+    </details>
 
     <footer>
-      <p><b>Definitionen:</b> „Ohne Aktion geschlossen" = kein Produkt angesehen, kein Filter geändert, kein Scan, keine Suche, kein Freitext. Sitzungen pro Journey-ID dedupliziert. Onboarding/Demografie/Markt werden <b>pro User</b> direkt vom Profil (users-Doc) der im Fenster aktiven User gemessen — nicht pro Sitzung (der Sitzungs-Schnappschuss entsteht vor dem Onboarding und unterzählt strukturell); erfasst erst seit 6.0. Sitzungsdauer wird nicht verglichen (Alt-Daten dafür defekt).</p>
-      <p><b>Quelle:</b> <code>aggregates/releaseMonitor_v1</code> (nur aggregierte Kennzahlen, keine personenbezogenen Daten) — neu berechnet alle 6 Stunden automatisch, per Button on-demand (Schutz: max. alle 10 Min).</p>
+      <p><b>Lesehilfe:</b> „v6" = rollierendes 72-h-Fenster · „v5" = fixe 5.x-Baseline (<span id="oldwin"></span>). Plattform-Filter wirkt nur auf sitzungsbasierte v6-Werte (Verhalten). Märkte + User-Basis sind Voll-DB-Stand (kein v5-Vergleich, bewusst nicht gefaked). „In-App gelandet" = Neu-Installs minus die, die nie über Hero/Boot hinauskamen.</p>
+      <p><b>Quelle:</b> <code>aggregates/releaseMonitor_v1</code> (nur aggregierte, anonyme Kennzahlen) — automatisch alle 6 h, per Button on-demand (max. alle 10 Min).</p>
     </footer>
   </div>
 </div>
@@ -138,7 +255,8 @@ const API_KEY='AIzaSyDZ6xtYoJcu1mJvFQpsV3aC2Qgs3UipZR8';
 const DOC_URL=`https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/(default)/documents/aggregates/releaseMonitor_v1?key=${API_KEY}`;
 const RECOMPUTE_URL='https://europe-west1-markendetektive-895f7.cloudfunctions.net/aggregateReleaseMonitorHttp';
 
-// Firestore-REST-Typwerte → JS
+const SNAPSHOT={"computeMs":3186,"old":{"purch":0,"n":2817,"markt":5,"cust":0,"demo":5,"such":576,"avgViews":1.78,"filter":1062,"conv":1,"bounce":1341,"cart":28,"zero":1877,"scan":415},"daily":[{"day":"2026-06-30","n":198},{"day":"2026-07-01","n":222},{"day":"2026-07-02","n":181},{"day":"2026-07-03","n":267},{"day":"2026-07-04","n":1191},{"day":"2026-07-05","n":408},{"day":"2026-07-06","n":555},{"day":"2026-07-07","n":1047},{"day":"2026-07-08","n":1120},{"day":"2026-07-09","n":445},{"day":"2026-07-10","n":299},{"day":"2026-07-11","n":254},{"day":"2026-07-12","n":752},{"day":"2026-07-13","n":377}],"v6":{"ios":{"zero":460,"cart":10,"userMarkt":169,"userDemo":78,"scan":38,"cust":2,"demo":34,"markt":146,"n":865,"purch":1,"usersN":731,"bounce":437,"conv":2,"avgViews":3.73,"filter":235,"userOnboarding":180,"such":107},"all":{"such":170,"userOnboarding":303,"filter":350,"avgViews":4.38,"conv":5,"bounce":562,"usersN":1032,"purch":3,"n":1204,"markt":177,"demo":64,"cust":7,"scan":72,"userDemo":119,"userMarkt":244,"zero":598,"cart":34},"android":{"cart":24,"zero":138,"userMarkt":75,"scan":34,"userDemo":41,"markt":31,"n":339,"demo":30,"cust":5,"usersN":301,"purch":2,"conv":3,"bounce":125,"such":63,"userOnboarding":123,"filter":115,"avgViews":6.04}},"onboarding":{"v6":{"completedUsers":231,"aktiv":522,"started":340,"sawOnb":317,"installs":907,"landed":{"heroBounce":184,"skipped":13,"installs":907,"completed":74,"bypass":114,"aktiv":522},"reAnon":308,"completed":237,"registered":74,"correctedAktiv":214,"correctedDenom":599,"stepFunnel":{"prioritaeten":238,"skipMaerkte":52,"budget":243,"maerkte":262,"hero":599,"done":231},"bounced":282,"byVersion":{"6.0.5":{"installs":38,"reAnon":0},"6.0.4":{"installs":7,"reAnon":0},"6.0.3":{"installs":33,"reAnon":0},"6.0.2":{"installs":11,"reAnon":0},"6.0.1":{"installs":492,"reAnon":166},"6.0.0":{"installs":460,"reAnon":186}}},"old":{"completed":1110,"bounced":125,"reAnon":0,"sawOnb":1474,"installs":1599,"stepFunnel":{"budget":1117,"maerkte":1138,"hero":1599,"done":1104,"prioritaeten":1108,"skipMaerkte":0},"started":1474,"aktiv":966,"correctedDenom":1599,"correctedAktiv":966,"completedUsers":1110,"registered":97}},"feedback":{"window":"2026-05-26 … 2026-07-13","scanned":300,"total":300,"positive":278,"negative":22,"positivePct":93,"withText":6,"releaseDate":"2026-07-12","eraV5":{"total":584,"positive":529,"negative":55,"positivePct":91},"eraV6":{"total":16,"positive":13,"negative":3,"positivePct":81},"comments":[{"rating":"negative","day":"2026-07-11","text":"Ich wollte ein Noname-Produkt scannen. Wie soll das gehen? Auf jeden Fall nicht intuitiv.","level":2},{"rating":"negative","day":"2026-06-24","text":"Momentan stürzt die App am iPhone 16 Pro nach dem Klick auf den Button ‚Meisterdetektiv Level 10' beim Antippen der Funktion ‚Bestenliste' SOFORT zu 100% komplett ab.","level":10},{"rating":"negative","day":"2026-06-21","text":"Viele Produkte fehlen, in der Suchfunktion nie ein Produkt gefunden. Gut und Günstig von EDEKA nie gefunden. App wird deinstalliert.","level":3},{"rating":"negative","day":"2026-06-15","text":"Finde viele Marken nicht","level":3},{"rating":"negative","day":"2026-05-29","text":"Nicht benutzerfreundlich für ältere Menschen","level":3},{"rating":"negative","day":"2026-05-27","text":"Punktesystem stört die Suche erheblich","level":3}]},"markets":{"scanned":6000,"withMarket":279,"coveragePct":5,"distinct":14,"top":[{"name":"Aldi Süd","count":66},{"name":"EDEKA","count":43},{"name":"Aldi Nord","count":42},{"name":"LiDL","count":28},{"name":"dm","count":24},{"name":"REWE","count":23},{"name":"Kaufland","count":18},{"name":"Penny","count":15},{"name":"Netto Markendiscount","count":7},{"name":"GLOBUS","count":5},{"name":"HOFER","count":4},{"name":"Spar","count":2}],"other":2,"otherMarkets":2},"userBase":{"totalUsers":236404,"active7d":9320,"active7dPct":3.9,"avgLevel":1.67,"totalSavings":179831.84,"productsSaved":65923,"avgSavings":0.76},"windows":{"v6":"rolling-72h","old":"2026-07-04..2026-07-06 (Public 5.x, fix)"},"version":"releaseMonitor_v1","updatedAt":"2026-07-13T10:15:07.369Z"};
+
 function val(v){
   if(v==null) return null;
   const t=Object.keys(v)[0], x=v[t];
@@ -149,256 +267,269 @@ function val(v){
   return x;
 }
 
-const METRICS={
-  core:[
-    {key:'bounce',type:'pct',dir:'down',title:'App geschlossen ohne Aktion',what:'nichts angesehen, kein Filter, kein Scan, keine Suche'},
-    {key:'userOnboarding',type:'pct',dir:'up',title:'Onboarding abgeschlossen',what:'User mit abgeschlossenem Onboarding (vom Profil)',oldNA:true,perUser:true},
-    {key:'userDemo',type:'pct',dir:'up',title:'Demografie ausgefüllt (Alter/Geschlecht)',what:'User mit Alter/Geschlecht im Profil',oldNA:true,perUser:true},
-    {key:'userMarkt',type:'pct',dir:'up',title:'Lieblingsmarkt gesetzt',what:'User mit gewähltem Markt im Profil',oldNA:true,perUser:true},
-    {key:'avgViews',type:'num',dir:'up',title:'Produkte angesehen (Ø pro Sitzung)',what:'Produkt-Detailaufrufe'},
-    {key:'filter',type:'pct',dir:'up',title:'Filter genutzt',what:'mind. ein Filter gesetzt oder geändert'}
-  ],
-  behavior:[
-    {key:'zero',type:'pct',dir:'down',title:'Kein Produkt angesehen',what:'0 Produktaufrufe (Filter/Scan zählen nicht)'},
-    {key:'such',type:'pct',dir:'up',title:'Suche genutzt',what:'mind. eine Produktsuche'},
-    {key:'scan',type:'pct',dir:'up',title:'Barcode gescannt',what:'mind. ein Scan'},
-    {key:'cust',type:'pct',dir:'up',title:'Freitext auf den Zettel',what:'eigener Eintrag ohne Katalog-Produkt'}
-  ],
-  closing:[
-    {key:'cart',type:'pct',dir:'up',title:'Einkaufszettel befüllt',what:'Sitzung endete mit Produkten im Zettel'},
-    {key:'purch',type:'pct',dir:'up',title:'Kauf abgehakt',what:'mind. ein Produkt als gekauft markiert'},
-    {key:'conv',type:'pct',dir:'up',title:'Marke → NoName umgewandelt',what:'Markenprodukt durch Alternative ersetzt'}
-  ]
-};
+let DATA=null, SEG='all';
+const deN=x=>Math.round(x).toLocaleString('de-DE');
+const pctN=(a,b)=>{const p=100*a/Math.max(b,1);return p<1&&a>0?p.toFixed(1).replace('.',','):String(Math.round(p));};
+const pctS=(a,b)=>pctN(a,b)+' %';
+const eur=v=>Number(v||0).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
+const num1=v=>(Math.round(v*10)/10).toLocaleString('de-DE');
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
 
-let DATA=null;
-function fmtPct(v,n){const p=100*v/n;return (p<1&&v>0?p.toFixed(1).replace('.',','):Math.round(p))+' %';}
-function fmt(m,v,n){return m.type==='pct'?fmtPct(v,n):(Math.round(v*10)/10).toLocaleString('de-DE');}
-
-function render(seg){
-  const v6=DATA.v6[seg], old=DATA.old;
-  for(const [sec,list] of Object.entries(METRICS)){
-    const el=document.getElementById(sec); el.innerHTML='';
-    for(const m of list){
-      // Pro-User-Kacheln (perUser) messen am users-Doc der aktiven User —
-      // der Sitzungs-Schnappschuss unterzählt strukturell (Journey-Start
-      // liegt bei Neu-Usern VOR dem Onboarding). Nenner dann = User.
-      const den=m.perUser?Math.max(v6.usersN||0,1):Math.max(v6.n,1);
-      const v=v6[m.key]??0, o=m.oldNA?null:(old[m.key]??0);
-      const vP=m.type==='pct'?100*v/den:null, oP=(o!=null&&m.type==='pct')?100*o/Math.max(old.n,1):null;
-      const mx=m.type==='num'?Math.max(v,o??0,0.001):100;
-      const wV=m.type==='num'?100*v/mx:vP, wO=o==null?0:(m.type==='num'?100*o/mx:oP);
-      let cls='neutral',txt='≈ gleich';
-      if(m.oldNA){cls='new';txt='neu ab 6.0';}
-      else{
-        const a=m.type==='pct'?vP:v,b=m.type==='pct'?oP:o;
-        const better=m.dir==='down'?a<b:a>b, worse=m.dir==='down'?a>b*1.1:a<b*0.9;
-        const diff=m.type==='pct'?Math.abs(a-b):Math.abs(a-b)/Math.max(b,0.001)*100;
-        if(diff<3){cls='neutral';txt='≈ gleich';}
-        else if(better){cls='good';txt='v6 besser';}
-        else if(worse){cls='bad';txt='v6 schlechter';}
-      }
-      el.insertAdjacentHTML('beforeend',`
-      <div class="metric">
-        <div class="mhead"><span class="mtitle">${m.title}</span><span class="mwhat">${m.what}</span><span class="badge ${cls}">${txt}</span></div>
-        <div class="rows">
-          <div class="brow"><span class="who">v6</span>
-            <div class="track"><div class="fill" style="width:${Math.max(wV,1.5)}%"></div></div>
-            <span class="num">${fmt(m,v,den)}</span></div>
-          <div class="brow old"><span class="who">vorher</span>
-            ${o==null?`<div class="na">— wurde in der alten Version nicht erfasst —</div><span></span>`
-             :`<div class="track"><div class="fill" style="width:${Math.max(wO,1.5)}%"></div></div><span class="num">${fmt(m,o,old.n)}</span>`}
-          </div>
-        </div>
-        ${m.type==='pct'&&o!=null?`<div class="mfoot">v6: ${v} von ${v6.n} Sitzungen · vorher: ${o} von ${old.n}</div>`
-          :m.oldNA?`<div class="mfoot">v6: ${v} von ${den} ${m.perUser?'Usern':'Sitzungen'}</div>`:''}
-      </div>`);
-    }
-  }
-  renderLanded(DATA.onboarding);
-  renderOnboarding(DATA.onboarding);
-  renderStepFunnel(DATA.onboarding);
-  const daily=DATA.daily||[];
-  const mx=Math.max(...daily.map(d=>d.n),1);
-  document.getElementById('spark').innerHTML=daily.map(d=>{
-    const isV6=d.day>='2026-07-11';
-    const label=d.day.slice(8,10).replace(/^0/,'')+'.'+d.day.slice(5,7).replace(/^0/,'')+'.';
-    return `<div class="col ${isV6?'v6':''}"><span class="cv">${d.n.toLocaleString('de-DE')}</span>
-      <div class="bar2" style="height:${Math.max(6,95*d.n/mx)}px"></div><span class="cl">${label}</span></div>`;
-  }).join('');
+// Δ-Chip in Prozentpunkten (pct) bzw. relativ (num). dir='up' → höher=gut.
+function delta(v6,v5,dir,isPct){
+  const d=v6-v5, mag=isPct?Math.abs(d):Math.abs(d)/Math.max(Math.abs(v5),0.001)*100;
+  const better=dir==='up'?d>0:d<0, arrow=d>0?'▲':d<0?'▼':'▬';
+  const cls=mag<(isPct?2:5)?'flat':(better?'good':'bad');
+  const txt=mag<0.5?'≈ vorher':`${arrow} ${isPct?(Math.round(mag))+' pp':Math.round(mag)+' %'}`;
+  return {cls,txt};
+}
+// KPI-Karte. cmp = {v5str, dir, v6num, v5num, isPct} oder null (→ sub).
+function kpi({label,icon,big,status,cmp,sub}){
+  let foot='';
+  if(cmp){const d=delta(cmp.v6num,cmp.v5num,cmp.dir,cmp.isPct);
+    foot=`<div class="kcmp"><span class="kv5">v5: ${cmp.v5str}</span><span class="kdelta ${d.cls}">${d.txt}</span></div>`;}
+  else foot=`<div class="ksub">${sub||''}</div>`;
+  return `<div class="kpi"><div class="klabel">${icon||''} ${label}</div>
+    <div class="kbig ${status||'ink'}">${big}</div>${foot}</div>`;
 }
 
-// „Wer landet in der App?" — 5 exklusive Outcome-Buckets als Karten +
-// große Zusammenfassung (grün = in der App, rot = nie eingestiegen).
-function renderLanded(ob){
-  const el=document.getElementById('landed');
-  if(!el||!ob||!ob.v6||!ob.v6.landed){if(el)el.innerHTML='<p class="sectionnote">Noch keine Daten — einmal „Neu berechnen" tippen.</p>';return;}
-  const L=ob.v6.landed, n=Math.max(L.installs||0,1);
-  const landed=(L.aktiv||0)+(L.completed||0)+(L.skipped||0)+(L.bypass||0);
-  const hero=L.heroBounce||0;
-  const p=x=>Math.round(100*x/n)+' %';
-  const cards=[
-    {ic:'🟢',lab:'Aktiv in der App',sub:'Produkt/Suche/Scan/Zettel genutzt',v:L.aktiv||0,col:'#0d8575'},
-    {ic:'🟢',lab:'Onboarding abgeschlossen',sub:'in der App, noch nicht aktiv',v:L.completed||0,col:'#0d8575'},
-    {ic:'🟢',lab:'Onboarding übersprungen',sub:'überspringen getippt → in App',v:L.skipped||0,col:'#0d8575'},
-    {ic:'🟡',lab:'Am Onboarding vorbei',sub:'direkt in die App geroutet (Veteran/Bypass)',v:L.bypass||0,col:'#c9a227'},
-    {ic:'🔴',lab:'Nur Hero/Boot gesehen',sub:'nie eingestiegen',v:hero,col:'#c0392b'},
+// Gesamturteil: alle sauber vergleichbaren v5-vs-v6-Kennzahlen tallyen.
+function renderVerdict(){
+  const ob=DATA.onboarding, v6o=ob.v6, v5o=ob.old, beh=DATA.v6.all, old=DATA.old, fb=DATA.feedback;
+  const L=v6o.landed||{}, inst=L.installs||v6o.installs||1, cD=v6o.correctedDenom||1, cDO=v5o.correctedDenom||1;
+  const dn=Math.max(beh.n,1), don=Math.max(old.n,1), P=(a,b)=>100*a/b;
+  const M=[
+    {n:'In-App gelandet',v6:P(inst-(L.heroBounce||0),inst),v5:P((v5o.installs||1)-(v5o.bounced||0),v5o.installs||1),dir:'up',pct:1},
+    {n:'Onboarding abgeschlossen',v6:P(v6o.stepFunnel.done||0,cD),v5:P(v5o.stepFunnel.done||0,cDO),dir:'up',pct:1},
+    {n:'Registrierung',v6:P(v6o.registered||0,cD),v5:P(v5o.registered||0,cDO),dir:'up',pct:1},
+    {n:'Produkte/Sitzung',v6:beh.avgViews||0,v5:old.avgViews||0,dir:'up',pct:0},
+    {n:'Ohne Aktion geschlossen',v6:P(beh.bounce||0,dn),v5:P(old.bounce||0,don),dir:'down',pct:1},
+    {n:'Kein Produkt angesehen',v6:P(beh.zero||0,dn),v5:P(old.zero||0,don),dir:'down',pct:1},
+    {n:'Suche genutzt',v6:P(beh.such||0,dn),v5:P(old.such||0,don),dir:'up',pct:1},
+    {n:'Scan genutzt',v6:P(beh.scan||0,dn),v5:P(old.scan||0,don),dir:'up',pct:1},
+    {n:'Filter genutzt',v6:P(beh.filter||0,dn),v5:P(old.filter||0,don),dir:'up',pct:1},
+    {n:'Zettel befüllt',v6:P(beh.cart||0,dn),v5:P(old.cart||0,don),dir:'up',pct:1},
+    {n:'Marke→NoName',v6:P(beh.conv||0,dn),v5:P(old.conv||0,don),dir:'up',pct:1},
   ];
-  el.innerHTML=`
-    <div class="metric" style="margin-bottom:12px">
-      <div class="mhead"><span class="mtitle" style="font-size:1.15em">➡️ ${p(landed)} landen in der App</span>
-        <span class="mwhat">${landed} von ${n} Neu-Installs · nur ${hero} (${p(hero)}) steigen nie ein</span></div>
-      <div class="rows"><div class="brow"><span class="who">App</span>
-        <div class="track" style="height:22px"><div class="fill" style="width:${Math.max(100*landed/n,1.5)}%;background:#0d8575"></div></div>
-        <span class="num">${p(landed)}</span></div></div>
-      <div class="mfoot">20–40 % First-Open-Bounce sind für Apps normal. Der „46 % spurlos"-Wert im Onboarding-Funnel ist ein Nenner-Artefakt (v5 hatte einen „Später"-Button, der Abbrecher als „begonnen" zählte; v6 hat zusätzlich Re-Anon-Veteranen). Diese Karte ist die ehrliche Sicht.</div>
-    </div>
-    <div style="display:flex;flex-wrap:wrap;gap:10px">
-      ${cards.map(c=>`
-        <div class="metric" style="flex:1;min-width:150px;border-left:4px solid ${c.col};margin:0">
-          <div style="font-size:1.8em;font-weight:800;color:${c.col};line-height:1.1">${c.v}</div>
-          <div style="font-size:1.1em;font-weight:700">${p(c.v)}</div>
-          <div style="font-weight:700;margin-top:4px">${c.ic} ${c.lab}</div>
-          <div class="mwhat" style="display:block;margin-top:2px">${c.sub}</div>
-        </div>`).join('')}
+  if(fb&&fb.eraV5&&fb.eraV6&&fb.eraV6.total>0) M.push({n:'Zufriedenheit',v6:fb.eraV6.positivePct,v5:fb.eraV5.positivePct,dir:'up',pct:1});
+  let better=0,worse=0,equal=0;
+  const scored=M.map(m=>{
+    const d=m.v6-m.v5, mag=m.pct?Math.abs(d):Math.abs(d)/Math.max(Math.abs(m.v5),0.001)*100;
+    const sig=m.pct?Math.abs(d)>=2:mag>=5, isBetter=m.dir==='up'?d>0:d<0;
+    const verdict=!sig?'equal':(isBetter?'better':'worse');
+    if(verdict==='better')better++;else if(verdict==='worse')worse++;else equal++;
+    return {n:m.n,verdict,mag};
+  });
+  const net=better-worse;
+  const overall=net>=2?'In Summe vorn: 6.0':net<=-2?'Nach reiner Zählung vorn: 5.x — aber mit Vorbehalt':'Gemischtes Bild — kein klarer Sieger';
+  const cls=net>=2?'good':net<=-2?'warn':'warn';
+  const wins=scored.filter(s=>s.verdict==='better').sort((a,b)=>b.mag-a.mag).slice(0,3);
+  const loss=scored.filter(s=>s.verdict==='worse').sort((a,b)=>b.mag-a.mag).slice(0,3);
+  const chip=(s,g)=>`<span class="mv ${g?'good':'bad'}">${g?'▲':'▼'} ${s.n}</span>`;
+  const vf=old.avgViews?(beh.avgViews/old.avgViews).toFixed(1).replace('.',','):'?';
+  document.getElementById('verdict').innerHTML=`
+    <div class="vhero ${cls}">
+      <div class="vbig">${overall}</div>
+      <div class="vsplit">
+        <span class="vpill good">${better} besser</span>
+        <span class="vpill warn">${equal} gleich</span>
+        <span class="vpill bad">${worse} schlechter</span>
+        <span class="vof">von ${M.length} vergleichbaren Kennzahlen (v6 gegen v5)</span>
+      </div>
+      <div class="vmovers">
+        <div><b>Stärker in 6.0:</b> ${wins.map(s=>chip(s,true)).join('')||'—'}</div>
+        <div><b>Schwächer in 6.0:</b> ${loss.map(s=>chip(s,false)).join('')||'—'}</div>
+      </div>
+      <div class="vcaveat">⚠️ <b>So lesen:</b> Die Zählung gewichtet nicht — der größte Einzelsprung ist <b>Produkte/Sitzung ×${vf}</b> (zählt trotzdem nur „1"). Und 6.0-Sitzungen sind erst ~72 h alt → Verhaltens-Werte (Suche/Scan/Filter/Zettel) reifen noch, sind also <b>Untergrenzen</b>. Der Onboarding-Abschluss-Rückgang ist teils Messartefakt (Re-Anon) + Märkte-Friktion, die Option A adressiert. Fazit: 6.0 stark beim Engagement, Baustelle ist der Onboarding-Abschluss.</div>
     </div>`;
 }
 
-// Onboarding-Funnel: eigene Kacheln, weil jede einen anderen Nenner hat
-// (Installs bzw. Begonnene) — passt nicht ins generische METRICS-Raster.
-function renderOnboarding(ob){
-  const el=document.getElementById('onbfunnel');
-  if(!el||!ob){if(el)el.innerHTML='<p class="sectionnote">Noch keine Funnel-Daten — einmal „Neu berechnen" tippen.</p>';return;}
-  el.innerHTML='';
-  const v6=ob.v6, old=ob.old;
-  // Echter Nenner = Neu-Installs OHNE die re-anonymisierten Bestands-User.
-  const vDenom=v6.correctedDenom??Math.max((v6.installs||0)-(v6.reAnon||0),0);
-  const oDenom=old.correctedDenom??old.installs;
-  const vSaw=v6.sawOnb??v6.started, oSaw=old.sawOnb??old.started;
-  const vComp=v6.completedUsers??v6.completed, oComp=old.completedUsers??old.completed;
-  const vAkt=v6.correctedAktiv??v6.aktiv, oAkt=old.correctedAktiv??old.aktiv;
+function render(){
+  renderVerdict();
+  const ob=DATA.onboarding, v6o=ob.v6, v5o=ob.old, beh=DATA.v6[SEG], old=DATA.old;
+  const L=v6o.landed||{}, inst=L.installs||v6o.installs||1;
+  const cD=v6o.correctedDenom||1, cDO=v5o.correctedDenom||1;
 
-  // ── Re-Anon-KPI oben: die Zahl, die mit 6.0.3 gegen 0 gehen MUSS ──
-  const reA=v6.reAnon||0, inst=v6.installs||0;
-  const reaP=inst?Math.round(100*reA/inst):0;
-  el.insertAdjacentHTML('beforeend',`
-    <div class="metric" style="border-left:4px solid var(--bad,#c0392b)">
-      <div class="mhead"><span class="mtitle">⚠️ Bestands-User durch Session-Verlust (Re-Anon)</span>
-        <span class="mwhat">im Fenster als „neu" fehlgezählt — sollte mit 6.0.3 gegen 0 gehen</span></div>
-      <div class="rows"><div class="brow"><span class="who">v6</span>
-        <div class="track"><div class="fill" style="width:${Math.max(Math.min(reaP,100),1.5)}%;background:var(--bad,#c0392b)"></div></div>
-        <span class="num">${reaP} %</span></div></div>
-      <div class="mfoot">${reA} von ${inst} „Neu-Installs" sind in Wahrheit re-anonymisierte Bestands-User. Sie werden aus den Onboarding-Quoten unten herausgerechnet.</div>
-    </div>`);
+  // 1 · ONBOARDING KPIs
+  const landV6=100*(inst-(L.heroBounce||0))/inst, landV5=100*((v5o.installs||1)-(v5o.bounced||0))/(v5o.installs||1);
+  const compV6=100*(v6o.stepFunnel.done||0)/cD, compV5=100*(v5o.stepFunnel.done||0)/cDO;
+  const regV6=100*(v6o.registered||0)/cD, regV5=100*(v5o.registered||0)/cDO;
+  const reaP=100*(v6o.reAnon||0)/inst;
+  document.getElementById('k-onb').innerHTML=[
+    kpi({label:'In-App gelandet<span class="help" title="Neu-Installs, die über den ersten Hero/Boot-Screen hinauskamen — also nicht sofort abgesprungen sind. Egal ob Onboarding durchlaufen, übersprungen oder vorbeigeroutet.">?</span>',icon:'📲',big:Math.round(landV6)+' %',status:landV6>=70?'good':'warn',
+      cmp:{v5str:Math.round(landV5)+' %',dir:'up',v6num:landV6,v5num:landV5,isPct:true}}),
+    kpi({label:'Onboarding abgeschlossen',icon:'🎯',big:Math.round(compV6)+' %',status:compV6>=compV5-5?'good':'warn',
+      cmp:{v5str:Math.round(compV5)+' %',dir:'up',v6num:compV6,v5num:compV5,isPct:true}}),
+    kpi({label:'Registrierung (echtes Konto)',icon:'👤',big:pctS(v6o.registered||0,cD),status:regV6>=regV5?'good':'warn',
+      cmp:{v5str:pctS(v5o.registered||0,cDO),dir:'up',v6num:regV6,v5num:regV5,isPct:true}}),
+    kpi({label:'Session-Verlust · Re-Anon<span class="help" title="Bestands-User, die beim 5→6-Update ihre Anmeldung verloren und darum als „neu“ zählen. Ein Bug — soll mit dem Fix (6.0.3) gegen 0 gehen. In v5 gab es das nicht (0 %).">?</span>',icon:'⚠️',big:Math.round(reaP)+' %',status:reaP>=20?'bad':reaP>=5?'warn':'good',
+      cmp:{v5str:'0 %',dir:'down',v6num:reaP,v5num:0,isPct:true}}),
+  ].join('');
+  renderFunnel(v6o.stepFunnel,v5o.stepFunnel||{hero:1599,maerkte:1138,budget:1117,prioritaeten:1108,done:1104});
+  renderReanonByVersion(v6o.byVersion);
 
-  const tiles=[
-    {title:'Onboarding begonnen',what:'von echten Neu-Installs; mind. eine Interaktion',v:[vSaw,vDenom],o:[oSaw,oDenom],dir:'up'},
-    {title:'Abgeschlossen — von Begonnenen',what:'Flow bis zum Ende durchlaufen',v:[vComp,vSaw],o:[oComp,oSaw],dir:'up'},
-    {title:'Abgeschlossen — von echten Neu-Installs',what:'Ende erreicht, echte neue User',v:[vComp,vDenom],o:[oComp,oDenom],dir:'up'},
-    {title:'Echtes Konto angelegt (Registrierung)',what:'von echten Neu-Installs mit E-Mail/Provider statt Gast',v:[v6.registered??0,vDenom],o:[old.registered??0,oDenom],dir:'up'},
+  // 2 · FEEDBACK
+  renderFeedback();
+
+  // 3 · MÄRKTE
+  renderMarkets();
+
+  // 4 · VERHALTEN KPIs (v5 vs v6, plattform-gefiltert)
+  const dn=Math.max(beh.n,1), don=Math.max(old.n,1);
+  const behCards=[
+    {k:'avgViews',label:'Produkte angesehen',icon:'👁',num:true,dir:'up',fmt:num1},
+    {k:'bounce',label:'Ohne Aktion geschlossen',icon:'🚪',dir:'down'},
+    {k:'such',label:'Suche genutzt',icon:'🔍',dir:'up'},
+    {k:'scan',label:'Barcode gescannt',icon:'📷',dir:'up'},
+    {k:'filter',label:'Filter genutzt',icon:'⚙️',dir:'up'},
+    {k:'cart',label:'Zettel befüllt',icon:'🛒',dir:'up'},
   ];
-  for(const t of tiles){
-    const vP=100*t.v[0]/Math.max(t.v[1],1), oP=100*t.o[0]/Math.max(t.o[1],1);
-    let cls='neutral',txt='≈ gleich';
-    if(Math.abs(vP-oP)>=3){ if(vP>oP){cls='good';txt='v6 besser';} else {cls='bad';txt='v6 schlechter';} }
-    const p=(x)=>(x<1&&x>0?x.toFixed(1).replace('.',','):Math.round(x))+' %';
-    el.insertAdjacentHTML('beforeend',`
-    <div class="metric">
-      <div class="mhead"><span class="mtitle">${t.title}</span><span class="mwhat">${t.what}</span><span class="badge ${cls}">${txt}</span></div>
-      <div class="rows">
-        <div class="brow"><span class="who">v6</span>
-          <div class="track"><div class="fill" style="width:${Math.max(Math.min(vP,100),1.5)}%"></div></div>
-          <span class="num">${p(vP)}</span></div>
-        <div class="brow old"><span class="who">vorher</span>
-          <div class="track"><div class="fill" style="width:${Math.max(Math.min(oP,100),1.5)}%"></div></div>
-          <span class="num">${p(oP)}</span></div>
-      </div>
-      <div class="mfoot">v6: ${t.v[0]} von ${t.v[1]} · vorher: ${t.o[0]} von ${t.o[1]} (04.–06.07.)</div>
-    </div>`);
-  }
+  document.getElementById('k-beh').innerHTML=behCards.map(m=>{
+    if(m.num){const v6v=beh[m.k]||0,v5v=old[m.k]||0;
+      const st=(m.dir==='up'?v6v>=v5v:v6v<=v5v)?'good':'warn';
+      return kpi({label:m.label,icon:m.icon,big:m.fmt(v6v),status:st,cmp:{v5str:m.fmt(v5v),dir:m.dir,v6num:v6v,v5num:v5v,isPct:false}});}
+    const v6p=100*(beh[m.k]||0)/dn, v5p=100*(old[m.k]||0)/don;
+    const st=(m.dir==='up'?v6p>=v5p-2:v6p<=v5p+2)?'good':'warn';
+    return kpi({label:m.label,icon:m.icon,big:pctS(beh[m.k]||0,dn),status:st,cmp:{v5str:pctS(old[m.k]||0,don),dir:m.dir,v6num:v6p,v5num:v5p,isPct:true}});
+  }).join('');
+
+  // 5 · USER-BASIS
+  const ub=DATA.userBase;
+  document.getElementById('k-ub').innerHTML=ub?[
+    kpi({label:'Gesamt-User',icon:'👥',big:deN(ub.totalUsers),status:'ink',sub:'registriert in der DB'}),
+    kpi({label:'Aktiv (7 Tage)',icon:'📈',big:deN(ub.active7d),status:'good',sub:`${num1(ub.active7dPct)} % der User`}),
+    kpi({label:'Ø Level',icon:'🏅',big:num1(ub.avgLevel),status:'brand',sub:'pro User'}),
+    kpi({label:'Produkte gespeichert',icon:'⭐',big:deN(ub.productsSaved),status:'brand',sub:'gesamt'}),
+    kpi({label:'Gesamt-Ersparnis',icon:'💶',big:eur(ub.totalSavings),status:'good',sub:`Ø ${eur(ub.avgSavings)} / User`}),
+  ].join(''):'<div class="kpi"><div class="ksub">Noch keine User-Basis-Daten — „Neu berechnen" tippen.</div></div>';
+
+  renderTrend();
 }
 
-// Schritt-für-Schritt-Funnel v5 vs v6: pro Stufe der Anteil echter
-// Neu-Installs, plus der Absprung gegenüber der Vorstufe (rot markiert,
-// wo v6 mehr verliert als v5 → dort sitzt das Problem).
-function renderStepFunnel(ob){
-  const el=document.getElementById('stepfunnel');
-  if(!el||!ob||!ob.v6||!ob.v6.stepFunnel){if(el)el.innerHTML='<p class="sectionnote">Noch keine Schritt-Daten — einmal „Neu berechnen" tippen.</p>';return;}
-  el.innerHTML='';
-  const v=ob.v6.stepFunnel, o=(ob.old&&ob.old.stepFunnel)||{hero:1599,maerkte:1138,budget:1117,prioritaeten:1108,done:1104};
+function renderFunnel(v,o){
   const stages=[
-    {k:'hero',label:'App geöffnet · Hero',sub:'„Los geht\'s"-Screen (Tap selbst nicht geloggt)'},
-    {k:'maerkte',label:'Märkte bestanden',sub:'Markt GEWÄHLT + Weiter (Skip zählt hier NICHT)'},
-    {k:'budget',label:'Budget bestanden',sub:'Wocheneinkauf in € angegeben'},
-    {k:'prioritaeten',label:'Prioritäten bestanden',sub:'„Was ist dir wichtig?"'},
-    {k:'done',label:'Abgeschlossen',sub:'Climax + Konto-Angebot erreicht'},
+    {k:'hero',l:'App geöffnet · Hero',s:'„Los geht\'s"-Screen'},
+    {k:'maerkte',l:'Märkte bestanden',s:'Markt gewählt + weiter'},
+    {k:'budget',l:'Budget bestanden',s:'Wocheneinkauf in €'},
+    {k:'prioritaeten',l:'Prioritäten',s:'„Was ist dir wichtig?"'},
+    {k:'done',l:'Abgeschlossen',s:'Climax erreicht'},
   ];
   const vH=Math.max(v.hero,1), oH=Math.max(o.hero,1);
-  const p=(x)=>(x<1&&x>0?x.toFixed(1).replace('.',','):Math.round(x))+' %';
-  let prevV=100, prevO=100;
+  let pv=100,po=100,html='';
   stages.forEach((s,i)=>{
-    const vP=100*(v[s.k]||0)/vH, oP=100*(o[s.k]||0)/oH;
-    const vDrop=i===0?0:prevV-vP, oDrop=i===0?0:prevO-oP;
-    // Rot, wenn v6 an dieser Stufe deutlich mehr verliert als v5.
-    const bad=i>0 && vDrop-oDrop>=5;
-    const dropHtml=i===0?'<span class="mwhat">Startpunkt = 100 %</span>'
-      :`<span class="badge ${bad?'bad':(vDrop<=oDrop+1?'good':'neutral')}">v6 −${p(vDrop)} · v5 −${p(oDrop)}${bad?' ⚠ hier bricht v6 ein':''}</span>`;
-    el.insertAdjacentHTML('beforeend',`
-    <div class="metric"${bad?' style="border-left:4px solid var(--bad,#c0392b)"':''}>
-      <div class="mhead"><span class="mtitle">${i+1}. ${s.label}</span><span class="mwhat">${s.sub}</span>${dropHtml}</div>
-      <div class="rows">
-        <div class="brow"><span class="who">v6</span>
-          <div class="track"><div class="fill" style="width:${Math.max(Math.min(vP,100),1.5)}%"></div></div>
-          <span class="num">${p(vP)}</span></div>
-        <div class="brow old"><span class="who">v5</span>
-          <div class="track"><div class="fill" style="width:${Math.max(Math.min(oP,100),1.5)}%"></div></div>
-          <span class="num">${p(oP)}</span></div>
-      </div>
-      <div class="mfoot">v6: ${v[s.k]||0} von ${v.hero} · v5: ${o[s.k]||0} von ${o.hero}${
-        s.k==='maerkte' && (v.skipMaerkte||0)>0
-          ? ` · <b>davon NICHT: ${v.skipMaerkte} „übersprungen" (${p(100*v.skipMaerkte/vH)}), Rest still verlassen</b>`
-          : ''}</div>
-    </div>`);
-    prevV=vP; prevO=oP;
+    const vp=100*(v[s.k]||0)/vH, op=100*(o[s.k]||0)/oH;
+    const hit=i>0 && (pv-vp)-(po-op)>=5;
+    html+=`<div class="frow ${hit?'hit':''}">
+      <div class="fl">${s.l}<small>${s.s}</small></div>
+      <div class="ftrack"><div class="ffill" style="width:${Math.max(vp,1.5)}%"></div></div>
+      <div class="fmeta"><span class="fv6">${Math.round(vp)} %</span> · <span class="fv5">v5 ${Math.round(op)} %</span></div>
+    </div>`;
+    pv=vp;po=op;
   });
-  // Aufschlüsselung des großen Hero→Märkte-Absprungs: Skip vs. still weg.
-  const lost=Math.max(vH-(v.maerkte||0),0), skip=v.skipMaerkte||0, silent=Math.max(lost-skip,0);
-  el.insertAdjacentHTML('beforeend',`
-    <div class="metric" style="border-left:4px solid var(--bad,#c0392b)">
-      <div class="mhead"><span class="mtitle">🔍 Wo genau geht der Märkte-Absprung hin?</span>
-        <span class="mwhat">Zerlegung der ${lost} verlorenen echten Neu-Installs</span></div>
-      <div class="mfoot" style="line-height:1.7">
-        <b>${skip}</b> (${p(100*skip/vH)}) tippten auf dem Märkte-Screen aktiv <b>„Onboarding überspringen"</b> — sie SAHEN die Frage und lehnten ab.<br>
-        <b>${silent}</b> (${p(100*silent/vH)}) verschwanden <b>ohne Spur</b> — entweder nie „Los geht's" getippt (Hero) oder auf dem Märkte-Screen die App geschlossen. Server-seitig nicht trennbar → dafür bräuchte es je ein Tracking-Event für „Los geht's"-Tap + „Märkte-Screen gesehen".
-      </div>
-    </div>`);
+  document.getElementById('funnel').innerHTML=html;
 }
 
-async function load(){
-  const r=await fetch(DOC_URL);
-  if(!r.ok){document.getElementById('loading').textContent='Konnte die Zahlen nicht laden ('+r.status+') — Seite neu laden versuchen.';return;}
-  const doc=await r.json();
-  const f=Object.fromEntries(Object.entries(doc.fields||{}).map(([k,v])=>[k,val(v)]));
+function renderReanonByVersion(bv){
+  const host=document.getElementById('reanon-versions');
+  if(!host) return;
+  if(!bv||!Object.keys(bv).length){host.innerHTML='<p class="csub">Noch keine Versions-Daten — „Neu berechnen" tippen.</p>';return;}
+  const vers=Object.keys(bv).sort().reverse();
+  host.innerHTML=vers.map(v=>{
+    const d=bv[v]||{}, inst=d.installs||0, ra=d.reAnon||0, rate=inst?Math.round(100*ra/inst):0;
+    const col=rate>=20?'var(--crit)':rate>=5?'var(--warn)':'var(--good)';
+    return `<div class="bar"><div class="bl">${esc(v)}</div>
+      <div class="bartrack"><div class="barfill" style="width:${Math.max(rate,1.5)}%;background:${col}"></div></div>
+      <div class="bv"><b style="color:${col}">${rate} %</b> · ${deN(ra)}/${deN(inst)}</div></div>`;
+  }).join('');
+}
+
+function renderFeedback(){
+  const fb=DATA.feedback;
+  if(!fb||!fb.total){document.getElementById('k-fb').innerHTML='<div class="kpi"><div class="ksub">Noch keine Feedback-Daten.</div></div>';
+    document.getElementById('fb-donut').innerHTML='';document.getElementById('fb-list').innerHTML='';return;}
+  const pos=fb.positive||0,neg=fb.negative||0,tot=Math.max(fb.total,1),pp=fb.positivePct??Math.round(100*pos/tot);
+  const e5=fb.eraV5||{},e6=fb.eraV6||{},e6p=e6.positivePct??0,e5p=e5.positivePct??0;
+  document.getElementById('k-fb').innerHTML=[
+    kpi({label:'Zufriedenheit gesamt',icon:'👍',big:pp+' %',status:pp>=80?'good':pp>=60?'warn':'bad',sub:`${deN(pos)} von ${deN(tot)} Bewertungen`}),
+    kpi({label:'Zufriedenheit v6-Ära',icon:'🆕',big:e6.total?e6p+' %':'—',status:!e6.total?'ink':e6p>=e5p?'good':'warn',
+      cmp:e6.total?{v5str:e5p+' % (v5-Ära)',dir:'up',v6num:e6p,v5num:e5p,isPct:true}:null,sub:e6.total?'':'noch keine v6-Bewertungen'}),
+    kpi({label:'Zufriedene Nutzer',icon:'😊',big:deN(pos),status:'good',sub:'positive Bewertungen'}),
+    kpi({label:'Unzufriedene Nutzer',icon:'😕',big:deN(neg),status:neg>0?'bad':'good',sub:`${fb.withText||0} mit Kommentar`}),
+  ].join('');
+  document.getElementById('fb-window').innerHTML='In-App-Bewertungen · '+(fb.window||'')+(e6.total?` · <b>Split am Release 12.07:</b> v5-Ära ${deN(e5.total||0)} · v6-Ära ${deN(e6.total||0)} (noch klein)`:'');
+  document.getElementById('fb-donut').innerHTML=`
+    <div class="donutwrap">
+      <div class="donut" style="background:conic-gradient(var(--good) 0 ${pp}%,var(--crit) ${pp}% 100%)">
+        <div class="dc"><b>${pp} %</b><span>positiv</span></div></div>
+      <div class="dlgd">
+        <div class="dli"><i style="background:var(--good)"></i>Positiv <b>${deN(pos)}</b> · ${pctS(pos,tot)}</div>
+        <div class="dli"><i style="background:var(--crit)"></i>Negativ <b>${deN(neg)}</b> · ${pctS(neg,tot)}</div>
+      </div></div>`;
+  const comments=fb.comments||[];
+  document.getElementById('fb-list').innerHTML=comments.map(c=>`
+    <div class="fbc"><div class="fbc-h"><span class="fbc-badge">👎 Negativ</span>
+      <span class="fbc-day">${esc(c.day||'')}${c.level?' · Level '+esc(String(c.level)):''}</span></div>
+      <div class="fbc-t">${esc(c.text)}</div></div>`).join('')||'<p class="csub">Keine Text-Kommentare.</p>';
+}
+
+function renderMarkets(){
+  const mk=DATA.markets;
+  const bars=document.getElementById('mk-bars');
+  if(!mk||!mk.top||!mk.top.length){document.getElementById('k-mk').innerHTML='<div class="kpi"><div class="ksub">Noch keine Markt-Daten.</div></div>';bars.innerHTML='';return;}
+  const withM=Math.max(mk.withMarket,1), top=mk.top, lead=top[0];
+  document.getElementById('k-mk').innerHTML=[
+    kpi({label:'Führender Markt',icon:'🏆',big:esc(lead.name),status:'brand',sub:`${pctS(lead.count,withM)} der Markt-Nennungen`}),
+    kpi({label:'Verschiedene Märkte',icon:'🗺️',big:deN(mk.distinct),status:'ink',sub:'im aktiven Sample'}),
+    kpi({label:'Markt gesetzt',icon:'📍',big:mk.coveragePct+' %',status:mk.coveragePct<30?'warn':'good',sub:`nur ${deN(withM)} von ${deN(mk.scanned)} aktiven Usern`}),
+  ].join('');
+  const mx=Math.max(...top.map(t=>t.count),1);
+  document.getElementById('mk-sub').textContent=`${deN(withM)} Nennungen · Top ${top.length}${mk.otherMarkets?` (+ ${mk.otherMarkets} weitere)`:''}`;
+  bars.innerHTML=top.map(t=>`
+    <div class="bar"><div class="bl" title="${esc(t.name)}">${esc(t.name)}</div>
+      <div class="bartrack"><div class="barfill" style="width:${Math.max(100*t.count/mx,2)}%"></div></div>
+      <div class="bv"><b>${deN(t.count)}</b> · ${pctS(t.count,withM)}</div></div>`).join('');
+}
+
+function renderTrend(){
+  const daily=DATA.daily||[];
+  const mx=Math.max(...daily.map(d=>d.n),1), lastIdx=daily.length-1;
+  const relIdx=daily.findIndex(d=>d.day>='2026-07-12');
+  const rel=relIdx>=0?`<div class="relmark" style="left:${100*relIdx/daily.length}%"><span>6.0 Release</span></div>`:'';
+  document.getElementById('trend').innerHTML=rel+daily.map((d,i)=>{
+    const isV6=d.day>='2026-07-12',partial=i===lastIdx;
+    const label=d.day.slice(8,10).replace(/^0/,'')+'.'+d.day.slice(5,7).replace(/^0/,'')+'.';
+    return `<div class="tcol ${isV6?'v6':''} ${partial?'partial':''}"><span class="tcv">${deN(d.n)}</span>
+      <div class="tbar" style="height:${Math.max(5,92*d.n/mx)}px"></div><span class="tcl">${label}</span></div>`;
+  }).join('');
+}
+
+function applyData(f,offline){
   DATA=f;
   const upd=f.updatedAt?new Date(f.updatedAt):null;
-  document.getElementById('stand').textContent='Stand: '+(upd?upd.toLocaleString('de-DE',{dateStyle:'medium',timeStyle:'short'})+' Uhr':'unbekannt')
-    +' · v6: '+f.v6.all.n+' Sitzungen / '+(f.v6.all.usersN||0)+' User (72h) · vorher n = '+f.old.n;
+  document.getElementById('stand').textContent='Stand: '+(upd?upd.toLocaleString('de-DE',{dateStyle:'medium',timeStyle:'short'})+' Uhr':'unbekannt');
   document.getElementById('oldwin').textContent=(f.windows&&f.windows.old)||'04.–06.07.2026';
+  const off=document.getElementById('offline');
+  if(offline){off.style.display='';off.querySelector('span:last-child').innerHTML=`<b>Offline-Snapshot</b> — Live-Daten nicht erreichbar, Stand ${upd?upd.toLocaleDateString('de-DE'):'?'}.`;}
+  else off.style.display='none';
   document.getElementById('loading').style.display='none';
   document.getElementById('app').style.display='';
-  render('all');
+  render();
 }
-
+async function load(){
+  try{
+    const r=await fetch(DOC_URL); if(!r.ok) throw new Error('HTTP '+r.status);
+    const doc=await r.json();
+    applyData(Object.fromEntries(Object.entries(doc.fields||{}).map(([k,v])=>[k,val(v)])),false);
+  }catch(e){ applyData(SNAPSHOT,true); }
+}
 document.addEventListener('click',e=>{
   const b=e.target.closest('.seg button');
-  if(b){document.querySelectorAll('.seg button').forEach(x=>x.classList.toggle('on',x===b));render(b.dataset.seg);}
+  if(b){document.querySelectorAll('.seg button').forEach(x=>x.classList.toggle('on',x===b));SEG=b.dataset.seg;render();}
 });
 document.getElementById('recompute').addEventListener('click',async()=>{
-  const btn=document.getElementById('recompute');
-  btn.disabled=true;btn.textContent='rechnet …';
-  try{
-    const r=await fetch(RECOMPUTE_URL);const j=await r.json();
-    btn.textContent=j.skipped?'noch frisch (max. alle 10 Min)':'fertig — lade neu …';
+  const btn=document.getElementById('recompute');btn.disabled=true;btn.textContent='rechnet …';
+  try{const r=await fetch(RECOMPUTE_URL);const j=await r.json();
+    btn.textContent=j.skipped?'noch frisch (max. 10 Min)':'fertig — lädt neu …';
     if(!j.skipped) setTimeout(()=>location.reload(),800); else setTimeout(()=>{btn.textContent='↻ Neu berechnen';btn.disabled=false;},2500);
   }catch(_){btn.textContent='Fehler';setTimeout(()=>{btn.textContent='↻ Neu berechnen';btn.disabled=false;},2500);}
 });
