@@ -105,8 +105,8 @@ android {
         applicationId 'de.markendetektive'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1210
-            versionName "6.0.3"
+        versionCode 1211
+            versionName "6.0.4"
     }
     signingConfigs {
         debug {

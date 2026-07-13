@@ -2,7 +2,7 @@
   "expo": {
     "name": "MarkenDetektive",
     "slug": "markendetektive",
-    "version": "6.0.3",
+    "version": "6.0.4",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": [
@@ -30,7 +30,7 @@
       "supportsTablet": false,
       "requireFullScreen": true,
       "bundleIdentifier": "de.markendetektive",
-      "buildNumber": "1252",
+      "buildNumber": "1253",
       "appleTeamId": "MZD2N2F887",
       "googleServicesFile": "./GoogleService-Info.plist",
       "usesAppleSignIn": true,
@@ -73,7 +73,7 @@
       ],
       "package": "de.markendetektive",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 1210
+      "versionCode": 1211
     },
     "web": {
       "bundler": "metro",
