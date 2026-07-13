@@ -282,6 +282,15 @@ class AnalyticsService {
       
       // Jedes Event einzeln zu GA4 senden
       for (const event of events) {
+        // 6.0.4 (Fix R4 #8): Conversion-Events NICHT über den generischen
+        // Pfad an GA4 senden — trackConversion() emittiert dafür bereits die
+        // STANDARD-GA4-E-Commerce-Events (add_to_cart mit items[], add_to_
+        // wishlist, purchase). Ohne diesen Skip käme 'add_to_cart' DOPPELT
+        // in GA4 an (einmal hier mit dem internen Namen, einmal aus dem
+        // switch) → verdoppelte Conversion-Zahlen. Die interne Firestore-
+        // Analytics-Pipeline (Journeys) bekommt das Event weiterhin.
+        if (event.event_category === 'conversion') continue;
+
         // GA4-konforme Parameter (max 25 pro Event)
         const ga4Params: Record<string, any> = {
           screen_name: event.screen_name,

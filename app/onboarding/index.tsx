@@ -355,56 +355,88 @@ export default function OnboardingScreen() {
   //
   // country wird IMMER mitgesendet weil's aus Device-Locale stammt
   // (auch wenn User auf Step 2 noch nicht aktiv geändert hat).
-  const trackCurrentStep = async () => {
+  // 6.0.4 (Analytics-Umbau): Ein leichtgewichtiger Funnel-Stempel, der bei
+  // JEDEM Übergang das onboardingResultsV5-Doc (per sessionId) fortschreibt.
+  // funnelStage ist die kanonische Stufe für die Auswertung — der Aggregator
+  // muss sie NICHT mehr aus status/currentStep raten. Stages:
+  //   hero_shown     = Onboarding-Screen gemountet (echter Einstieg; ein
+  //                    re-anonymisierter Veteran mountet ihn NIE → sauberer
+  //                    Nenner, frei von Bestands-User-Verzerrung).
+  //   hero_tapped    = „Los geht's" getippt → Märkte-Screen wird gezeigt.
+  //   maerkte_passed = Markt gewählt + Weiter · budget/prioritaeten/…
+  //   completed / skipped_<n> = Abschluss bzw. „Onboarding überspringen".
+  // IMMER fire-and-forget (merge) — Tracking darf die UI nie blockieren und
+  // offline nie hängen (früher: awaited setDoc → CTA/Weiter tot bei schwachem
+  // Netz + Abschluss-Sackgasse). Der onSnapshot/lokale Cache treibt die UI.
+  const stampFunnel = (stage: string, extra: Record<string, any> = {}) => {
+    try {
+      const userId = authMod.currentUser?.uid || 'anonymous';
+      void setDoc(
+        doc(db, 'onboardingResultsV5', sessionId),
+        {
+          userId,
+          sessionId,
+          version: 'v3',
+          platform: 'mobile',
+          country,
+          funnelStage: stage,
+          [`stage_${stage}_at`]: serverTimestamp(),
+          lastUpdateTime: serverTimestamp(),
+          ...extra,
+        },
+        { merge: true },
+      ).catch((e) => console.warn('funnel stamp failed (ignored):', stage, (e as any)?.message));
+    } catch (e) {
+      console.warn('funnel stamp threw (ignored):', (e as any)?.message);
+    }
+  };
+
+  const trackCurrentStep = () => {
     // Nur tracken wenn der User mindestens einen Step abgeschlossen hat.
     if (currentStep <= 1) return;
 
-    try {
-      
-      const auth = authMod;
+    const stepData: any = {
+      currentStep,
+      status: 'in_progress',
+      funnelStage: `step_${currentStep}_passed`,
+    };
 
-      const userId = auth.currentUser?.uid || 'anonymous';
-
-      const stepData: any = {
-        userId,
-        sessionId,
-        currentStep,
-        status: 'in_progress',
-        lastUpdateTime: serverTimestamp(),
-        country, // immer aus Locale-Detection oder User-Override
-        version: 'v3', // T2: Variante B (5 Steps, ohne Demographics+Akquisition)
-        platform: 'mobile',
-      };
-
-      // startTime beim ersten echten Step (= 2 = Märkte).
-      if (currentStep === 2) {
-        stepData.startTime = serverTimestamp();
-      }
-
-      // Schritt-akkumulative Daten — alles was bis hierhin
-      // beantwortet wurde wird mitgesendet.
-      if (currentStep >= 2 && selectedMarkets.length > 0) {
-        stepData.favoriteMarkets = selectedMarkets.map(m => m.name);
-        // primaryMarket nur dann setzen wenn's einen ECHTEN Discounter
-        // in der Auswahl gibt — 'isOther'/Anderer ist kein gültiger
-        // Lieblingsmarkt (keine ID, kein Logo). Fallback: erster real.
-        if (firstRealMarket) {
-          stepData.primaryMarket = firstRealMarket.name;
-        }
-        if (marketOther) stepData.marketOther = marketOther;
-      }
-      if (currentStep >= 3) stepData.weeklyBudgetEur = budget;
-      if (currentStep >= 4 && priorities.length > 0) {
-        stepData.priorities = priorities;
-        if (prioritiesOther) stepData.prioritiesOther = prioritiesOther;
-      }
-
-      await setDoc(doc(db, 'onboardingResultsV5', sessionId), stepData);
-      console.log('📊 Step tracking saved for step:', currentStep);
-    } catch (error) {
-      console.error('❌ Step tracking error:', error);
+    // startTime beim ersten echten Step (= 2 = Märkte).
+    if (currentStep === 2) {
+      stepData.startTime = serverTimestamp();
     }
+
+    // Schritt-akkumulative Daten — alles was bis hierhin beantwortet wurde.
+    if (currentStep >= 2 && selectedMarkets.length > 0) {
+      stepData.favoriteMarkets = selectedMarkets.map(m => m.name);
+      // primaryMarket nur bei ECHTEM Discounter (kein 'isOther'/Anderer).
+      if (firstRealMarket) {
+        stepData.primaryMarket = firstRealMarket.name;
+      }
+      if (marketOther) stepData.marketOther = marketOther;
+    }
+    if (currentStep >= 3) stepData.weeklyBudgetEur = budget;
+    if (currentStep >= 4 && priorities.length > 0) {
+      stepData.priorities = priorities;
+      if (prioritiesOther) stepData.prioritiesOther = prioritiesOther;
+    }
+
+    // Fire-and-forget (merge) — NIE awaiten (Offline-Hänger, siehe oben).
+    stampFunnel(`step_${currentStep}_passed`, stepData);
   };
+
+  // 6.0.4: Hero-Impression genau einmal stempeln, sobald der Onboarding-
+  // Screen mountet. Das ist der EHRLICHE Funnel-Nenner „echte Onboarding-
+  // Einsteiger": ein re-anonymisierter Bestands-User wird am Onboarding
+  // vorbeigeroutet und mountet diesen Screen nie → er verzerrt die Quote
+  // nicht mehr. Fire-and-forget, blockiert nichts.
+  const heroStampedRef = useRef(false);
+  useEffect(() => {
+    if (heroStampedRef.current) return;
+    heroStampedRef.current = true;
+    stampFunnel('hero_shown', { status: 'hero_shown', currentStep: 1, startTime: serverTimestamp() });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const nextStep = async () => {
     if (currentStep < TOTAL_STEPS) {
@@ -436,10 +468,14 @@ export default function OnboardingScreen() {
             console.warn('⚠️ markStarted failed:', e);
           }
         })();
+        // 6.0.4: „Los geht's" getippt → der User verlässt den Hero und
+        // sieht als Nächstes den Märkte-Screen. Damit ist der bisher blinde
+        // Hero→Märkte-Absprung endlich messbar (hero_shown → hero_tapped).
+        stampFunnel('hero_tapped', { heroTapped: true });
       }
 
-      // Tracking beim Weiterklicken (nicht bei jeder Auswahl).
-      await trackCurrentStep();
+      // Tracking beim Weiterklicken — fire-and-forget (nie awaiten).
+      trackCurrentStep();
 
       // Spezielle Animation für Übergang von Hero (Step 1) zu Step 2
       if (currentStep === 1) {
@@ -535,14 +571,17 @@ export default function OnboardingScreen() {
     try {
       
       const auth = authMod;
-      
-      await setDoc(doc(db, 'onboardingResultsV5', sessionId), {
+
+      // 6.0.4: fire-and-forget (merge) + funnelStage. Skip darf offline nicht
+      // hinter dem „Lade ersten Start..."-Spinner hängen bleiben.
+      void setDoc(doc(db, 'onboardingResultsV5', sessionId), {
         userId: auth.currentUser?.uid || 'anonymous',
         sessionId,
         status: 'abandoned',
         abandonedAtStep: currentStep,
         abandonReason: 'later_button',
         currentStep,
+        funnelStage: `skipped_${currentStep}`,
         lastUpdateTime: serverTimestamp(),
         completedAt: serverTimestamp(),
         // Behalte bereits gesammelte Daten (Demographics+Acquisition
@@ -558,7 +597,7 @@ export default function OnboardingScreen() {
         ...(prioritiesOther && { prioritiesOther }),
         version: 'v3',
         platform: 'mobile',
-      });
+      }, { merge: true }).catch((e) => console.warn('skip tracking failed (ignored):', (e as any)?.message));
 
       console.log('📊 Abandon tracked at step:', currentStep);
     } catch (error) {
@@ -683,6 +722,7 @@ export default function OnboardingScreen() {
       estimatedSavingsEurWeek: Math.round(budget * 0.35),
       version: 'v3', // T2 Variante B
       platform: 'mobile',
+      funnelStage: 'completed', // 6.0.4: kanonische Funnel-Stufe
     };
 
     // Optional fields (Demographics + Akquisition raus — T2)
@@ -705,9 +745,13 @@ export default function OnboardingScreen() {
       completionData.prioritiesOther = prioritiesOther;
     }
 
-    await setDoc(doc(db, 'onboardingResultsV5', sessionId), completionData);
+    // 6.0.4: fire-and-forget (merge) statt awaited — offline hing der
+    // Abschluss sonst ewig hinter dem Vollbild-Spinner (Sackgasse, Audit
+    // R3 #1). markCompleted (lokal) + Navigation treiben die UI.
+    void setDoc(doc(db, 'onboardingResultsV5', sessionId), completionData, { merge: true })
+      .catch((e) => console.warn('completion tracking failed (ignored):', (e as any)?.message));
 
-    // User-Doc Mirror.
+    // User-Doc Mirror (ebenfalls fire-and-forget — reine Datenspiegelung).
     try {
       const uid = authMod.currentUser?.uid;
       if (uid) {
@@ -729,7 +773,8 @@ export default function OnboardingScreen() {
         if (priorities.includes('anderes') && prioritiesOther.trim() !== '') {
           userPrefs.prioritiesOther = prioritiesOther;
         }
-        await setDoc(doc(db, 'users', uid), userPrefs, { merge: true });
+        void setDoc(doc(db, 'users', uid), userPrefs, { merge: true })
+          .catch((e) => console.warn('prefs mirror failed (ignored):', (e as any)?.message));
         console.log('✅ Onboarding answers mirrored to users/' + uid);
         // Läuft bereits eine Journey, bekommt sie den frisch gesetzten
         // Markt sofort in ihren consumerProfile-Snapshot — der Start-
@@ -792,6 +837,7 @@ export default function OnboardingScreen() {
         estimatedSavingsEurWeek: Math.round(budget * 0.35),
         version: 'v3',
         platform: 'mobile',
+        funnelStage: 'completed', // 6.0.4: kanonische Funnel-Stufe
       };
 
       // Optional fields
@@ -810,8 +856,10 @@ export default function OnboardingScreen() {
         completionData.prioritiesOther = prioritiesOther;
       }
 
-      // Vervollständige die Session statt neues Dokument
-      await setDoc(doc(db, 'onboardingResultsV5', sessionId), completionData);
+      // 6.0.4: fire-and-forget (merge) — offline hing der Abschluss sonst
+      // ewig hinter dem Vollbild-Spinner (Audit R3 #1).
+      void setDoc(doc(db, 'onboardingResultsV5', sessionId), completionData, { merge: true })
+        .catch((e) => console.warn('completion tracking failed (ignored):', (e as any)?.message));
 
       // ─── ALSO mirror the answers onto the user document ───
       //
@@ -866,7 +914,10 @@ export default function OnboardingScreen() {
 
           // Merge so we don't clobber unrelated fields on the user
           // doc (level, points, displayName, photo_url, …).
-          await setDoc(doc(db, 'users', uid), userPrefs, { merge: true });
+          // 6.0.4: fire-and-forget (Read-your-writes → refreshConsumerProfile
+          // sieht den Markt sofort aus dem lokalen Cache; offline kein Hang).
+          void setDoc(doc(db, 'users', uid), userPrefs, { merge: true })
+            .catch((e) => console.warn('prefs mirror failed (ignored):', (e as any)?.message));
           console.log('✅ Onboarding answers mirrored to users/' + uid);
           // Läuft bereits eine Journey, bekommt sie den frisch gesetzten
           // Markt sofort in ihren consumerProfile-Snapshot — der Start-
