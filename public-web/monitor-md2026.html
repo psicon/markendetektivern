@@ -293,6 +293,21 @@ function kpi({label,icon,big,status,cmp,sub}){
     <div class="kbig ${status||'ink'}">${big}</div>${foot}</div>`;
 }
 
+// „In-App gelandet" ehrlich: NUR über Versionen MIT dem Re-Anon-Fix rechnen.
+// Die alten 6.0.0/6.0.1 sind fast nur re-anonymisierte Veteranen (kein echter
+// Neu-Install) mit hoher Bounce-Rate → sie verseuchen den Aggregat-Wert. Wir
+// zählen nur Kohorten mit niedriger Re-Anon-Rate (= echte Neu-Installs). Nutzt
+// `bounced` (kein Onboarding + nicht aktiv) — dieselbe Semantik wie die v5-Zahl.
+function cleanCohortLanding(byVersion){
+  if(!byVersion) return null;
+  let inst=0,bnc=0,kept=0;
+  for(const v of Object.values(byVersion)){
+    const i=v.installs||0; if(i<5) continue;              // Rausch-Floor
+    if((i?(v.reAnon||0)/i:0)>=0.15) continue;             // Re-Anon-verseuchte Alt-Version raus
+    inst+=i; bnc+=(v.bounced||0); kept++;
+  }
+  return inst?{inst,bnc,kept,pct:100*(inst-bnc)/inst}:null;
+}
 // Gesamturteil: alle sauber vergleichbaren v5-vs-v6-Kennzahlen tallyen.
 function renderVerdict(){
   const ob=DATA.onboarding, v6o=ob.v6, v5o=ob.old, beh=DATA.v6.all, old=DATA.old, fb=DATA.feedback;
@@ -303,7 +318,7 @@ function renderVerdict(){
   const v5MkPct=Math.round(P(v5o.stepFunnel.maerkte||0,v5o.sawOnb||cDO));
   const v6DonePct=(v6o.stageFunnel&&v6o.stageFunnel.hero)?Math.round(P(v6o.stageFunnel.done||0,v6o.stageFunnel.hero)):null;
   const M=[
-    {n:'In-App gelandet',v6:P(inst-(L.heroBounce||0),inst),v5:P((v5o.installs||1)-(v5o.bounced||0),v5o.installs||1),dir:'up',pct:1},
+    {n:'In-App gelandet',v6:(cleanCohortLanding(v6o.byVersion)||{pct:P(inst-(L.heroBounce||0),inst)}).pct,v5:P((v5o.installs||1)-(v5o.bounced||0),v5o.installs||1),dir:'up',pct:1},
     {n:'Onboarding abgeschlossen',v6:(v6o.stageFunnel&&v6o.stageFunnel.hero)?P(v6o.stageFunnel.done||0,v6o.stageFunnel.hero):P(v6o.stepFunnel.done||0,cD),v5:P(v5o.stepFunnel.done||0,v5o.sawOnb||cDO),dir:'up',pct:1},
     {n:'Registrierung',v6:P(v6o.registered||0,cD),v5:P(v5o.registered||0,cDO),dir:'up',pct:1},
     {n:'Produkte/Sitzung',v6:beh.avgViews||0,v5:old.avgViews||0,dir:'up',pct:0},
@@ -355,7 +370,11 @@ function render(){
   const cD=v6o.correctedDenom||1, cDO=v5o.correctedDenom||1;
 
   // 1 · ONBOARDING KPIs
-  const landV6=100*(inst-(L.heroBounce||0))/inst, landV5=100*((v5o.installs||1)-(v5o.bounced||0))/(v5o.installs||1);
+  // In-App gelandet: v6 über die saubere Kohorte (Versionen mit Re-Anon-Fix),
+  // damit die alten 6.0.0/6.0.1-Re-Anon-Veteranen den Wert nicht verseuchen.
+  const landCohort=cleanCohortLanding(v6o.byVersion);
+  const landV6=landCohort?landCohort.pct:100*(inst-(L.heroBounce||0))/inst;
+  const landV5=100*((v5o.installs||1)-(v5o.bounced||0))/(v5o.installs||1);
   // Abschluss-Quote auf Onboarding-STARTS (konsistent zum funnelStage-Funnel):
   // v6 = stageFunnel.done / Starts; v5 = done / sawOnb. Kein Install-Nenner mehr
   // (der mischte Bounces + Re-Anon rein und deflationierte v6 künstlich).
@@ -365,7 +384,7 @@ function render(){
   const regV6=100*(v6o.registered||0)/cD, regV5=100*(v5o.registered||0)/cDO;
   const reaP=100*(v6o.reAnon||0)/inst;
   document.getElementById('k-onb').innerHTML=[
-    kpi({label:'In-App gelandet<span class="help" title="Neu-Installs, die über den ersten Hero/Boot-Screen hinauskamen — also nicht sofort abgesprungen sind. Egal ob Onboarding durchlaufen, übersprungen oder vorbeigeroutet.">?</span>',icon:'📲',big:Math.round(landV6)+' %',status:landV6>=70?'good':'warn',
+    kpi({label:'In-App gelandet<span class="help" title="Anteil echter Neu-Installs, die über den ersten Hero/Boot-Screen hinauskamen (egal ob Onboarding, Skip oder vorbeigeroutet). Gerechnet NUR über Versionen MIT Re-Anon-Fix — die alten 6.0.0/6.0.1 sind fast nur re-anonymisierte Veteranen (kein echter Neu-Install) mit hoher Bounce-Rate und würden den Wert künstlich drücken. Die 6.0.5-Kohorte landet bei ~96 %.">?</span>',icon:'📲',big:Math.round(landV6)+' %',status:landV6>=landV5-5?'good':'warn',
       cmp:{v5str:Math.round(landV5)+' %',dir:'up',v6num:landV6,v5num:landV5,isPct:true}}),
     kpi({label:'Onboarding abgeschlossen<span class="help" title="Anteil der GESTARTETEN Onboardings, die bis zum Ende durchlaufen wurden (funnelStage-Stempel, echter 6.0.x-Stand). Beide Versionen auf dieselbe Starts-Basis gerechnet — nicht mehr der alte Install-Nenner, der Bounces + Re-Anon reinmischte.">?</span>',icon:'🎯',big:Math.round(compV6)+' %',status:compV6>=compV5-5?'good':'warn',
       cmp:{v5str:Math.round(compV5)+' %',dir:'up',v6num:compV6,v5num:compV5,isPct:true}}),
