@@ -244,8 +244,9 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
     const prev = firstScreenByUid.get(u);
     if (!prev || t < prev.t) firstScreenByUid.set(u, { t, screen: r.screenName });
     const ver = String((r.app || {}).version || '');
+    const os = String((r.app || {}).os || '');
     const vprev = versionByUid.get(u);
-    if (ver && (!vprev || t >= vprev.t)) versionByUid.set(u, { t, ver });
+    if (ver && (!vprev || t >= vprev.t)) versionByUid.set(u, { t, ver, os });
   }
 
   // v3-Onboarding-Sessions im Fenster → distinct uids die das Onboarding
@@ -258,6 +259,9 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
   // Weitester erreichter Schritt pro uid (für den Schritt-Funnel).
   // completed → 99; sonst abandonedAtStep bzw. currentStep.
   const reachedByUid = new Map();
+  // Nur Docs MIT funnelStage-Stempeln (6.0.4+): der echte aktuelle Funnel über
+  // die Onboarding-STARTS, frei vom alten Skip-am-Markt-Artefakt der Alt-Docs.
+  const stampedByUid = new Map();
   let started = 0;
   let completed = 0;
   let last = null;
@@ -265,7 +269,8 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
     let q = db.collection('onboardingResultsV5')
       .where('lastUpdateTime', '>=', ts(fromDate))
       .orderBy('lastUpdateTime', 'asc')
-      .select('lastUpdateTime', 'status', 'version', 'userId', 'currentStep', 'abandonedAtStep')
+      .select('lastUpdateTime', 'status', 'version', 'userId', 'currentStep', 'abandonedAtStep',
+        'stage_step_2_passed_at', 'stage_step_3_passed_at', 'stage_step_4_passed_at', 'funnelStage', 'heroTapped')
       .limit(1000);
     if (last) q = q.startAfter(last);
     // eslint-disable-next-line no-await-in-loop
@@ -286,8 +291,23 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
         // rank: 1=Märkte, 2=Budget, 3=Prioritäten, 4=abgeschlossen, 0=nichts.
         let rank = 0;
         let skipAtMaerkte = false;
+        // Bevorzugt die funnelStage-Stempel (ab 6.0.4): stage_step_2/3/4_passed_at
+        // sind gesetzt, sobald der jeweilige Schritt WIRKLICH bestanden wurde —
+        // unabhängig davon, ob der User danach skippt (der alte abandonedAtStep-
+        // Pfad zählte einen getippten Markt+Skip fälschlich als „nicht bestanden"
+        // → das war die 44%-Artefakt-Zahl). Alt-Docs ohne Stempel (6.0.3-) fallen
+        // auf die bisherige status/currentStep-Logik zurück.
+        const hasStamps = !!(x.stage_step_2_passed_at || x.stage_step_3_passed_at ||
+          x.stage_step_4_passed_at || x.funnelStage);
         if (isDone) {
           rank = 4;
+        } else if (hasStamps) {
+          if (x.stage_step_4_passed_at) rank = 3;      // Prioritäten bestanden
+          else if (x.stage_step_3_passed_at) rank = 2; // Budget bestanden
+          else if (x.stage_step_2_passed_at) rank = 1; // Märkte bestanden
+          else rank = 0;                               // nur Hero (gesehen/getippt)
+          // Skip am Märkte-Schritt = abgebrochen, ohne step_2 je zu bestehen.
+          if (x.status === 'abandoned' && !x.stage_step_2_passed_at) skipAtMaerkte = true;
         } else if (x.status === 'abandoned') {
           const s = typeof x.abandonedAtStep === 'number' ? x.abandonedAtStep : 0;
           rank = s > 4 ? 3 : s > 3 ? 2 : s > 2 ? 1 : 0; // Skip bei ≤2 = Märkte NICHT bestanden
@@ -299,6 +319,11 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
         const prev = reachedByUid.get(uid);
         if (!prev || rank > prev.rank) reachedByUid.set(uid, { rank, skipAtMaerkte });
         else if (rank === prev.rank && skipAtMaerkte) reachedByUid.set(uid, { rank, skipAtMaerkte: true });
+        // Stempel-Kohorte separat (nur Docs mit funnelStage) → sauberer 6.0.x-Funnel.
+        if (hasStamps) {
+          const prevS = stampedByUid.get(uid);
+          if (!prevS || rank > prevS.rank) stampedByUid.set(uid, { rank });
+        }
       }
       if (isDone) {
         completed += 1;
@@ -348,9 +373,18 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
   // Session-app.version, kein Client-Write nötig.
   const perV = {};
   const bumpV = (u, key) => {
-    const ver = (versionByUid.get(u) || {}).ver || 'unknown';
-    if (!perV[ver]) perV[ver] = { installs: 0, reAnon: 0, sawOnb: 0, bounced: 0, aktiv: 0, registered: 0 };
+    const info = versionByUid.get(u) || {};
+    const ver = info.ver || 'unknown';
+    const os = info.os === 'ios' ? 'ios' : info.os === 'android' ? 'android' : 'other';
+    if (!perV[ver]) {
+      perV[ver] = {
+        installs: 0, reAnon: 0, sawOnb: 0, bounced: 0, aktiv: 0, registered: 0,
+        ios: { installs: 0, reAnon: 0, bounced: 0, sawOnb: 0 },
+        android: { installs: 0, reAnon: 0, bounced: 0, sawOnb: 0 },
+      };
+    }
     perV[ver][key] += 1;
+    if ((os === 'ios' || os === 'android') && perV[ver][os][key] != null) perV[ver][os][key] += 1;
   };
   for (const u of distinctUids(v6rows)) {
     const f = facts.get(u);
@@ -386,6 +420,17 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
   }
   const correctedDenom = installs - reAnon; // echte Neu-Installs
   const correctedAktiv = aktiv - reAnon; // aktive echte Neu-Installs (alle reAnon sind aktiv)
+  // Stempel-basierter Funnel: über die gestempelten Onboarding-STARTS (Basis =
+  // gestartete Onboardings, NICHT Installs). Das ist der echte aktuelle Funnel
+  // ohne Alt-Artefakt — hero=100% → markt/budget/prio/done als Anteil davon.
+  let fsStarts = 0; let fsMarkt = 0; let fsBudget = 0; let fsPrio = 0; let fsDone = 0;
+  for (const [, o] of stampedByUid) {
+    fsStarts += 1;
+    if (o.rank >= 1) fsMarkt += 1;
+    if (o.rank >= 2) fsBudget += 1;
+    if (o.rank >= 3) fsPrio += 1;
+    if (o.rank >= 4) fsDone += 1;
+  }
 
   return {
     v6: {
@@ -395,6 +440,8 @@ async function onboardingFunnel(v6rows, facts, fromDate) {
       // maerkte = Markt gewählt + Weiter (echt bestanden); skipMaerkte =
       // auf dem Märkte-Screen „Onboarding überspringen" getippt.
       stepFunnel: { hero: correctedDenom, maerkte: stMaerkte, budget: stBudget, prioritaeten: stPrio, done: completedUsers, skipMaerkte: stSkipMaerkte },
+      // Echter aktueller Onboarding-Funnel (nur funnelStage-Docs, Basis = Starts):
+      stageFunnel: { hero: fsStarts, maerkte: fsMarkt, budget: fsBudget, prioritaeten: fsPrio, done: fsDone },
       // „Wer landet in der App?" über ALLE Neu-Installs (nicht correctedDenom):
       landed: { installs, aktiv: lAktiv, completed: lCompleted, skipped: lSkipped, bypass: lBypass, heroBounce: lHero },
       // Re-Anon pro App-Version (installs/reAnon je 6.0.x) → zeigt, ob 6.0.3+
