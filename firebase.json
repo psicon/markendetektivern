@@ -318,6 +318,15 @@
               "value": "max-age=300"
             }
           ]
+        },
+        {
+          "source": "/monitor-md2026.html",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, max-age=0, must-revalidate"
+            }
+          ]
         }
       ]
     }
