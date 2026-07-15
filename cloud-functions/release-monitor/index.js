@@ -565,6 +565,115 @@ async function marketsSummary() {
   };
 }
 
+// Demografie-Verteilung aus users.{age,gender,country,weeklyBudgetEur,priorities}.
+// Bounded Scan der zuletzt aktiven User (wie marketsSummary) → EIN Scan,
+// repräsentativ + günstig. „aktueller Stand", kein v5/v6-Split (Profil-Attribute).
+// Alter + Geschlecht kommen aus dem Post-Onboarding-Sheet, Land/Budget/
+// Prioritäten aus dem Onboarding. Es landen NUR aggregierte Counts im Doc (keine PII).
+async function demographicsSummary() {
+  const LIMIT = 15000;
+  let snap;
+  try {
+    snap = await db.collection('users')
+      .orderBy('lastActivityAt', 'desc')
+      .limit(LIMIT)
+      .select('age', 'gender', 'country', 'weeklyBudgetEur', 'priorities', 'demographicsSkipped')
+      .get();
+  } catch (e) {
+    console.warn('demographicsSummary failed:', e.message);
+    return null;
+  }
+  // Feste Bucket-Reihenfolge (matcht ageBucketFromAge in der App).
+  const AGE_BUCKETS = [
+    [16, 24, '16–24'], [25, 34, '25–34'], [35, 44, '35–44'],
+    [45, 54, '45–54'], [55, 64, '55–64'], [65, 200, '65+'],
+  ];
+  const BUDGET_BUCKETS = [
+    [0, 49, '< 50 €'], [50, 74, '50–74 €'], [75, 99, '75–99 €'],
+    [100, 149, '100–149 €'], [150, 1e9, '≥ 150 €'],
+  ];
+  const LAND = { DE: 'Deutschland', AT: 'Österreich', CH: 'Schweiz' };
+  const PRIO = {
+    preis: 'Preis', qualität: 'Qualität', qualitaet: 'Qualität',
+    inhaltsstoffe: 'Inhaltsstoffe', marke: 'Marke',
+    marktnähe: 'Marktnähe', marktnaehe: 'Marktnähe', anderes: 'Anderes',
+  };
+  const normGender = (raw) => {
+    const s = String(raw || '').trim();
+    if (!s) return '';
+    const l = s.toLowerCase();
+    if (['männlich', 'male', 'm', 'mann'].includes(l)) return 'Männlich';
+    if (['weiblich', 'female', 'w', 'frau'].includes(l)) return 'Weiblich';
+    if (['anderes', 'divers', 'nonbinary', 'non-binary', 'other', 'sonstiges'].includes(l)) return 'Anderes';
+    return s; // Unbekannt → unverändert lassen (selten)
+  };
+  const ageCounts = new Map();
+  const genderCounts = new Map();
+  const countryCounts = new Map();
+  const budgetCounts = new Map();
+  const prioCounts = new Map();
+  const ageVals = [];
+  const budgetVals = [];
+  let withAge = 0; let withGender = 0; let withCountry = 0;
+  let withBudget = 0; let withPrio = 0; let skipped = 0;
+  snap.forEach((d) => {
+    const x = d.data();
+    const ageNum = typeof x.age === 'number' ? x.age : parseInt(String(x.age || ''), 10);
+    if (Number.isFinite(ageNum) && ageNum > 0) {
+      const b = AGE_BUCKETS.find(([lo, hi]) => ageNum >= lo && ageNum <= hi);
+      if (b) { ageCounts.set(b[2], (ageCounts.get(b[2]) || 0) + 1); ageVals.push(ageNum); withAge += 1; }
+    }
+    const g = normGender(x.gender);
+    if (g) { genderCounts.set(g, (genderCounts.get(g) || 0) + 1); withGender += 1; }
+    const c = String(x.country || '').trim().toUpperCase();
+    if (c) { const l = LAND[c] || c; countryCounts.set(l, (countryCounts.get(l) || 0) + 1); withCountry += 1; }
+    const bud = typeof x.weeklyBudgetEur === 'number' ? x.weeklyBudgetEur : parseInt(String(x.weeklyBudgetEur || ''), 10);
+    if (Number.isFinite(bud) && bud > 0) {
+      const b = BUDGET_BUCKETS.find(([lo, hi]) => bud >= lo && bud <= hi);
+      if (b) { budgetCounts.set(b[2], (budgetCounts.get(b[2]) || 0) + 1); budgetVals.push(bud); withBudget += 1; }
+    }
+    if (Array.isArray(x.priorities) && x.priorities.length) {
+      withPrio += 1;
+      x.priorities.forEach((p) => {
+        const key = String(p || '').trim().toLowerCase();
+        if (!key) return;
+        const label = PRIO[key] || (key.charAt(0).toUpperCase() + key.slice(1));
+        prioCounts.set(label, (prioCounts.get(label) || 0) + 1);
+      });
+    }
+    if (x.demographicsSkipped === true) skipped += 1;
+  });
+  const median = (arr) => {
+    if (!arr.length) return 0;
+    const s = [...arr].sort((a, b) => a - b);
+    const m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
+  };
+  const ageOrder = AGE_BUCKETS.map(([, , l]) => l);
+  const budgetOrder = BUDGET_BUCKETS.map(([, , l]) => l);
+  const pct = (a) => (snap.size ? Math.round((100 * a) / snap.size) : 0);
+  // Demografie-Sheet-Antwortrate: beantwortet (withGender) vs. beantwortet + übersprungen.
+  const demoReached = withGender + skipped;
+  return {
+    scanned: snap.size,
+    withAge, withGender, withCountry, withBudget, withPrio, skipped,
+    ageCoveragePct: pct(withAge),
+    genderCoveragePct: pct(withGender),
+    countryCoveragePct: pct(withCountry),
+    budgetCoveragePct: pct(withBudget),
+    prioCoveragePct: pct(withPrio),
+    demoReached,
+    demoAnswerRatePct: demoReached ? Math.round((100 * withGender) / demoReached) : 0,
+    medianAge: median(ageVals),
+    medianBudget: median(budgetVals),
+    age: ageOrder.filter((l) => ageCounts.has(l)).map((label) => ({ label, count: ageCounts.get(label) })),
+    gender: [...genderCounts.entries()].sort((a, b) => b[1] - a[1]).map(([label, count]) => ({ label, count })),
+    country: [...countryCounts.entries()].sort((a, b) => b[1] - a[1]).map(([label, count]) => ({ label, count })),
+    budget: budgetOrder.filter((l) => budgetCounts.has(l)).map((label) => ({ label, count: budgetCounts.get(label) })),
+    priorities: [...prioCounts.entries()].sort((a, b) => b[1] - a[1]).map(([label, count]) => ({ label, count })),
+  };
+}
+
 // User-Basis-Totals über Aggregations-Queries (count/sum/avg) — server-seitig,
 // KEIN Full-Scan (≈ wenige Reads statt 236k). Felder liegen top-level auf users/*.
 // „aktueller Stand" der Voll-DB, kein v5/v6-Split.
@@ -638,9 +747,10 @@ async function aggregate() {
   // 2d) Userfeedback (In-App-Rating-Prompt) — anonymisierte Zusammenfassung.
   const feedback = await feedbackSummary();
 
-  // 2e) Primäre Märkte + User-Basis-Totals (aktueller Stand, kein v5/v6-Split).
+  // 2e) Primäre Märkte + User-Basis-Totals + Demografie (aktueller Stand, kein v5/v6-Split).
   const markets = await marketsSummary();
   const userBase = await userBaseSummary();
+  const demographics = await demographicsSummary();
 
   // 3) Vor-Release-Baseline (fix) — alles außer 6.x-TestFlight.
   const oldRows = dedupe(await sampleBetween(OLD_FROM, OLD_TO, 3000)).filter((r) => !isV6(r));
@@ -664,6 +774,7 @@ async function aggregate() {
     feedback,
     markets,
     userBase,
+    demographics,
   };
   doc.computeMs = Date.now() - startedAt;
 
