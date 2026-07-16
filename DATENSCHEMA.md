@@ -66,7 +66,7 @@ Die zwei Auflösungs-Ketten:
 | `discounter` | Ref → `discounter` | Verkaufsmarkt |
 | `markenProdukt` | Ref → `markenProdukte` | das „enttarnte" Original (bei Stufe 3–5) |
 | `hersteller` | **Ref → `hersteller_new`** | die ECHTE Firma (Kette A!) |
-| `ersparnis`, `ersparnisProz` | number | serverseitig berechnete Ersparnis vs. Original |
+| `ersparnis`, `ersparnisProz` | number | **admin-kuratierte** Ersparnis vs. Original (⚠️ MANUELL — kein CF-Writer; Client rechnet nur einen Anzeige-Fallback zur Laufzeit, `lib/utils/savings.ts`) |
 | `same`, `rating`/`ratingCount`, `averageRating*` | bool/number | Community-Bewertung |
 | `bildClean*` | string/number | CF-generierte bereinigte Bilder (WebP ≤512 / PNG ≤1024 / HQ ≤1600, `bildCleanVersion`, `bildCleanSource`) |
 | `aiComparison` | **Map** | KI-Vergleich NoName↔Marke: `{score: 1-5, reasoning, model, promptVersion, updatedAt, skipped?}` |
@@ -276,3 +276,76 @@ App: Foto → Storage-Upload → enqueueCashback (HTTPS, Pre-OCR-Dedup: Byte-Has
 10. Cart-Doc-IDs sind deterministisch (`brand_*`/`noname_*`) und in persönlichem UND geteiltem Zettel identisch — beim Schreiben immer klarstellen, WELCHE Collection gemeint ist.
 11. Firestore-**Indizes** werden NICHT über `firestore.indexes.json` deployt (Console + Staging-DB verwaltet) — nie `deploy --only firestore:indexes`.
 12. `payoutThresholdCents` nie unter 100 setzen (Tremendous-Produktminimum 1 €).
+
+---
+
+## 12 · Pflege-Handbuch: Neuanlage & Aktualisierung (manuell vs. automatisch)
+
+> Für alle, die `produkte` / `markenProdukte` / `hersteller` / `hersteller_new` anlegen oder pflegen.
+> Faustregel: **Stammdaten + Verknüpfungen + `EANs[]` sind Handarbeit — KI, Bilder-Derivate, Nährwerte und Historien füllen sich selbst.** Aber: die Automatik greift nur, wenn ihre Vorbedingungen (unten fett) erfüllt sind.
+
+### 12.1 Neuanlage-Checklisten (was MANUELL eingetragen werden muss)
+
+**`produkte` (NoName) anlegen:**
+| Pflicht | Warum |
+|---|---|
+| `name`, `beschreibung`, `bild`, `preis` (+`preisDatum`) | Stammdaten — `bild` ist zudem Vorbedingung für Bild-Cleanup + Thumb |
+| **`EANs: [gtin]`** | ⚠️ OHNE `EANs[]` greift die komplette Nährwert-/Zutaten-Automatik NICHT (`skip_no_eans`) |
+| `stufe` (String `"1"`–`"5"`) | Fachliche Einordnung — steuert auch, ob KI vergleicht oder standalone bewertet |
+| Refs: `kategorie`, `packTyp`, `handelsmarke`, `discounter` | Stammverknüpfungen (echte `DocumentReference`s!) |
+| `hersteller` → **`hersteller_new`** | die ECHTE Firma (nie auf `hersteller`/Marke zeigen!) |
+| `markenProdukt` → `markenProdukte` (bei Stufe 3–5) | ⚠️ Vorbedingung für einen echten `aiComparison`-**Score** — ohne Link gibt's nur `aiAssessment` |
+| `ersparnis`, `ersparnisProz` | ⚠️ **MANUELL** (admin-kuratiert) — kein CF berechnet das; Client zeigt sonst nur einen Laufzeit-Fallback |
+
+**`markenProdukte` anlegen:**
+| Pflicht | Warum |
+|---|---|
+| `name`, `beschreibung`, `bild`, `preis`, **`EANs[]`** | wie oben (EANs → Nutrition-Automatik) |
+| Refs: `kategorie`, `packTyp` | |
+| `hersteller` → **`hersteller` (= MARKE)** | Kette B! Die Marke muss existieren und ihr `herstellerref` gesetzt haben |
+| `relatedProdukte[]` + `relatedProdukteIDs[]` | ⚠️ **MANUELL** — kein Writer pflegt die Rück-Verknüpfung automatisch, wenn ein NoName per `markenProdukt` verlinkt wird |
+| ⚠️ Bild-Cleanup ist für markenProdukte **NICHT verdrahtet** | `bildClean*` entsteht hier nur per manuellem Backfill (`image-cleanup/backfill.js`) — bewusste Entscheidung |
+
+**`hersteller` (= MARKE) anlegen:**
+| Pflicht | Warum |
+|---|---|
+| `name` (+`bezeichnung`), `bild` (Logo), `infos` | Anzeige im Marken-Sheet |
+| **`herstellerref` → `hersteller_new`** | DAS Kettenglied — ohne es ist die Marke vom Konzern-Graph abgehängt (und wird beim Lesen ggf. fälschlich als Firma interpretiert) |
+| Namens-Hygiene | Platzhalter-Konventionen („z - …", „NoName", „Dummy", <2 Zeichen) werden von Lesern gefiltert und von der KI übersprungen |
+
+**`hersteller_new` (= FIRMA) anlegen:**
+| Pflicht | Warum |
+|---|---|
+| `name`, **`herstellername`** | `herstellername` ist das Erkennungs-Feld „ich bin eine Firma" — Pflicht! |
+| `adresse`, `plz`, `stadt`, `land`, `identNummer` | Stammdaten (Land/Stadt fließen in die KI-Einschätzung) |
+
+### 12.2 Was danach AUTOMATISCH passiert (Trigger-Matrix)
+
+| Automatik (CF) | Feuert auf | Schreibt | Vorbedingung | Timing |
+|---|---|---|---|---|
+| **image-cleanup** | onCreate `produkte` / onUpdate wenn `bild` geändert | `bildClean`, `bildCleanPng`, `bildCleanHq`, `bildCleanVersion/Source/ProcessedAt` (Fehler → `bildCleanError`) | `bild` gesetzt | sofort · ⚠️ markenProdukte NICHT verdrahtet (nur manueller Backfill) |
+| **thumbhash-generator** | onWrite `produkte` UND `markenProdukte` | `bildThumb` (32px-WebP-Data-URI), `bildThumbFor`; räumt Legacy `bildBlurhash*` ab | `bildClean` oder `bild` vorhanden | sofort (läuft typ. 2× — nach Anlage + nach Cleanup) |
+| **nutrition-backfill** | onCreate `produkte`/`markenProdukte` + nightly 02:30 + onWrite `nutritionscrape/{ean}` | `nutr_*_val/_unit`, `attr_ingredientStatement`, `nutritionSource`/`ingredientsSource` (+Url/Shop/UpdatedAt) | **`EANs[]` vorhanden**; Trust-Gate: `manual`/`rewe`/`ocr` wird NIE überschrieben | sofort; ohne Treffer stößt es den Scraper an |
+| **nutrition-scraper** | nur HTTPS (von backfill angestoßen) | → `nutritionscrape/{ean}` (nicht direkt in Katalog) | EAN (sucht NIE per Name) | async |
+| **nutrition-history-watcher** | onWrite `produkte`/`markenProdukte` | `pricehistory_*` (jede `preis`-Änderung) · `nutritionhistory_*` (Nährwert-Änderung durch untrusted Source) · setzt **`preisDatum` automatisch nach**, wenn `preis` ohne Datum geändert wurde | nicht bei Create | sofort |
+| **ai-product-comparison** | onCreate/onUpdate `produkte` (nur bei relevanten Feldern: `markenProdukt`, `stufe`, `nutr_*`, Zutaten, Scores) + onUpdate `markenProdukte` (Fan-out auf bis zu 30 verlinkte NoNames) | setzt zunächst nur `aiComparisonDirtyAt`; Scheduler (alle 15 Min) schreibt nach **≥1 h Ruhe** `aiComparison` ODER `aiAssessment` (löscht das jeweils andere) | echter Score braucht `markenProdukt`-Ref + Nährwert-/Zutatendaten auf BEIDEN Seiten, sonst `skipped`/Assessment | **trailing 1 h Debounce** — nicht wundern, dass die KI-Karte nicht sofort erscheint |
+| **ai-product-comparison (Hersteller-Teil)** | onCreate/onUpdate `hersteller` UND `hersteller_new` (relevante Felder: name, herstellername, land, stadt) | `aiHersteller{herkunft, summary, …}` auf dem jeweiligen Doc | Name ≥2 Zeichen, kein Platzhalter | **sofort** (kein Debounce) |
+| **receipt-matcher (Embeddings)** | onWrite `produkte`/`markenProdukte` | Vektor-Embedding nach **`productEmbeddings/{id}`** (separate Collection, nicht ins Katalog-Doc) | `name` vorhanden; neu nur bei geändertem Namen | sofort |
+| **connected-brands-aggregator** | scheduled montags 03:00 | `aggregates/herstellerBrands_v1` (Konzern-Graph) | — | wöchentlich |
+| **top-products-aggregator** | scheduled montags 03:30 (+ HTTP) | `aggregates/topProducts_v1` | — | wöchentlich |
+
+### 12.3 ⚠️ Drei Blackboxen / offene Punkte (dem Externen explizit sagen)
+
+1. **Algolia-Suche:** Im Repo existiert **kein** Record-Sync (kein `saveObjects`, keine Firebase-Extension in `firebase.json`; der Client nutzt nur den Search-Key, Scripts pflegen nur Synonyme/Settings). **Neu angelegte Produkte erscheinen NICHT automatisch durch dieses Repo in der Suche** — der Index-Sync läuft außerhalb (Console-Extension o. ä.). Vor Katalog-Arbeiten klären, wie der Sync konkret läuft.
+2. **`averageRating*`:** Bewertungen landen in `productRatings`, aber **keine Funktion im Repo schreibt die Aggregate zurück** aufs Produkt-Doc (`adminPromote` initialisiert sie nur auf 0; die App aktualisiert nur optimistisch im Speicher). Entweder existiert ein Aggregator außerhalb des Repos oder die Felder veralten — vor Verlass darauf prüfen.
+3. **`relatedProdukte`/`relatedProdukteIDs` + `ersparnis`/`ersparnisProz`:** rein manuelle Pflege — es gibt keine Automatik, die sie konsistent hält (z. B. wird `relatedProdukte` NICHT nachgezogen, wenn ein NoName einen `markenProdukt`-Link bekommt).
+
+### 12.4 Update-Verhalten (Kurzreferenz)
+
+- **`bild` ändern (produkte):** Cleanup + Thumb laufen automatisch neu. Bei **markenProdukte**: Thumb ja, Cleanup nein (Backfill nötig).
+- **`preis` ändern:** `pricehistory_*`-Eintrag automatisch; `preisDatum` wird notfalls automatisch nachgesetzt. `ersparnis`/`ersparnisProz` **manuell** nachziehen!
+- **Nährwerte/Zutaten manuell pflegen:** `nutritionSource`/`ingredientsSource` auf `'manual'` setzen — dann fasst die Automatik die Felder nie wieder an (Trust-Hierarchie).
+- **`markenProdukt`-Link setzen/ändern:** triggert (debounced ~1 h) den KI-Vergleich neu; `relatedProdukte` auf der Marken-Seite manuell spiegeln.
+- **`stufe` ändern:** triggert KI neu (relevantes Feld).
+- **Hersteller-/Marken-Stammdaten ändern** (name/land/stadt): `aiHersteller` wird sofort neu berechnet.
+- **EANs nachtragen bei Bestandsprodukt:** Nutrition-Automatik greift ab dem nächsten Write/Nightly — oder sofort via HTTPS-Backfill anstoßen.
