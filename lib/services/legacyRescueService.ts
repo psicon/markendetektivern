@@ -57,6 +57,23 @@ export async function attemptLegacySessionRescue(): Promise<boolean> {
   return inflight;
 }
 
+/**
+ * Rettung terminal abschließen — für den EXPLIZITEN Logout (Audit 2026-07-16).
+ * Ohne das konnte der Post-Logout-Anon-Login die Rettung erneut anstoßen und
+ * den User still zurück ins gerade abgemeldete Konto einloggen (der 5.x-
+ * Refresh-Token überlebt signOut; das Rescue-State-Key blieb unset, wenn die
+ * ersten Boots nach dem Update offline waren und der User sich danach manuell
+ * einloggte). Ein bewusster Logout ist eine Identitäts-Entscheidung — danach
+ * darf die Rettung nie wieder feuern. Wirft nie.
+ */
+export async function markLegacyRescueDone(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(KEY_STATE, 'done');
+  } catch {
+    /* non-fatal — schlimmstenfalls bleibt das bisherige Verhalten */
+  }
+}
+
 async function doAttempt(): Promise<boolean> {
   try {
     const state = await AsyncStorage.getItem(KEY_STATE);

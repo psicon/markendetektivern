@@ -1187,6 +1187,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const handleSignInAnonymously = async () => {
     try {
+      // Audit 2026-07-16: Guard für gerettete 5.x-Gäste. Ein per Custom-Token
+      // geretteter Gast hat NATIV isAnonymous=false (0 Provider) — für den
+      // erzeugt signInAnonymously eine NEUE UID und trennt Punkte/Favoriten/
+      // Listen der geretteten Identität dauerhaft ab (exakt der Datenverlust,
+      // den die Session-Rettung repariert; Welcome-Skip-X + „Ohne Anmeldung
+      // fortfahren" riefen das ungeschützt auf). Effektiv anonym = ist schon
+      // Gast → nichts zu tun. signIn/signUp/linkOrSignIn tragen denselben
+      // Guard bereits.
+      const cu = auth.currentUser;
+      if (cu && isEffectivelyAnonymous(cu)) {
+        console.log('🔒 Bereits Gast (effektiv anonym) — kein neuer Anon-Account:', cu.uid);
+        return;
+      }
       const result = await signInAnonymously(auth);
       console.log('🔒 Anonymer Login erfolgreich:', result.user.uid);
       // User wird automatisch via onAuthStateChanged gesetzt
@@ -1221,6 +1234,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await AsyncStorage.removeItem('@auth_last_login');
       } catch (clearErr) {
         console.warn('⚠️ Could not clear auth backup on logout:', clearErr);
+      }
+
+      // Audit 2026-07-16: Legacy-Rescue terminal abschließen — derselbe
+      // Grundsatz wie der Backup-Clear oben: ein EXPLIZITER Logout ist eine
+      // bewusste Identitäts-Entscheidung. Ohne das feuerte die 5.x-Session-
+      // Rettung auf den Post-Logout-Anon-Login (unten) und loggte den User
+      // still zurück ins gerade abgemeldete Konto (Refresh-Token überlebt
+      // signOut; State-Key blieb unset, wenn frühere Rescue-Versuche offline
+      // scheiterten und der User sich danach manuell eingeloggt hatte).
+      try {
+        const { markLegacyRescueDone } = await import('@/lib/services/legacyRescueService');
+        await markLegacyRescueDone();
+      } catch {
+        /* non-fatal */
       }
 
       // Sign out from Firebase

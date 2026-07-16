@@ -6,6 +6,7 @@
 // (ehemals existierenden) OnboardingProvider — Provider ist in T8
 // gelöscht, das Pattern braucht's nicht mehr.
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { onAuthStateChanged } from '@react-native-firebase/auth';
 import { collection, doc, getDocs, query, serverTimestamp, setDoc, where } from '@react-native-firebase/firestore';
 import { markAppContentReady } from '@/lib/utils/appReady';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -100,6 +101,40 @@ const PRIORITIES = [
 // PulsingAgeHint-Komponente + Style-Block entfernt in T2 — gehörte
 // zum Alter-Slider-Step. Demographics-Flow lebt jetzt im
 // DemographicsPromptSheet (T3).
+
+// Audit 2026-07-16: Wartet auf den ersten Firebase-User. Der Boot-Auto-Anon
+// (AuthContext: 1s-Timeout + Legacy-Rescue-Check + Netz-Roundtrip) ist beim
+// Onboarding-Mount oft noch NICHT durch — unauthentifizierte Writes auf
+// onboardingResultsV5 lehnen die Firestore-Rules (signedIn()) aber mit
+// permission-denied ab. Folge bis 6.0.6: hero_shown/hero_tapped fehlten
+// systematisch bei frischen Installs → der Monitor-Funnel-Nenner war
+// untererfasst (step_2_passed kam Sekunden später mit Auth an, der Einstieg
+// davor fehlte). EIN geteiltes Modul-Promise, damit gepufferte Stempel ihre
+// Aufruf-Reihenfolge behalten (funnelStage = „letzter gewinnt" bleibt korrekt).
+let authReadyPromise: Promise<string | null> | null = null;
+function waitForAuthUid(): Promise<string | null> {
+  const cur = authMod.currentUser?.uid;
+  if (cur) return Promise.resolve(cur);
+  if (!authReadyPromise) {
+    authReadyPromise = new Promise((resolve) => {
+      let settled = false;
+      const finish = (uid: string | null) => {
+        if (settled) return;
+        settled = true;
+        try { unsub(); } catch { /* noop */ }
+        clearTimeout(timer);
+        resolve(uid);
+      };
+      const unsub = onAuthStateChanged(authMod, (u) => {
+        if (u?.uid) finish(u.uid);
+      });
+      // Fallback nach 30 s: trotzdem versuchen (verliert nichts gegenüber
+      // vorher — ohne Auth lehnt die Rule ab, genau wie bisher).
+      const timer = setTimeout(() => finish(authMod.currentUser?.uid ?? null), 30_000);
+    });
+  }
+  return authReadyPromise;
+}
 
 export default function OnboardingScreen() {
   // Splash-Overlay ausblenden sobald dieser Screen steht (s. lib/utils/appReady).
@@ -369,26 +404,34 @@ export default function OnboardingScreen() {
   // offline nie hängen (früher: awaited setDoc → CTA/Weiter tot bei schwachem
   // Netz + Abschluss-Sackgasse). Der onSnapshot/lokale Cache treibt die UI.
   const stampFunnel = (stage: string, extra: Record<string, any> = {}) => {
-    try {
-      const userId = authMod.currentUser?.uid || 'anonymous';
-      void setDoc(
-        doc(db, 'onboardingResultsV5', sessionId),
-        {
-          userId,
-          sessionId,
-          version: 'v3',
-          platform: 'mobile',
-          country,
-          funnelStage: stage,
-          [`stage_${stage}_at`]: serverTimestamp(),
-          lastUpdateTime: serverTimestamp(),
-          ...extra,
-        },
-        { merge: true },
-      ).catch((e) => console.warn('funnel stamp failed (ignored):', stage, (e as any)?.message));
-    } catch (e) {
-      console.warn('funnel stamp threw (ignored):', (e as any)?.message);
-    }
+    // Weiter fire-and-forget nach außen — intern aber auf den Anon-Login
+    // warten (waitForAuthUid, Modul-Ebene): vorher lehnten die Rules den
+    // Write ab und hero_shown/hero_tapped gingen bei frischen Installs
+    // verloren. Stempel-Timestamps verschieben sich dadurch max. um die
+    // Auth-Wartezeit (~1-2 s) — verschmerzbar, ein FEHLENDER Stempel nicht.
+    void (async () => {
+      try {
+        const uid = await waitForAuthUid();
+        const userId = uid || 'anonymous';
+        await setDoc(
+          doc(db, 'onboardingResultsV5', sessionId),
+          {
+            userId,
+            sessionId,
+            version: 'v3',
+            platform: 'mobile',
+            country,
+            funnelStage: stage,
+            [`stage_${stage}_at`]: serverTimestamp(),
+            lastUpdateTime: serverTimestamp(),
+            ...extra,
+          },
+          { merge: true },
+        );
+      } catch (e) {
+        console.warn('funnel stamp failed (ignored):', stage, (e as any)?.message);
+      }
+    })();
   };
 
   // marketsOverride: bei „Tap = Markt + weiter" (Option A) ist die frische
