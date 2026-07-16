@@ -436,17 +436,20 @@ export default function HomeScreen() {
         // ODER nach dem ersten Produktbesuch + Rückkehr zum Home (der
         // isFocused-Re-Run dieses Effects). Altdaten ohne Modus-Key
         // gelten als 'completed' (Verhalten wie bisher).
+        // Device-lokale Aktivitäts-Signale — EINMAL laden, an ZWEI Stellen genutzt
+        // (Walkthrough-Skip-Aufschub + onboardingCompletedAt-Relaxation unten).
+        const signals = await import('@/lib/services/demographicsPromptSignals');
+        const [startCount, productVisited] = await Promise.all([
+          signals.getAppStartCount(),
+          signals.wasProductVisited(),
+        ]);
+        // „Angekommen" = ≥2 App-Starts ODER schon ein Produkt besucht.
+        const activeEnough = startCount >= 2 || productVisited;
+
         const seenMode = await CoachmarkService.getSeenMode('home');
-        if (seenMode === 'skipped') {
-          const signals = await import('@/lib/services/demographicsPromptSignals');
-          const [startCount, productVisited] = await Promise.all([
-            signals.getAppStartCount(),
-            signals.wasProductVisited(),
-          ]);
-          if (startCount < 2 && !productVisited) {
-            why(`walkthrough geskippt — Aufschub aktiv (starts=${startCount}, produktBesucht=false)`);
-            return;
-          }
+        if (seenMode === 'skipped' && !activeEnough) {
+          why(`walkthrough geskippt — Aufschub aktiv (starts=${startCount}, produktBesucht=${productVisited})`);
+          return;
         }
 
         const { getDoc, doc } = await import('@react-native-firebase/firestore');
@@ -454,14 +457,22 @@ export default function HomeScreen() {
         const snap = await getDoc(doc(db, 'users', user.uid));
         const data = snap.exists ? snap.data() : null;
 
-        // ClickUp 86cad6cy5 (6.19/6.20): per-UID-Marker prüfen. Nach Abmelden
-        // bzw. Account-Löschen entsteht eine FRISCHE Anon-UID OHNE
-        // `onboardingCompletedAt` → das Sheet darf dann NICHT erneut kommen.
-        // (Das device-lokale `hasPassedOnboarding()` oben übersteht den Logout
-        // und würde sonst fälschlich durchlassen; `onboardingCompletedAt` wird
-        // im Onboarding-Climax UND -Skip ans User-Doc geschrieben, also nur für
-        // Identitäten gesetzt, die den Flow tatsächlich durchlaufen haben.)
-        if (data?.onboardingCompletedAt == null) { why('onboardingCompletedAt fehlt (frische UID nach Logout/Delete)'); return; }
+        // ClickUp 86cad6cy5 (6.19/6.20): per-UID-Marker. `onboardingCompletedAt` wird
+        // im 6.0-Onboarding-Climax UND -Skip ans User-Doc geschrieben. Es FEHLT bei einer
+        // frischen Anon-UID nach Logout/Delete — ABER AUCH bei re-anon-Veteranen und
+        // geupdateten v5-Usern, die das 6.0-Onboarding nie (neu) durchliefen. Die alle
+        // hart auszusperren hieße: sie werden NIE proaktiv nach Alter gefragt → das
+        // Demografie-Ziel (30-50%) ist unerreichbar. Darum: fehlt das Feld, aber der User
+        // ist device-lokal „angekommen" (activeEnough), fragen wir trotzdem. re-anon-
+        // Veteranen (die KEINE Account-History haben, also nicht per Level/Käufe erkennbar
+        // sind) sind so mit drin; eine frische Logout-UID kriegt den Ask dann ggf. auch
+        // einmalig — harmlos (skip-/beantwortbar; die no-age/no-gender/demographicsSkipped-
+        // Checks unten verhindern jedes Wieder-Nerven, und Alkohol ist ohnehin per Tap
+        // freischaltbar).
+        if (data?.onboardingCompletedAt == null && !activeEnough) {
+          why(`onboardingCompletedAt fehlt + noch nicht aktiv genug (starts=${startCount}, produkt=${productVisited})`);
+          return;
+        }
 
         // Daten bereits vorhanden? Nicht nochmal fragen.
         if (data?.age != null) { why('age schon im User-Doc'); return; }
