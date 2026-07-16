@@ -107,9 +107,35 @@ Platzhalter-Docs („z - …", „NoName", „Dummy") existieren und werden beim
 | `scraped_products` | weitere Scraper-Ablage (public-read, CF-write) |
 | `ExternalLookupMiss`-Docs | Miss-Tracking: `{ean, status: pending→resolved/no-data, hitCount, triedSources[]}` |
 
-### Historien (server-only, Watcher-CFs)
-`pricehistory_produkte` / `pricehistory_markenProdukte` — jede Preisänderung.
-`nutritionhistory_produkte` / `nutritionhistory_markenProdukte` — Snapshots bei Nährwert-Änderungen durch untrusted Sources.
+### Historien (server-only, CF `nutrition-history-watcher`, onWrite auf beiden Katalog-Collections)
+
+**`pricehistory_produkte` / `pricehistory_markenProdukte`** — ein Doc pro `preis`-Änderung (JEDE Änderung, keine Source-Ausnahme; nicht bei Create). Doc-Schema:
+
+```
+productId: string · productPath: string ("produkte/abc…")
+productName: string|null
+changedAt: Timestamp (Server)
+before: { preis: number|null, preisDatum: Timestamp|null }
+after:  { preis: number|null, preisDatum: Timestamp|null }
+deltaAbs: number|null   // after-before, 4 Nachkommastellen
+deltaPct: number|null   // Prozent, 2 Nachkommastellen
+```
+
+⚠️ **Keine Markt-Dimension!** Die Price-History kennt nur den einen `preis` des Katalog-Docs — WO (welcher Markt) ein Preis beobachtet wurde, wird nicht festgehalten. Markt-genaue Preisdaten existieren nur roh in den Bon-Positionen (`users/*/purchased_products`: `priceCents` + `merchantId` + `bonDate`). Eine markt-dimensionale Preishistorie ist als Backlog-Task offen (86ca77197).
+
+Nebeneffekt des Watchers: Ändert jemand `preis` OHNE `preisDatum` mitzusetzen, stempelt die CF `preisDatum` automatisch nach (schleifensicher).
+
+**`nutritionhistory_produkte` / `nutritionhistory_markenProdukte`** — Snapshot des ALT-Zustands, bevor eine **untrusted** Source (`scraper`/`openfood`/`legacy`/reweapify-fill) Zutaten/Nährwerte überschreibt (trusted `manual`/`rewe`/`ocr`-Writes und Creates erzeugen KEINEN Eintrag). Doc-Schema:
+
+```
+productId · productPath · productName · changedAt
+changedFields: ('ingredients'|'nutrition')[]
+before: { attr_ingredientStatement, ingredientsSource, ingredientsUpdatedAt,
+          nutr_* (alle Werte), nutritionSource, nutritionUpdatedAt }   // der ALTE Stand
+triggeredByNewSource: { ingredients: string|null, nutrition: string|null }
+```
+
+Zweck: Rollback-/Audit-Fähigkeit, falls ein Scraper Daten verschlechtert. Beide Historien-Familien sind für Clients **deny-all** (nicht in den Rules gematcht) — Zugriff nur via Admin-SDK.
 
 ---
 
