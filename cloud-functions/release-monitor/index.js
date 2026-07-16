@@ -577,7 +577,7 @@ async function demographicsSummary() {
     snap = await db.collection('users')
       .orderBy('lastActivityAt', 'desc')
       .limit(LIMIT)
-      .select('age', 'gender', 'country', 'weeklyBudgetEur', 'priorities', 'demographicsSkipped')
+      .select('age', 'gender', 'country', 'weeklyBudgetEur', 'priorities', 'demographicsSkipped', 'created_time')
       .get();
   } catch (e) {
     console.warn('demographicsSummary failed:', e.message);
@@ -616,24 +616,35 @@ async function demographicsSummary() {
   const budgetVals = [];
   let withAge = 0; let withGender = 0; let withCountry = 0;
   let withBudget = 0; let withPrio = 0; let skipped = 0;
+  // v5-Ära- vs v6-Ära-Split nach created_time (Store-Release 12.07). Zeigt, ob
+  // das 6.0-Onboarding + Demografie-Sheet MEHR erfasst als die 5.x-Ära. „Beitritt
+  // vor/nach Release" — dieselbe Ära-Grenze wie beim Feedback (RELEASE_ISO).
+  const RELEASE_MS = Date.parse(`${RELEASE_ISO}T00:00:00Z`);
+  const mkEra = () => ({ scanned: 0, withAge: 0, withGender: 0, withCountry: 0, withBudget: 0, withPrio: 0, skipped: 0 });
+  const eras = { v5: mkEra(), v6: mkEra() };
   snap.forEach((d) => {
     const x = d.data();
+    const ct = x.created_time;
+    const ctMs = ct && typeof ct.toMillis === 'function' ? ct.toMillis()
+      : (ct && ct._seconds != null ? ct._seconds * 1000 : null);
+    const e = (ctMs != null && ctMs >= RELEASE_MS) ? eras.v6 : eras.v5;
+    e.scanned += 1;
     const ageNum = typeof x.age === 'number' ? x.age : parseInt(String(x.age || ''), 10);
     if (Number.isFinite(ageNum) && ageNum > 0) {
       const b = AGE_BUCKETS.find(([lo, hi]) => ageNum >= lo && ageNum <= hi);
-      if (b) { ageCounts.set(b[2], (ageCounts.get(b[2]) || 0) + 1); ageVals.push(ageNum); withAge += 1; }
+      if (b) { ageCounts.set(b[2], (ageCounts.get(b[2]) || 0) + 1); ageVals.push(ageNum); withAge += 1; e.withAge += 1; }
     }
     const g = normGender(x.gender);
-    if (g) { genderCounts.set(g, (genderCounts.get(g) || 0) + 1); withGender += 1; }
+    if (g) { genderCounts.set(g, (genderCounts.get(g) || 0) + 1); withGender += 1; e.withGender += 1; }
     const c = String(x.country || '').trim().toUpperCase();
-    if (c) { const l = LAND[c] || c; countryCounts.set(l, (countryCounts.get(l) || 0) + 1); withCountry += 1; }
+    if (c) { const l = LAND[c] || c; countryCounts.set(l, (countryCounts.get(l) || 0) + 1); withCountry += 1; e.withCountry += 1; }
     const bud = typeof x.weeklyBudgetEur === 'number' ? x.weeklyBudgetEur : parseInt(String(x.weeklyBudgetEur || ''), 10);
     if (Number.isFinite(bud) && bud > 0) {
       const b = BUDGET_BUCKETS.find(([lo, hi]) => bud >= lo && bud <= hi);
-      if (b) { budgetCounts.set(b[2], (budgetCounts.get(b[2]) || 0) + 1); budgetVals.push(bud); withBudget += 1; }
+      if (b) { budgetCounts.set(b[2], (budgetCounts.get(b[2]) || 0) + 1); budgetVals.push(bud); withBudget += 1; e.withBudget += 1; }
     }
     if (Array.isArray(x.priorities) && x.priorities.length) {
-      withPrio += 1;
+      withPrio += 1; e.withPrio += 1;
       x.priorities.forEach((p) => {
         const key = String(p || '').trim().toLowerCase();
         if (!key) return;
@@ -641,7 +652,7 @@ async function demographicsSummary() {
         prioCounts.set(label, (prioCounts.get(label) || 0) + 1);
       });
     }
-    if (x.demographicsSkipped === true) skipped += 1;
+    if (x.demographicsSkipped === true) { skipped += 1; e.skipped += 1; }
   });
   const median = (arr) => {
     if (!arr.length) return 0;
@@ -654,6 +665,15 @@ async function demographicsSummary() {
   const pct = (a) => (snap.size ? Math.round((100 * a) / snap.size) : 0);
   // Demografie-Sheet-Antwortrate: beantwortet (withGender) vs. beantwortet + übersprungen.
   const demoReached = withGender + skipped;
+  // Pro-Ära-Coverage (Umfrage = country als Proxy fürs Onboarding-Survey).
+  const eraPct = (o) => ({
+    scanned: o.scanned,
+    withAge: o.withAge, withGender: o.withGender, withSurvey: o.withCountry, skipped: o.skipped,
+    ageCoveragePct: o.scanned ? Math.round((100 * o.withAge) / o.scanned) : 0,
+    genderCoveragePct: o.scanned ? Math.round((100 * o.withGender) / o.scanned) : 0,
+    surveyCoveragePct: o.scanned ? Math.round((100 * o.withCountry) / o.scanned) : 0,
+    answerRatePct: (o.withGender + o.skipped) ? Math.round((100 * o.withGender) / (o.withGender + o.skipped)) : 0,
+  });
   return {
     scanned: snap.size,
     withAge, withGender, withCountry, withBudget, withPrio, skipped,
@@ -671,6 +691,7 @@ async function demographicsSummary() {
     country: [...countryCounts.entries()].sort((a, b) => b[1] - a[1]).map(([label, count]) => ({ label, count })),
     budget: budgetOrder.filter((l) => budgetCounts.has(l)).map((label) => ({ label, count: budgetCounts.get(label) })),
     priorities: [...prioCounts.entries()].sort((a, b) => b[1] - a[1]).map(([label, count]) => ({ label, count })),
+    byEra: { v5: eraPct(eras.v5), v6: eraPct(eras.v6) },
   };
 }
 
