@@ -633,7 +633,10 @@ export default function OnboardingScreen() {
           ...(firstRealMarket && { primaryMarket: firstRealMarket.name }),
         }),
         ...(marketOther && { marketOther }),
-        ...(budget && { weeklyBudgetEur: budget }),
+        // Budget NUR wenn der Budget-Step (3) wirklich per „Weiter" bestätigt
+        // wurde (User steht auf ≥4) — sonst landet der State-DEFAULT (100 €)
+        // als erfundener Wert im Abandon-Doc und kontaminiert jede Auswertung.
+        ...(currentStep >= 4 && budget ? { weeklyBudgetEur: budget } : {}),
         ...(priorities.length > 0 && { priorities }),
         ...(prioritiesOther && { prioritiesOther }),
         version: 'v3',
@@ -666,19 +669,31 @@ export default function OnboardingScreen() {
         // aufs Profil bekommen wie im Completion-Pfad — sonst gilt der User
         // als „onboarded", aber favoriteMarket fehlt (getippte Marktwahl
         // verloren). Bis 6.0.5 schrieb der Skip nur onboardingCompletedAt.
-        const skipPrefs: any = { onboardingCompletedAt: serverTimestamp() };
-        if (firstRealMarket) {
-          skipPrefs.country = country;
+        // Parität mit Completion: country IMMER, favoriteMarkets auch für den
+        // Custom-Markt („Anderer" → {id:'other', isCustom:true}); nur die
+        // firstRealMarket-Felder bleiben an echte Discounter gebunden.
+        const skipPrefs: any = {
+          onboardingCompletedAt: serverTimestamp(),
+          country,
+        };
+        if (selectedMarkets.length > 0) {
           skipPrefs.favoriteMarkets = selectedMarkets.map((market) =>
             market.isOther ? { id: 'other', name: marketOther, isCustom: true } : market,
           );
+        }
+        if (firstRealMarket) {
           if (firstRealMarket.id) {
             skipPrefs.favoriteMarket = firstRealMarket.id;
             skipPrefs.favoriteMarketName = firstRealMarket.name ?? '';
           }
           skipPrefs.primaryMarket = firstRealMarket;
         }
-        await setDoc(doc(db, 'users', skipUid), skipPrefs, { merge: true });
+        // Fire-and-forget (CLAUDE.md Forbidden Pattern: awaited Firestore-Write
+        // im kritischen UI-Pfad hängt OFFLINE für immer → User säße bis zum
+        // App-Kill auf dem „Lade ersten Start..."-Spinner, weil router.replace
+        // unten nie erreicht würde). Lokaler Cache sieht den Wert sofort.
+        void setDoc(doc(db, 'users', skipUid), skipPrefs, { merge: true })
+          .catch((e) => console.warn('⚠️ skip onboardingCompletedAt write failed (ignored):', (e as any)?.message));
       }
     } catch (e) {
       console.warn('⚠️ skip onboardingCompletedAt write failed:', e);

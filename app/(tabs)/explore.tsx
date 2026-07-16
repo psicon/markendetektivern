@@ -4914,7 +4914,11 @@ export default function ExploreScreen() {
           try {
             const { setDoc, doc, serverTimestamp } = await import('@react-native-firebase/firestore');
             const { db: dbRef } = await import('@/lib/firebase');
-            await setDoc(
+            // Fire-and-forget (CLAUDE.md): awaited Firestore-Write hängt
+            // OFFLINE für immer → der Unlock unten liefe nie. Das Alter ist
+            // lokal bekannt (result.age) — Unlock sofort, Write synct im
+            // Hintergrund (lokaler Cache sieht ihn eh sofort).
+            void setDoc(
               doc(dbRef, 'users', user.uid),
               {
                 age: result.age,
@@ -4925,7 +4929,7 @@ export default function ExploreScreen() {
                 demographicsCapturedAt: serverTimestamp(),
               },
               { merge: true },
-            );
+            ).catch((err) => console.warn('[Explore] age-gate save failed (ignored):', err));
             // Cache resetten + neu laden mit dem frischen Age — Alkohol
             // wird jetzt nicht mehr als locked gemeldet.
             categoryAccessService.clearCache();

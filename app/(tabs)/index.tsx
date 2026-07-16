@@ -485,6 +485,15 @@ export default function HomeScreen() {
         // mitten in den ProductCard-Initial-Animationen).
         await new Promise<void>(r => InteractionManager.runAfterInteractions(() => r()));
         if (cancelled) return;
+        // Forbidden Pattern „zwei RN-Modals gleichzeitig" (iOS-Deadlock):
+        // warten bis KEIN anderes Sheet mehr präsentiert ist (z.B. action-
+        // getriggerte Umfrage), erst dann das Demografie-Modal öffnen —
+        // gleiches Gate wie der Paywall-Effect oben (C1).
+        await new Promise<void>((resolve) => {
+          if (!isAnySheetOpen()) { resolve(); return; }
+          whenSheetsIdle(() => resolve());
+        });
+        if (cancelled) return;
         setShowDemographicsSheet(true);
       } catch (err) {
         console.warn('[Home] demographics prompt check failed:', err);

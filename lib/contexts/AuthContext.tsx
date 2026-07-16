@@ -830,6 +830,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               ...agePatch,
               gender: additionalData.gender || '',
               location: additionalData.location || '',
+              // Lieblingsmarkt aus dem Registrier-Formular. NUR wenn gewählt
+              // (konditional) — sonst würde merge:true einen im Onboarding
+              // gesetzten Markt mit Leerwerten überschreiben. Bis 6.0.6 wurde
+              // das Feld hier stillschweigend verworfen (Audit 2026-07-16).
+              ...(additionalData.favoriteMarket
+                ? {
+                    favoriteMarket: additionalData.favoriteMarket,
+                    favoriteMarketName: additionalData.favoriteMarketName ?? '',
+                  }
+                : {}),
               // photo_url/totalSavings hier NICHT setzen (Audit 2026-07-12):
               // beim Anon→Email-Upgrade bleibt die UID gleich, das Doc
               // existiert bereits aus der Gast-Phase — `photo_url: ''`
@@ -995,7 +1005,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (isNewUser && userCredential.user) {
         const displayName = buildAppleDisplayName(bundle.fullName);
         await createUserProfile(userCredential.user, {
-          realName: displayName,
+          // Audit 2026-07-16: hieß fälschlich `realName` — Partial<UserProfile>
+          // kennt nur `real_name` → das Doc bekam ein Junk-Top-Level-Feld und
+          // real_name blieb leer (tsc-Fehler existierte dazu schon).
+          real_name: displayName,
           email: bundle.email || userCredential.user.email || '',
         });
         console.log(`✅ Apple Sign-In: NEUER USER → Profil angelegt (${userCredential.user.email})`);
@@ -1063,7 +1076,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const isNewUser = userCredential.additionalUserInfo?.isNewUser;
       if (isNewUser && userCredential.user) {
         await createUserProfile(userCredential.user, {
-          realName: bundle.displayName || userCredential.user.displayName || 'Facebook User',
+          // Audit 2026-07-16: `realName` → `real_name` (analog Apple-Pfad).
+          real_name: bundle.displayName || userCredential.user.displayName || 'Facebook User',
           email: bundle.email || userCredential.user.email || '',
         });
         console.log(`✅ Facebook Sign-In: NEUER USER → Profil angelegt (${userCredential.user.email})`);
