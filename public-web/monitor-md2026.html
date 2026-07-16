@@ -228,7 +228,7 @@
 
     <!-- ══ 3b · DEMOGRAFIE ══ -->
     <div class="shead"><h2>Demografie</h2><span class="tag cmp">v5 vs v6</span>
-      <span class="hint">Erfassungs-Quoten: 6.0-Ära vs. 5.x-Ära (nach Beitritt) · Verteilung darunter = Gesamtstand aller Angaben</span></div>
+      <span class="hint">Wie viel % der User haben das Feld gesetzt — 6.0-Ära (Beitritt seit 12.07) vs. 5.x-Ära · Verteilungen darunter = alle Angaben zusammen</span></div>
     <div class="kgrid" id="k-dm"></div>
     <div class="two">
       <div class="chartcard"><h3>Altersverteilung</h3><p class="csub" id="dm-age-sub"></p><div id="dm-age-bars"></div></div>
@@ -550,24 +550,27 @@ function renderDemographics(){
   }
   const sc=dm.scanned||0;
   const e5=dm.byEra&&dm.byEra.v5, e6=dm.byEra&&dm.byEra.v6;
-  const answerHelp='Von den Usern, denen das Post-Onboarding-Sheet (Alter+Geschlecht) gezeigt wurde: wie viele haben geantwortet statt zu überspringen.';
   if(e6&&e5){
     // v6-Ära (seit Store-Release 12.07 beigetreten) vs 5.x-Ära — erfassen wir mehr Demografie?
     const cov=(a,b)=>({v5str:Math.round(b)+' %',dir:'up',v6num:a,v5num:b,isPct:true});
     const cell=(v6v,v5v)=>((v6v||0)>=(v5v||0)?'good':'warn');
+    const reach6=(e6.withGender||0)+(e6.skipped||0);
+    const reachPct6=e6.scanned?Math.round(100*reach6/e6.scanned):0;
+    // Funnel-Erklärung fürs Alter/Geschlecht (löst den „51% vs 15%"-Widerspruch auf).
+    const sheetWhy=`Alter + Geschlecht kommen aus einem Sheet NACH dem Onboarding — nicht jeder sieht es. Von den 6.0-Ära-Usern erreichen es bisher ~${reachPct6}% (${deN(reach6)} von ${deN(e6.scanned)}), davon antworten ~${e6.answerRatePct||0}% → am Ende haben ~${e6.ageCoveragePct||0}% Alter gesetzt. In der 5.x-Ära gab es das Sheet praktisch nicht.`;
     document.getElementById('k-dm').innerHTML=[
-      kpi({label:'Alter erfasst',icon:'🎂',big:(e6.ageCoveragePct||0)+' %',status:cell(e6.ageCoveragePct,e5.ageCoveragePct),cmp:cov(e6.ageCoveragePct||0,e5.ageCoveragePct||0)}),
-      kpi({label:'Geschlecht erfasst',icon:'⚧',big:(e6.genderCoveragePct||0)+' %',status:cell(e6.genderCoveragePct,e5.genderCoveragePct),cmp:cov(e6.genderCoveragePct||0,e5.genderCoveragePct||0)}),
-      kpi({label:'Umfrage erfasst<span class="help" title="Land/Budget/Prioritäten aus dem Onboarding (Land als Proxy). 6.0-Ära = seit dem Store-Release 12.07 beigetretene User.">?</span>',icon:'📋',big:(e6.surveyCoveragePct||0)+' %',status:cell(e6.surveyCoveragePct,e5.surveyCoveragePct),cmp:cov(e6.surveyCoveragePct||0,e5.surveyCoveragePct||0)}),
-      kpi({label:'Antwortrate (6.0-Ära)<span class="help" title="'+answerHelp+' Bewusst OHNE v5-Vergleich: die 5.x-Ära-Quote basiert auf sehr wenigen, selbst-selektierten Alt-Usern und wäre kein fairer Vergleich.">?</span>',icon:'✋',big:(e6.answerRatePct||0)+' %',status:(e6.answerRatePct||0)<40?'warn':'good',sub:`${deN(e6.withGender||0)} von ${deN((e6.withGender||0)+(e6.skipped||0))} Gefragten`}),
+      kpi({label:'Alter erfasst<span class="help" title="'+sheetWhy+'">?</span>',icon:'🎂',big:(e6.ageCoveragePct||0)+' %',status:cell(e6.ageCoveragePct,e5.ageCoveragePct),cmp:cov(e6.ageCoveragePct||0,e5.ageCoveragePct||0)}),
+      kpi({label:'Geschlecht erfasst<span class="help" title="'+sheetWhy+'">?</span>',icon:'⚧',big:(e6.genderCoveragePct||0)+' %',status:cell(e6.genderCoveragePct,e5.genderCoveragePct),cmp:cov(e6.genderCoveragePct||0,e5.genderCoveragePct||0)}),
+      kpi({label:'Land/Budget/Prio<span class="help" title="Land, Wochenbudget &amp; Prioritäten aus dem Onboarding (Land als Proxy, alle drei ~gleich hoch). Das 5.x-Onboarding schrieb diese Felder nicht → 0%. 6.0-Ära = seit dem Store-Release 12.07 beigetretene User.">?</span>',icon:'📋',big:(e6.surveyCoveragePct||0)+' %',status:cell(e6.surveyCoveragePct,e5.surveyCoveragePct),cmp:cov(e6.surveyCoveragePct||0,e5.surveyCoveragePct||0)}),
+      kpi({label:'Median-Alter<span class="help" title="Median-Alter über alle User mit Alters-Angabe (beide Ären zusammen). Unsere Nutzer skewen deutlich älter.">?</span>',icon:'📅',big:(dm.medianAge||0)+' J.',status:'ink',sub:`über ${deN(dm.withAge||0)} Angaben · skewt älter`}),
     ].join('');
   } else {
     // Fallback (kein byEra im Doc): aktueller Gesamtstand ohne Ära-Split.
     document.getElementById('k-dm').innerHTML=[
-      kpi({label:'Alter erfasst',icon:'🎂',big:(dm.ageCoveragePct||0)+' %',status:(dm.ageCoveragePct||0)<15?'warn':'good',sub:`Median ${dm.medianAge||0} J. · ${deN(dm.withAge||0)} von ${deN(sc)}`}),
-      kpi({label:'Geschlecht erfasst',icon:'⚧',big:(dm.genderCoveragePct||0)+' %',status:(dm.genderCoveragePct||0)<15?'warn':'good',sub:`${deN(dm.withGender||0)} von ${deN(sc)} aktiven Usern`}),
-      kpi({label:'Umfrage erfasst',icon:'📋',big:(dm.countryCoveragePct||0)+' %',status:(dm.countryCoveragePct||0)<30?'warn':'good',sub:`Land/Budget/Prioritäten · Median ${dm.medianBudget||0} €/Wo.`}),
-      kpi({label:'Demografie-Antwortrate<span class="help" title="'+answerHelp+'">?</span>',icon:'✋',big:(dm.demoAnswerRatePct||0)+' %',status:(dm.demoAnswerRatePct||0)<40?'warn':'good',sub:`${deN(dm.withGender||0)} beantwortet · Rest übersprungen`}),
+      kpi({label:'Alter erfasst',icon:'🎂',big:(dm.ageCoveragePct||0)+' %',status:(dm.ageCoveragePct||0)<10?'warn':'good',sub:`${deN(dm.withAge||0)} von ${deN(sc)} aktiven Usern`}),
+      kpi({label:'Geschlecht erfasst',icon:'⚧',big:(dm.genderCoveragePct||0)+' %',status:(dm.genderCoveragePct||0)<10?'warn':'good',sub:`${deN(dm.withGender||0)} von ${deN(sc)} aktiven Usern`}),
+      kpi({label:'Land/Budget/Prio',icon:'📋',big:(dm.countryCoveragePct||0)+' %',status:(dm.countryCoveragePct||0)<30?'warn':'good',sub:'Land · Budget · Prioritäten'}),
+      kpi({label:'Median-Alter',icon:'📅',big:(dm.medianAge||0)+' J.',status:'ink',sub:`über ${deN(dm.withAge||0)} Angaben`}),
     ].join('');
   }
   const bar=(label,count,denom,max)=>`
