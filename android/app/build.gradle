@@ -106,7 +106,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1216
-            versionName "6.0.7"
+            versionName "6.0.8"
     }
     signingConfigs {
         debug {
