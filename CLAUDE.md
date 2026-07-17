@@ -234,7 +234,9 @@ Einkaufszettel und alle Produkt-Share-Links tot**, mehrere Stunden unbemerkt
   productshare`. Beides ist dort als PRODUKTIV kommentiert + im README gewarnt.
 - **Ändere ich hier `public-web/join.html` oder `monitor-md2026.html` → Kopie nach
   `~/Documents/LokaleFragen/firebase-app/public/` nachziehen**, sonst deployt der nächste
-  Marketing-Deploy den alten Stand.
+  Marketing-Deploy den alten Stand. **Assets nicht vergessen** — `join.html` braucht
+  `app-icon.png`, `app-store-badge.svg`, `google-play-badge.png` aus demselben Ordner
+  (am 17.07. übersehen → Einladungsseite lud mit kaputten Bild-Platzhaltern).
 - Einladungs-Links sind in der App **hardcoded** (`lib/services/sharedListService.ts`,
   `INVITE_LINK_BASE`) — die URL kann NICHT einfach umgezogen werden, alte Links blieben
   sonst für immer tot.
