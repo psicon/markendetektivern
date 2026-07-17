@@ -13,6 +13,8 @@ import com.facebook.react.defaults.DefaultReactNativeHost
 import com.facebook.react.soloader.OpenSourceMergedSoMapping
 import com.facebook.soloader.SoLoader
 
+import com.google.android.play.core.missingsplits.MissingSplitsManagerFactory
+
 import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ReactNativeHostWrapper
 
@@ -41,6 +43,17 @@ class MainApplication : Application(), ReactApplication {
     get() = ReactNativeHostWrapper.createReactHost(applicationContext, reactNativeHost)
 
   override fun onCreate() {
+    // Missing-Splits-Guard (Crashlytics-Top-Issue 2026-07: SoLoaderDSONotFoundError
+    // "couldn't find DSO to load: libreactnative.so" in onCreate). Ursache: App
+    // wurde OHNE ihre ABI-Splits installiert (Sideload/App-Sharing/kaputtes
+    // Delta-Update) → native Libs fehlen → Boot-Crash-Loop. Google-Pattern:
+    // App deaktivieren + Play zeigt den "Neu installieren"-Dialog, statt dass
+    // SoLoader.init unten crasht. MUSS vor super.onCreate() und jeder weiteren
+    // Initialisierung laufen. Universal-APKs (bundletool-Device-Test-Workflow)
+    // sind vollstaendig und triggern den Guard NICHT.
+    if (MissingSplitsManagerFactory.create(this).disableAppIfMissingRequiredSplits()) {
+      return
+    }
     super.onCreate()
     SoLoader.init(this, OpenSourceMergedSoMapping)
     if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
