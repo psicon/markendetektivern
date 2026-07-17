@@ -164,11 +164,6 @@ dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
 
-    // Missing-Splits-Guard (siehe MainApplication.onCreate): erkennt Installationen
-    // ohne ABI-Splits (Sideload/App-Sharing) und zeigt den Play-"Neu installieren"-
-    // Dialog statt des SoLoaderDSONotFoundError-Boot-Crash-Loops.
-    implementation("com.google.android.play:missing-splits:2.1.0")
-
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";
     def isWebpAnimatedEnabled = (findProperty('expo.webp.animated') ?: "") == "true";
