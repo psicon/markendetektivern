@@ -1549,8 +1549,14 @@ export default function OnboardingScreen() {
           {renderProgressBar()}
           
           <View style={styles.loadingContent}>
+            {/* renderMode SOFTWARE: com.airbnb.lottie (Java) crasht HW-beschleunigt
+                auf schwachen/bestimmten Android-Geraeten mit null-Canvas (SIGSEGV
+                null-deref in libart.so ueber die Fabric-Bruecke — Cluster Samsung
+                A13, Onboarding-Climax). Software-Rendering umgeht das; fuer kleine
+                Onboarding-Animationen visuell identisch. */}
             <LottieView
               source={require('@/assets/lottie/sandyloader.json')}
+              renderMode="SOFTWARE"
               autoPlay
               loop={true}
               style={styles.sandyLoaderLottie}
@@ -1650,6 +1656,7 @@ export default function OnboardingScreen() {
               >
                 <LottieView
                   source={require('@/assets/lottie/money.json')}
+                  renderMode="SOFTWARE"
                   autoPlay
                   loop={false}
                   style={[
