@@ -274,61 +274,6 @@
         "**/.*",
         "**/node_modules/**"
       ]
-    },
-    {
-      "site": "markendetektive-895f7",
-      "public": "public-web",
-      "ignore": [
-        "firebase.json",
-        "**/.*",
-        "**/node_modules/**"
-      ],
-      "rewrites": [
-        {
-          "source": "/join-list/**",
-          "destination": "/join.html"
-        },
-        {
-          "source": "/p/**",
-          "run": {
-            "serviceId": "productshare",
-            "region": "europe-west3"
-          }
-        }
-      ],
-      "headers": [
-        {
-          "source": "/.well-known/apple-app-site-association",
-          "headers": [
-            {
-              "key": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "key": "Cache-Control",
-              "value": "max-age=300"
-            }
-          ]
-        },
-        {
-          "source": "/.well-known/assetlinks.json",
-          "headers": [
-            {
-              "key": "Cache-Control",
-              "value": "max-age=300"
-            }
-          ]
-        },
-        {
-          "source": "/monitor-md2026.html",
-          "headers": [
-            {
-              "key": "Cache-Control",
-              "value": "no-cache, max-age=0, must-revalidate"
-            }
-          ]
-        }
-      ]
     }
   ]
 }

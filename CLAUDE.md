@@ -225,10 +225,17 @@ Folge: `/join-list/**` und `/p/**` waren 404 → **alle Einladungs-Links für ge
 Einkaufszettel und alle Produkt-Share-Links tot**, mehrere Stunden unbemerkt
 (`.well-known/*` überlebte, weil Firebase die App-Links-Dateien selbst ausliefert).
 
+**Technisch abgesichert (17.07.) — beide Richtungen:**
+- **Dieses Repo kann die Site nicht mehr deployen**: der `markendetektive-895f7`-Block
+  wurde aus `firebase.json` ENTFERNT (nur noch `md-receipt-admin` steht drin). Ein
+  versehentliches `firebase deploy --only hosting` kann die Marketing-Site nicht mehr
+  löschen. Den Block NICHT wieder hinzufügen.
+- **Der Marketing-Deploy schützt unsere Dateien**: `predeploy` (`scripts/app-infra.mjs`)
+  synct `public-web/`-Dateien von hier rüber und bricht ab, wenn Dateien oder Rewrites
+  fehlen; `postdeploy` (`scripts/verify-live.mjs`) smoke-testet alle 10 Live-Pfade.
+
 **Regeln:**
-- **NIEMALS `firebase deploy --only hosting:markendetektive-895f7` aus DIESEM Repo** —
-  das würde die Marketing-Site löschen. (`hosting:md-receipt-admin` ist unbetroffen.)
-- Der kanonische Deploy der Default-Site läuft aus `~/Documents/LokaleFragen/firebase-app`.
+- Der kanonische (und einzige) Deploy der Default-Site läuft aus `~/Documents/LokaleFragen/firebase-app`.
   Dessen `public/` enthält Kopien von `public-web/join.html` + `public-web/monitor-md2026.html`,
   dessen `firebase.json` die Rewrites `/join-list/** → /join.html` und `/p/** → Cloud Run
   productshare`. Beides ist dort als PRODUKTIV kommentiert + im README gewarnt.
