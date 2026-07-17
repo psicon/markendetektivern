@@ -211,6 +211,40 @@ Wenn du eine bestehende Datei berührst und siehst dass sie diese
 Regeln verletzt → **flag es dem User**, fix es nicht heimlich
 mit. Aber das was du SELBER schreibst hält sich an die Regeln.
 
+## ⛔️ Hosting-Site `markendetektive-895f7` ist GETEILT — Deploy-Falle (17.07.2026)
+
+Die Default-Hosting-Site trägt **zwei Dinge gleichzeitig**: die Marketing-Startseite
+(Quelle: `~/Documents/LokaleFragen/firebase-app`, eigenes Git-Repo) UND produktive
+App-Infrastruktur. Firebase Hosting **ersetzt bei jedem Deploy den KOMPLETTEN
+Site-Inhalt — es gibt kein Merge**. Wer aus einem der beiden Repos deployt, ohne die
+Dateien des anderen mitzuliefern, reißt live Features ab.
+
+**Vorfall 17.07.2026:** Ein Marketing-Deploy (dessen `firebase.json` hat KEINE
+`site`-Angabe → landet automatisch auf der Default-Site) ersetzte `public-web/`.
+Folge: `/join-list/**` und `/p/**` waren 404 → **alle Einladungs-Links für geteilte
+Einkaufszettel und alle Produkt-Share-Links tot**, mehrere Stunden unbemerkt
+(`.well-known/*` überlebte, weil Firebase die App-Links-Dateien selbst ausliefert).
+
+**Regeln:**
+- **NIEMALS `firebase deploy --only hosting:markendetektive-895f7` aus DIESEM Repo** —
+  das würde die Marketing-Site löschen. (`hosting:md-receipt-admin` ist unbetroffen.)
+- Der kanonische Deploy der Default-Site läuft aus `~/Documents/LokaleFragen/firebase-app`.
+  Dessen `public/` enthält Kopien von `public-web/join.html` + `public-web/monitor-md2026.html`,
+  dessen `firebase.json` die Rewrites `/join-list/** → /join.html` und `/p/** → Cloud Run
+  productshare`. Beides ist dort als PRODUKTIV kommentiert + im README gewarnt.
+- **Ändere ich hier `public-web/join.html` oder `monitor-md2026.html` → Kopie nach
+  `~/Documents/LokaleFragen/firebase-app/public/` nachziehen**, sonst deployt der nächste
+  Marketing-Deploy den alten Stand.
+- Einladungs-Links sind in der App **hardcoded** (`lib/services/sharedListService.ts`,
+  `INVITE_LINK_BASE`) — die URL kann NICHT einfach umgezogen werden, alte Links blieben
+  sonst für immer tot.
+- **Nach jedem Hosting-Deploy (egal aus welchem Repo) verifizieren:**
+  ```bash
+  for p in / /join-list/TEST /monitor-md2026.html /p/test; do
+    curl -s -o /dev/null -w "%{http_code}  $p\n" "https://markendetektive-895f7.web.app$p"
+  done   # alle 200 = ok
+  ```
+
 ## Forbidden Patterns
 
 Dinge die mindestens einmal teuer waren und nicht neu probiert
