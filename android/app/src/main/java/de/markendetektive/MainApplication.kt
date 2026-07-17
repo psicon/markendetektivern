@@ -64,33 +64,75 @@ class MainApplication : Application(), ReactApplication {
     }
   }
 
+  // Erkennt, ob ein Throwable ein NATIVE-LADE-Fehler ist (fehlende .so / DSO).
+  // Das ist der Kern des Missing-Splits-Problems, wenn NUR der ABI-Split fehlt
+  // (Base + Sprach-/Density-Splits sind da → isMissingRequiredSplits() greift
+  // NICHT, weil splitSourceDirs nicht leer ist). Wir laufen die cause-Kette ab
+  // und matchen sehr eng, damit ECHTE App-Bugs weiterhin normal crashen/gemeldet
+  // werden (kein Verstecken, kein Falsch-Positiv fuer intakte Installs).
+  private fun isNativeLoadFailure(root: Throwable): Boolean {
+    var e: Throwable? = root
+    var depth = 0
+    while (e != null && depth < 12) {
+      if (e is UnsatisfiedLinkError) return true
+      val cn = e.javaClass.name
+      if (cn.contains("SoLoader") || cn.contains("DSONotFound")) return true
+      val msg = e.message ?: ""
+      if (msg.contains("couldn't find DSO") ||
+          msg.contains("libreactnative") ||
+          msg.contains("libhermes") ||
+          msg.contains("dlopen failed")) return true
+      e = e.cause
+      depth++
+    }
+    return false
+  }
+
+  // Unvollstaendige Installation: freundlich in den Play Store leiten und den
+  // Prozess beenden, BEVOR/NACHDEM ein nativer Lade-Fehler auftritt — statt
+  // Crash-Loop oeffnet jeder App-Tap die Store-Seite zum Neu-Installieren.
+  private fun redirectToPlayStoreAndDie() {
+    runCatching {
+      Toast.makeText(
+        this,
+        "MarkenDetektive ist unvollständig installiert — bitte über den Play Store neu installieren (vorher deinstallieren).",
+        Toast.LENGTH_LONG,
+      ).show()
+      startActivity(
+        Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$packageName"))
+          .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+      )
+    }
+    android.os.Process.killProcess(android.os.Process.myPid())
+  }
+
   override fun onCreate() {
+    // Schnell-Pfad: gar KEINE Splits installiert (Base-only-Install, z.B. per
+    // App-Sharing) → vor jeder nativen Ladung abfangen.
     if (isMissingRequiredSplits()) {
-      // Unvollstaendige Installation: freundlich in den Play Store leiten und
-      // den Prozess beenden, BEVOR SoLoader/RN irgendetwas Natives laedt (das
-      // wuerde nur wieder crashen). Kein Crash-Loop mehr — jeder App-Tap
-      // oeffnet stattdessen die Store-Seite zum Neu-Installieren.
-      runCatching {
-        Toast.makeText(
-          this,
-          "MarkenDetektive ist unvollständig installiert — bitte über den Play Store neu installieren.",
-          Toast.LENGTH_LONG,
-        ).show()
-        startActivity(
-          Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$packageName"))
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
-      }
-      android.os.Process.killProcess(android.os.Process.myPid())
+      redirectToPlayStoreAndDie()
       return
     }
-    super.onCreate()
-    SoLoader.init(this, OpenSourceMergedSoMapping)
-    if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
-      // If you opted-in for the New Architecture, we load the native entry point for this app.
-      load()
+    // Robuster Catch-All: der native Load kann auch fehlschlagen, wenn NUR der
+    // ABI-Split fehlt (andere Splits vorhanden). Dann wirft SoLoader/RN einen
+    // UnsatisfiedLinkError / SoLoaderDSONotFoundError beim Laden von
+    // libreactnative.so. Topologie-unabhaengig abfangen und in den Store leiten;
+    // alles andere unveraendert weiterwerfen (echte Bugs bleiben sichtbar).
+    try {
+      super.onCreate()
+      SoLoader.init(this, OpenSourceMergedSoMapping)
+      if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
+        // If you opted-in for the New Architecture, we load the native entry point for this app.
+        load()
+      }
+      ApplicationLifecycleDispatcher.onApplicationCreate(this)
+    } catch (t: Throwable) {
+      if (isNativeLoadFailure(t)) {
+        redirectToPlayStoreAndDie()
+      } else {
+        throw t
+      }
     }
-    ApplicationLifecycleDispatcher.onApplicationCreate(this)
   }
 
   override fun onConfigurationChanged(newConfig: Configuration) {
