@@ -128,18 +128,8 @@ android {
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             crunchPngs (findProperty('android.enablePngCrunchInReleaseBuilds')?.toBoolean() ?: true)
-
-            // Native-Crash-Symbolisierung: lädt unstripped .so-Symbole zu Crashlytics,
-            // damit native Stacks (libappmodules.so = autolinked Native-Module = der
-            // Fingerabdruck bei SIGSEGV/SIGABRT) echte Funktionsnamen statt 'pc 0x…'
-            // zeigen. Classpath (firebase-crashlytics-gradle:3.0.2) + apply plugin sind
-            // schon gesetzt; nur dieser Block fehlte. AGP-8-Pfad (mergeReleaseNativeLibs)
-            // ist Pflicht — falscher Pfad bricht den Build (injectCrashlyticsBuildIds).
-            // Prebuilt/stripped Libs (libreactnative/libhermes/libfbjni) bleiben roh.
-            firebaseCrashlytics {
-                nativeSymbolUploadEnabled true
-                unstrippedNativeLibsDir file("${buildDir}/intermediates/merged_native_libs/release/mergeReleaseNativeLibs/out/lib")
-            }
+            // (Native-Symbol-Upload folgt separat — brauchte apply plugin VOR dem
+            //  android{}-Block, sonst "Could not find method firebaseCrashlytics()".)
         }
     }
     packagingOptions {
