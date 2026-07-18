@@ -105,7 +105,7 @@ android {
         applicationId 'de.markendetektive'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1219
+        versionCode 1220
             versionName "6.0.10"
     }
     signingConfigs {
@@ -128,6 +128,18 @@ android {
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             crunchPngs (findProperty('android.enablePngCrunchInReleaseBuilds')?.toBoolean() ?: true)
+
+            // Native-Crash-Symbolisierung: lädt unstripped .so-Symbole zu Crashlytics,
+            // damit native Stacks (libappmodules.so = autolinked Native-Module = der
+            // Fingerabdruck bei SIGSEGV/SIGABRT) echte Funktionsnamen statt 'pc 0x…'
+            // zeigen. Classpath (firebase-crashlytics-gradle:3.0.2) + apply plugin sind
+            // schon gesetzt; nur dieser Block fehlte. AGP-8-Pfad (mergeReleaseNativeLibs)
+            // ist Pflicht — falscher Pfad bricht den Build (injectCrashlyticsBuildIds).
+            // Prebuilt/stripped Libs (libreactnative/libhermes/libfbjni) bleiben roh.
+            firebaseCrashlytics {
+                nativeSymbolUploadEnabled true
+                unstrippedNativeLibsDir file("${buildDir}/intermediates/merged_native_libs/release/mergeReleaseNativeLibs/out/lib")
+            }
         }
     }
     packagingOptions {
