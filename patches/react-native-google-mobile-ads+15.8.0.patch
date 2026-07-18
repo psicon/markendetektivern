@@ -1,0 +1,35 @@
+diff --git a/node_modules/react-native-google-mobile-ads/android/src/main/java/io/invertase/googlemobileads/ReactNativeGoogleMobileAdsBannerAdViewManager.java b/node_modules/react-native-google-mobile-ads/android/src/main/java/io/invertase/googlemobileads/ReactNativeGoogleMobileAdsBannerAdViewManager.java
+index 5671260..8c49eff 100644
+--- a/node_modules/react-native-google-mobile-ads/android/src/main/java/io/invertase/googlemobileads/ReactNativeGoogleMobileAdsBannerAdViewManager.java
++++ b/node_modules/react-native-google-mobile-ads/android/src/main/java/io/invertase/googlemobileads/ReactNativeGoogleMobileAdsBannerAdViewManager.java
+@@ -218,10 +218,26 @@ public class ReactNativeGoogleMobileAdsBannerAdViewManager
+     Activity currentActivity = ((ReactContext) reactViewGroup.getContext()).getCurrentActivity();
+     if (currentActivity == null) return null;
+ 
+-    BaseAdView adView =
+-        ReactNativeGoogleMobileAdsCommon.isAdManagerUnit(reactViewGroup.getUnitId())
+-            ? new AdManagerAdView(currentActivity)
+-            : new AdView(currentActivity);
++    // Defensive (MarkenDetektive patch): der AdView/AdManagerAdView-Konstruktor
++    // initialisiert intern einen android.webkit.WebView. Auf Budget-/Android-10-
++    // Geräten mit fehlendem/deaktiviertem/gerade-aktualisierendem System-WebView
++    // wirft das (WebViewFactory$MissingWebViewPackageException / AndroidRuntime-
++    // Exception) und würde ungefangen den GANZEN Prozess killen (SIGABRT abort,
++    // Crashlytics-Cluster Motorola/Xiaomi/Realme). Statt Crash: Ad sauber failen
++    // (return null ist in dieser Methode ein bereits behandelter Pfad, s. o.).
++    BaseAdView adView;
++    try {
++      adView =
++          ReactNativeGoogleMobileAdsCommon.isAdManagerUnit(reactViewGroup.getUnitId())
++              ? new AdManagerAdView(currentActivity)
++              : new AdView(currentActivity);
++    } catch (Throwable t) {
++      android.util.Log.e(
++          "RNGMA",
++          "Banner AdView-Erzeugung fehlgeschlagen (System-WebView fehlt/aktualisiert?) — Ad wird übersprungen statt den Prozess zu crashen",
++          t);
++      return null;
++    }
+ 
+     adView.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+     adView.setOnPaidEventListener(
