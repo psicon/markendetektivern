@@ -2392,6 +2392,16 @@ Token-Cache + 503-Retry). Vollständige Analyse-Methodik + Referenz-Abfragen:
   Play-API ist die einzige programmatische Crash-Quelle.
 - **Bekannter Top-Crash der App** (Stand 07/2026): `561a7ca7…` = nativer
   `JavaTurboModule::setEventEmitterCallback`-Crash beim Setup des
-  AdMob-TurboModules, NUR armeabi_v7a-Geräte (Galaxy A13 & Co.), existiert
-  seit vc 1065 — NICHT durch den 6.0.11-Banner-Patch abgedeckt. Details §5
-  der Analyse-Doc.
+  AdMob-TurboModules, NUR armeabi_v7a-Geräte (Galaxy A13 & Co. — 32-bit-
+  Userspace trotz arm64-CPU, von Google-CDD bei 2–4 GB RAM so empfohlen),
+  existiert seit vc 1065 — NICHT durch den 6.0.11-Banner-Patch abgedeckt.
+  **Root-Cause = RN-Core-Bug (variadisches JNI `CallVoidMethod` auf 32-bit),
+  gefixt in react-native 0.79.6 — unser 0.79.5 ist die LETZTE Version ohne
+  den Fix.** Fix-Pfad: `npx expo install --fix` (Expo SDK 53 pinnt selbst
+  0.79.6; 0.79.7 = letzte 0.79.x, nimmt noch einen Fabric-Soft-Error-Fix
+  mit) + neuer EAS-Build (C++-Fix in libreactnative.so, NICHT per
+  patch-package nachrüstbar). Crash zeigt sich NUR in signierten
+  Release-Builds auf 32-bit — lokal/Debug nie reproduzierbar. Belege:
+  RN #51628 / PR #51695, invertase#754 (A13 + 0.79.6-Bestätigungen),
+  stripe#2091. Details §9 der Analyse-Doc
+  (`docs/CRASH_ANALYSIS_6011_2026-07-20.md`).

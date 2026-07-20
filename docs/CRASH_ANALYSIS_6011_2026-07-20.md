@@ -173,18 +173,9 @@ libart CallVoidMethodV
   Erstellung). Der Crash passiert früher/woanders: beim Registrieren des
   EventEmitter-Callbacks während des TurboModule-Setups des AdMob-Moduls.
 
-**Handlungsansätze (nach Priorität):**
-1. **Crashlytics-Symbol-Upload reaktivieren** (`firebaseCrashlytics`-Block in
-   `android/app/build.gradle`; der 1221-Build-Fehler entsteht, weil
-   `apply plugin: 'com.google.firebase.crashlytics'` erst NACH dem
-   `android{}`-Block steht — Plugin-Apply VOR den Block ziehen). Dann liefert
-   der nächste Build exakte Zeilen statt Adressen.
-2. **Upstream prüfen:** `JavaTurboModule::setEventEmitterCallback`-Crashes auf
-   32-bit sind ein bekanntes RN-New-Arch-Muster (RN-Core, nicht das
-   AdMob-Modul selbst) — RN-Release-Notes/Issues zur aktuellen RN-Version
-   checken; ein RN-Patch-Level-Bump könnte die Familie beheben.
-3. Falls 1+2 nichts ergeben: prüfen, ob das AdMob-TurboModule-Setup auf
-   armeabi_v7a verzögert/abgesichert werden kann.
+**Handlungsansätze:** → durch die Upstream-Recherche (§9, gleicher Tag)
+vollständig aufgelöst: Root-Cause ist ein RN-Core-Bug, **gefixt in RN 0.79.6**;
+unser 0.79.5 ist die letzte Version ohne den Fix. Details + Beweise in §9.
 
 ---
 
@@ -217,18 +208,144 @@ nachweislich nicht die Haupt-Crash-Ursache der Low-End-Geräte.
 
 ---
 
-## 8. Empfehlungen
+## 8. Empfehlungen (aktualisiert nach §9)
 
 1. **Kein Rollback.** Die 2,30 % sind ein Ein-Tages-/Kleinbasis-Artefakt;
    6.0.11 hat absolut die wenigsten Crashes (3) und 0 ANRs.
-2. **Re-Messung ~22.–23.07.**, wenn 1222 ≥200 Nutzer hat (Erwartung: ≤1 %,
-   analog 1218: 1,59 % → 0,49 %).
-3. **Symbol-Upload-Fix in den nächsten Android-Build** (§5, Punkt 1).
-4. **`561a7ca7` als eigenes Arbeitspaket** behandeln (größter Cluster, 41+
-   Nutzer, Review-Treiber auf Low-End-Samsungs) — beginnend mit RN-Upstream-
-   Recherche nach Symbol-Upload.
+2. **RN 0.79.5 → 0.79.6 (besser gleich 0.79.7) bumpen** — eliminiert per
+   Upstream-Fix den größten Crash-Cluster der App (`561a7ca7`, §9.1).
+   Expo SDK 53 pinnt selbst 0.79.6 → `npx expo install --fix` ist der
+   offizielle Weg. Native Änderung ⇒ neuer EAS-Build nötig.
+3. **Im selben Build: Crashlytics-Symbol-Upload reaktivieren**
+   (`apply plugin: 'com.google.firebase.crashlytics'` VOR den `android{}`-Block
+   ziehen — das war der 1221-Build-Fehler).
+4. **Re-Messung ~22.–23.07.** der 6.0.11-Rate (Erwartung: ≤1 %, analog
+   1218: 1,59 % → 0,49 %); nach dem RN-Bump-Release dann Verifikation, dass
+   `561a7ca7` auf der neuen versionCode verschwindet.
+5. **Optional, zweiter Schritt:** Reanimated 3.17.4 → 3.19.5 gegen die
+   `handleNodeRemovals`-Signatur (§9.3) — verlässt die Expo-Pin-Range,
+   ist aber offiziell RN-0.79-kompatibel. Getrennt vom RN-Bump ausrollen,
+   um Effekte zuordnen zu können.
+6. **Kein armeabi_v7a-Drop, kein Geräte-Ausschluss** — unnötig, da der Fix
+   billiger ist und die Community diesen Weg praktisch nie gegangen ist (§9.4).
 
 ---
+
+## 9. Upstream-Recherche (20.07.2026) — Root-Cause, Fix-Versionen, Erfahrungswerte
+
+Multi-Agent-Web-Recherche mit adversarialer Verifikation: **54 Quellen-Checks,
+alle Kernaussagen an der geöffneten Primärquelle bestätigt** (GitHub-Issues/PRs/
+Commits/Release-Notes/Raw-Source, teils per GitHub-API gegengeprüft).
+
+### 9.1 `561a7ca7` (AdMob-TurboModule, 32-bit) = bekannter RN-Core-Bug, gefixt in 0.79.6
+
+**Root-Cause (Meta-bestätigt):** `JavaTurboModule::setEventEmitterCallback`
+nutzte den **variadischen JNI-Call `CallVoidMethod`** — auf 32-bit-ABIs werden
+Argumente ungeprüft über den Stack übergeben; bei Typ-/Alignment-Differenz
+liest JNI falschen Speicher → SIGSEGV (auf altem/strict ART stattdessen
+CheckJNI-Abort „invalid jobject" = unsere `f43e7a87`-SIGABRT-Schwester).
+
+- **Bug-Issue:** [facebook/react-native#51628](https://github.com/facebook/react-native/issues/51628)
+  — „App Crashes on Android 32bit When emit event from TurboModule";
+  reproduzierbar **nur auf 32-bit-Geräten, nur in signierten Release-Builds**
+  (erklärt, warum wir es lokal nie sahen). Closed „Resolution: Fixed".
+- **Fix:** [PR #51695](https://github.com/facebook/react-native/pull/51695) /
+  Commit [`43bc43e`](https://github.com/facebook/react-native/commit/43bc43e5e85519d2924c4fc80765e66d0c48b1a9)
+  (merged 02.06.2025): `CallVoidMethod` → **`CallVoidMethodA`** mit explizitem
+  jvalue-Array (+ `instance_.get()`). Diff selbst gelesen — geänderte Funktion
+  IST `setEventEmitterCallback`.
+- **Released in RN 0.79.6** (14.08.2025, [Release-Notes](https://github.com/facebook/react-native/releases/tag/v0.79.6):
+  „TurboModule: Fix emitting event from turbo module crashes on 32bit android").
+  Per GitHub-Compare-API dreifach verifiziert: **0.79.5 = ohne Fix (letzte
+  betroffene Version), 0.79.6 = mit Fix.** Ebenso in 0.80.1+ und 0.81+ (SDK 54).
+  Ein zweiter, älterer arm32-Fix an derselben Stelle
+  ([PR #50592](https://github.com/facebook/react-native/pull/50592), in 0.80.0)
+  wurde von Meta nicht nach 0.79 zurückportiert; die Community-Bestätigungen
+  unten zeigen aber, dass 0.79.6 für diese Crash-Klasse in der Praxis reicht.
+- **Exakt unser Modul + Gerät ist dokumentiert:**
+  [invertase/react-native-google-mobile-ads#754](https://github.com/invertase/react-native-google-mobile-ads/issues/754)
+  — identischer Stack (`NativeGoogleMobileAdsNativeModuleSpecJSI` →
+  `setEventEmitterCallback`, armeabi_v7a-Split), explizit **Samsung Galaxy A13**.
+  Maintainer schloss es als Upstream-RN-Bug. Mehrere unabhängige Bestätigungen,
+  dass der 0.79.6-Bump die Crashes beendet — einer **von exakt 0.79.5**:
+  > „I had react-native 0.79.5 (bad luck mine...) and after upgrading to
+  > react-native 0.79.6 …" (carlosmellado, 25.09.2025)
+- **Modul-agnostisch bewiesen:**
+  [stripe/stripe-react-native#2091](https://github.com/stripe/stripe-react-native/issues/2091)
+  — gleicher Crash, gleiches Gerät (A13), anderes Modul. Jedes Codegen-
+  TurboModule mit EventEmitters im Spec triggert ihn; AdMob ist bei uns nur
+  das prominenteste, weil es früh im Boot lädt. **Ein AdMob-Lib-Update
+  (15.8.0 → 16.x) bringt für diesen Crash nichts** (Changelogs 15.8.x–16.4.0
+  lückenlos geprüft: kein entsprechender Fix — der Hebel ist die RN-Version).
+- **Warum der Galaxy A13 überhaupt 32-bit läuft:** Exynos 850 ist arm64-fähig,
+  aber Googles eigene [Android-12-CDD §7.6.1](https://source.android.com/docs/compatibility/12/android-12-cdd)
+  empfiehlt Herstellern bei 2–<4 GB RAM ausdrücklich reinen 32-bit-Userspace
+  („STRONGLY RECOMMENDED to support only 32-bit userspace") → Play liefert
+  diesen Geräten den armeabi_v7a-Split. Betrifft also aktuelle Budget-Geräte,
+  nicht nur Uralt-Hardware.
+- **Wichtig für die Umsetzung:** Der Fix liegt in C++ (`libreactnative.so`,
+  prebuilt Maven-Artefakt) — **nicht per patch-package nachrüstbar**; nur der
+  Versions-Bump zieht das gefixte native Artefakt. Expo SDK 53 pinnt in
+  `bundledNativeModules.json` inzwischen selbst `react-native: 0.79.6` →
+  `npx expo install --fix` ist der offizielle, minimal-invasive Weg (kein
+  SDK-Wechsel, Reanimated bleibt). **0.79.7** (letzte 0.79.x) enthält
+  zusätzlich nur noch einen Fabric-Fix („Make missing parent view state in
+  updateLayout a soft error") — sinnvoller Endpunkt des Patch-Bumps.
+
+### 9.2 `4783a8f4` (Fabric „Unable to find viewState for tag") = ecosystem-weit, echter Fix erst RN 0.86
+
+- In RN 0.79.5 im Framework-Source hart verdrahtet (Raw-Source der Tags
+  geprüft): `addViewAt` → werfendes `getViewState()`; die „Retryable"-Exception
+  wird im Batch-Mount-Pfad **nicht** retried.
+- Meta selbst maß **~44 700 Crashes / 14 600 Nutzer in 30 Tagen** an dieser
+  Signatur und fixte sie per
+  [PR #56389](https://github.com/facebook/react-native/pull/56389)
+  (Crash → Soft-Exception, merged 10.04.2026) — **erstmals released in
+  RN 0.86.0** (Source-Diff 0.85→0.86 verifiziert). Auch RN 0.81 (= Expo
+  SDK 54) hat die Signatur noch ([#53916](https://github.com/facebook/react-native/issues/53916)).
+- Konsequenz für uns: bleibt bis zu einem künftigen Expo-SDK (RN ≥0.86)
+  niedrigvolumig bestehen — bei uns 2–3 Nutzer/Woche, geräteübergreifend.
+  0.79.7 entschärft immerhin die verwandte `updateLayout`-Stelle.
+  Erwartungsmanagement fürs Monitoring, kein akuter Handlungsbedarf.
+
+### 9.3 Reanimated `handleNodeRemovals` (nur 6.0.8 gesehen) = gefixt in Reanimated 3.19.1
+
+- [software-mansion/react-native-reanimated#8001](https://github.com/software-mansion/react-native-reanimated/issues/8001):
+  Thread-Race auf der `removableShadowNodes_`-Map (JS-Thread mutiert während
+  der Fabric-Mount-Hook iteriert → Use-after-free in `getFamily()`). Kein
+  32-bit-Thema — passt zu unserem arm64-Auftreten.
+- Fix [PR #8005](https://github.com/software-mansion/react-native-reanimated/pull/8005)
+  (Locking), **released in 3.19.1**; Produktions-Bestätigung des Reporters
+  per Sentry über große Android-Audience („all those pesky handleNodeRemovals
+  crashes" weg). Code-verifiziert an den Tags: 3.17.4/3.17.5/3.18.2 ungefixt,
+  3.19.1–3.19.5 gefixt. Expo 53 pinnt `~3.17.4` — Bump auf 3.19.5 verlässt
+  die Pin-Range, ist laut offizieller Kompatibilitätstabelle aber
+  RN-0.79/Fabric-supported und läuft nachweislich auf exakt unserer Kombo.
+
+### 9.4 Was andere Teams mit diesen Geräten machen (Community-Reihenfolge)
+
+Aus den Threads (#51628, #754): **Version bumpen > patchen (Build-from-source)
+> New Arch deaktivieren > Geräte-Gating zur Laufzeit.** Ein armeabi_v7a-Drop
+kam als Antwort auf diesen Bug praktisch nicht vor (ein Team nahm 32-bit
+sogar explizit wieder rein). Fakten dazu:
+- arm64-only-AAB ⇒ 32-bit-Userspace-Geräte sehen die App im Store schlicht
+  nicht mehr (still unsichtbar, Bestandsnutzer ohne Updates) — bei unserer
+  Budget-Geräte-Zielgruppe (Cashback!) die falsche Richtung; 32-bit-Anteil
+  2025 je nach Zielgruppe grob ~10 %.
+- Play Console kann einzelne Modelle/SoCs ausschließen (Device catalog →
+  Exclude) — chirurgische Notbremse, hier unnötig.
+- Warnung aus rnmapbox/maps#3913: einzelne native Libs können eigene
+  arm32-Bugs unter Fabric haben → nach dem RN-Bump den armeabi_v7a-Split
+  einmal gezielt testen (`adb install --abi armeabi-v7a` auf arm64-Gerät
+  bzw. 32-bit-Testgerät).
+
+### 9.5 Verifikations-Notizen (Abweichungen der Erst-Recherche)
+
+Bei der adversarialen Prüfung flogen 4 von 54 Behauptungen raus bzw. wurden
+korrigiert — keine betrifft die Kernaussagen: expo/expo#37350 ist inzwischen
+stale-closed (nicht „offen"); eine Workaround-Attribution (User toy0605) war
+falsch zugeordnet; der v16.3.1-Ads-Fix ist iOS-only (nicht Android);
+rnmapbox#3913-Detailangaben teilkorrigiert. Der Rest: quellenbestätigt.
 
 ## Anhang A — Reproduzierbare Abfragen
 
