@@ -2367,3 +2367,31 @@ autonome UI-Tests im Simulator OHNE manuelles Klicken möglich:
   steht in RevenueCatProvider. Frischer Test-Sim: `simctl create` +
   App aus DerivedData installieren + Dev-Client-Deep-Link
   (`markendetektivern://expo-development-client/?url=...`).
+
+## Play Developer Reporting API (Crash-/Vitals-Analysen) — Fallen + Tooling
+
+Helper: `scripts/play-vitals/play_api.py` (JWT aus Play-SA
+`markendetektive-895f7-ee3923910ddd.json`, Scope `playdeveloperreporting`,
+Token-Cache + 503-Retry). Vollständige Analyse-Methodik + Referenz-Abfragen:
+`docs/CRASH_ANALYSIS_6011_2026-07-20.md` (Anhang A/B). Die teuren Fallen:
+
+- **`errorIssues:search`/`errorReports:search` sind GET** (Filter als
+  URL-encodete Query-Params). Ein POST liefert eine generische 404-HTML-Seite —
+  sieht aus wie „Endpoint nicht verfügbar", ist nur die falsche HTTP-Methode
+  (hat am 20.07. fast zur Fehldiagnose „API nicht freigeschaltet" geführt).
+- **DAILY-Metric-Queries brauchen `timeZone {id:"America/Los_Angeles"}`** in
+  start/endTime — sonst kommt **stillschweigend `{}`** statt eines Fehlers.
+- `FULL_RANGE` existiert für crashRate/anrRate nicht (nur HOURLY/DAILY);
+  `errorCountMetricSet` verlangt Dimension `reportType`.
+- **`firstAppVersion`/`lastAppVersion` sind intervall-/filterbezogen.** Eine
+  auf `versionCode = X` gefilterte Abfrage zeigt IMMER first=X — für „seit wann
+  existiert dieser Crash?" ungefiltert + langes Fenster (Issue-IDs sind
+  versionsübergreifend stabil) abfragen.
+- `distinctUsers` gerundet; `errorReports` sind Samples. GA4-BigQuery-Export
+  hat KEINE `app_exception`-Events, Crashlytics-BQ-Export nicht aktiviert →
+  Play-API ist die einzige programmatische Crash-Quelle.
+- **Bekannter Top-Crash der App** (Stand 07/2026): `561a7ca7…` = nativer
+  `JavaTurboModule::setEventEmitterCallback`-Crash beim Setup des
+  AdMob-TurboModules, NUR armeabi_v7a-Geräte (Galaxy A13 & Co.), existiert
+  seit vc 1065 — NICHT durch den 6.0.11-Banner-Patch abgedeckt. Details §5
+  der Analyse-Doc.
