@@ -1,6 +1,10 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+// MUSS vor dem android{}-Block stehen, sonst kennt der release-buildType das
+// firebaseCrashlytics{}-DSL nicht ("Could not find method firebaseCrashlytics()",
+// Build-1221-Fehler).
+apply plugin: 'com.google.firebase.crashlytics'
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
@@ -128,8 +132,11 @@ android {
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             crunchPngs (findProperty('android.enablePngCrunchInReleaseBuilds')?.toBoolean() ?: true)
-            // (Native-Symbol-Upload folgt separat — brauchte apply plugin VOR dem
-            //  android{}-Block, sonst "Could not find method firebaseCrashlytics()".)
+            firebaseCrashlytics {
+                // Native-Symbole (libappmodules/libreactnative etc.) zu Crashlytics
+                // hochladen, damit NDK-Crashes Zeilen statt Adressen zeigen.
+                nativeSymbolUploadEnabled true
+            }
         }
     }
     packagingOptions {
@@ -192,4 +199,3 @@ dependencies {
 }
 
 apply plugin: 'com.google.gms.google-services'
-apply plugin: 'com.google.firebase.crashlytics'
