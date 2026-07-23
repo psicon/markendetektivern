@@ -40,7 +40,13 @@ const FEEDBACK_CHIPS: { key: string; label: string }[] = [
 ];
 
 /**
- * App-Rating-Funnel (Redesign 2026-06-12, psychologische Hebel):
+ * App-Rating-Funnel — seit 2026-07 NUR noch der MANUELLE Pfad
+ * (Profil → 'App bewerten' / Debug). Die AUTOMATISCHEN Trigger
+ * (Erst-Scan-Erfolg, Level-Up) rufen in ratingPrompt.ts DIREKT den
+ * nativen In-App-Review-Dialog auf, ohne dieses Modal — eine
+ * Sentiment-Vorfrage vor der Review-Karte ist auf Android per
+ * Guideline verboten und in DE UWG-riskant. User-initiiert (hier)
+ * ist der Funnel unkritisch. Psychologische Hebel:
  *
  *  1. REZIPROZITÄT: Headline spiegelt zuerst den ERHALTENEN Wert
  *     (echte Gesamtersparnis bzw. Detektiv-Level), dann erst die
@@ -51,8 +57,9 @@ const FEEDBACK_CHIPS: { key: string; label: string }[] = [
  *     vorhanden (Store-konform), aber mit klarer Führung.
  *  3. HELFER-FRAMING im Store-Schritt: 'Hilf anderen Sparfüchsen,
  *     uns zu finden' schlägt die Ich-Bitte 'bewerte uns'. Der
- *     native In-App-Review-Prompt (requestStoreReview) minimiert
- *     die Reibung.
+ *     Store öffnet per Deep-Link (openStoreForManualReview, iOS mit
+ *     ?action=write-review) — Apples dokumentierter Weg für
+ *     button-ausgelöste Bewertungen.
  *  4. Negative Route: 1-Tap-Kategorie-Chips + optionaler Freitext;
  *     diese Nutzer werden nie zum Store geleitet.
  *  5. HYGIENE: X/Später = 60-Tage-Cooldown (markDismissed), nach
@@ -106,7 +113,7 @@ export const AppRatingModal: React.FC<AppRatingModalProps> = ({ visible, onClose
   };
 
   const handleStoreReview = () => {
-    void ratingPromptService.requestStoreReview();
+    void ratingPromptService.openStoreForManualReview();
     resetAndClose();
   };
 
