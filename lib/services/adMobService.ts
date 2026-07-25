@@ -46,11 +46,34 @@ class AdMobService {
         hasInitializeMethod: typeof MobileAds?.initialize === 'function'
       });
       
-      // Set test devices in dev
-      if (__DEV__ && MobileAds.setRequestConfiguration) {
-        await MobileAds.setRequestConfiguration({
-          testDeviceIdentifiers: AD_CONFIG.testDeviceIds,
-        });
+      // Request-Konfiguration — MUSS vor der Initialisierung laufen.
+      //
+      // Der Block lief bis 2026-07 nur unter `__DEV__`, in Production
+      // wurde also NIE eine Inhalts-Obergrenze gesetzt (Default = MA,
+      // also alles). `PG` ist für eine Familien-/Einkaufs-App die
+      // passende Obergrenze.
+      //
+      // EHRLICHE EINORDNUNG: das behebt NICHT die gemeldete
+      // Scareware-Anzeige ("Fakemeldung mein iPhone Speicher waere voll
+      // ... Weiterleitung zum Appstore zur App Cleaner"). Content-Rating
+      // regelt Jugendschutz-Themen (Gewalt, Sprache, Sexualität), nicht
+      // irreführende Werbung. Dagegen hilft nur die AdMob-Konsole:
+      // sensible Kategorie "Herunterladbare Dienstprogramme" blockieren
+      // + die konkrete App via Anzeigenprüfcenter melden/sperren.
+      //
+      // Trade-off: eine Obergrenze schließt Inventar aus und kann die
+      // Fill-Rate leicht senken. Wenn das messbar weh tut, ist 'T' die
+      // weniger strenge Alternative.
+      if (MobileAds.setRequestConfiguration) {
+        try {
+          const { MaxAdContentRating } = require('react-native-google-mobile-ads');
+          await MobileAds.setRequestConfiguration({
+            maxAdContentRating: MaxAdContentRating?.PG ?? 'PG',
+            ...(__DEV__ ? { testDeviceIdentifiers: AD_CONFIG.testDeviceIds } : {}),
+          });
+        } catch (e) {
+          console.warn('⚠️ AdMob setRequestConfiguration failed (non-fatal):', e);
+        }
       }
 
       // Platform-specific initialization

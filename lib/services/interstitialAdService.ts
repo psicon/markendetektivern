@@ -10,12 +10,25 @@ const COUNTER_KEYS = {
   SCAN: '@interstitial_scan_count',
   LAST_SHOWN: '@interstitial_last_shown',
   LIFETIME_ACTIONS: '@interstitial_lifetime_actions', // monotone Lebensdauer-Aktionen
+  DAY_COUNT: '@interstitial_day_count', // "YYYY-MM-DD:n" — Tages-Deckel
 };
 
 // Thresholds
 const THRESHOLDS = {
-  SCAN: 3, // Nach jedem 3. Scan
+  SCAN: 5, // Nach jedem 5. Scan
 };
+
+// Tages-Deckel. Zusammen mit MIN_TIME_BETWEEN_ADS begrenzt das einen
+// Einkauf mit 20 Scans auf 1-2 Vollbild-Ads statt bisher 4-6.
+// Anlass: 16 negative Reviews (Schnitt 1,56) mit Zitaten wie "Nach
+// jedem 2. Scan WERBUNG" und "Einfach zu viel Werbung!" — SCAN:3 und
+// die 1-Minute waren seit Oktober 2025 unverändert, für WIEDERKEHRENDE
+// User (Grace-Period einmal durch = für immer durch) war die Kadenz
+// also identisch zu der beklagten Version.
+const MAX_ADS_PER_DAY = 3;
+// Pro App-Session (In-Memory, kein Storage) — verhindert, dass eine
+// einzige lange Einkaufs-Session mehrfach unterbrochen wird.
+const MAX_ADS_PER_SESSION = 2;
 
 // Grace-Period für NEUE User (App-Store-Reviews: "Werbung schon nach paar
 // Produkten" zerstört den ersten Eindruck). Die ersten N qualifizierenden
@@ -25,12 +38,22 @@ const THRESHOLDS = {
 const GRACE_PERIOD_ACTIONS = 12;
 
 // Minimum time between ads (in milliseconds)
-const MIN_TIME_BETWEEN_ADS = 60000; // 1 Minute
+const MIN_TIME_BETWEEN_ADS = 240000; // 4 Minuten
+
+// Maximale Lade-Versuche nach einem ERROR. Vorher lief hier eine
+// UNBEGRENZTE 5-s-Retry-Schleife — die feuerte für ALLE User weiter,
+// auch für Premium (der Ad-Load ist nicht premium-gegated, nur das
+// Anzeigen).
+const MAX_LOAD_ATTEMPTS = 3;
 
 class InterstitialAdService {
   private interstitialAd: any = null;
   private isLoaded = false;
   private isShowing = false;
+  /** Ads in DIESER App-Session (In-Memory, absichtlich nicht persistiert). */
+  private shownThisSession = 0;
+  /** Lade-Versuche nach ERROR — deckelt die frühere Endlos-Schleife. */
+  private loadAttempts = 0;
 
   async initialize() {
     if (isExpoGo()) {
@@ -86,16 +109,23 @@ class InterstitialAdService {
       this.interstitialAd.addAdEventListener(AdEventType.LOADED, () => {
         console.log('✅ Interstitial loaded');
         this.isLoaded = true;
+        this.loadAttempts = 0;
       });
 
       this.interstitialAd.addAdEventListener(AdEventType.ERROR, (error: any) => {
         console.log('❌ Interstitial failed to load:', error);
         this.isLoaded = false;
-        // Retry loading after error
+        // Gedeckelter Retry (vorher: unbegrenzte 5-s-Schleife, die auch
+        // für Premium-User endlos weiterlief).
+        this.loadAttempts += 1;
+        if (this.loadAttempts >= MAX_LOAD_ATTEMPTS) {
+          console.log(`⛔ Interstitial: ${MAX_LOAD_ATTEMPTS} Lade-Versuche erschöpft — kein weiterer Retry`);
+          return;
+        }
         setTimeout(() => {
-          console.log('🔄 Retrying interstitial load after error...');
+          console.log(`🔄 Retrying interstitial load (${this.loadAttempts}/${MAX_LOAD_ATTEMPTS})...`);
           this.loadAd();
-        }, 5000); // Retry after 5 seconds
+        }, 5000);
       });
 
       this.interstitialAd.addAdEventListener(AdEventType.CLOSED, () => {
@@ -144,6 +174,21 @@ class InterstitialAdService {
       /* im Zweifel weiter (Counter nicht lesbar) */
     }
 
+    // Session-Deckel (In-Memory) — eine lange Einkaufs-Session wird
+    // nicht mehrfach unterbrochen.
+    if (this.shownThisSession >= MAX_ADS_PER_SESSION) {
+      console.log(`🛑 Session-Deckel erreicht (${this.shownThisSession}/${MAX_ADS_PER_SESSION})`);
+      return false;
+    }
+
+    // Tages-Deckel (persistiert). Fehler beim Lesen => im Zweifel
+    // WEITER, aber lieber konservativ: ein nicht lesbarer Zähler darf
+    // keine Ad-Flut erzeugen, also gilt dann nur der Session-Deckel.
+    if ((await this.getTodayCount()) >= MAX_ADS_PER_DAY) {
+      console.log(`🛑 Tages-Deckel erreicht (${MAX_ADS_PER_DAY})`);
+      return false;
+    }
+
     // Check last shown time
     const lastShownStr = await AsyncStorage.getItem(COUNTER_KEYS.LAST_SHOWN);
     if (lastShownStr) {
@@ -155,6 +200,35 @@ class InterstitialAdService {
       }
     }
     return true;
+  }
+
+  /** Lokaler Tages-Schlüssel (Gerätezeit — bewusst, kein Server-Roundtrip). */
+  private todayKey(): string {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+
+  private async getTodayCount(): Promise<number> {
+    try {
+      const raw = await AsyncStorage.getItem(COUNTER_KEYS.DAY_COUNT);
+      if (!raw) return 0;
+      const [day, n] = raw.split(':');
+      if (day !== this.todayKey()) return 0; // anderer Tag => Zähler ist stale
+      const parsed = parseInt(n ?? '', 10);
+      return Number.isFinite(parsed) ? parsed : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  private async bumpTodayCount(): Promise<void> {
+    try {
+      const cur = await this.getTodayCount();
+      await AsyncStorage.setItem(COUNTER_KEYS.DAY_COUNT, `${this.todayKey()}:${cur + 1}`);
+    } catch {
+      /* nicht fatal */
+    }
   }
 
   private async updateLastShownTime() {
@@ -177,12 +251,12 @@ class InterstitialAdService {
     }
   }
 
-  async showIfReady(isPremium: boolean, retryCount: number = 0) {
-    console.log('🎯 showIfReady called:', { 
-      isPremium, 
-      isLoaded: this.isLoaded, 
+  async showIfReady(isPremium: boolean) {
+    console.log('🎯 showIfReady called:', {
+      isPremium,
+      isLoaded: this.isLoaded,
       isShowing: this.isShowing,
-      retryCount 
+      shownThisSession: this.shownThisSession,
     });
     
     // Skip if premium
@@ -224,6 +298,8 @@ class InterstitialAdService {
         console.log('🚀 Showing interstitial ad now!');
         await this.interstitialAd.show();
         await this.updateLastShownTime();
+        this.shownThisSession += 1;
+        await this.bumpTodayCount();
         this.isLoaded = false; // Mark as not loaded after showing
       } catch (error) {
         console.error('❌ Error showing interstitial:', error);
@@ -236,19 +312,16 @@ class InterstitialAdService {
         isShowing: this.isShowing 
       });
       
-      // Try loading if not loaded
+      // Nur vorladen — NICHT verzögert nachfeuern.
+      //
+      // Vorher lief hier ein 3x-2-s-Retry: das Ad konnte bis ~6 s NACH
+      // dem Scan über die inzwischen geöffnete Produktseite fallen
+      // ("Video stört beim Einkaufen", "obwohl man sich brav den
+      // Werbespot angesehen hat, geht es nicht weiter"). Ein
+      // Interstitial gehört an einen Übergangs-Moment oder gar nicht —
+      // ist es nicht rechtzeitig da, greift eben der nächste Trigger.
       if (!this.isLoaded) {
         this.loadAd();
-      }
-      
-      // Retry showing after a delay (max 3 retries)
-      if (retryCount < 3) {
-        setTimeout(() => {
-          console.log(`🔄 Retry ${retryCount + 1}/3 to show interstitial...`);
-          this.showIfReady(isPremium, retryCount + 1);
-        }, 2000); // Retry after 2 seconds
-      } else {
-        console.log('❌ Max retries reached, giving up on showing interstitial');
       }
     }
   }
