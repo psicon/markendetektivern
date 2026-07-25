@@ -1,23 +1,30 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { doc, serverTimestamp, setDoc, updateDoc } from '@react-native-firebase/firestore';
-import { Alert, Linking, Platform } from 'react-native';
+import { Alert, AppState, Linking, Platform } from 'react-native';
 import { db } from '../firebase';
-import { isAnySheetOpen } from './sheetPresence';
+import { CoachmarkService } from './coachmarkService';
+import { isAnySheetOpen, isSurveyVisible } from './sheetPresence';
 
 const RATING_FLAG_KEY = 'pendingRatingPrompt';
 // X/'Später' = sanfter Cooldown statt Sofort-Wiederholung beim
 // naechsten Trigger (Rating-Funnel-Redesign 2026-06-12).
 const DISMISSED_AT_KEY = (uid: string) => `ratingDismissedAt_${uid}`;
 const DISMISS_COOLDOWN_MS = 60 * 24 * 60 * 60 * 1000; // 60 Tage
-// Erst-Erfolgs-Trigger (2026-07): einmalig pro User beim ersten
-// Katalog-Treffer im Scanner scharf geschaltet.
-const FIRST_SCAN_ARMED_KEY = (uid: string) => `ratingFirstScanArmed_${uid}`;
 // Native-Request-Budget: iOS drosselt selbst auf 3×/365 Tage, Play hat
 // ein undokumentiertes Quota — unsere Gates sorgen, dass die wenigen
 // Chancen auf echte Happy Moments fallen statt verpuffen.
 const NATIVE_ASKED_AT_KEY = (uid: string) => `nativeReviewAskedAt_${uid}`;
 const NATIVE_ASKED_VERSION_KEY = (uid: string) => `nativeReviewAskedVersion_${uid}`;
+// Zusätzlich UID-FREI: das 1×-pro-App-Version-Budget ist inhaltlich
+// geräte-, nicht account-gebunden. Ohne diesen Riegel könnte ein
+// Logout + neuer Anonymous-Sign-In (frische uid) im selben Build einen
+// zweiten Dialog auslösen — die Coachmark-Keys sind nämlich NICHT
+// uid-scoped, das Gate stünde also sofort wieder offen.
+const NATIVE_ASKED_VERSION_GLOBAL_KEY = 'nativeReviewAskedVersion_global';
 const NATIVE_ASK_COOLDOWN_MS = 14 * 24 * 60 * 60 * 1000; // 14 Tage
+
+// Synchroner Guard gegen Doppel-Anfragen aus konkurrierenden Kanten.
+let nativeRequestInFlight = false;
 
 interface RatingFlag {
   userId: string;
@@ -78,37 +85,11 @@ class RatingPromptService {
   }
 
   /**
-   * Erst-Erfolgs-Trigger: beim ersten erfolgreichen Katalog-Treffer im
-   * Scanner (NoName- oder Marken-Match, NICHT der External-Fallback)
-   * einmalig den Rating-Prompt scharf schalten. Der 10-s-Poll im
-   * GamificationProvider löst ihn ein, sobald kein Banner/Sheet den
-   * Moment stört — der User hat sein Ergebnis dann schon gesehen.
-   */
-  async armFirstScanSuccess(userId?: string | null): Promise<void> {
-    try {
-      if (!userId) return;
-      // Einmalig pro User — der Key wird IMMER gesetzt, auch wenn die
-      // Gates unten das Flag verhindern ("erster Erfolg" zählt nur einmal).
-      const armed = await AsyncStorage.getItem(FIRST_SCAN_ARMED_KEY(userId));
-      if (armed) return;
-      await AsyncStorage.setItem(FIRST_SCAN_ARMED_KEY(userId), String(Date.now()));
-
-      if (!(await this.shouldShowRating(userId))) return;
-      const flag: RatingFlag = {
-        userId,
-        triggerLevel: 0,
-        timestamp: Date.now(),
-        reason: 'first_scan_success',
-      };
-      await AsyncStorage.setItem(RATING_FLAG_KEY, JSON.stringify(flag));
-      console.log('📱 Rating flag set (first scan success)');
-    } catch (error) {
-      console.error('❌ Error arming first-scan rating:', error);
-    }
-  }
-
-  /**
    * Check and show pending rating (call on navigation)
+   *
+   * NUR noch der LEVEL-UP-Pfad (`setPendingRating`). Der Erst-Erfolgs-
+   * Pfad läuft über `firstCaseService` und schreibt dieses Flag NICHT —
+   * so gibt es keine zwei Pfade auf dasselbe Ereignis.
    *
    * Auto-Pfad = DIREKT der native In-App-Review-Dialog
    * (SKStoreReviewController / Play In-App-Review), bewusst OHNE
@@ -125,42 +106,95 @@ class RatingPromptService {
         return; // Keine pending rating - kein Log nötig (läuft alle 2 Sek)
       }
 
-      // Sheet offen? Flag LIEGEN LASSEN — der nächste Poll versucht es
-      // erneut (kein System-Dialog über einem präsentierten Sheet,
-      // siehe Zwei-Modal-Regel/sheetPresence).
-      if (isAnySheetOpen()) return;
+      // Sheet offen ODER Walkthrough läuft? Flag LIEGEN LASSEN — der
+      // nächste Poll versucht es erneut (kein System-Dialog über einem
+      // präsentierten Sheet oder mitten in einer Tour).
+      if (isAnySheetOpen() || isSurveyVisible()) return;
+      if (CoachmarkService.isAnyActive()) return;
 
       const flag: RatingFlag = JSON.parse(flagData);
       console.log(`📱 Found pending rating flag (${flag.reason ?? `level ${flag.triggerLevel}`})`);
 
-      // Remove flag first (avoid multiple prompts)
-      await AsyncStorage.removeItem(RATING_FLAG_KEY);
-
-      // User hat inzwischen geantwortet / Cooldowns aktiv?
-      if (!(await this.shouldShowRating(flag.userId))) {
+      // Endgültige Absagen (bereits bewertet / Cooldown / Budget) → Flag
+      // verbrauchen, es würde sonst bei jedem Poll neu geprüft.
+      if (!(await this.canRequestNativeReview(flag.userId))) {
+        await AsyncStorage.removeItem(RATING_FLAG_KEY);
         console.log('📱 Rating conditions no longer met - skipping');
         return;
       }
-      if (!(await this.nativeRequestAllowed(flag.userId))) {
-        console.log('📱 Native-Request-Budget verbraucht (Version/14d) - skipping');
-        return;
-      }
 
-      // Konservativ VOR dem Anzeigen verbuchen — nie doppelt feuern.
-      await this.recordNativeRequest(flag.userId);
+      // Flag NICHT vorab löschen: `requestNativeReviewNow` kann am
+      // Moment-Kontext scheitern (Sheet öffnet in den 500 ms, App geht
+      // in den Hintergrund). Früher war das Flag dann weg und der
+      // Level-Up-Prompt bis zum nächsten Level ≥3 verloren.
+      // Doppel-Prompts verhindert `nativeRequestInFlight` + der
+      // Budget-Recheck in requestNativeReviewNow.
       setTimeout(() => {
-        void this.requestNativeReview();
+        void this.requestNativeReviewNow(flag.userId).then((ok) => {
+          if (ok) void AsyncStorage.removeItem(RATING_FLAG_KEY);
+        });
       }, 500);
     } catch (error) {
       console.error('❌ Error checking pending rating:', error);
     }
   }
 
+  /**
+   * Darf jetzt grundsätzlich nach einer Bewertung gefragt werden?
+   * (hasRated / 60-Tage-Dismiss / 1×-App-Version / 14-Tage-Cooldown)
+   * Prüft NICHT den Moment-Kontext — dafür `requestNativeReviewNow`.
+   */
+  async canRequestNativeReview(userId: string): Promise<boolean> {
+    return (
+      (await this.shouldShowRating(userId)) && (await this.nativeRequestAllowed(userId))
+    );
+  }
+
+  /**
+   * Fragt den nativen Dialog an, wenn der MOMENT passt, und verbucht
+   * das Budget ERST DANACH.
+   *
+   * Reihenfolge ist wichtig: früher wurde vor dem Aufruf verbucht —
+   * ein blockierter Versuch (Modul fehlt / App im Hintergrund / Sheet
+   * offen) hat dann das 1×-pro-App-Version-Budget verbrannt, ohne dass
+   * je ein Dialog erschien.
+   *
+   * EHRLICHE GRENZE: `true` heißt "wir haben gefragt und es hat nicht
+   * geworfen" — NICHT, dass iOS/Play die Karte wirklich gezeigt hat.
+   * Beide APIs sind fire-and-forget ohne Rückkanal; ein OS-seitiges
+   * Drosseln bleibt für uns unsichtbar.
+   */
+  async requestNativeReviewNow(userId: string): Promise<boolean> {
+    if (nativeRequestInFlight) return false;
+    // Kein System-Dialog über einem präsentierten Sheet/Modal.
+    if (isAnySheetOpen() || isSurveyVisible()) return false;
+    if (CoachmarkService.isAnyActive()) return false;
+    // Im Hintergrund würde der Dialog verpuffen (Android: kein
+    // currentActivity → nur ein Log.w) und das Budget kosten.
+    if (AppState.currentState !== 'active') return false;
+    // Budget hier NOCHMAL prüfen (nicht nur beim Aufrufer): sonst können
+    // zwei zeitlich versetzte Einstiegspfade — Erst-Fall-Sequenz und
+    // Level-Up-Poll mit seinen 500 ms Verzögerung — beide durchkommen
+    // und zwei Dialoge hintereinander anfragen (Play-Quota verbrannt).
+    if (!(await this.canRequestNativeReview(userId))) return false;
+
+    nativeRequestInFlight = true;
+    try {
+      const ok = await this.requestNativeReview();
+      if (ok) await this.recordNativeRequest(userId);
+      return ok;
+    } finally {
+      nativeRequestInFlight = false;
+    }
+  }
+
   /** Gate fürs native Review: max 1×/App-Version UND ≥14 Tage Abstand. */
   private async nativeRequestAllowed(userId: string): Promise<boolean> {
     try {
-      const Application = require('expo-application');
-      const version: string = Application?.nativeApplicationVersion ?? 'unknown';
+      const version = this.appVersion();
+      // Geräteweit (uid-frei) — überlebt einen uid-Wechsel.
+      const askedGlobal = await AsyncStorage.getItem(NATIVE_ASKED_VERSION_GLOBAL_KEY);
+      if (askedGlobal && askedGlobal === version) return false;
       const askedVersion = await AsyncStorage.getItem(NATIVE_ASKED_VERSION_KEY(userId));
       if (askedVersion && askedVersion === version) return false;
       const askedAt = await AsyncStorage.getItem(NATIVE_ASKED_AT_KEY(userId));
@@ -174,12 +208,24 @@ class RatingPromptService {
     }
   }
 
-  private async recordNativeRequest(userId: string): Promise<void> {
+  /** Lazy require: `expo-application` erst beim Aufruf anfassen. */
+  private appVersion(): string {
     try {
       const Application = require('expo-application');
-      const version: string = Application?.nativeApplicationVersion ?? 'unknown';
-      await AsyncStorage.setItem(NATIVE_ASKED_AT_KEY(userId), String(Date.now()));
-      await AsyncStorage.setItem(NATIVE_ASKED_VERSION_KEY(userId), version);
+      return Application?.nativeApplicationVersion ?? 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  private async recordNativeRequest(userId: string): Promise<void> {
+    try {
+      const version = this.appVersion();
+      await AsyncStorage.multiSet([
+        [NATIVE_ASKED_AT_KEY(userId), String(Date.now())],
+        [NATIVE_ASKED_VERSION_KEY(userId), version],
+        [NATIVE_ASKED_VERSION_GLOBAL_KEY, version],
+      ]);
     } catch (error) {
       console.error('❌ Error recording native review request:', error);
     }
@@ -356,11 +402,21 @@ class RatingPromptService {
 
   /**
    * Clear all rating data (for testing)
+   *
+   * MUSS alle Gate-Keys mitnehmen — sonst ist der Auto-Pfad nach EINEM
+   * Testlauf bis zum nächsten Version-Bump tot und mit Bordmitteln
+   * nicht zurücksetzbar (das 1×-pro-App-Version-Budget greift).
    */
   async clearRatingData(userId: string): Promise<void> {
     try {
-      await AsyncStorage.removeItem(RATING_FLAG_KEY);
-      await AsyncStorage.removeItem(`hasRated_${userId}`);
+      await AsyncStorage.multiRemove([
+        RATING_FLAG_KEY,
+        `hasRated_${userId}`,
+        DISMISSED_AT_KEY(userId),
+        NATIVE_ASKED_AT_KEY(userId),
+        NATIVE_ASKED_VERSION_KEY(userId),
+        NATIVE_ASKED_VERSION_GLOBAL_KEY,
+      ]);
       console.log('🧹 Rating data cleared');
     } catch (error) {
       console.error('❌ Error clearing rating data:', error);

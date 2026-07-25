@@ -29,7 +29,7 @@ import {
   snoozeActionSurveysToday,
 } from '@/lib/services/surveyService';
 import { setSurveyPrompter } from '@/lib/services/surveyPromptBus';
-import { isAnySheetOpen, whenSheetsIdle } from '@/lib/services/sheetPresence';
+import { isAnySheetOpen, setSurveyVisible, whenSheetsIdle } from '@/lib/services/sheetPresence';
 import {
   showCashbackNudgeToast,
   showInfoToast,
@@ -97,6 +97,16 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
   const [activityNonce, setActivityNonce] = useState(0);
   const startedAtRef = useRef(0);
   const completedRef = useRef(false);
+
+  // Sichtbarkeit an den Bus spiegeln: dieses Sheet zählt bewusst NICHT
+  // im sheetPresence-Zähler (registerPresence={false}, sonst blockiert
+  // es sich selbst) und ist damit für `isAnySheetOpen()` unsichtbar.
+  // Andere Konsumenten (z.B. der native Review-Dialog) müssen es aber
+  // sehen können, um nicht darüber zu präsentieren.
+  useEffect(() => {
+    setSurveyVisible(visible);
+    return () => setSurveyVisible(false);
+  }, [visible]);
 
   // Öffnet das Sheet. WICHTIG: niemals ein zweites RN-Modal über einem
   // bereits offenen Sheet präsentieren (RatingsSheet/FilterSheet) — das

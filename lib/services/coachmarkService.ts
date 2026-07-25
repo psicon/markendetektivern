@@ -48,12 +48,20 @@ export const ALL_TOUR_KEYS: TourKey[] = [
   'rewards',
 ];
 
+// Die Touren, die den EINSTIEG erklären — das ist aus User-Sicht "der
+// Walk-Through": Home-Spotlight → Tap auf die Demo-Karte → 5-Step-Tour
+// auf der Produktseite. `rewards` gehört bewusst NICHT dazu: die Tour
+// hängt am Belohnungen-Tab, den viele nie oder erst spät öffnen — ein
+// Gate darauf würde nie freigeben.
+export const INTRO_TOUR_KEYS: TourKey[] = ['home', 'product-detail'];
+
 // Storage-Key-Präfix — Namespace ist bewusst NICHT `onboarding/*`
 // damit Search/Grep für Onboarding-Code keinen Treffer hier
 // fälschlich mit-anzieht.
 const STORAGE_PREFIX = `coachmark/${COACHMARK_VERSION}/`;
 
 const storageKeyFor = (tour: TourKey) => `${STORAGE_PREFIX}${tour}`;
+const modeKeyFor = (tour: TourKey) => `${storageKeyFor(tour)}_mode`;
 
 // ─── Replay-Event-Bus ─────────────────────────────────────────────
 //
@@ -111,7 +119,7 @@ export const CoachmarkService = {
       // kommen, nach SKIP erst beim 2. App-Start oder nach dem ersten
       // Produktbesuch. Bestandsdaten ohne Modus-Key gelten als
       // 'completed' (kein Aufschub — Verhalten wie bisher).
-      await AsyncStorage.setItem(`${storageKeyFor(tour)}_mode`, safeMode);
+      await AsyncStorage.setItem(modeKeyFor(tour), safeMode);
     } catch (e) {
       console.warn('Coachmark markSeen failed (non-fatal):', e);
     }
@@ -120,11 +128,28 @@ export const CoachmarkService = {
   /** Wie wurde die Tour beendet? null = kein Modus gespeichert (Altdaten). */
   async getSeenMode(tour: TourKey): Promise<'completed' | 'skipped' | null> {
     try {
-      const v = await AsyncStorage.getItem(`${storageKeyFor(tour)}_mode`);
+      const v = await AsyncStorage.getItem(modeKeyFor(tour));
       return v === 'skipped' || v === 'completed' ? v : null;
     } catch {
       return null;
     }
+  },
+
+  /**
+   * Ist der Einstiegs-Walk-Through durch? (Home-Spotlight + Produkt-
+   * Tour, siehe INTRO_TOUR_KEYS.) Basis für den "Erster Fall"-Review-
+   * Trigger (firstCaseService).
+   *
+   * Absichtlich auf `getSeen` und NICHT auf `getSeenMode('completed')`:
+   * Skip zählt als durch (die Tour kommt nicht wieder), und der Modus
+   * ist für die Tutorial-Touren derzeit ohnehin nicht verlässlich.
+   * Erbt das FAIL-OPEN von `getSeen` (Storage-Fehler ⇒ true) — im
+   * Zweifel kommt der Prompt einen Moment zu früh, statt für diese
+   * User für immer gesperrt zu sein.
+   */
+  async hasCompletedIntroTours(): Promise<boolean> {
+    const seen = await Promise.all(INTRO_TOUR_KEYS.map((t) => this.getSeen(t)));
+    return seen.every(Boolean);
   },
 
   /**
@@ -158,7 +183,9 @@ export const CoachmarkService = {
    */
   async resetOne(tour: TourKey): Promise<void> {
     try {
-      await AsyncStorage.removeItem(storageKeyFor(tour));
+      // `_mode` MIT löschen — sonst überlebt der alte Modus jeden
+      // Dev-Reset und verfälscht Testläufe (z.B. Demografie-Aufschub).
+      await AsyncStorage.multiRemove([storageKeyFor(tour), modeKeyFor(tour)]);
     } catch (e) {
       console.warn('Coachmark resetOne failed (non-fatal):', e);
     }
@@ -171,7 +198,9 @@ export const CoachmarkService = {
    */
   async resetAll(): Promise<void> {
     try {
-      await AsyncStorage.multiRemove(ALL_TOUR_KEYS.map(storageKeyFor));
+      await AsyncStorage.multiRemove(
+        ALL_TOUR_KEYS.flatMap((t) => [storageKeyFor(t), modeKeyFor(t)]),
+      );
     } catch (e) {
       console.warn('Coachmark resetAll failed (non-fatal):', e);
     }

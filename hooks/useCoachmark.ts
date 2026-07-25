@@ -43,7 +43,7 @@ export type UseCoachmarkResult = {
   /** Soll das Overlay aktuell sichtbar sein? */
   visible: boolean;
   /** Schließt das Overlay UND markiert als gesehen. */
-  dismiss: () => void;
+  dismiss: (mode?: 'completed' | 'skipped') => void;
   /** Schließt OHNE als gesehen zu markieren. Aktuell unused. */
   forceClose: () => void;
 };

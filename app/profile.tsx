@@ -58,6 +58,10 @@ import { AuthRequiredModal } from '@/components/ui/AuthRequiredModal';
 import { SimilarityStagesModal } from '@/components/ui/SimilarityStagesModal';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useGamificationEnabled } from '@/hooks/useGamificationEnabled';
+import {
+  bannerDataFromFirstCase,
+  useGamification,
+} from '@/components/ui/GamificationProvider';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
@@ -93,6 +97,7 @@ export default function ProfileScreen() {
   // Stats, "Belohnungen & Level"-Menüeintrag werden ausgeblendet.
   // Cashback (€) bleibt sichtbar weil das echtes Geld ist.
   const gamificationEnabled = useGamificationEnabled();
+  const { showBanner } = useGamification();
   const navigation = useNavigation();
 
   const { user, userProfile, logout, isAnonymous } = useAuth();
@@ -745,6 +750,57 @@ export default function ProfileScreen() {
       Alert.alert(
         'Zurückgesetzt',
         'Scan-Flag, Rating-Gates und Coachmark-Touren sind zurückgesetzt. Nach dem nächsten Walk-Through + Katalog-Treffer kommt der Review-Dialog erneut.',
+      );
+    } catch (e: any) {
+      Alert.alert('Fehler', String(e?.message ?? e));
+    }
+  };
+
+  /**
+   * Nur die Feier zeigen — reine Optik-Vorschau, aendert KEINEN State.
+   * Fuer Copy-/Design-Iterationen am Banner.
+   */
+  const onFirstCaseBannerPreview = () => {
+    showBanner(bannerDataFromFirstCase());
+  };
+
+  /**
+   * Die ECHTE Sequenz durchspielen: setzt die Vorbedingungen und laesst
+   * dann den produktiven Pfad im GamificationProvider laufen — Feier
+   * ueber die normale Banner-Queue, danach (nach ~2,5 s Ruhe) der native
+   * Bewertungsdialog. Simuliert also nicht, sondern triggert.
+   */
+  const onFirstCaseRunFull = async () => {
+    try {
+      if (!user?.uid) {
+        Alert.alert('Erster Fall', 'Kein User eingeloggt.');
+        return;
+      }
+      const [{ FirstCaseService }, { CoachmarkService }] = await Promise.all([
+        import('@/lib/services/firstCaseService'),
+        import('@/lib/services/coachmarkService'),
+      ]);
+      // Alles zuruecksetzen, damit die Sequenz wiederholbar ist —
+      // inkl. Rating-Budget (1x/App-Version), sonst laeuft sie genau
+      // einmal pro Build.
+      await FirstCaseService.reset(user.uid);
+      await ratingPromptService.clearRatingData(user.uid);
+      // Walk-Through-Bedingung erfuellen (die zwei Intro-Touren).
+      await CoachmarkService.markSeen('home');
+      await CoachmarkService.markSeen('product-detail');
+      // Erst-Erfolg verbuchen — das feuert den Bus, der Provider
+      // uebernimmt ab hier von selbst.
+      await FirstCaseService.markScanSuccess(user.uid);
+
+      const { gamificationSettingsService } = await import(
+        '@/lib/services/gamificationSettingsService'
+      );
+      const disabled = await gamificationSettingsService.areNotificationsDisabled();
+      Alert.alert(
+        'Erster Fall laeuft',
+        disabled
+          ? 'Sequenz gestartet. "Spielerische Inhalte" sind AUS — es gibt daher bewusst KEINE Feier, der Bewertungsdialog kommt gleich direkt.'
+          : 'Sequenz gestartet: Glueckwunsch-Feier, danach der native Bewertungsdialog (~2,5 s nach dem Ende der Feier).\n\nHinweis: die Intro-Touren gelten jetzt als gesehen — "Erster-Fall-Trigger zuruecksetzen" macht das rueckgaengig.',
       );
     } catch (e: any) {
       Alert.alert('Fehler', String(e?.message ?? e));
@@ -1762,10 +1818,24 @@ export default function ProfileScreen() {
                 }}
               />
               <MenuRow
+                icon="party-popper"
+                color="#f59e0b"
+                label="Erster-Fall-Sequenz durchspielen"
+                sub={'Echter Pfad: Feier „Erster Fall geschlossen“ + danach der native Bewertungsdialog'}
+                onPress={onFirstCaseRunFull}
+              />
+              <MenuRow
+                icon="eye-outline"
+                color="#f59e0b"
+                label="Nur die Feier anzeigen"
+                sub="Banner-Vorschau ohne State-Änderung (Copy/Design prüfen)"
+                onPress={onFirstCaseBannerPreview}
+              />
+              <MenuRow
                 icon="magnify-scan"
                 color="#f59e0b"
                 label="Erster-Fall-Status anzeigen"
-                sub="Scan-Erfolg / Walk-Through / Rating-Gates des Auto-Prompts"
+                sub="Scan-Erfolg / Feier / Walk-Through / Rating-Gates"
                 onPress={onFirstCaseStatus}
               />
               <MenuRow

@@ -64,3 +64,29 @@ export function whenSheetsIdle(cb: () => void): () => void {
   idleListeners.add(cb);
   return () => idleListeners.delete(cb);
 }
+
+// ─── Sonderfall: Umfrage-Sheet ────────────────────────────────────
+//
+// Der Umfrage-Sheet (components/survey/SurveyProvider) ist ein echtes
+// RN-<Modal> (FilterSheet), registriert sich aber bewusst NICHT im
+// Zähler oben (`registerPresence={false}`) — sonst würde es sich beim
+// Öffnen selbst blockieren. Damit ist es für `isAnySheetOpen()`
+// unsichtbar, obwohl es präsentiert ist.
+//
+// Konsumenten, die kein zweites Modal/keinen System-Dialog darüber
+// legen dürfen (z.B. der native Review-Dialog), brauchen diese Info.
+// Da Umfragen nach JEDER Aktion angestoßen werden — auch beim
+// allerersten Scan — fällt das genau mit dem "Erster Fall"-Review-
+// Moment zusammen.
+
+let surveyVisible = false;
+
+/** Vom SurveyProvider bei jedem Öffnen/Schließen gesetzt. */
+export function setSurveyVisible(v: boolean): void {
+  surveyVisible = v;
+}
+
+/** Ist gerade ein Umfrage-Sheet präsentiert? */
+export function isSurveyVisible(): boolean {
+  return surveyVisible;
+}

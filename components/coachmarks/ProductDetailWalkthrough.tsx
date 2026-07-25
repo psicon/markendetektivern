@@ -45,7 +45,7 @@ export type ProductDetailScreenType = 'noname' | 'comparison';
 
 export type ProductDetailWalkthroughProps = {
   visible: boolean;
-  onDismiss: () => void;
+  onDismiss: (mode?: 'completed' | 'skipped') => void;
   /**
    * Welcher Detail-Screen mountet die Tour. Beeinflusst Texte
    * der hero- und context-Phasen.
@@ -136,7 +136,8 @@ export function ProductDetailWalkthrough({
   const advance = useCallback(() => {
     const idx = PHASES_ORDER.indexOf(phase);
     if (idx < 0 || idx >= PHASES_ORDER.length - 1) {
-      onDismiss();
+      // Letzter Step durchgeklickt = echte Completion.
+      onDismiss('completed');
       return;
     }
     setPhase(PHASES_ORDER[idx + 1]);
@@ -174,9 +175,9 @@ export function ProductDetailWalkthrough({
       anchorId={config.anchorId}
       title={config.title}
       body={config.body}
-      onSkip={() => onDismiss()}
+      onSkip={() => onDismiss('skipped')}
       skipLabel="Tour beenden"
-      onPrimary={isLastStep ? () => onDismiss() : advance}
+      onPrimary={isLastStep ? () => onDismiss('completed') : advance}
       primaryLabel={primaryLabel}
     />
   );

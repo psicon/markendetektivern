@@ -41,7 +41,7 @@ const PHASES_ORDER: Phase[] = ['hero', 'earn', 'redeem'];
 
 export type RewardsWalkthroughProps = {
   visible: boolean;
-  onDismiss: () => void;
+  onDismiss: (mode?: 'completed' | 'skipped') => void;
 };
 
 function configForPhase(
@@ -99,7 +99,8 @@ export function RewardsWalkthrough({
   const advance = useCallback(() => {
     const idx = PHASES_ORDER.indexOf(phase);
     if (idx < 0 || idx >= PHASES_ORDER.length - 1) {
-      onDismiss();
+      // Letzter Step durchgeklickt = echte Completion.
+      onDismiss('completed');
       return;
     }
     setPhase(PHASES_ORDER[idx + 1]);
@@ -127,7 +128,7 @@ export function RewardsWalkthrough({
       title={config.title}
       body={config.body}
       lottie={config.lottie}
-      onSkip={() => onDismiss()}
+      onSkip={() => onDismiss('skipped')}
       onPrimary={advance}
       primaryLabel={primaryLabel}
     />

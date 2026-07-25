@@ -1,4 +1,5 @@
 import * as Haptics from 'expo-haptics';
+import { AppState } from 'react-native';
 import { safeNavigate, safePush } from '@/lib/utils/safeNav';
 import { getCurrentPathname } from '@/lib/utils/currentRoute';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -12,14 +13,22 @@ import {
 } from '@/lib/services/achievementService';
 import { formatCents } from '@/lib/types/cashback';
 import { CoachmarkService } from '@/lib/services/coachmarkService';
+import { FirstCaseService } from '@/lib/services/firstCaseService';
 import { gamificationSettingsService } from '@/lib/services/gamificationSettingsService';
 import { ratingPromptService } from '@/lib/services/ratingPrompt';
+import { isAnySheetOpen, isSurveyVisible } from '@/lib/services/sheetPresence';
 import { RATING_POLL_INTERVAL_MS } from '@/lib/perfFlags';
+
 import { showInfoToast, showPointsToast, showStreakToast as showStreakToastNew } from '@/lib/services/ui/toast';
 import { Achievement } from '@/lib/types/achievements';
 import React, { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { type BannerData } from './AchievementUnlockBanner';
 import { AppRatingModal } from './AppRatingModal';
+
+// Ruhe-Fenster nach der letzten Feier-Kante, bevor der native
+// Review-Dialog angefragt wird (gibt EdgeGlow-Nachlauf, Queue-Drain
+// und Punkte-Toasts Luft).
+const FIRST_CASE_SETTLE_DELAY_MS = 2500;
 
 // AchievementUnlockBanner LAZY laden — sein Modul importiert
 // transitiv @shopify/react-native-skia (durch EdgeGlow) und das ist
@@ -235,6 +244,56 @@ export function bannerDataFromCashbackPayout(cashbackCents: number): BannerData 
   };
 }
 
+/**
+ * "Erster Fall geschlossen" (ClickUp 86cav7gqm) — die Feier für den
+ * ersten echten Erfolg (Katalog-Treffer im Scanner), gezeigt sobald
+ * zusätzlich der Walk-Through durch ist.
+ *
+ * EIGENE Banner-Quelle statt Umtexten des `first_action_any`-
+ * Achievements: dieses Achievement wird im Standard-Funnel schon vom
+ * Walkthrough-Demo-Tap verbraucht (die Demo-Karte führt auf eine
+ * Produktseite → `trackAction('view_comparison')`), also LANGE bevor
+ * der User zum ersten Mal selbst scannt. Ein Umtexten hätte die Feier
+ * dort verbrannt und im entscheidenden Moment gar keinen Banner gehabt.
+ *
+ * Der native Review-Dialog hängt an der Beendigung GENAU DIESES
+ * Banners — dadurch ist die Reihenfolge "erst Feier, dann Frage"
+ * strukturell garantiert und kann nicht von einem noch ausstehenden
+ * anderen Banner überholt werden (presentBanner reiht ein, dismissBanner
+ * drainiert).
+ *
+ * KEINE Punkte am Banner: eine Belohnung in unmittelbarer Nähe zur
+ * Bewertungsbitte wäre Incentivierung (Apple 3.2.2(x), Play-Policy,
+ * UWG). Die Punkte für die Aktion selbst laufen unabhängig weiter.
+ */
+export function bannerDataFromFirstCase(): BannerData {
+  return {
+    title: 'Erster Fall geschlossen!',
+    // Kurz halten: der Banner gibt dem Subtitle 2 Zeilen neben Lottie
+    // (72 px) — ein längerer Satz wird bei großer System-Schrift
+    // (maxFontSizeMultiplier 1.3) abgeschnitten.
+    subtitle: 'Herzlichen Glückwunsch, Detektiv!',
+    lottie: (() => {
+      try {
+        return require('@/assets/lottie/firstaction.json');
+      } catch {
+        return require('@/assets/lottie/confetti.json');
+      }
+    })(),
+    tint: '#F0A030',
+    // EdgeGlow shimmert Gold ↔ Brand-Grün.
+    secondaryTint: '#0d8575',
+    withGlow: true,
+    onTap: () => {
+      try {
+        safePush('/achievements' as any);
+      } catch (e) {
+        console.warn('First-case banner nav failed (non-fatal):', e);
+      }
+    },
+  };
+}
+
 // Kurze Toast-Texte für abgelehnte Bons (die ausführliche Begründung
 // steht im pending/[id]-Screen). Klein wie eine Fehlermeldung.
 function cashbackRejectToastMsg(reason?: string | null, maxAgeDays?: number | null): string {
@@ -382,6 +441,141 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     return off;
   }, []);
 
+  // ─── "Erster Fall geschlossen" → nativer Review ────────────────
+  //
+  // ZWEI PHASEN (ClickUp 86cav7gqm), damit die Reihenfolge
+  // "erst Feier, dann Frage" strukturell garantiert ist:
+  //
+  //   PHASE 1  tryCelebrateFirstCase: sobald Erst-Erfolg UND
+  //            Walk-Through vorliegen, zeigt der Provider EINE eigene
+  //            Glückwunsch-Feier (bannerDataFromFirstCase) über
+  //            presentBanner — die reiht sich in die normale
+  //            Banner-Queue ein, kommt also nach etwaigen anderen
+  //            Feiern und wird während einer Tour gequeued.
+  //   PHASE 2  trySettleFirstCase: fragt den nativen Dialog an,
+  //            sobald nichts mehr läuft. Läuft NUR, wenn Phase 1 die
+  //            Sequenz gestartet hat (firstCaseAwaitingReviewRef) —
+  //            deshalb kann der Dialog nie kontextfrei erscheinen.
+  //
+  // WARUM NICHT AM ACHIEVEMENT-BANNER: das `first_action_any`-
+  // Achievement ist im Standard-Funnel schon vom Walkthrough-Demo-Tap
+  // verbraucht (Demo-Karte → Produktseite → trackAction), also lange
+  // vor dem ersten eigenen Scan — dort hätte die Feier gefehlt.
+  //
+  // DER TIMER WARTET AUF NICHTS (das wäre das verbotene Time-based
+  // Debouncing): er terminiert nur eine RE-EVALUIERUNG. Die
+  // Entscheidung fällt ausschließlich über synchron gelesene Refs/
+  // States. Zu früh gefeuert ⇒ Gate greift, nichts wird verbraucht,
+  // die nächste Kante versucht es erneut. Zu JEDEM Gate gibt es eine
+  // Gegenkante (Banner, Tour, Modal, Arm-Bus, AppState) — sonst bliebe
+  // ein geblockter Versuch für immer liegen.
+  //
+  // BEWUSSTE GRENZE: wird die App zwischen Feier und Dialog gekillt,
+  // ist die Erst-Fall-Chance verbraucht (celebratedAt ist gesetzt, die
+  // Sequenz-Ref lebt nur in der Session). Alternative wäre ein
+  // kontextfreier Prompt beim nächsten Start — genau davor warnen die
+  // Store-Guidelines. Zweite Chance bleibt der Level-Up-Pfad.
+  const [firstCaseTick, setFirstCaseTick] = useState(0);
+  const bumpFirstCaseTick = useCallback(() => setFirstCaseTick((n) => n + 1), []);
+
+  // Kanten, die eine Re-Evaluierung auslösen:
+  //  • Erst-Erfolg frisch verbucht (Bus)
+  //  • App kommt in den Vordergrund (AppState-Gate war sonst blind)
+  // Die übrigen Kanten liefern die Effect-Deps unten (Banner, Tour,
+  // Rating-Modal). Wichtig ist, dass es zu JEDEM Gate eine Gegenkante
+  // gibt — sonst bleibt ein geblockter Versuch für immer liegen.
+  useEffect(() => FirstCaseService.onArmed(bumpFirstCaseTick), [bumpFirstCaseTick]);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') bumpFirstCaseTick();
+    });
+    return () => sub.remove();
+  }, [bumpFirstCaseTick]);
+
+  // Läuft die Feier→Review-Sequenz? Wird gesetzt, sobald die Feier
+  // präsentiert/eingereiht ist, und ist die BEDINGUNG dafür, dass
+  // überhaupt ein Review-Versuch stattfindet. Damit kann der Dialog
+  // niemals kontextfrei erscheinen (z.B. beim Kaltstart auf Home) —
+  // ohne diese Ref wäre jeder Mount eine gültige "Ruhe-Kante".
+  const firstCaseAwaitingReviewRef = useRef(false);
+  const firstCaseCelebrateBusyRef = useRef(false);
+
+  /** PHASE 1: Feier zeigen, sobald Erst-Erfolg UND Walk-Through da sind. */
+  const tryCelebrateFirstCase = useCallback(async () => {
+    const uid = user?.uid;
+    if (!uid) return;
+    if (firstCaseAwaitingReviewRef.current) return; // Sequenz läuft schon
+    if (firstCaseCelebrateBusyRef.current) return; // synchroner Guard
+    firstCaseCelebrateBusyRef.current = true;
+    try {
+      if (!(await FirstCaseService.shouldCelebrate(uid))) return;
+      // Verbuchen BEVOR wir zeigen — die Feier ist einmalig, und ein
+      // Doppel-Banner wäre schlimmer als ein verlorener Banner.
+      await FirstCaseService.markCelebrated(uid);
+      firstCaseAwaitingReviewRef.current = true;
+
+      const notificationsDisabled =
+        await gamificationSettingsService.areNotificationsDisabled();
+      if (notificationsDisabled) {
+        // Für diese User gibt es bewusst KEINE Feier. Der Review folgt
+        // trotzdem am nächsten Ruhe-Punkt — das ist Absicht, kein Bug.
+        console.log('🔕 Erster-Fall-Feier unterdrückt (Spielerische Inhalte aus)');
+      } else {
+        // presentBanner reiht sich korrekt ein (Walkthrough aktiv oder
+        // anderer Banner offen → Queue) — dadurch kommt unsere Feier
+        // garantiert NACH etwaigen anderen Feiern.
+        presentBanner(bannerDataFromFirstCase());
+      }
+      // Frische Kante für Phase 2 erzwingen: das Setzen einer Ref löst
+      // keinen Re-Render aus, und im unterdrückten Fall gibt es auch
+      // keine bannerData-Änderung, die den Settle-Effect neu anstößt.
+      bumpFirstCaseTick();
+    } catch (e) {
+      console.warn('First-case celebration failed (non-fatal):', e);
+    } finally {
+      firstCaseCelebrateBusyRef.current = false;
+    }
+  }, [user?.uid, presentBanner, bumpFirstCaseTick]);
+
+  useEffect(() => {
+    if (walkthroughActive) return; // Tour läuft → nach ihrem Ende erneut
+    void tryCelebrateFirstCase();
+  }, [firstCaseTick, walkthroughActive, tryCelebrateFirstCase]);
+
+  /** PHASE 2: nach der Feier den nativen Dialog anfragen. */
+  const trySettleFirstCase = useCallback(() => {
+    if (!firstCaseAwaitingReviewRef.current) return;
+    // Refs sind die einzigen synchron aktuellen Quellen (bannerData als
+    // State kann im selben Tick veraltet sein) — insbesondere deckt
+    // `bannerQueueRef` den Fall ab, dass noch ein Banner WARTET.
+    if (bannerShowingRef.current) return;
+    if (bannerQueueRef.current.length > 0) return;
+    if (CoachmarkService.isAnyActive()) return;
+    if (isAnySheetOpen() || isSurveyVisible()) return;
+    if (AppState.currentState !== 'active') return;
+    void FirstCaseService.maybeRequestReview(user?.uid).then((outcome) => {
+      if (outcome === 'requested' || outcome === 'already' || outcome === 'gated') {
+        // Sequenz abgeschlossen bzw. endgültig gegated → nicht weiter
+        // versuchen. 'unavailable'/'busy' bleiben offen für die nächste
+        // Kante (Sheet zu, App wieder aktiv …).
+        firstCaseAwaitingReviewRef.current = false;
+      }
+      if (outcome === 'requested') {
+        console.log('⭐ Erster Fall — nativer Review angefragt');
+      }
+    });
+  }, [user?.uid]);
+
+  // Ruhe-Kanten für Phase 2: Banner weg, Walkthrough zu Ende, Rating-
+  // Modal zu, Tick (Arm / App wieder im Vordergrund).
+  useEffect(() => {
+    if (bannerData !== null) return;
+    if (walkthroughActive) return;
+    if (showAppRatingModal) return;
+    const t = setTimeout(trySettleFirstCase, FIRST_CASE_SETTLE_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [bannerData, walkthroughActive, showAppRatingModal, firstCaseTick, trySettleFirstCase]);
+
   // ─── Auto-Trigger-Handler ────────────────────────────────────
   //
   // Achievement-Unlock und Level-Up routen IMMER zum Banner.
@@ -519,7 +713,9 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
   useEffect(() => {
     let checkCount = 0;
     const checkInterval = setInterval(async () => {
-      if (showAppRatingModal || bannerData !== null) {
+      // walkthroughActive mit prüfen: sonst platzt der Level-Up-Prompt
+      // mitten in eine laufende Tour (bisher prüfte das niemand).
+      if (showAppRatingModal || bannerData !== null || walkthroughActive) {
         return;
       }
       checkCount++;
@@ -532,7 +728,7 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     return () => {
       clearInterval(checkInterval);
     };
-  }, [showAppRatingModal, bannerData]);
+  }, [showAppRatingModal, bannerData, walkthroughActive]);
 
   // ─── Public Streak-Toast (ggf. via global) ──────────────────
   //

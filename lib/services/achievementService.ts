@@ -856,9 +856,6 @@ class AchievementService {
         console.log('✅ Profile refresh requested (fire-and-forget)');
       }
 
-      // 📱 App Rating temporär deaktiviert - verursacht Freeze
-      // appRatingService.checkPendingRating();
-
     } catch (error) {
       console.error('❌ Fehler beim Tracken der Action:', error);
       throw error;
