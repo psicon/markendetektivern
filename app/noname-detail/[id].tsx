@@ -601,6 +601,8 @@ export default function NoNameDetailScreen() {
           excludeProductId: product.id,
           kategorieId: categoryIdForAlternatives,
           productName: (product as any)?.name ?? null,
+          // Basis fuer den Plausibilitaets-Guard (Domaene/Subkategorie).
+          catalogProfile: (product as any)?.catalogProfile ?? null,
           handelsmarkeName:
             (product as any)?.handelsmarke?.bezeichnung ??
             (product as any)?.handelsmarke?.name ??

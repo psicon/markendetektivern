@@ -23,6 +23,8 @@ import {
 } from '@react-native-firebase/firestore';
 import { Image as RNImage, InteractionManager } from 'react-native';
 import { db } from '../firebase';
+import { rankAlternatives } from '@/lib/utils/alternativePlausibility';
+import type { CatalogProfileLike } from '@/lib/utils/productTaxonomy';
 import {
     Discounter,
     Einkaufswagen,
@@ -220,77 +222,9 @@ const topRatedCache = new Map<string, CacheEntry<any[]>>();
 const alternativesCache = new Map<string, CacheEntry<any[]>>();
 const topRatedInflight = new Map<string, Promise<any[]>>();
 
-// ─── Name-Similarity Helpers (für getEnttarnteAlternatives) ─────
-//
-// Cheap Token-Score-Funktion für die "Weitere enttarnte Produkte"-
-// Liste. Ziel: bei einem Toastbrot zuerst andere Toastbrote zeigen,
-// dann andere Brote, dann Rest-Kategorie. KEIN Levenshtein, KEINE
-// externe Lib — nur Tokenisierung + exact/substring-Match.
-
-const PRODUCT_NAME_STOPWORDS = new Set([
-  // Artikel + Bindewörter (deutsch)
-  'der', 'die', 'das', 'den', 'dem', 'des',
-  'ein', 'eine', 'einer', 'einem', 'einen', 'eines',
-  'mit', 'und', 'oder', 'für', 'aus', 'auf', 'in', 'im',
-  'zu', 'zum', 'zur', 'an', 'am', 'auch',
-  'von', 'vom', 'bei', 'beim', 'als',
-  // Generische Marketing-Worte die in vielen Produktnamen
-  // auftauchen ohne tatsächliche Produktinformation. Beim Stufe-3-
-  // Vergleich helfen sie nicht und verzerren das Score.
-  'beste', 'wahl', 'gut', 'gold', 'select', 'premium',
-  'feinkost',
-]);
-
-function tokenizeProductName(
-  name: string,
-  handelsmarkeName?: string | null,
-): string[] {
-  if (!name) return [];
-  const cleaned = String(name)
-    .toLowerCase()
-    .replace(/[^a-zäöüß0-9\s-]/g, ' ')
-    .replace(/-/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  // Handelsmarken-Tokens entfernen — sonst matchen z.B. zwei "REWE
-  // Beste Wahl"-Produkte sich gegenseitig nur über die Marke statt
-  // über den Inhalt.
-  const hmTokens = new Set<string>();
-  if (handelsmarkeName) {
-    String(handelsmarkeName)
-      .toLowerCase()
-      .replace(/[^a-zäöüß0-9\s-]/g, ' ')
-      .replace(/-/g, ' ')
-      .split(/\s+/)
-      .forEach((t) => {
-        if (t) hmTokens.add(t);
-      });
-  }
-  return cleaned
-    .split(' ')
-    .filter(
-      (t) =>
-        t.length >= 3 && !PRODUCT_NAME_STOPWORDS.has(t) && !hmTokens.has(t),
-    );
-}
-
-function scoreNameSimilarity(a: string[], b: string[]): number {
-  if (a.length === 0 || b.length === 0) return 0;
-  let score = 0;
-  for (const ta of a) {
-    for (const tb of b) {
-      if (ta === tb) {
-        score += 2; // exakter Token-Match (z.B. "toastbrot" == "toastbrot")
-      } else if (ta.length >= 4 && tb.length >= 4) {
-        // Substring-Stem-Match: "toast" inside "toastbrot",
-        // "brot" inside "toastbrot". Mindest-Länge 4 vermeidet
-        // dass "ml" / "kg" / "g" usw. Lärm produzieren.
-        if (ta.includes(tb) || tb.includes(ta)) score += 1;
-      }
-    }
-  }
-  return score;
-}
+// Name-Similarity + Plausibilitaets-Guard leben in lib/utils/ —
+// dorthin VERSCHOBEN (nicht kopiert), damit Guard und Service dieselbe
+// Tokenisierung nutzen und es keine zweite Wahrheit gibt.
 
 // Per-Kategorie-Alternativen-Cache — pro Kategorie ein Eintrag mit
 // 30-Min TTL. Damit verursacht das Anschauen mehrerer Produkte
@@ -1307,142 +1241,16 @@ export class FirestoreService {
    * Sucht ähnliche NoName-Produkte basierend auf Keywords mit Algolia
    * Für Fallback-Produkte (z.B. Nutella → ähnliche Nuss-Nougat-Cremes)
    */
-  static async searchSimilarProductsByKeywords(
-    productName: string,
-    limit: number = 5
-  ): Promise<(FirestoreDocument<Produkte> & {
-    discounter?: Discounter;
-    handelsmarke?: Handelsmarken;
-    kategorie?: Kategorien;
-  })[]> {
-    try {
-      const { KeywordExtractor } = await import('./keywordExtractor');
-      const { AlgoliaService } = await import('./algolia');
-      
-      // Bereinige den Produktnamen für die Algolia-Suche
-      const searchQuery = KeywordExtractor.extractSearchQuery(productName);
-      
-      if (!searchQuery) {
-        console.log('⚠️ No valid search query from:', productName);
-        return [];
-      }
-      
-      console.log(`🔍 Searching similar products with Algolia query: "${searchQuery}"`);
-      
-      // Suche mit Algolia (nur NoName Produkte) - mehr laden, da wir nach Stufe filtern
-      const algoliaResults = await AlgoliaService.searchNoNameProducts(searchQuery, 0, limit * 2);
-      
-      if (algoliaResults.hits.length === 0) {
-        console.log('⚠️ No similar products found');
-        return [];
-      }
-      
-      console.log(`✅ Found ${algoliaResults.hits.length} similar products from Algolia`);
-      
-      // Lade die vollständigen Produkte aus Firestore basierend auf Algolia objectIDs
-      const productPromises = algoliaResults.hits.map(async (hit) => {
-        try {
-          // Lade Produkt aus Firestore
-          const productDoc = await getDoc(doc(db, 'produkte', hit.objectID));
-          
-          if (!productDoc.exists()) {
-            console.warn(`Product ${hit.objectID} not found in Firestore`);
-            return null;
-          }
-          
-          const data = productDoc.data() as Produkte;
-          const productWithDetails = {
-            id: productDoc.id,
-            ...data
-          } as FirestoreDocument<Produkte> & {
-            discounter?: Discounter;
-            handelsmarke?: Handelsmarken;
-            kategorie?: Kategorien;
-          };
-          
-          // Lade References parallel
-          const [discounterData, handelsmarkeData, kategorieData] = await Promise.all([
-            data.discounter ? getDoc(data.discounter) : null,
-            data.handelsmarke ? getDoc(data.handelsmarke) : null,
-            data.kategorie ? getDoc(data.kategorie) : null
-          ]);
-          
-          if (discounterData?.exists()) {
-            productWithDetails.discounter = { id: discounterData.id, ...discounterData.data() } as Discounter;
-          }
-          if (handelsmarkeData?.exists()) {
-            productWithDetails.handelsmarke = { id: handelsmarkeData.id, ...handelsmarkeData.data() } as Handelsmarken;
-          }
-          if (kategorieData?.exists()) {
-            productWithDetails.kategorie = { id: kategorieData.id, ...kategorieData.data() } as Kategorien;
-          }
-          
-          return productWithDetails;
-        } catch (error) {
-          console.error(`Error loading product ${hit.objectID}:`, error);
-          return null;
-        }
-      });
-      
-      const products = await Promise.all(productPromises);
-      
-      // Filtere null-Werte und nur Stufe 3, 4, 5 Produkte
-      const filteredProducts = products.filter(p => {
-        if (!p) return false;
-        const stufe = parseInt(p.stufe || '0');
-        return stufe >= 3 && stufe <= 5;
-      }) as (FirestoreDocument<Produkte> & {
-        discounter?: Discounter;
-        handelsmarke?: Handelsmarken;
-        kategorie?: Kategorien;
-      })[];
-      
-      console.log(`✅ Filtered to ${filteredProducts.length} products with Stufe 3-5`);
-      
-      // Limitiere auf die gewünschte Anzahl
-      return filteredProducts.slice(0, limit);
-      
-    } catch (error) {
-      console.error('Error searching similar products with Algolia:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Holt ähnliche Produkte (Stufe 3,4,5) aus der gleichen Kategorie
-   * Für die "Ähnliche Produkte" Sektion auf Stufe 1+2 Detailseiten
-   */
-  /**
-   * "Weitere enttarnte Produkte" — Liste ähnlicher NoNames am
-   * unteren Ende der Detail-Seiten. Sauber + günstig:
-   *
-   *   1. SAME-CATEGORY ONLY — kein globaler Fallback. Nur Produkte
-   *      aus DERSELBEN `kategorie` werden gezeigt. "Toast neben
-   *      Smoothie" tritt damit nicht mehr auf; Nischen-Kategorien
-   *      ohne Stufe-3+-Treffer rendern gar nichts.
-   *
-   *   2. SINGLE-FIELD INDEX — Query nur mit `where('kategorie',
-   *      '==', ref) limit 50`. Stufen-Filter (3,4,5) passiert
-   *      client-side. Kein composite Index nötig.
-   *
-   *   3. PER-KATEGORIE CACHE — Pool pro Kategorie 30 Min im Memory.
-   *      Zweiter Toast-Aufruf derselben Session: 0 zusätzliche Reads.
-   *      Empty-Treffer cachen nur 1 Min (frisch hochgeladene Stufe-3-
-   *      Variante schnell sichtbar).
-   *
-   *   4. NAME-NÄHE RANKING — der Pool wird client-side per Token-
-   *      Similarity gegen den Namen des AKTUELLEN Produkts gerankt.
-   *      Toastbrot-Visit zeigt zuerst andere Toastbrote, dann andere
-   *      Brote (Substring-Match), dann der Rest der Kategorie.
-   *      Random-Tiebreaker damit gleich-bewertete Treffer pro Visit
-   *      varieren.
-   */
   static async getEnttarnteAlternatives(
     opts: {
       excludeProductId: string;
       kategorieId?: string | null;
       productName?: string | null;
       handelsmarkeName?: string | null;
+      /** catalogProfile des QUELL-Produkts — Basis fuer den
+       *  Plausibilitaets-Guard (Domaene + Subkategorie). Fehlt es,
+       *  greift fail-open (siehe alternativePlausibility). */
+      catalogProfile?: CatalogProfileLike;
     },
     limitCount: number = 5,
   ): Promise<Array<{
@@ -1508,6 +1316,9 @@ export class FirestoreService {
                 return {
                   id: p.id,
                   name: p.name ?? 'Produkt',
+                  // Fuer den Plausibilitaets-Guard (klein im Vergleich
+                  // zum restlichen Doc, ~200 Byte).
+                  catalogProfile: (p as any).catalogProfile ?? null,
                   bild: p.bild ?? null,
                   bildClean: (p as any).bildClean ?? null,
                   bildCleanPng: (p as any).bildCleanPng ?? null,
@@ -1544,100 +1355,29 @@ export class FirestoreService {
       (p: any) => p.id !== opts.excludeProductId,
     );
 
-    // Name-Similarity-Ranking. Tokenize beide Seiten, scoring nach
-    // exact match (+2) und Substring-Stem-Match (+1, wenn beide
-    // Tokens ≥ 4 Zeichen → vermeidet Lärm wie "ml" matched "milch").
-    // Für "Toastbrot": exact match auf "toastbrot" gewinnt, dann
-    // substring "toast"/"brot", dann der Rest der Kategorie ohne
-    // Token-Treffer.
-    const currentTokens = tokenizeProductName(
-      opts.productName ?? '',
-      opts.handelsmarkeName,
+    // Plausibilitaets-Guard + deterministisches Ranking (ClickUp:
+    // absurde Alternativen). Vorher wurde NUR nach Namens-Score
+    // sortiert, ohne Mindestschwelle und mit Math.random() als
+    // Tiebreaker — an echten Kategorie-Pools nachgemessen hatten 43 %
+    // der ausgelieferten Karten Score 0, waren also aus der Kategorie
+    // gewuerfelt ("Frischkaese -> Speckknoedel").
+    //
+    // Der Kategorie-Filter in der Query oben bleibt: der Guard ist die
+    // ZWEITE Verteidigungslinie, kein Ersatz.
+    return rankAlternatives(
+      {
+        id: opts.excludeProductId,
+        name: opts.productName,
+        handelsmarkeName: opts.handelsmarkeName,
+        catalogProfile: opts.catalogProfile,
+        kategorieId: opts.kategorieId,
+      },
+      raw,
+      limitCount,
+      'discovery',
     );
-    const scored = raw.map((c) => ({
-      item: c,
-      score:
-        currentTokens.length > 0
-          ? scoreNameSimilarity(
-              currentTokens,
-              tokenizeProductName(c.name, c.handelsmarkeName),
-            )
-          : 0,
-    }));
-    scored.sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      // Random-Tiebreaker damit gleich-bewertete Treffer pro Visit
-      // verschieden gemischt sind (Discovery-Charakter).
-      return Math.random() - 0.5;
-    });
-
-    return scored.slice(0, limitCount).map((s) => s.item);
   }
 
-  static async getSimilarProducts(
-    categoryName: string, // Einfach der Kategorie-Name
-    excludeProductId: string,
-    limitCount: number = 3
-  ): Promise<(FirestoreDocument<Produkte> & {
-    discounter?: Discounter;
-    handelsmarke?: Handelsmarken;
-    kategorie?: Kategorien;
-  })[]> {
-    try {
-      console.log('🔍 Loading similar products for category:', categoryName);
-      
-      // EINFACH: Kleine Query, random 7 Stufe 3,4,5 - SOFORT
-      const produkteRef = collection(db, 'produkte');
-      
-      const q = query(
-        produkteRef,
-        where('stufe', 'in', ['3', '4', '5']),
-        limit(10) // NUR 10 laden - noch sparsamer!
-      );
-      
-      const querySnapshot = await getDocs(q);
-      console.log(`📊 Found ${querySnapshot.docs.length} products with stufe 3,4,5`);
-      
-      // Random shuffle und nimm 7 - OHNE Kategorie-Check
-      const shuffledDocs = querySnapshot.docs
-        .filter(doc => doc.id !== excludeProductId)
-        .sort(() => Math.random() - 0.5)
-        .slice(0, limitCount);
-      
-      console.log(`✅ Selected ${shuffledDocs.length} random products, loading details...`);
-      
-      // Lade References parallel - SCHNELL
-      const productPromises = shuffledDocs.map(async (docSnap) => {
-        const productData = docSnap.data() as Produkte;
-        const productWithDetails: any = { id: docSnap.id, ...productData };
-
-        // Parallel References laden
-        const [discounter, handelsmarke, kategorie] = await Promise.all([
-          productData.discounter ? this.getDocumentByReference<Discounter>(productData.discounter) : null,
-          productData.handelsmarke ? this.getDocumentByReference<Handelsmarken>(productData.handelsmarke) : null,
-          productData.kategorie ? this.getDocumentByReference<Kategorien>(productData.kategorie) : null,
-        ]);
-
-        if (discounter) productWithDetails.discounter = discounter;
-        if (handelsmarke) productWithDetails.handelsmarke = handelsmarke;
-        if (kategorie) productWithDetails.kategorie = kategorie;
-
-        return productWithDetails;
-      });
-
-      const finalProducts = await Promise.all(productPromises);
-      console.log(`✅ Returning ${finalProducts.length} random products FAST`);
-      
-      return finalProducts;
-    } catch (error) {
-      console.error('Error fetching similar products:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Holt alle Discounter/Märkte
-   */
   static async getDiscounter(): Promise<FirestoreDocument<Discounter>[]> {
     // Cache for 30 min — the discounter list (Aldi, Lidl, …) is
     // basically static, refetching on every Home-tab focus is

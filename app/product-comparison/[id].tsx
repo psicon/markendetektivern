@@ -448,6 +448,15 @@ export default function ProductComparisonScreen() {
       (picked as any)?.handelsmarke?.bezeichnung ??
       (picked as any)?.handelsmarke?.name ??
       null;
+    // WICHTIG: Profil von DERSELBEN Seite wie `refName` nehmen. Der
+    // Kandidaten-Pool kommt aus der Kategorie des MARKENPRODUKTS,
+    // gerankt/geprueft wird aber gegen das gepickte NoName — nimmt man
+    // hier das Marken-Profil, pruefte der Guard gegen das falsche
+    // Produkt (die Kategorien beider Seiten weichen real oft ab).
+    const refCatalogProfile =
+      (picked as any)?.catalogProfile ??
+      (mainProduct as any)?.catalogProfile ??
+      null;
     // Deferred via InteractionManager — der Page-Load + Carousel-
     // Animations haben Vorrang vor der unten am Ende sitzenden
     // "Weitere enttarnte Produkte"-Liste.
@@ -459,6 +468,7 @@ export default function ProductComparisonScreen() {
           kategorieId,
           productName: refName,
           handelsmarkeName: refHandelsmarke,
+          catalogProfile: refCatalogProfile,
         },
         5,
       )
