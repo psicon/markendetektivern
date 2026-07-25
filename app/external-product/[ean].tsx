@@ -52,6 +52,13 @@ import {
   AlgoliaService,
   type AlgoliaSearchResult,
 } from '@/lib/services/algolia';
+import {
+  buildAlternativeQueries,
+  filterExternalAlternatives,
+  filterExternalByDomainOnly,
+  hasKnownDomain,
+  preFilterByNameSignal,
+} from '@/lib/utils/externalAlternativeQuery';
 import ExternalProductService from '@/lib/services/externalProductService';
 import { FirestoreService } from '@/lib/services/firestore';
 import {
@@ -225,22 +232,50 @@ export default function ExternalProductScreen() {
   // Brand-Referenz. Daher MUSS der Brand-Name aus der Suche raus,
   // sonst kommen wir nie an die echten Alternativen.
   //
-  // Cascade:
-  //   1. Vollständiger Name OHNE Brand
-  //   2. Signifikante Produkt-Wörter einzeln (Joghurt, Soja, Cola, …)
-  //   3. Kategorie (last segment)
-  //   4. Voller Original-Name (Last-Resort)
+  // Kaskade + Guard leben in lib/utils/externalAlternativeQuery (dort
+  // testbar). ENTSCHEIDENDE Aenderung 2026-07: ein Query "gewinnt"
+  // nicht mehr, sobald er IRGENDWELCHE Treffer hat, sondern erst mit
+  // PLAUSIBLEN. Vorher lieferte die Einzelwort-Stufe systematisch
+  // Unsinn ("Garnier MINERAL Deo" -> 6x Mineralwasser), weil das erste
+  // Wort mit Treffern gewann.
   useEffect(() => {
     let alive = true;
     const name = product?.productName?.trim();
     if (!name) return;
     setAltLoading(true);
 
+    // Wenige, GUTE Alternativen statt einer langen Liste — und ein
+    // hartes Read-Budget fuer die ganze Kaskade.
+    //
+    // Kosten-Einordnung: die Algolia-Trefferzahl ist gratis (Algolia
+    // rechnet pro SUCHANFRAGE ab, nicht pro Treffer), teuer ist nur das
+    // Anreichern — ein Firestore-Read pro Kandidat, gebraucht allein
+    // fuer das catalogProfile des Domaenen-Checks. Deshalb: erst der
+    // kostenlose Namens-Vorfilter, dann anreichern, und das Ganze
+    // gedeckelt auf MAX_ENRICH_TOTAL Reads fuer ALLE Queries zusammen.
+    const DISPLAY_LIMIT = 5;
+    const HITS_PER_QUERY = 10;
+    const MAX_ENRICH_TOTAL = 8;
+    let enrichBudget = MAX_ENRICH_TOTAL;
+
+    const source = {
+      productName: name,
+      brandName: product?.brandName ?? null,
+      category: product?.category ?? null,
+    };
+
     const tryQuery = async (query: string): Promise<AlgoliaSearchResult[]> => {
       try {
-        const result = await AlgoliaService.searchNoNameProducts(query, 0, 6);
+        // Etwas mehr anfordern als angezeigt wird — der Guard filtert
+        // danach, es braucht also Reserve. Kostet bei Algolia nichts
+        // extra (Abrechnung pro Anfrage, nicht pro Treffer).
+        const result = await AlgoliaService.searchNoNameProducts(
+          query,
+          0,
+          HITS_PER_QUERY,
+        );
         const hits = result?.hits ?? [];
-        console.log(`[external-alt] query="${query}" → ${hits.length} hits`);
+        console.log(`[external-alt] query="${query}" -> ${hits.length} hits`);
         return hits;
       } catch (e) {
         console.warn('[external-alt] query failed', query, e);
@@ -248,100 +283,20 @@ export default function ExternalProductScreen() {
       }
     };
 
-    // Generische Stop-Words die in Produktnamen ohne Inhalts-Bedeutung
-    // vorkommen. Beim Zerlegen rausfiltern damit "vegan", "natur" etc.
-    // nicht als Such-Token landen (zu generisch, würden 1000+ Hits
-    // bringen).
-    const STOPWORDS = new Set([
-      'mit', 'ohne', 'und', 'oder', 'aus', 'für', 'fur', 'im', 'in', 'der', 'die', 'das',
-      'vegan', 'vegetarisch', 'natur', 'classic', 'original', 'light', 'mini',
-      'plus', 'extra', 'pur', 'pure', 'fein', 'feine', 'frisch', 'echt',
-      'g', 'kg', 'ml', 'l', 'cl', 'stk', 'stück', 'st',
-      'bio', 'eco', 'premium', 'soft', 'hart', 'cremig',
-    ]);
-
-    // Brand-Wörter aus dem Namen entfernen damit wir auf die Produktart
-    // zoomen. Bei "Alpro Joghurtalternative Soja Natur mit Kokosnuss
-    // vegan 400g" → wir wollen "joghurtalternative soja kokosnuss".
-    function stripBrandFromName(raw: string, brand?: string | null): string {
-      let s = raw.toLowerCase();
-      if (brand) {
-        const brandWords = brand.toLowerCase().split(/[,\s]+/).filter((w) => w.length >= 3);
-        for (const bw of brandWords) {
-          s = s.replace(new RegExp(`\\b${escapeRegex(bw)}\\b`, 'gi'), ' ');
-        }
-      }
-      // Pack-Size-Suffixe ("400g", "1l", "6×0,5l") wegnehmen
-      s = s.replace(/\b\d+\s*[×x]?\s*\d*\s*(g|kg|ml|l|cl|stk|stück|st)\b/gi, ' ');
-      return s.replace(/\s+/g, ' ').trim();
-    }
-
-    function escapeRegex(s: string): string {
-      return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }
-
-    function significantWords(s: string): string[] {
-      return s
-        .toLowerCase()
-        .split(/[\s,;:\-_/()]+/)
-        .map((w) => w.trim())
-        .filter((w) => w.length >= 4 && !STOPWORDS.has(w) && !/^\d/.test(w));
-    }
-
-    (async () => {
-      const brandStripped = stripBrandFromName(name, product?.brandName);
-
-      // 1. Brand-stripped name als ganzer Query
-      let hits: AlgoliaSearchResult[] = [];
-      if (brandStripped && brandStripped !== name.toLowerCase()) {
-        hits = await tryQuery(brandStripped);
-        if (!alive) return;
-      }
-
-      // 2. Einzelne signifikante Produktwörter, in Reihenfolge ihrer
-      //    Position im Namen (erstes signifikantes Wort = meist
-      //    Produktart, z.B. "Joghurtalternative").
-      if (hits.length === 0) {
-        const words = significantWords(brandStripped || name);
-        for (const w of words) {
-          hits = await tryQuery(w);
-          if (!alive) return;
-          if (hits.length > 0) break;
-        }
-      }
-
-      // 3. Kategorie aus Source (falls vorhanden)
-      if (hits.length === 0 && product?.category) {
-        const catParts = product.category.split(/[›>,]+/).map((s) => s.trim());
-        const lastCat = catParts.filter(Boolean).pop();
-        if (lastCat && lastCat.length >= 3) {
-          hits = await tryQuery(lastCat);
-          if (!alive) return;
-        }
-      }
-
-      // 4. Last-Resort: voller Original-Name (auch wenn vorher gefailt,
-      //    Algolia kann mit removeWordsIfNoResults manchmal doch was).
-      if (hits.length === 0) {
-        hits = await tryQuery(name);
-        if (!alive) return;
-      }
-
-      if (!alive) return;
-
-      // Enrich (max 6): Algolia liefert discounter/handelsmarke NUR als
-      // Pfad-Strings ('discounter/abc') — daher fehlten Markt + Eigenmarke
-      // auf den Cards. getSearchCardData löst sie (gecacht) zu echten
-      // Objekten auf + liefert bildClean + packSize + packTypInfo. Damit
-      // sehen die Cards exakt aus wie das Stöbern-/Home-Grid.
-      const top = hits.slice(0, 6);
-      const enriched = await Promise.all(
-        top.map(async (h) => {
+    // Anreichern: Algolia liefert discounter/handelsmarke NUR als
+    // Pfad-Strings ('discounter/abc'). getSearchCardData loest sie
+    // (gecacht) zu echten Objekten auf + liefert bildClean + packSize +
+    // packTypInfo — UND das catalogProfile, das der Guard braucht.
+    const enrich = async (hits: AlgoliaSearchResult[]) =>
+      Promise.all(
+        hits.map(async (h) => {
           try {
             const fs: any = await FirestoreService.getSearchCardData(h.objectID, false);
             if (!fs) return h;
             return {
               ...h,
+              // Guard-Basis — ohne das laeuft der Filter fail-open.
+              ...(fs.catalogProfile ? { catalogProfile: fs.catalogProfile } : {}),
               ...(fs.bildClean ? { bildClean: fs.bildClean } : {}),
               ...(fs.bildThumb ? { bildThumb: fs.bildThumb } : {}),
               ...(fs.packSize != null ? { packSize: fs.packSize } : {}),
@@ -366,8 +321,58 @@ export default function ExternalProductScreen() {
         }),
       );
 
-      if (alive) setAlternatives(enriched);
-      if (alive) setAltLoading(false);
+    (async () => {
+      const queries = buildAlternativeQueries(source);
+      const seen = new Set<string>();
+      let kept: AlgoliaSearchResult[] = [];
+
+      const domainKnown = hasKnownDomain(source);
+
+      for (const { q, kind } of queries) {
+        // Die Kategorie-Stufe braucht eine bekannte Quell-Domaene —
+        // sonst waere "nur Domaene pruefen" gleich "alles akzeptieren".
+        if (kind === 'category' && !domainKnown) continue;
+
+        const hits = (await tryQuery(q)).filter((h) => {
+          if (!h?.objectID || seen.has(h.objectID)) return false;
+          seen.add(h.objectID);
+          return true;
+        });
+        if (!alive) return;
+        if (hits.length === 0) continue;
+
+        // NAME-Stufe: erst billig nach Namens-Signal vorfiltern (kein
+        // Read), dann NUR die Ueberlebenden anreichern.
+        // KATEGORIE-Stufe: der Query IST die Kategorie, ein
+        // Namens-Signal waere hier die falsche Huerde (real gemessen:
+        // "Zahnpasta" findet die Eigenmarken-"Zahncreme" sonst nie).
+        const promising = (
+          kind === 'name' ? preFilterByNameSignal(source, hits as any[]) : hits
+        ).slice(0, enrichBudget);
+        if (promising.length === 0) continue;
+        enrichBudget -= promising.length;
+
+        const enriched = await enrich(promising as AlgoliaSearchResult[]);
+        if (!alive) return;
+
+        const typed = enriched as unknown as (AlgoliaSearchResult & { name?: string })[];
+        kept = (
+          kind === 'name'
+            ? filterExternalAlternatives(source, typed, DISPLAY_LIMIT)
+            : filterExternalByDomainOnly(source, typed, DISPLAY_LIMIT)
+        ) as AlgoliaSearchResult[];
+        console.log(
+          `[external-alt] query="${q}" (${kind}) -> ${hits.length} hits -> ${kept.length} plausibel`,
+        );
+        // Nur ein Query mit PLAUSIBLEN Treffern beendet die Kaskade.
+        if (kept.length > 0) break;
+        // Read-Budget aufgebraucht → aufhoeren, statt weiter zu suchen.
+        if (enrichBudget <= 0) break;
+      }
+
+      if (!alive) return;
+      setAlternatives(kept);
+      setAltLoading(false);
     })();
 
     return () => {
