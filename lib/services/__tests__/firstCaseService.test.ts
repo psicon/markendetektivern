@@ -73,20 +73,20 @@ beforeEach(() => {
   mockRequestNow.mockResolvedValue(true);
 });
 
-describe('markScanSuccess', () => {
-  it('verbucht den ersten Treffer und feuert den Bus', async () => {
+describe('markFirstCase — erstes enttarntes Produkt gesehen', () => {
+  it('verbucht den ersten Fall und feuert den Bus', async () => {
     const listener = jest.fn();
     const off = FirstCaseService.onArmed(listener);
-    await FirstCaseService.markScanSuccess(UID);
+    await FirstCaseService.markFirstCase(UID);
     expect(listener).toHaveBeenCalledTimes(1);
     off();
   });
 
-  it('ist idempotent — zweiter Treffer feuert nicht erneut', async () => {
+  it('ist idempotent — zweiter Aufruf feuert nicht erneut', async () => {
     const listener = jest.fn();
     const off = FirstCaseService.onArmed(listener);
-    await FirstCaseService.markScanSuccess(UID);
-    await FirstCaseService.markScanSuccess(UID);
+    await FirstCaseService.markFirstCase(UID);
+    await FirstCaseService.markFirstCase(UID);
     expect(listener).toHaveBeenCalledTimes(1);
     off();
   });
@@ -94,7 +94,7 @@ describe('markScanSuccess', () => {
   it('ist ein No-op ohne uid (Anon-Sign-In noch nicht durch)', async () => {
     const listener = jest.fn();
     const off = FirstCaseService.onArmed(listener);
-    await FirstCaseService.markScanSuccess(null);
+    await FirstCaseService.markFirstCase(null);
     expect(listener).not.toHaveBeenCalled();
     off();
   });
@@ -111,7 +111,7 @@ describe('shouldCelebrate — Phase 1', () => {
 
   it('Scan da, Tour offen: false — und nach der Tour true (reihenfolge-unabhängig)', async () => {
     mockHasCompletedIntroTours.mockResolvedValue(false);
-    await FirstCaseService.markScanSuccess(UID);
+    await FirstCaseService.markFirstCase(UID);
     expect(await FirstCaseService.shouldCelebrate(UID)).toBe(false);
 
     mockHasCompletedIntroTours.mockResolvedValue(true);
@@ -119,13 +119,13 @@ describe('shouldCelebrate — Phase 1', () => {
   });
 
   it('Rating-Gates zu: false — die Feier wird nicht verbrannt', async () => {
-    await FirstCaseService.markScanSuccess(UID);
+    await FirstCaseService.markFirstCase(UID);
     mockCanRequest.mockResolvedValue(false);
     expect(await FirstCaseService.shouldCelebrate(UID)).toBe(false);
   });
 
   it('nach markCelebrated: false — Feier ist einmalig', async () => {
-    await FirstCaseService.markScanSuccess(UID);
+    await FirstCaseService.markFirstCase(UID);
     expect(await FirstCaseService.shouldCelebrate(UID)).toBe(true);
     await FirstCaseService.markCelebrated(UID);
     expect(await FirstCaseService.shouldCelebrate(UID)).toBe(false);
@@ -138,20 +138,20 @@ describe('maybeRequestReview — Phase 2', () => {
   });
 
   it('OHNE verbuchte Feier: no-celebration — kein kontextfreier Prompt', async () => {
-    await FirstCaseService.markScanSuccess(UID);
+    await FirstCaseService.markFirstCase(UID);
     expect(await FirstCaseService.maybeRequestReview(UID)).toBe('no-celebration');
     expect(mockRequestNow).not.toHaveBeenCalled();
   });
 
   it('nach der Feier: requested', async () => {
-    await FirstCaseService.markScanSuccess(UID);
+    await FirstCaseService.markFirstCase(UID);
     await FirstCaseService.markCelebrated(UID);
     expect(await FirstCaseService.maybeRequestReview(UID)).toBe('requested');
     expect(mockRequestNow).toHaveBeenCalledWith(UID);
   });
 
   it('Rating-Gates zu: gated, nichts verbraucht — späterer Versuch geht durch', async () => {
-    await FirstCaseService.markScanSuccess(UID);
+    await FirstCaseService.markFirstCase(UID);
     await FirstCaseService.markCelebrated(UID);
     mockCanRequest.mockResolvedValue(false);
     expect(await FirstCaseService.maybeRequestReview(UID)).toBe('gated');
@@ -162,7 +162,7 @@ describe('maybeRequestReview — Phase 2', () => {
   });
 
   it('Moment passt nicht (Sheet offen / Hintergrund): unavailable, Retry bleibt möglich', async () => {
-    await FirstCaseService.markScanSuccess(UID);
+    await FirstCaseService.markFirstCase(UID);
     await FirstCaseService.markCelebrated(UID);
     mockRequestNow.mockResolvedValue(false);
     expect(await FirstCaseService.maybeRequestReview(UID)).toBe('unavailable');
@@ -173,7 +173,7 @@ describe('maybeRequestReview — Phase 2', () => {
   });
 
   it('nach erfolgreicher Anfrage: already — genau einmal pro User', async () => {
-    await FirstCaseService.markScanSuccess(UID);
+    await FirstCaseService.markFirstCase(UID);
     await FirstCaseService.markCelebrated(UID);
     expect(await FirstCaseService.maybeRequestReview(UID)).toBe('requested');
     expect(await FirstCaseService.maybeRequestReview(UID)).toBe('already');
@@ -181,7 +181,7 @@ describe('maybeRequestReview — Phase 2', () => {
   });
 
   it('zwei parallele Aufrufe: genau EIN Request (inFlight-Guard)', async () => {
-    await FirstCaseService.markScanSuccess(UID);
+    await FirstCaseService.markFirstCase(UID);
     await FirstCaseService.markCelebrated(UID);
     const [a, b] = await Promise.all([
       FirstCaseService.maybeRequestReview(UID),
@@ -195,7 +195,7 @@ describe('maybeRequestReview — Phase 2', () => {
 
 describe('reset', () => {
   it('macht Feier UND Review wieder möglich (Dev-Panel)', async () => {
-    await FirstCaseService.markScanSuccess(UID);
+    await FirstCaseService.markFirstCase(UID);
     await FirstCaseService.markCelebrated(UID);
     expect(await FirstCaseService.maybeRequestReview(UID)).toBe('requested');
 
@@ -203,9 +203,46 @@ describe('reset', () => {
     expect(await FirstCaseService.shouldCelebrate(UID)).toBe(false); // Scan weg
     expect(await FirstCaseService.maybeRequestReview(UID)).toBe('no-celebration');
 
-    await FirstCaseService.markScanSuccess(UID);
+    await FirstCaseService.markFirstCase(UID);
     expect(await FirstCaseService.shouldCelebrate(UID)).toBe(true);
     await FirstCaseService.markCelebrated(UID);
     expect(await FirstCaseService.maybeRequestReview(UID)).toBe('requested');
+  });
+});
+
+describe('willCelebrate — steuert die Banner-Unterdrückung', () => {
+  it('false ohne verbuchten Fall', async () => {
+    expect(await FirstCaseService.willCelebrate(UID)).toBe(false);
+  });
+
+  it('true sobald der Fall verbucht ist — AUCH wenn die Tour noch läuft', async () => {
+    // Entscheidend: sonst wandert der 'Es geht los!'-Banner in die
+    // Queue und taucht nach der Tour doch noch vor unserer Feier auf.
+    mockHasCompletedIntroTours.mockResolvedValue(false);
+    await FirstCaseService.markFirstCase(UID);
+    expect(await FirstCaseService.willCelebrate(UID)).toBe(true);
+  });
+
+  it('true nach der Feier (der Moment ist bereits getragen)', async () => {
+    await FirstCaseService.markFirstCase(UID);
+    await FirstCaseService.markCelebrated(UID);
+    expect(await FirstCaseService.willCelebrate(UID)).toBe(true);
+  });
+
+  it('false wenn der Review schon durch ist — dann normaler Banner', async () => {
+    await FirstCaseService.markFirstCase(UID);
+    await FirstCaseService.markCelebrated(UID);
+    await FirstCaseService.maybeRequestReview(UID);
+    expect(await FirstCaseService.willCelebrate(UID)).toBe(false);
+  });
+
+  it('false wenn die Rating-Gates zu sind — es gäbe gar keine Feier', async () => {
+    await FirstCaseService.markFirstCase(UID);
+    mockCanRequest.mockResolvedValue(false);
+    expect(await FirstCaseService.willCelebrate(UID)).toBe(false);
+  });
+
+  it('false ohne uid', async () => {
+    expect(await FirstCaseService.willCelebrate(null)).toBe(false);
   });
 });

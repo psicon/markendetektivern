@@ -11,7 +11,8 @@ import { ratingPromptService } from './ratingPrompt';
  * Walk-Through durch ist. Beide Bedingungen sind persistent und
  * REIHENFOLGE-UNABHÄNGIG:
  *
- *   (a) Erster Katalog-Treffer im Scanner  → `markScanSuccess`
+ *   (a) Erstes ENTTARNTES Produkt (Stufe 3-5) gesehen → `markFirstCase`
+ *       (egal ob via Walk-Through, Scan, Suche oder Direktlink)
  *   (b) Intro-Touren durch                 → `CoachmarkService.hasCompletedIntroTours()`
  *
  * ZWEI PHASEN, damit die Reihenfolge "erst Feier, dann Frage"
@@ -41,7 +42,7 @@ import { ratingPromptService } from './ratingPrompt';
  */
 
 const KEY_PREFIX = 'firstCase/v1/';
-const SCAN_KEY = (uid: string) => `${KEY_PREFIX}scanSuccessAt_${uid}`;
+const CASE_KEY = (uid: string) => `${KEY_PREFIX}firstCaseAt_${uid}`;
 const CELEBRATED_KEY = (uid: string) => `${KEY_PREFIX}celebratedAt_${uid}`;
 const REVIEW_KEY = (uid: string) => `${KEY_PREFIX}reviewRequestedAt_${uid}`;
 
@@ -74,24 +75,34 @@ function emitArmed(): void {
 
 export const FirstCaseService = {
   /**
-   * Erster erfolgreicher Katalog-Treffer im Scanner. Idempotent —
-   * schreibt nur beim ersten Mal und feuert dann den Bus.
+   * Der erste „gelöste Fall": das erste Mal, dass der User ein
+   * ENTTARNTES Produkt (Stufe 3, 4 oder 5) vor sich hat — egal auf
+   * welchem Weg: über den Walk-Through, per Scan, über die Suche oder
+   * einen Direktlink.
    *
+   * Bewusst NICHT mehr nur „Katalog-Treffer im Scanner" (so war es bis
+   * 2026-07-25): der Aha-Moment ist, die Entsprechung zu SEHEN, nicht
+   * der Scan-Vorgang. Wer über die Demo-Karte des Walk-Throughs oder
+   * über die Suche dorthin kommt, hat denselben Moment.
+   *
+   * Stufe 1/2 zählt NICHT — dort gibt es keine Enttarnung zu zeigen.
+   *
+   * Idempotent — schreibt nur beim ersten Mal und feuert dann den Bus.
    * Der Emit läuft NACH dem Write (nicht `void write(); emit()`) —
    * sonst liest ein Listener, der sofort `maybeRequestReview` aufruft,
    * den Key noch als leer (bezahltes Learning, vgl.
    * `useCoachmark.dismiss` → awaitet `markSeen` vor dem visible-Flip).
    */
-  async markScanSuccess(uid?: string | null): Promise<void> {
+  async markFirstCase(uid?: string | null): Promise<void> {
     if (!uid) return; // Anon-Sign-In noch nicht durch → nächster Scan zieht
     try {
-      const existing = await AsyncStorage.getItem(SCAN_KEY(uid));
+      const existing = await AsyncStorage.getItem(CASE_KEY(uid));
       if (existing) return;
-      await AsyncStorage.setItem(SCAN_KEY(uid), String(Date.now()));
-      console.log('🔍 Erster Fall gelöst — Review-Trigger gearmt');
+      await AsyncStorage.setItem(CASE_KEY(uid), String(Date.now()));
+      console.log('🔍 Erster Fall gelöst (Stufe 3+ gesehen) — Trigger gearmt');
       emitArmed();
     } catch (e) {
-      console.warn('FirstCase markScanSuccess failed (non-fatal):', e);
+      console.warn('FirstCase markFirstCase failed (non-fatal):', e);
     }
   },
 
@@ -110,7 +121,7 @@ export const FirstCaseService = {
       const [review, celebrated, scan] = await Promise.all([
         AsyncStorage.getItem(REVIEW_KEY(uid)),
         AsyncStorage.getItem(CELEBRATED_KEY(uid)),
-        AsyncStorage.getItem(SCAN_KEY(uid)),
+        AsyncStorage.getItem(CASE_KEY(uid)),
       ]);
       if (review || celebrated) return false;
       if (!scan) return false;
@@ -125,6 +136,34 @@ export const FirstCaseService = {
       return await ratingPromptService.canRequestNativeReview(uid);
     } catch (e) {
       console.warn('FirstCase shouldCelebrate failed (non-fatal):', e);
+      return false;
+    }
+  },
+
+  /**
+   * Kommt die „Erster Fall"-Feier noch ODER ist sie gerade gelaufen?
+   *
+   * Zweck: der generische `first_action_any`-Achievement-Banner („Es
+   * geht los!", +5 Punkte) sagt dasselbe wie unsere Feier, nur
+   * schwächer — er wird unterdrückt, wenn unsere Feier den Moment
+   * bereits trägt. Sonst sieht der User beim ersten Fall DREI Banner
+   * hintereinander (Achievement + Level 2 + Feier), zusammen ~20 s.
+   *
+   * Bewusst auch dann `true`, wenn der Walk-Through noch läuft: sonst
+   * würde der Achievement-Banner in die Queue wandern und nach der Tour
+   * doch noch vor unserer Feier auftauchen. Die Punkte werden natürlich
+   * trotzdem vergeben — nur der Banner entfällt.
+   */
+  async willCelebrate(uid?: string | null): Promise<boolean> {
+    if (!uid) return false;
+    try {
+      if (await AsyncStorage.getItem(REVIEW_KEY(uid))) return false; // durch
+      if (await AsyncStorage.getItem(CELEBRATED_KEY(uid))) return true; // lief
+      if (!(await AsyncStorage.getItem(CASE_KEY(uid)))) return false;
+      // Tour-Status bewusst NICHT prüfen (s.o.). Nur die Rating-Gates,
+      // denn ohne sie gibt es gar keine Feier.
+      return await ratingPromptService.canRequestNativeReview(uid);
+    } catch {
       return false;
     }
   },
@@ -193,7 +232,7 @@ export const FirstCaseService = {
   /** Dev-Panel: Trigger komplett zurücksetzen. */
   async reset(uid: string): Promise<void> {
     try {
-      await AsyncStorage.multiRemove([SCAN_KEY(uid), CELEBRATED_KEY(uid), REVIEW_KEY(uid)]);
+      await AsyncStorage.multiRemove([CASE_KEY(uid), CELEBRATED_KEY(uid), REVIEW_KEY(uid)]);
       console.log('🧹 FirstCase-State zurückgesetzt');
     } catch (e) {
       console.warn('FirstCase reset failed (non-fatal):', e);
@@ -209,7 +248,7 @@ export const FirstCaseService = {
     ratingGatesOpen: boolean;
   }> {
     const [scan, celebrated, review] = await Promise.all([
-      AsyncStorage.getItem(SCAN_KEY(uid)),
+      AsyncStorage.getItem(CASE_KEY(uid)),
       AsyncStorage.getItem(CELEBRATED_KEY(uid)),
       AsyncStorage.getItem(REVIEW_KEY(uid)),
     ]);

@@ -83,6 +83,7 @@ import { scoreToVerdict } from '@/lib/utils/aiVerdict';
 import { useFavorites } from '@/lib/hooks/useFavorites';
 import achievementService from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
+import { FirstCaseService } from '@/lib/services/firstCaseService';
 import { isNonFoodCategory } from '@/lib/utils/categoryClassification';
 import {
   showFavoriteAddedToast,
@@ -469,6 +470,13 @@ export default function NoNameDetailScreen() {
         // product loads. This action also triggers the
         // `first_action_any` achievement on the user's first
         // visit. Fire-and-forget — must not block the screen.
+        // "Erster Fall geloest" — siehe product-comparison. Hier landen
+        // zwar meist Stufe 1/2 (keine Enttarnung), der Guard prueft die
+        // Stufe aber ohnehin, also ist die Stelle unkritisch.
+        if (Number((data as any)?.stufe) >= 3) {
+          void FirstCaseService.markFirstCase(user?.uid);
+        }
+
         if (user?.uid) {
           achievementService
             .trackAction(user.uid, 'view_comparison', {

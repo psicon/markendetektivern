@@ -14,7 +14,6 @@ import { achievementService } from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
 import { interstitialAdService } from '@/lib/services/interstitialAdService';
 import journeyTrackingService from '@/lib/services/journeyTrackingService';
-import { FirstCaseService } from '@/lib/services/firstCaseService';
 import scanHistoryService, { ScanHistoryItem } from '@/lib/services/scanHistoryService';
 import ExternalProductService from '@/lib/services/externalProductService';
 import { isExpoGo, platformLog } from '@/lib/utils/platform';
@@ -262,12 +261,6 @@ export default function BarcodeScannerScreen() {
           productName: product.name,
           productType: 'noname'
         }, user?.uid);
-
-        // "Erster Fall geloest" (ClickUp 86cav7gqm): Katalog-Treffer
-        // verbuchen. Eingeloest wird der native Review-Prompt erst, wenn
-        // ZUSAETZLICH der Walk-Through durch ist und keine Feier/kein
-        // Sheet mehr laeuft — siehe firstCaseService.
-        void FirstCaseService.markScanSuccess(user?.uid);
         
         // GA4 Tracking für NoName-Scan
         if (analytics.trackEvent) {
@@ -357,12 +350,6 @@ export default function BarcodeScannerScreen() {
           productName: product.name,
           productType: 'brand'
         }, user?.uid);
-
-        // "Erster Fall geloest" (ClickUp 86cav7gqm): Katalog-Treffer
-        // verbuchen. Eingeloest wird der native Review-Prompt erst, wenn
-        // ZUSAETZLICH der Walk-Through durch ist und keine Feier/kein
-        // Sheet mehr laeuft — siehe firstCaseService.
-        void FirstCaseService.markScanSuccess(user?.uid);
         
         // GA4 Tracking für Marken-Scan
         if (analytics.trackEvent) {

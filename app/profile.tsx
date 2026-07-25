@@ -788,9 +788,9 @@ export default function ProfileScreen() {
       // Walk-Through-Bedingung erfuellen (die zwei Intro-Touren).
       await CoachmarkService.markSeen('home');
       await CoachmarkService.markSeen('product-detail');
-      // Erst-Erfolg verbuchen — das feuert den Bus, der Provider
+      // Erst-Fall verbuchen — das feuert den Bus, der Provider
       // uebernimmt ab hier von selbst.
-      await FirstCaseService.markScanSuccess(user.uid);
+      await FirstCaseService.markFirstCase(user.uid);
 
       const { gamificationSettingsService } = await import(
         '@/lib/services/gamificationSettingsService'

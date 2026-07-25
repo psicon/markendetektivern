@@ -593,11 +593,28 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
       return;
     }
 
+    // „Es geht los!" (+5 Punkte) NICHT zeigen, wenn die „Erster Fall
+    // geschlossen"-Feier denselben Moment traegt — sie sagt dasselbe,
+    // nur staerker. Sonst laufen beim ersten Fall DREI Banner
+    // hintereinander (Achievement + Level 2 + Feier), zusammen ~20 s;
+    // der User sieht die Meldungen dann als „zu spaet".
+    // Die PUNKTE werden normal vergeben, nur der Banner entfaellt.
+    if (achievement.trigger?.action === 'first_action_any') {
+      try {
+        if (await FirstCaseService.willCelebrate(user?.uid)) {
+          console.log('🎖️ first_action_any-Banner unterdrückt — Erster-Fall-Feier übernimmt');
+          return;
+        }
+      } catch {
+        /* im Zweifel normal zeigen */
+      }
+    }
+
     const data = bannerDataFromAchievement(achievement);
     // presentBanner entscheidet synchron Zeigen-vs-Queue (race-frei auch bei
     // mehreren Achievements, die EINE Aktion gleichzeitig freischaltet).
     setTimeout(() => presentBanner(data), 1500);
-  }, [presentBanner]);
+  }, [presentBanner, user?.uid]);
 
   const pointsHandler = useCallback(async (points: number, action: string, message: string) => {
     if (points <= 0) return;

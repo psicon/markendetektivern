@@ -89,6 +89,7 @@ import { scoreToVerdict } from '@/lib/utils/aiVerdict';
 import { useFavorites } from '@/lib/hooks/useFavorites';
 import achievementService from '@/lib/services/achievementService';
 import { FirestoreService } from '@/lib/services/firestore';
+import { FirstCaseService } from '@/lib/services/firstCaseService';
 import { getStufeCopy, loadStufeCopy } from '@/lib/utils/stufeCopy';
 import { isNonFoodCategory } from '@/lib/utils/categoryClassification';
 import {
@@ -379,6 +380,20 @@ export default function ProductComparisonScreen() {
         // hand. This action also fires the `first_action_any`
         // achievement on the user's first visit. Fire-and-forget —
         // failures must not block the screen from rendering.
+        // "Erster Fall geloest" (ClickUp 86cav7gqm): das erste Mal ein
+        // ENTTARNTES Produkt (Stufe 3-5) vor sich zu haben — egal ob
+        // ueber den Walk-Through, per Scan, ueber die Suche oder einen
+        // Direktlink. Der Aha-Moment ist das SEHEN, nicht der Scan.
+        {
+          // Hoechste Stufe unter den angezeigten Eigenmarken — das ist
+          // die Enttarnung, die der User vor sich hat.
+          const stufeSeen = (sorted ?? []).reduce(
+            (max: number, nn: any) => Math.max(max, parseStufe(nn?.stufe)),
+            0,
+          );
+          if (stufeSeen >= 3) void FirstCaseService.markFirstCase(user?.uid);
+        }
+
         if (user?.uid) {
           achievementService
             .trackAction(user.uid, 'view_comparison', {
