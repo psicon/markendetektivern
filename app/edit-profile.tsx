@@ -38,6 +38,7 @@ import {
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { LocationPicker } from '@/components/ui/LocationPicker';
+import { regionFromPickedLocation } from '@/lib/data/city-to-bundesland';
 import { MarketSelector } from '@/components/ui/MarketSelector';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { db, storage } from '@/lib/firebase';
@@ -57,6 +58,10 @@ interface FormData {
   age: number | null;
   gender: string;
   location: string;
+  /** Strukturierte Region aus der Ort-Auswahl — DAS ist das Feld,
+   *  das Profil + Bestenliste lesen (ClickUp 86cawtkjp). */
+  city: string | null;
+  bundesland: string | null;
   photoURL: string;
   favoriteMarket: FirestoreDocument<Discounter> | null;
 }
@@ -96,6 +101,8 @@ export default function EditProfileScreen() {
     age: null,
     gender: '',
     location: '',
+    city: null,
+    bundesland: null,
     photoURL: user?.photoURL || '',
     favoriteMarket: null,
   });
@@ -154,6 +161,8 @@ export default function EditProfileScreen() {
           // Pills normalisieren — sonst keine Vorselektion (86ca7x8ft).
           gender: normalizeLegacyGender(data.gender) ?? '',
           location: data.location || '',
+          city: data.city ?? null,
+          bundesland: data.bundesland ?? null,
           photoURL: data.photo_url || user.photoURL || '',
           favoriteMarket:
             data.favoriteMarket && data.favoriteMarketName
@@ -205,6 +214,12 @@ export default function EditProfileScreen() {
         photo_url: formData.photoURL,
         gender: formData.gender,
         location: formData.location,
+        // Manuelle Auswahl schlaegt die automatische Schaetzung: Profil
+        // und Bestenliste lesen `city ?? guessedCity`. Bewusst `null`
+        // (nicht '') wenn nichts gewaehlt ist, damit `??` sauber auf die
+        // Schaetzung zurueckfaellt.
+        city: formData.city,
+        bundesland: formData.bundesland,
         favoriteMarket: formData.favoriteMarket?.id || null,
         favoriteMarketName: formData.favoriteMarket?.name || null,
         updatedAt: serverTimestamp(),
@@ -593,7 +608,13 @@ export default function EditProfileScreen() {
         visible={showLocationPicker}
         onClose={() => setShowLocationPicker(false)}
         onSelect={(locationData) => {
-          setFormData((p) => ({ ...p, location: locationData.address }));
+          const { city, bundesland } = regionFromPickedLocation(locationData);
+          setFormData((p) => ({
+            ...p,
+            location: locationData.address,
+            city,
+            bundesland,
+          }));
           setShowLocationPicker(false);
         }}
         currentLocation={formData.location}

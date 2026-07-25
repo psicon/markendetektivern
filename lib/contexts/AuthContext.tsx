@@ -99,7 +99,12 @@ interface AdditionalProfileData {
   // ageReportedYear ans User-Doc.
   age?: number;
   gender?: string;
+  /** Roher Adress-String aus dem LocationPicker (Anzeige im Formular). */
   location?: string;
+  /** Strukturierte Region — das ist, was Profil + Bestenliste lesen
+   *  (ClickUp 86cawtkjp). Aus `regionFromPickedLocation` abgeleitet. */
+  city?: string | null;
+  bundesland?: string | null;
   favoriteMarket?: string; // Discounter ID
   favoriteMarketName?: string; // Marktname für schnelle Anzeige
 }
@@ -395,14 +400,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // Trotzdem weitermachen - User kann die App nutzen
         }
         await refreshUserProfile();
-        
-        // 📱 App Rating temporär deaktiviert - verursacht App-Freeze  
-        try {
-          console.log('📱 App Rating Login-Tracking DEAKTIVIERT (Freeze-Fix)');
-          // await appRatingService.incrementLoginCount(user.uid);
-        } catch (error) {
-          console.error('❌ App Rating Login-Tracking Fehler:', error);
-        }
         
         // Achievement-Checks für ALLE User (anonym + registriert)
         try {
@@ -830,6 +827,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               ...agePatch,
               gender: additionalData.gender || '',
               location: additionalData.location || '',
+              // Strukturierte Region (ClickUp 86cawtkjp) — NUR wenn im
+              // Formular gewählt, sonst würde merge:true einen später
+              // gesetzten Ort mit Leerwerten überschreiben.
+              ...(additionalData.city
+                ? {
+                    city: additionalData.city,
+                    bundesland: additionalData.bundesland ?? null,
+                  }
+                : {}),
               // Lieblingsmarkt aus dem Registrier-Formular. NUR wenn gewählt
               // (konditional) — sonst würde merge:true einen im Onboarding
               // gesetzten Markt mit Leerwerten überschreiben. Bis 6.0.6 wurde

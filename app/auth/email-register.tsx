@@ -3,6 +3,7 @@ import { CustomIcon } from '@/components/ui/CustomIcon';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { LocationPicker } from '@/components/ui/LocationPicker';
+import { regionFromPickedLocation } from '@/lib/data/city-to-bundesland';
 import { MarketSelector } from '@/components/ui/MarketSelector';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -111,6 +112,8 @@ export default function RegisterScreen() {
     age: null as number | null,
     gender: '' as Gender | '',
     location: '',
+    city: null as string | null,
+    bundesland: null as string | null,
     favoriteMarket: null as FirestoreDocument<Discounter> | null
   });
   const [prefilledFields, setPrefilledFields] = useState<Set<string>>(() => {
@@ -281,6 +284,8 @@ export default function RegisterScreen() {
           age: typeof formData.age === 'number' ? formData.age : undefined,
           gender: formData.gender || undefined,
           location: formData.location || undefined,
+          city: formData.city ?? undefined,
+          bundesland: formData.bundesland ?? undefined,
           favoriteMarket: formData.favoriteMarket?.id || undefined,
           favoriteMarketName: formData.favoriteMarket?.name || undefined
         }
@@ -728,7 +733,16 @@ export default function RegisterScreen() {
         visible={showLocationPicker}
         onClose={() => setShowLocationPicker(false)}
         onSelect={(location) => {
-          setFormData(prev => ({ ...prev, location: location.address || location.city || '' }));
+          // Auch hier die strukturierte Region mitnehmen — sonst hätte
+          // die Registrierung denselben Bug wie das Profil (ClickUp
+          // 86cawtkjp): Auswahl gespeichert, aber nirgends gelesen.
+          const { city, bundesland } = regionFromPickedLocation(location);
+          setFormData(prev => ({
+            ...prev,
+            location: location.address || location.city || '',
+            city,
+            bundesland,
+          }));
           setShowLocationPicker(false);
         }}
         currentLocation={formData.location}

@@ -23,6 +23,18 @@ interface LocationData {
   longitude: number;
   city?: string;
   country?: string;
+  /**
+   * Bundesland / Kanton, wie vom Reverse-Geocoder geliefert
+   * (`region` aus `Location.reverseGeocodeAsync`).
+   *
+   * WICHTIG: Vorher gab dieser Picker NUR den formatierten
+   * Adress-String heraus und verwarf die strukturierten Felder — die
+   * aufrufenden Screens konnten daraus keine Region ableiten und
+   * mussten auf eine Stadt→Bundesland-Tabelle hoffen, die kleine Orte
+   * (z.B. "Bous", Saarland) nicht kennt. Der Geocoder weiß es dagegen
+   * direkt. Siehe ClickUp 86cawtkjp.
+   */
+  region?: string;
 }
 
 interface LocationPickerProps {
@@ -57,6 +69,14 @@ export const LocationPicker: React.FC<LocationPickerProps> = ({
   
   const [searchText, setSearchText] = useState('');
   const [selectedAddress, setSelectedAddress] = useState('');
+  // Strukturierte Geocoder-Felder zur aktuellen Markierung — parallel
+  // zum formatierten Anzeige-String, damit Aufrufer Stadt und
+  // Bundesland ohne Text-Parsing bekommen.
+  const [selectedParts, setSelectedParts] = useState<{
+    city?: string;
+    region?: string;
+    country?: string;
+  }>({});
   const [loading, setLoading] = useState(false);
   const [locationPermission, setLocationPermission] = useState<boolean | null>(null);
   const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null);
@@ -164,8 +184,22 @@ export const LocationPicker: React.FC<LocationPickerProps> = ({
           address.city,
           address.country
         ].filter(Boolean).join(', ');
-        
+
         setSelectedAddress(formattedAddress);
+        // Strukturierte Felder mitnehmen (nicht wegwerfen!): `region`
+        // ist in DE/AT das Bundesland, in CH der Kanton. Bei kleinen
+        // Orten liefert der Geocoder `city` teils leer und stattdessen
+        // `district`/`subregion` — beides als Fallback nutzen, damit
+        // Dörfer nicht ohne Stadt dastehen.
+        setSelectedParts({
+          city:
+            address.city ??
+            (address as any).district ??
+            (address as any).subregion ??
+            undefined,
+          region: address.region ?? undefined,
+          country: address.country ?? undefined,
+        });
       }
     } catch (error) {
       console.error('Error reverse geocoding:', error);
@@ -247,6 +281,9 @@ export const LocationPicker: React.FC<LocationPickerProps> = ({
         address: selectedAddress,
         latitude: markerPosition.latitude,
         longitude: markerPosition.longitude,
+        city: selectedParts.city,
+        region: selectedParts.region,
+        country: selectedParts.country,
       });
       onClose();
     }

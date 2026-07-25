@@ -265,3 +265,87 @@ const EN_TO_DE: Readonly<Record<string, string>> = {
 export function normalizeCityName(city: string): string {
   return EN_TO_DE[city] ?? city;
 }
+
+/**
+ * Ort-Auswahl (LocationPicker) → strukturierte Region.
+ *
+ * Reihenfolge bewusst so (ClickUp 86cawtkjp): der REVERSE-GEOCODER
+ * gewinnt, die Tabelle oben ist nur Fallback. Grund: die Tabelle kennt
+ * nur größere Städte — ein Nutzer aus "Bous" (Saarland) hätte sonst
+ * kein Bundesland bekommen, obwohl der Geocoder es direkt liefert.
+ *
+ * Rückgabe ist `null`-normalisiert (nie Leerstring), damit die
+ * Lesekette `city ?? guessedCity` in den Screens korrekt auf die
+ * Schätzung zurückfällt — bei `''` würde `??` fälschlich den leeren
+ * Wert liefern.
+ */
+export function regionFromPickedLocation(picked: {
+  address?: string | null;
+  city?: string | null;
+  region?: string | null;
+}): { city: string | null; bundesland: string | null } {
+  const trim = (v: string | null | undefined) => {
+    const s = (v ?? '').trim();
+    return s.length > 0 ? s : null;
+  };
+
+  // Stadt: strukturiertes Feld bevorzugen. Fallback: aus dem
+  // formatierten String "Straße, Stadt, Land" das MITTLERE Segment —
+  // der Geocoder baut ihn in genau dieser Reihenfolge.
+  let city = trim(picked.city);
+  if (!city) {
+    const parts = (picked.address ?? '')
+      .split(',')
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (parts.length >= 3) city = trim(parts[parts.length - 2]);
+    else if (parts.length === 1) city = trim(parts[0]);
+  }
+  if (city) city = normalizeCityName(city);
+
+  const bundesland = trim(picked.region) ?? bundeslandForCity(city);
+  return { city, bundesland };
+}
+
+/**
+ * Angezeigte/genutzte Region eines Users — EINE Quelle für Profil,
+ * Bestenliste und alles Weitere (ClickUp 86cawtkjp).
+ *
+ * Präzedenz: MANUELL geschlagen von nichts. Die automatische Schätzung
+ * (`guessed*`, aus der Journey-History) ist ausschließlich Fallback.
+ *
+ * Warum nicht einfach `city ?? guessedCity` an der Callsite: `??`
+ * greift nur bei null/undefined. Ein Altdaten-`city: ''` würde damit
+ * den Leerstring durchreichen und die Schätzung nie erreichen — der
+ * User sähe gar keinen Ort. Hier wird auf `null` normalisiert.
+ */
+export function resolveUserRegion(
+  profile:
+    | {
+        city?: string | null;
+        bundesland?: string | null;
+        guessedCity?: string | null;
+        guessedBundesland?: string | null;
+      }
+    | null
+    | undefined,
+): { city: string | null; bundesland: string | null; isManual: boolean } {
+  const trim = (v: unknown) => {
+    const s = typeof v === 'string' ? v.trim() : '';
+    return s.length > 0 ? s : null;
+  };
+  const manualCity = trim(profile?.city);
+  const manualBl = trim(profile?.bundesland);
+  // Manuell gesetzt heißt: der User hat eine Stadt gewählt. Das
+  // Bundesland kann dabei fehlen (kleiner Ort, Geocoder ohne Region) —
+  // dann NICHT auf die geratene Region zurückfallen, die gehört zu
+  // einer anderen Stadt und wäre in sich widersprüchlich.
+  if (manualCity) {
+    return { city: manualCity, bundesland: manualBl, isManual: true };
+  }
+  return {
+    city: trim(profile?.guessedCity),
+    bundesland: trim(profile?.guessedBundesland),
+    isManual: false,
+  };
+}

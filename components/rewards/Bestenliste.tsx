@@ -1,4 +1,5 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { resolveUserRegion } from '@/lib/data/city-to-bundesland';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import {
   CITY_TO_BUNDESLAND,
@@ -98,16 +99,15 @@ export function BestenlisteTab({
   const { theme } = useTokens();
   const { user, userProfile, refreshUserProfile } = useAuth();
 
-  const userBL: string | null =
-    (userProfile as any)?.bundesland ??
-    (userProfile as any)?.guessedBundesland ??
-    null;
-  const userCity: string | null =
-    (userProfile as any)?.city ??
-    (userProfile as any)?.guessedCity ??
-    null;
+  // Manuell gewählte Region schlägt die automatische Schätzung — EIN
+  // Selektor, identisch zum Profil (ClickUp 86cawtkjp). Vorher sammelte
+  // ein User mit manuell gesetztem Ort weiter für die GERATENE Region.
+  const {
+    city: userCity,
+    bundesland: userBL,
+    isManual: hasExplicitCity,
+  } = resolveUserRegion(userProfile as any);
   const userNick = userProfile?.display_name ?? null;
-  const hasExplicitCity = !!(userProfile as any)?.city;
 
 
 
