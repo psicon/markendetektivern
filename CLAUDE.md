@@ -2405,3 +2405,54 @@ Token-Cache + 503-Retry). Vollständige Analyse-Methodik + Referenz-Abfragen:
   RN #51628 / PR #51695, invertase#754 (A13 + 0.79.6-Bestätigungen),
   stripe#2091. Details §9 der Analyse-Doc
   (`docs/CRASH_ANALYSIS_6011_2026-07-20.md`).
+
+## Bewertungs-Prompts (In-App-Review) — Regeln + Fallen
+
+Play stand 07/2026 bei **3,44★** (545 Bewertungen, davon 146× 1★), iOS bei
+4,02★ — obwohl die App gut ist: die zufriedene Mehrheit wurde nie gefragt.
+Aktueller Stand: Auto-Prompt = **nativer Dialog direkt**, ausgelöst nach dem
+ersten Erfolg + Walk-Through (`lib/services/firstCaseService.ts`, ClickUp
+86cav7gqm) sowie beim Level-Up ≥3 (`ratingPrompt.ts`).
+
+- **NIEMALS eine Vorfrage vor dem nativen Dialog** („Gefällt dir die App?" →
+  Weiche). Google verbietet das **wörtlich** in den In-App-Review-Guidelines
+  („shouldn't ask the user any questions before or while presenting the rating
+  card"), bei Apple ist es Grauzone (5.6.1), und in DE ist selektive
+  Bewertungsaufforderung **UWG-riskant** (Irreführung, abmahnbar). Steuerung
+  läuft AUSSCHLIESSLICH übers Timing. Das `AppRatingModal` (mit Sentiment-
+  Funnel) ist nur noch der MANUELLE Pfad (Profil → „App bewerten") — dort
+  unkritisch, weil user-initiiert. Es darf NIE in den Auto-Pfad zurückkehren.
+- **NIE Punkte/Belohnungen an eine Bewertung koppeln** (Apple 3.2.2(x),
+  Play-Policy, UWG). Auch nicht indirekt: der Erst-Fall-Feier-Banner trägt
+  bewusst KEINE Punkte-Pill, weil er unmittelbar vor dem Dialog läuft.
+- **Budget erst NACH dem Aufruf verbuchen.** `requestReview()` ist auf beiden
+  Plattformen fire-and-forget ohne Rückkanal — ein `true` beweist nur „hat
+  nicht geworfen", nicht dass die Karte erschien. Wer vorher verbucht,
+  verbrennt bei jedem blockierten Versuch (Modul fehlt, App im Hintergrund,
+  Sheet offen) das 1×-pro-App-Version-Budget, ohne dass je ein Dialog kam.
+  Version-Riegel zusätzlich **uid-frei** halten (`nativeReviewAskedVersion_global`),
+  sonst umgeht ein Logout + neuer Anonymous-Sign-In das Budget.
+- **Manueller „Bewerten"-Button → Store-Deep-Link, nicht die API** (Apple:
+  „Avoid requesting a review as the result of a user action"; bei Google kann
+  das Quota verbraucht sein → es passiert dann still gar nichts). iOS mit
+  `?action=write-review`.
+- **Jedes Gate braucht eine Gegenkante.** Ein Prompt, der wegen offenem Sheet /
+  laufender Tour / Hintergrund abgelehnt wird, muss später erneut evaluiert
+  werden (Bus-Tick, AppState-Listener) — sonst bleibt er für immer liegen.
+  Und: ein Abbruch darf NIE den Trigger verbrauchen (sonst verliert genau die
+  Gruppe den Prompt, bei der es einmal nicht passte).
+- **Feier-Kopplung NICHT an `first_action_any` hängen.** Dieses Achievement ist
+  im Standard-Funnel schon vom **Walkthrough-Demo-Tap** verbraucht (Demo-Karte
+  → Produktseite → `trackAction('view_comparison')`), also lange vor dem ersten
+  eigenen Scan. Wer „erster Erfolg" daran hängt, feiert im falschen Moment.
+
+## `isAnySheetOpen()` sieht das Umfrage-Sheet NICHT
+
+`components/survey/SurveyProvider.tsx` präsentiert ein echtes RN-`<Modal>`
+(FilterSheet), registriert sich aber bewusst mit `registerPresence={false}` im
+Zähler (sonst blockierte es sich selbst). Es ist damit für `isAnySheetOpen()`
+**unsichtbar** — und `requestActionSurvey` läuft nach JEDER Aktion, also auch
+beim allerersten Scan. Wer ein zweites Modal oder einen System-Dialog
+präsentiert, MUSS zusätzlich `isSurveyVisible()` aus
+`lib/services/sheetPresence.ts` prüfen (sonst Zwei-Modal-Deadlock bzw. still
+verschluckter System-Dialog).
