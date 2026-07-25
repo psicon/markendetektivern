@@ -51,6 +51,8 @@ import {
   DetailHeader,
 } from '@/components/design/DetailHeader';
 import { FilterSheet } from '@/components/design/FilterSheet';
+import { SegmentedTabs } from '@/components/design/SegmentedTabs';
+import { resolveUserRegion } from '@/lib/data/city-to-bundesland';
 import { DemographicsPromptSheet } from '@/components/onboarding/DemographicsPromptSheet';
 import { AuthRequiredModal } from '@/components/ui/AuthRequiredModal';
 import { SimilarityStagesModal } from '@/components/ui/SimilarityStagesModal';
@@ -103,7 +105,7 @@ export default function ProfileScreen() {
   // isPremiumEffective) — im Boot-Fenster (Status unbekannt) also beides
   // neutral statt falsches Flackern.
   const { isPremium, isPremiumEffective, presentPaywall } = useRevenueCat();
-  const { isDarkMode, toggleDarkMode } = useTheme();
+  const { isDarkMode, themeMode, setThemeMode } = useTheme();
 
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showSocialSheet, setShowSocialSheet] = useState(false);
@@ -237,12 +239,9 @@ export default function ProfileScreen() {
       alive = false;
     };
   }, [favoriteMarketId]);
-  const city =
-    (userProfile as any)?.city ?? (userProfile as any)?.guessedCity ?? '';
-  const bundesland =
-    (userProfile as any)?.bundesland ??
-    (userProfile as any)?.guessedBundesland ??
-    '';
+  // Manuell gewählte Region schlägt die automatische Schätzung — EINE
+  // Quelle für Profil + Bestenliste (ClickUp 86cawtkjp).
+  const { city, bundesland } = resolveUserRegion(userProfile as any);
 
   // Real level info from the catalogue — same source the home
   // card and the Errungenschaften screen use.
@@ -708,6 +707,68 @@ export default function ProfileScreen() {
       Alert.alert('Fehler', String(e?.message ?? e));
     }
   };
+  // ─── Dev: "Erster Fall" → nativer Review (ClickUp 86cav7gqm) ────
+  const onFirstCaseStatus = async () => {
+    try {
+      if (!user?.uid) {
+        Alert.alert('Erster Fall', 'Kein User eingeloggt.');
+        return;
+      }
+      const { FirstCaseService } = await import('@/lib/services/firstCaseService');
+      const s = await FirstCaseService.getDebugState(user.uid);
+      Alert.alert(
+        'Erster-Fall-Status',
+        `Scan-Erfolg: ${s.scanSuccessAt ?? '—'}\n` +
+          `Feier gezeigt: ${s.celebratedAt ?? '—'}\n` +
+          `Review angefragt: ${s.reviewRequestedAt ?? '—'}\n` +
+          `Walk-Through durch: ${s.introToursDone ? '✓' : '✗'}\n` +
+          `Rating-Gates offen: ${s.ratingGatesOpen ? '✓' : '✗'}`,
+      );
+    } catch (e: any) {
+      Alert.alert('Fehler', String(e?.message ?? e));
+    }
+  };
+
+  const onFirstCaseReset = async () => {
+    try {
+      if (!user?.uid) {
+        Alert.alert('Erster Fall', 'Kein User eingeloggt.');
+        return;
+      }
+      const [{ FirstCaseService }, { CoachmarkService }] = await Promise.all([
+        import('@/lib/services/firstCaseService'),
+        import('@/lib/services/coachmarkService'),
+      ]);
+      await FirstCaseService.reset(user.uid);
+      await ratingPromptService.clearRatingData(user.uid);
+      await CoachmarkService.resetAll();
+      Alert.alert(
+        'Zurückgesetzt',
+        'Scan-Flag, Rating-Gates und Coachmark-Touren sind zurückgesetzt. Nach dem nächsten Walk-Through + Katalog-Treffer kommt der Review-Dialog erneut.',
+      );
+    } catch (e: any) {
+      Alert.alert('Fehler', String(e?.message ?? e));
+    }
+  };
+
+  const onRequestNativeReview = async () => {
+    try {
+      if (!user?.uid) {
+        Alert.alert('Review', 'Kein User eingeloggt.');
+        return;
+      }
+      const ok = await ratingPromptService.requestNativeReviewNow(user.uid);
+      if (!ok) {
+        Alert.alert(
+          'Review-Dialog',
+          'Nicht angefragt — entweder ein Sheet/Walkthrough ist offen, die App ist im Hintergrund, oder das Budget (1×/App-Version, 14 Tage) ist verbraucht. "Erster-Fall-Trigger zurücksetzen" löst das Budget.',
+        );
+      }
+    } catch (e: any) {
+      Alert.alert('Fehler', String(e?.message ?? e));
+    }
+  };
+
   const onShowBonScanConsent = async () => {
     // Wipe the cashback consent so the screen mounts in its
     // first-time state, then navigate. Fail-soft if there's no user
@@ -1436,13 +1497,27 @@ export default function ProfileScreen() {
         <SectionLabel theme={theme}>Einstellungen</SectionLabel>
         <View style={{ paddingHorizontal: 20 }}>
           <MenuCard>
-            <ToggleRow
-              icon={isDarkMode ? 'weather-night' : 'white-balance-sunny'}
-              label="Dunkler Modus"
-              value={isDarkMode}
-              onChange={toggleDarkMode}
+            {/* Erscheinungsbild: DREI Zustände statt Boolean-Toggle
+                (ClickUp 86cawth45). Vorher war der Schalter eine
+                Einbahnstraße — einmal manuell gestellt, gab es keinen
+                Weg zurück auf „folgt dem System". */}
+            <SegmentedRow
+              icon={
+                themeMode === 'system'
+                  ? 'theme-light-dark'
+                  : isDarkMode
+                    ? 'weather-night'
+                    : 'white-balance-sunny'
+              }
+              label="Erscheinungsbild"
               first
-            />
+            >
+              <SegmentedTabs
+                tabs={THEME_TABS}
+                value={themeMode}
+                onChange={setThemeMode}
+              />
+            </SegmentedRow>
             <ToggleRow
               icon="bell-off-outline"
               label="Spielerische Inhalte ausblenden"
@@ -1685,6 +1760,27 @@ export default function ProfileScreen() {
                     Alert.alert('Rating-Modal', 'Handler nicht registriert (GamificationProvider nicht gemountet?).');
                   }
                 }}
+              />
+              <MenuRow
+                icon="magnify-scan"
+                color="#f59e0b"
+                label="Erster-Fall-Status anzeigen"
+                sub="Scan-Erfolg / Walk-Through / Rating-Gates des Auto-Prompts"
+                onPress={onFirstCaseStatus}
+              />
+              <MenuRow
+                icon="restore"
+                color="#f59e0b"
+                label="Erster-Fall-Trigger zurücksetzen"
+                sub="Scan-Flag, Rating-Gates und alle Coachmark-Touren zurücksetzen"
+                onPress={onFirstCaseReset}
+              />
+              <MenuRow
+                icon="star-outline"
+                color="#f59e0b"
+                label="Nativen Review-Dialog anfragen"
+                sub="Testet den echten In-App-Review (OS drosselt ggf. still)"
+                onPress={onRequestNativeReview}
               />
               <MenuRow
                 icon="receipt"
@@ -1994,6 +2090,15 @@ function LocBadge({
   );
 }
 
+// Erscheinungsbild-Umschalter (ClickUp 86cawth45). 'system' ist die
+// erste Option, weil es der Default ist und der Rückweg dorthin vorher
+// komplett fehlte.
+const THEME_TABS = [
+  { key: 'system' as const, label: 'System' },
+  { key: 'light' as const, label: 'Hell' },
+  { key: 'dark' as const, label: 'Dunkel' },
+];
+
 function MenuCard({ children }: { children: React.ReactNode }) {
   const { theme } = useTokens();
   return (
@@ -2089,6 +2194,65 @@ function MenuRow({
         color={theme.textMuted}
       />
     </Pressable>
+  );
+}
+
+/**
+ * Menu-Zeile mit Label oben und einem Steuerelement darunter (statt
+ * rechts) — für Auswahlen, die mehr als zwei Zustände haben und
+ * deshalb nicht in einen Switch passen. Optisch identisch zur
+ * ToggleRow (gleiche Paddings, gleicher Icon-Chip, gleiche Trennlinie).
+ */
+function SegmentedRow({
+  icon,
+  label,
+  first,
+  children,
+}: {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  label: string;
+  first?: boolean;
+  children: React.ReactNode;
+}) {
+  const { theme } = useTokens();
+  return (
+    <View
+      style={{
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        gap: 10,
+        borderTopWidth: first ? 0 : 1,
+        borderTopColor: theme.border,
+      }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <View
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: 9,
+            backgroundColor: theme.primary + '22',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <MaterialCommunityIcons name={icon} size={18} color={theme.primary} />
+        </View>
+        <Text
+          numberOfLines={2}
+          style={{
+            flex: 1,
+            fontFamily,
+            fontWeight: fontWeight.bold,
+            fontSize: 14,
+            color: theme.text,
+          }}
+        >
+          {label}
+        </Text>
+      </View>
+      {children}
+    </View>
   );
 }
 

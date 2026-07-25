@@ -10,7 +10,6 @@ interface ThemeContextType {
   themeMode: ThemeMode;
   setThemeMode: (mode: ThemeMode) => void;
   isDarkMode: boolean;
-  toggleDarkMode: () => void;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
@@ -35,7 +34,14 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     loadThemeMode();
   }, []);
 
-  // Speichere Theme-Einstellung bei Änderung
+  // Speichere Theme-Einstellung bei Änderung.
+  //
+  // WICHTIG (nicht "wegoptimieren"): Die Persistenz hängt bewusst HIER
+  // und nicht in `setThemeMode` — dadurch wird JEDE Änderung des Modus
+  // gespeichert, egal über welchen Weg sie kam, und der Setter bleibt
+  // ein reiner State-Setter. Das `isLoading`-Gate verhindert, dass der
+  // Default 'system' den gespeicherten Wert überschreibt, bevor
+  // `loadThemeMode` durch ist.
   useEffect(() => {
     if (!isLoading) {
       saveThemeMode(themeMode);
@@ -73,11 +79,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setThemeModeState(mode);
   };
 
-  const toggleDarkMode = () => {
-    const newMode = isDarkMode ? 'light' : 'dark';
-    setThemeMode(newMode);
-  };
-
   // Zeige nichts während des Ladens, um Flackern zu vermeiden
   if (isLoading) {
     return null;
@@ -90,7 +91,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         themeMode,
         setThemeMode,
         isDarkMode,
-        toggleDarkMode,
       }}
     >
       {children}
