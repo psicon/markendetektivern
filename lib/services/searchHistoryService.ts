@@ -68,13 +68,21 @@ class SearchHistoryService {
       
       const deletedDocs = await getDocs(deletedQuery);
       
+      // `resultCount` ist optional — Home ruft OHNE Zahl auf, weil der
+      // Algolia-Call zum Zeitpunkt des Schreibens noch unterwegs ist.
+      // `resultCount || 0` hat beides zu 0 verschmolzen: "unbekannt" und
+      // "wirklich 0 Treffer". Ab hier wird das getrennt.
+      const hasCount = typeof resultCount === 'number' && Number.isFinite(resultCount);
+
       if (!deletedDocs.empty) {
         // Gelöschten Eintrag wiederherstellen
         const deletedDoc = deletedDocs.docs[0];
         await updateDoc(doc(db, 'users', userId, 'searchHistory', deletedDoc.id), {
           deleted: false,
           timestamp: serverTimestamp(),
-          resultCount: resultCount || 0
+          // Ohne echte Zahl NICHT auf 0 zurücksetzen — sonst überschreibt
+          // ein Aufruf ohne Trefferzahl einen bereits korrekten Wert.
+          ...(hasCount ? { resultCount } : {}),
         });
         console.log('✅ Gelöschten Suchbegriff wiederhergestellt:', term);
         return;
@@ -99,12 +107,37 @@ class SearchHistoryService {
         await addDoc(historyRef, {
           searchTerm: term.trim(),
           timestamp: serverTimestamp(),
-          resultCount: resultCount || 0,
+          resultCount: hasCount ? resultCount : 0,
           deleted: false
         });
-        
+
         // Alte Einträge löschen (behalte nur die letzten 20)
         await this.cleanupOldSearches(userId);
+        return;
+      }
+
+      // Eintrag existiert bereits (24-h-Dedup). Frueher wurde hier
+      // kommentarlos abgebrochen — und genau das hat die Kennzahl
+      // zerstoert: Home schreibt den Eintrag OHNE Trefferzahl (0), das
+      // Stoebern-Screen ruft Sekunden spaeter MIT der echten Zahl auf und
+      // lief in dieses Return. Die echte Zahl wurde nie persistiert, jede
+      // auf Home gestartete Suche stand dauerhaft als "0 Treffer" in der
+      // Historie. In BigQuery sah das aus wie ~60 % erfolglose Suchen,
+      // obwohl der Index z.B. fuer "butter" 341 Treffer liefert.
+      //
+      // Jetzt: eine echte Zahl darf einen unbekannten Stand (0) nachtragen.
+      // Bewusst NICHT ueberschrieben wird ein bereits vorhandener Wert > 0
+      // (kein Geflacker durch Folgesuchen) und NICHT der `timestamp` —
+      // sonst wuerde sich die Reihenfolge der Verlaufsliste veraendern.
+      if (hasCount && resultCount > 0) {
+        const existing = existingDocs.docs[0];
+        const stored = Number(existing.data()?.resultCount) || 0;
+        if (stored === 0) {
+          await updateDoc(
+            doc(db, 'users', userId, 'searchHistory', existing.id),
+            { resultCount },
+          );
+        }
       }
     } catch (error) {
       console.error('Fehler beim Speichern der Suchhistorie:', error);
