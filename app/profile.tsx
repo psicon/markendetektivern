@@ -60,6 +60,7 @@ import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useGamificationEnabled } from '@/hooks/useGamificationEnabled';
 import {
   bannerDataFromFirstCase,
+  bannerDataFromVeteranCase,
   useGamification,
 } from '@/components/ui/GamificationProvider';
 import { useTokens } from '@/hooks/useTokens';
@@ -721,13 +722,20 @@ export default function ProfileScreen() {
       }
       const { FirstCaseService } = await import('@/lib/services/firstCaseService');
       const s = await FirstCaseService.getDebugState(user.uid);
+      let level = 0;
+      try {
+        level = Number((await achievementService.getUserStats(user.uid))?.currentLevel) || 0;
+      } catch {
+        /* non-fatal — Status-Alert soll auch ohne Level funktionieren */
+      }
       Alert.alert(
         'Erster-Fall-Status',
         `Scan-Erfolg: ${s.scanSuccessAt ?? '—'}\n` +
           `Feier gezeigt: ${s.celebratedAt ?? '—'}\n` +
           `Review angefragt: ${s.reviewRequestedAt ?? '—'}\n` +
           `Walk-Through durch: ${s.introToursDone ? '✓' : '✗'}\n` +
-          `Rating-Gates offen: ${s.ratingGatesOpen ? '✓' : '✗'}`,
+          `Rating-Gates offen: ${s.ratingGatesOpen ? '✓' : '✗'}\n` +
+          `Level: ${level || '—'} → Text: ${level >= 3 ? 'Bestandsnutzer' : 'Erster Fall'}`,
       );
     } catch (e: any) {
       Alert.alert('Fehler', String(e?.message ?? e));
@@ -762,6 +770,16 @@ export default function ProfileScreen() {
    */
   const onFirstCaseBannerPreview = () => {
     showBanner(bannerDataFromFirstCase());
+  };
+
+  /**
+   * Bestandsnutzer-Variante (Level >= 3). Eigene Zeile statt
+   * level-abhaengiger Automatik, damit sich BEIDE Texte pruefen lassen —
+   * ein Dev-Account mit Level 5 kaeme sonst nie an den Erst-Fall-Text.
+   * Der Level im Text ist nur Platzhalter fuer die Optik.
+   */
+  const onVeteranBannerPreview = () => {
+    showBanner(bannerDataFromVeteranCase(5));
   };
 
   /**
@@ -800,7 +818,7 @@ export default function ProfileScreen() {
         'Erster Fall laeuft',
         disabled
           ? 'Sequenz gestartet. "Spielerische Inhalte" sind AUS — es gibt daher bewusst KEINE Feier, der Bewertungsdialog kommt gleich direkt.'
-          : 'Sequenz gestartet: Glueckwunsch-Feier, danach der native Bewertungsdialog (~2,5 s nach dem Ende der Feier).\n\nHinweis: die Intro-Touren gelten jetzt als gesehen — "Erster-Fall-Trigger zuruecksetzen" macht das rueckgaengig.',
+          : 'Sequenz gestartet: Feier-Banner (Text je nach Level — ab Level 3 die Bestandsnutzer-Variante), der native Bewertungsdialog folgt 5 s nach dem Erscheinen des Banners, also waehrend es noch steht.\n\nHinweis: die Intro-Touren gelten jetzt als gesehen — "Erster-Fall-Trigger zuruecksetzen" macht das rueckgaengig.',
       );
     } catch (e: any) {
       Alert.alert('Fehler', String(e?.message ?? e));
@@ -1821,15 +1839,22 @@ export default function ProfileScreen() {
                 icon="party-popper"
                 color="#f59e0b"
                 label="Erster-Fall-Sequenz durchspielen"
-                sub={'Echter Pfad: Feier „Erster Fall geschlossen“ + danach der native Bewertungsdialog'}
+                sub={'Echter Pfad: setzt alles zurück, zeigt die Feier (Text je nach Level) und 5 s später den nativen Dialog'}
                 onPress={onFirstCaseRunFull}
               />
               <MenuRow
                 icon="eye-outline"
                 color="#f59e0b"
-                label="Nur die Feier anzeigen"
-                sub="Banner-Vorschau ohne State-Änderung (Copy/Design prüfen)"
+                label="Nur die Feier anzeigen — Neu-User"
+                sub={'Vorschau „Erster Fall geschlossen“, ohne State-Änderung'}
                 onPress={onFirstCaseBannerPreview}
+              />
+              <MenuRow
+                icon="eye-outline"
+                color="#f59e0b"
+                label="Nur die Feier anzeigen — Bestandsnutzer"
+                sub={'Vorschau „Wieder ein Fall gelöst“ (Level 3+), ohne State-Änderung'}
+                onPress={onVeteranBannerPreview}
               />
               <MenuRow
                 icon="magnify-scan"
