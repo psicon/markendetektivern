@@ -34,6 +34,14 @@ import { AppRatingModal } from './AppRatingModal';
 // und Punkte-Toasts Luft).
 const FIRST_CASE_SETTLE_DELAY_MS = 2500;
 
+// Regelfall: der Dialog kommt WÄHREND die Feier noch steht, gemessen ab
+// dem Moment, in dem der Banner sichtbar wird. Vorher hing er an der
+// Ruhe-Kante „Banner weg" — mit 6 s Standzeit + Ausblenden + 2,5 s waren
+// das real ~9 s, und der Bezug zum Erfolgserlebnis war verloren.
+// Der Banner ist ein Animated.View, KEIN <Modal> — der native Dialog
+// darüber ist deshalb unkritisch (kein Zwei-Modal-Deadlock auf iOS).
+const FIRST_CASE_PROMPT_AFTER_BANNER_MS = 3000;
+
 // AchievementUnlockBanner LAZY laden — sein Modul importiert
 // transitiv @shopify/react-native-skia (durch EdgeGlow) und das ist
 // auf manchen Android-Devices (Mediatek + Memory-Pressure) ein
@@ -272,6 +280,7 @@ export function bannerDataFromCashbackPayout(cashbackCents: number): BannerData 
  */
 export function bannerDataFromFirstCase(): BannerData {
   return {
+    kind: 'firstCase',
     title: 'Erster Fall geschlossen!',
     // Kurz halten: der Banner gibt dem Subtitle 2 Zeilen neben Lottie
     // (72 px) — ein längerer Satz wird bei großer System-Schrift
@@ -508,6 +517,10 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
   // ohne diese Ref wäre jeder Mount eine gültige "Ruhe-Kante".
   const firstCaseAwaitingReviewRef = useRef(false);
   const firstCaseCelebrateBusyRef = useRef(false);
+  // Steht gerade UNSERE eigene Erst-Fall-Feier auf dem Schirm? Nur dann
+  // darf Phase 2 laufen, obwohl ein Banner sichtbar ist — bei jedem
+  // anderen Banner bleibt es beim Warten auf die Ruhe-Kante.
+  const firstCaseBannerVisibleRef = useRef(false);
 
   /** PHASE 1: Feier zeigen, sobald Erst-Erfolg UND Walk-Through da sind. */
   const tryCelebrateFirstCase = useCallback(async () => {
@@ -557,7 +570,9 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     // Refs sind die einzigen synchron aktuellen Quellen (bannerData als
     // State kann im selben Tick veraltet sein) — insbesondere deckt
     // `bannerQueueRef` den Fall ab, dass noch ein Banner WARTET.
-    if (bannerShowingRef.current) return;
+    // Ausnahme: unsere EIGENE Feier darf stehen bleiben — der Dialog soll
+    // ja genau dann kommen, während der Erfolg noch sichtbar ist.
+    if (bannerShowingRef.current && !firstCaseBannerVisibleRef.current) return;
     if (bannerQueueRef.current.length > 0) return;
     if (CoachmarkService.isAnyActive()) return;
     if (isAnySheetOpen() || isSurveyVisible()) return;
@@ -575,8 +590,23 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     });
   }, [user?.uid]);
 
+  // SCHNELLPFAD: sobald unsere eigene Feier sichtbar ist, den Dialog nach
+  // FIRST_CASE_PROMPT_AFTER_BANNER_MS anfragen — noch während der Banner
+  // steht. Der Timer haengt an `bannerData`, nicht am presentBanner-Aufruf:
+  // presentBanner kann den Banner erst EINREIHEN (Walkthrough aktiv, anderer
+  // Banner offen), dann waere ein Timer ab Aufruf zu frueh gelaufen.
+  useEffect(() => {
+    const own = bannerData?.kind === 'firstCase';
+    firstCaseBannerVisibleRef.current = own;
+    if (!own) return;
+    const t = setTimeout(trySettleFirstCase, FIRST_CASE_PROMPT_AFTER_BANNER_MS);
+    return () => clearTimeout(t);
+  }, [bannerData, trySettleFirstCase]);
+
   // Ruhe-Kanten für Phase 2: Banner weg, Walkthrough zu Ende, Rating-
-  // Modal zu, Tick (Arm / App wieder im Vordergrund).
+  // Modal zu, Tick (Arm / App wieder im Vordergrund). Bleibt als
+  // Rückfallebene bestehen — z.B. wenn der User die Feier vorher
+  // wegwischt oder sie (Spielerische Inhalte aus) gar nicht kommt.
   useEffect(() => {
     if (bannerData !== null) return;
     if (walkthroughActive) return;

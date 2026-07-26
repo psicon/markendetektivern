@@ -76,6 +76,11 @@ export type BannerData = {
   withGlow?: boolean;
   /** Optional: Tap aufs Body. */
   onTap?: () => void;
+  /** Herkunfts-Marker. Rein fachlich, ohne Darstellungs-Wirkung: der
+   *  GamificationProvider muss erkennen, ob der GERADE sichtbare Banner
+   *  seine eigene Erst-Fall-Feier ist, um den nativen Review-Dialog
+   *  bereits WÄHREND des Banners anzufragen statt erst danach. */
+  kind?: 'firstCase';
 };
 
 export type AchievementUnlockBannerProps = {
