@@ -1938,6 +1938,57 @@ dedupe), (4) not-in-catalog → ExternalLookupMiss, (5) BigQuery-Export (B2B).
 Bonus: Match-Precision lässt sich direkt an den bereits gesammelten
 `purchased_products` messen (kein separater OCR-Spike nötig).
 
+## Android-Build scheitert bei ~9 min in `configureCMake` → Codegen-Race
+
+Symptom: `EAS_BUILD_UNKNOWN_GRADLE_ERROR`, `buildDuration` ~555–566 s (statt
+~1.310 s bei Erfolg), im Log
+`Execution failed for task ':app:configureCMakeRelWithDebInfo[arm64-v8a]'` und
+darunter mehrfach
+`add_subdirectory given source ".../android/build/generated/source/codegen/jni/"
+which is not an existing directory`.
+
+**Ursache:** Mit `newArchEnabled=true` erzeugt jedes autolinkte Modul seine
+Codegen-Artefakte selbst; `Android-autolinking.cmake` zieht genau diese
+Verzeichnisse per `add_subdirectory` herein. EAS baut mit
+`-Dorg.gradle.parallel=true` (steht in `GRADLE_OPTS` auf dem Worker), und ohne
+explizite Kante ist `:app:configureCMake*` VOR den Codegen-Tasks eingeplant —
+gemessen per `--dry-run`: Position 275 vs. letzter Codegen 569.
+
+**Es ist ein RACE, kein deterministischer Fehler.** Identischer Code scheiterte
+in 1224/1225/1227 und lief in 1222/1223/1226 durch (~50 %). Das ist die
+gefährliche Eigenschaft: ein einzelner grüner Build beweist NICHTS. Beleg im
+Log: erfolgreicher Build = 19 `generateCodegenArtifactsFromSchema`-Tasks,
+gescheiterter = 3.
+
+**Lokal nicht reproduzierbar** — dort liegen Codegen-Reste früherer Builds in
+`node_modules/*/android/build/`, also findet CMake die Verzeichnisse immer. Ein
+grüner lokaler `:app:bundleRelease` entlastet den Code, sagt aber nichts über
+diesen Fehler.
+
+**Fix** (in `android/app/build.gradle`, unter `apply plugin: google-services`):
+`gradle.projectsEvaluated` sammelt alle `generateCodegenArtifactsFromSchema`-Tasks
+der Subprojekte und hängt sie als `dependsOn` an jeden `configureCMake*`/
+`buildCMake*`-Task des App-Projekts. Parallelität bleibt erhalten.
+`org.gradle.parallel=false` in `gradle.properties` wäre WIRKUNGSLOS — EAS setzt
+die System-Property per `-D` auf der Kommandozeile, das gewinnt.
+
+**Verifikation ohne 25-Minuten-Build:**
+```bash
+cd android && ./gradlew :app:bundleRelease --dry-run --parallel --console=plain \
+  | grep -n SKIPPED
+# :app:configureCMake* MUSS hinter dem letzten generateCodegenArtifactsFromSchema liegen
+```
+
+**EAS-Build-Logs lokal lesen** (die CLI zeigt sie nicht):
+```bash
+npx eas-cli build:view <id> --json | python3 -c "import sys,json;print(json.load(sys.stdin)['logFiles'][0])"
+curl -sS -o log.raw "<signierte URL, 900 s gueltig>"
+node -e "require('fs').writeFileSync('log.txt', require('zlib').brotliDecompressSync(require('fs').readFileSync('log.raw')))"
+```
+Die Datei ist **brotli**-komprimiert (`curl --compressed` scheitert mit
+„Unrecognized content encoding", gzip/zlib ebenfalls) und enthält JSON-Zeilen
+mit dem Text im Feld `msg`.
+
 ## `tsc --noEmit` ist KEIN grünes Gate — gegen gemessene Baseline prüfen
 
 Stand 26.07.2026: **361 Fehler** am Produktiv-Commit `c453505`. Der Satz weiter

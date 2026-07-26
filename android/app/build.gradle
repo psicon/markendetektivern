@@ -199,3 +199,40 @@ dependencies {
 }
 
 apply plugin: 'com.google.gms.google-services'
+
+// ─────────────────────────────────────────────────────────────────────
+// Race-Fix: CMake-Configure vs. Codegen der autolinkten Module
+//
+// Mit newArchEnabled=true schreibt jedes autolinkte Modul seine
+// Codegen-Artefakte nach <modul>/android/build/generated/source/codegen/jni/.
+// Genau diese Verzeichnisse zieht Android-autolinking.cmake per
+// add_subdirectory herein. EAS baut mit `-Dorg.gradle.parallel=true`
+// (steht so in GRADLE_OPTS auf dem Worker), und ohne explizite Kante darf
+// :app:configureCMake* starten, BEVOR die Codegen-Tasks der anderen
+// Projekte fertig sind. Dann bricht CMake ab mit
+//   add_subdirectory given source ".../codegen/jni/" which is not an
+//   existing directory
+// und der Build stirbt nach ~9 Minuten.
+//
+// Das ist ein RACE, kein deterministischer Fehler: identischer Code
+// scheiterte in Build 1224/1225/1227 und lief in 1222/1223/1226 durch
+// (~50 %). Beleg aus den Worker-Logs: im erfolgreichen Build liefen 19
+// `generateCodegenArtifactsFromSchema`-Tasks, im gescheiterten nur 3.
+// Lokal faellt es nie auf, weil dort Codegen-Reste frueherer Builds liegen.
+//
+// Parallelitaet abzuschalten waere die Alternative, kostet aber Bauzeit —
+// und `org.gradle.parallel` in gradle.properties wuerde ohnehin verlieren,
+// weil EAS die System-Property per -D auf der Kommandozeile setzt.
+gradle.projectsEvaluated {
+    def codegenTasks = rootProject.subprojects.collect { sp ->
+        sp.tasks.findByName('generateCodegenArtifactsFromSchema')
+    }.findAll { it != null }
+
+    if (!codegenTasks.isEmpty()) {
+        tasks.configureEach { t ->
+            if (t.name.startsWith('configureCMake') || t.name.startsWith('buildCMake')) {
+                t.dependsOn codegenTasks
+            }
+        }
+    }
+}
