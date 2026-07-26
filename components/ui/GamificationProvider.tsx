@@ -284,6 +284,36 @@ export function bannerDataFromCashbackPayout(cashbackCents: number): BannerData 
  * Bewertungsbitte wäre Incentivierung (Apple 3.2.2(x), Play-Policy,
  * UWG). Die Punkte für die Aktion selbst laufen unabhängig weiter.
  */
+/**
+ * Variante für BESTANDSNUTZER (Level ≥ 3).
+ *
+ * Warum es die braucht: die Gates von firstCaseService sind reine
+ * AsyncStorage-Keys (`firstCase/v1/*`), die es bei KEINEM bestehenden
+ * User gibt. Beim Update auf 6.0.12 laufen deshalb auch langjährige
+ * Nutzer durch dieselbe Kante — mechanisch gewollt (sie sollen gefragt
+ * werden), aber „Erster Fall geschlossen!" wäre für jemanden mit
+ * hunderten Vergleichen schlicht falsch und wirkt herablassend.
+ *
+ * Gleicher Mechanismus, gleiche Sicherungen, nur ehrlicher Text.
+ */
+export function bannerDataFromVeteranCase(level: number): BannerData {
+  return {
+    kind: 'firstCase',
+    title: 'Wieder ein Fall gelöst!',
+    subtitle: `Starke Arbeit, Detektiv Level ${level}.`,
+    lottie: (() => {
+      try {
+        return require('@/assets/lottie/firstaction.json');
+      } catch {
+        return require('@/assets/lottie/confetti.json');
+      }
+    })(),
+    tint: '#F0A030',
+    secondaryTint: '#0d8575',
+    withGlow: true,
+  };
+}
+
 export function bannerDataFromFirstCase(): BannerData {
   return {
     kind: 'firstCase',
@@ -549,10 +579,22 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
         // trotzdem am nächsten Ruhe-Punkt — das ist Absicht, kein Bug.
         console.log('🔕 Erster-Fall-Feier unterdrückt (Spielerische Inhalte aus)');
       } else {
+        // Bestandsnutzer (Level ≥ 3) bekommen denselben Mechanismus, aber
+        // ehrlichen Text — für sie ist es NICHT der erste Fall. Der Level-
+        // Read darf die Feier nicht gefährden: schlägt er fehl, bleibt es
+        // beim bisherigen Verhalten (Erst-Fall-Text).
+        let level = 0;
+        try {
+          level = Number((await achievementService.getUserStats(uid))?.currentLevel) || 0;
+        } catch (e) {
+          console.warn('Level-Read für Feier-Text fehlgeschlagen (non-fatal):', e);
+        }
         // presentBanner reiht sich korrekt ein (Walkthrough aktiv oder
         // anderer Banner offen → Queue) — dadurch kommt unsere Feier
         // garantiert NACH etwaigen anderen Feiern.
-        presentBanner(bannerDataFromFirstCase());
+        presentBanner(
+          level >= 3 ? bannerDataFromVeteranCase(level) : bannerDataFromFirstCase(),
+        );
       }
       // Frische Kante für Phase 2 erzwingen: das Setzen einer Ref löst
       // keinen Re-Render aus, und im unterdrückten Fall gibt es auch
