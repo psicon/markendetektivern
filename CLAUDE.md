@@ -1938,6 +1938,65 @@ dedupe), (4) not-in-catalog → ExternalLookupMiss, (5) BigQuery-Export (B2B).
 Bonus: Match-Precision lässt sich direkt an den bereits gesammelten
 `purchased_products` messen (kein separater OCR-Spike nötig).
 
+## `tsc --noEmit` ist KEIN grünes Gate — gegen gemessene Baseline prüfen
+
+Stand 26.07.2026: **361 Fehler** am Produktiv-Commit `c453505`. Der Satz weiter
+unten („`tsc --noEmit` is the pre-deploy gate") beschreibt den Wunsch, nicht die
+Realität. Wer `npx tsc --noEmit | tail -5` laufen lässt, sieht fünf Fehler und
+hält das für die Gesamtmenge — genau dieser Fehlschluss hat am 26.07. zur
+falschen Behauptung „0 neue Fehler" geführt.
+
+Regeln:
+- **Nie `| tail`** zum Bewerten. Immer `| grep -c "error TS"` für die Zahl.
+- **Neu ≠ vorhanden.** Die einzig gültige Aussage ist ein Vergleich gegen eine
+  frisch gemessene Baseline:
+  ```bash
+  git worktree add -q --detach /tmp/md-base <baseline-commit>
+  ln -s "$PWD/node_modules" /tmp/md-base/node_modules   # spart 10 min npm i
+  (cd /tmp/md-base && npx tsc --noEmit -p tsconfig.json 2>&1 | grep "error TS") > /tmp/base.txt
+  # Signaturen ohne Zeilennummern vergleichen, sonst zaehlt jede Verschiebung als "neu":
+  sed -E 's/\(([0-9]+),([0-9]+)\)//' … | sort   →  comm -13 base now
+  git worktree remove /tmp/md-base --force
+  ```
+- **Neue Test-Dateien kippen Fehler-Sichtbarkeit.** Kommen `__tests__`-Files ins
+  Programm, gewinnt bei `setTimeout` mal RN (`number`), mal `@types/node`
+  (`NodeJS.Timeout`) → dutzende `Type 'number' is not assignable to type
+  'Timeout'` in Dateien, die niemand angefasst hat. Das ist kein Laufzeitdefekt
+  (beide Handles funktionieren, `clearTimeout` nimmt beide) und darf nicht als
+  eigene Regression missverstanden werden.
+- **jest ist das belastbare Gate** in diesem Repo, nicht tsc.
+
+## `MobileAds` ist eine FACTORY, keine Modul-Instanz
+
+`import { default: MobileAds } from 'react-native-google-mobile-ads'` liefert
+eine **Funktion**. Alle Methoden (`setRequestConfiguration`, `initialize`, …)
+hängen an dem, was `MobileAds()` zurückgibt. Ein Feature-Check auf
+`MobileAds.setRequestConfiguration` ist darum IMMER `undefined` — und weil ein
+solcher Block typischerweise in `if (…)` steht und nichts wirft, scheitert er
+**lautlos**. Genau so lief der `maxAdContentRating: 'PG'`-Block monatelang nie.
+Richtig: `const ads = MobileAds(); await ads.setRequestConfiguration({…})`.
+Merker: im selben File steht `await MobileAds()` — wo der Default-Export
+aufgerufen wird, ist er keine Instanz. Bei „Konfiguration wirkt nicht" immer
+erst prüfen, ob der Guard überhaupt true werden KANN, und einen `else`-Zweig
+mit Warnung einziehen, damit der Ausfall sichtbar wird.
+
+## Substring-Matching auf kurzen Stämmen ist bei deutschen Komposita eine Falle
+
+`text.includes('creme')` trifft „Schokoladen**creme**s", „Eis**creme**",
+„Frischkäse**creme**"; `includes('deo')` trifft „Ro**deo**"; `includes('pasta')`
+trifft „Zahn**pasta**". In `domainFromFreeText` (`lib/utils/productTaxonomy.ts`)
+hat das Lebensmittel als Drogerie klassifiziert → der Alternativen-Guard warf
+passende Vorschläge weg und ließ Drogerie-Artikel durch.
+
+Substring-Matching ist hier trotzdem richtig (Komposita wie
+„Vollwaschmittel" scheitern an Wortgrenzen). Der Preis: **kurze/mehrdeutige
+Stämme dürfen nicht nackt in der Liste stehen**, nur als eindeutiges Kompositum
+(`handcreme`, `zahncreme`, `deodorant`). Zusätzlich zwei Klassen trennen:
+*exklusive* Marker (nie Lebensmittel → entscheiden sofort) und *mehrdeutige*
+(`haushalt` in „Haushaltszucker") — treffen beide Welten zu, ist `null` die
+richtige Antwort, weil `null` fail-open ist und eine falsch geratene Domäne
+legitime Alternativen verwirft.
+
 ## Other notes
 
 - TypeScript strict; `tsc --noEmit -p tsconfig.json` is the
