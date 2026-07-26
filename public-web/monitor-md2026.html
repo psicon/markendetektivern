@@ -163,6 +163,40 @@
   #loading{padding:80px 20px;text-align:center;color:var(--muted)}
   footer{margin-top:40px;font-size:12px;color:var(--muted);border-top:1px solid var(--border);padding-top:16px;line-height:1.65}
   footer b{color:var(--sub)} footer code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:11.5px}
+
+  /* ── Deep-Dive-Analyse (manueller Snapshot) ── */
+  .asec{background:linear-gradient(180deg,var(--brand-soft),rgba(227,241,238,0));border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;margin:26px 0 4px}
+  .asec .ah{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+  .asec .ah h2{font-size:19px;font-weight:800;margin:0;letter-spacing:-.02em;color:var(--brand-ink)}
+  .asec p{margin:0;font-size:12.5px;color:var(--sub);line-height:1.6}
+  .asec p b{color:var(--ink)}
+  /* Ampel-Karten */
+  .ampel{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+  .ac{background:var(--surface);border:1px solid var(--border);border-left:5px solid var(--muted);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow)}
+  .ac.good{border-left-color:var(--good)} .ac.warn{border-left-color:var(--warn)} .ac.bad{border-left-color:var(--crit)}
+  .ac .at{font-size:14px;font-weight:800;letter-spacing:-.01em}
+  .ac .av{font-size:12.5px;color:var(--sub);margin-top:6px;line-height:1.5}
+  /* Prognose-Tabelle */
+  .ptab{width:100%;border-collapse:collapse;font-size:13px}
+  .ptab th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:800;padding:0 10px 9px}
+  .ptab td{padding:11px 10px;border-top:1px solid var(--hair);vertical-align:top}
+  .ptab .metric{font-weight:700;color:var(--ink)}
+  .ptab .now{color:var(--sub);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .ptab .proj{font-weight:800;color:var(--brand-ink);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .ptab .why{color:var(--muted);font-size:12px;line-height:1.45}
+  .conf{display:inline-block;font-size:10px;font-weight:800;padding:2px 8px;border-radius:999px;white-space:nowrap;text-transform:uppercase;letter-spacing:.03em}
+  .conf.hoch{background:var(--good-soft);color:var(--good-ink)} .conf.mittel{background:var(--surface-2);color:var(--sub)}
+  .conf.niedrig{background:var(--warn-soft);color:var(--warn-ink)} .conf.offen{background:var(--crit-soft);color:var(--crit-ink)}
+  @media(max-width:720px){.ptab .why{display:none}}
+  /* Deep-Dive Kennzahl-Karten */
+  .ddgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:12px}
+  .ddcard{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:15px 17px;box-shadow:var(--shadow)}
+  .ddcard h4{margin:0 0 8px;font-size:13.5px;font-weight:800;display:flex;align-items:center;gap:7px}
+  .ddcard .row{display:flex;justify-content:space-between;gap:12px;font-size:12.5px;padding:6px 0;border-top:1px dashed var(--hair)}
+  .ddcard .row:first-of-type{border-top:0}
+  .ddcard .row .k{color:var(--sub);line-height:1.35}
+  .ddcard .row .v{font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--ink)}
+  .ddcard .row .v.good{color:var(--good-ink)} .ddcard .row .v.bad{color:var(--crit-ink)} .ddcard .row .v.warn{color:var(--warn-ink)} .ddcard .row .v.brand{color:var(--brand-ink)}
 </style>
 </head>
 <body>
@@ -194,6 +228,117 @@
       <span class="pill" style="background:var(--surface-2);color:var(--sub)">v5</span>letzte 5.x-Woche <b>04.–06.07.</b> ·
       „v5 vs v6"-Karten vergleichen neu gegen alt, „aktueller Stand" = Voll-DB · OS-Filter (oben rechts) wirkt aufs Verhalten ·
       <b>Gesamturteil (v5 vs v6 in Summe) steht ganz unten.</b>
+    </div>
+
+    <!-- ══ DEEP-DIVE-ANALYSE & v6-PROGNOSE (manueller Snapshot 17.07.) ══ -->
+    <div class="asec">
+      <div class="ah"><h2>🔬 Deep-Dive-Analyse &amp; v6-Prognose</h2>
+        <span class="tag now">Snapshot 26.07.2026 · manuell</span></div>
+      <p>Tiefen-Analyse aus den Rohdaten — Bindung, Retention, Suche, Katalog, Cashback — mit unabhängig gegengeprüften Kernzahlen. <b>Dieser Block ist NICHT live</b> (im Gegensatz zu den Sektionen darunter): eine Momentaufnahme vom 26.07.2026, ~14:00 UTC. Sie löst den Stand vom 17.07. ab; jede Zahl wurde neu gemessen, die tragenden zusätzlich von einer zweiten Auswertung auf anderem Weg gegengerechnet.</p>
+    </div>
+
+    <!-- Ampel-Übersicht -->
+    <div class="shead"><h2>Ampel-Übersicht</h2><span class="hint">Fünf Dimensionen auf einen Blick</span></div>
+    <div class="ampel">
+      <div class="ac good"><div class="at">🟢 Technik / Release 6.0</div>
+        <div class="av">Identität gefixt: Re-Anon aggregiert von 11 % auf <b>1,6 %</b> — die Prognose (~3 %) ist übertroffen. Landing <b>~100 %</b>, kein Boot-Abbruch messbar. Dominant: 6.0.7 (iOS), 6.0.11 (Android).</div></div>
+      <div class="ac bad"><div class="at">🔴 Suche</div>
+        <div class="av"><b>~31 % der Suchen finden wirklich nichts</b> (Zufallsstichprobe live gegen den Index, n = 300). Die alten 51,6 % waren zum Teil ein Messfehler. Ursache unverändert: der Index trägt Referenz-<i>IDs</i> statt Marken-, Kategorie- und Marktnamen.</div></div>
+      <div class="ac bad"><div class="at">🔴 Bindung</div>
+        <div class="av">DAU/MAU <b>4,4 %</b> (nicht sticky, seit dem 17.07. unverändert). <b>~70 %</b> kommen nach Install nie wieder. Das Versprechen „Sparen" ist bei <b>99,2 %</b> nie eingetreten. Weiter die schwächste Dimension.</div></div>
+      <div class="ac warn"><div class="at">🟡 Wachstum</div>
+        <div class="av">Nicht mehr flach: Neu-User <b>×4</b> gegenüber dem Juni-Tief, zuletzt <b>745/Tag</b>. Registrierung <b>32,1 %</b> (von 16 %). Aber: keine einzige Kampagne zuordenbar, und ~⅓ der Android-Installs öffnen die App nie.</div></div>
+      <div class="ac good"><div class="at">🟢 Katalog-Qualität</div>
+        <div class="av">99,9 % EAN, <b>87 % KI-Urteil</b>, 85 % Nährwerte — inhaltlich unverändert stark. Aber: der Katalog ist in neun Tagen <b>nicht gewachsen</b> (7.321 / 3.360), während 64 nachgefragte Marken gar keine Produkte haben.</div></div>
+    </div>
+
+    <!-- v6-Prognose -->
+    <div class="shead"><h2>v6-Prognose</h2><span class="hint">Wohin die Zahlen laufen — Schätzung aus beobachteten Trends, keine Garantie</span></div>
+    <div class="chartcard">
+      <table class="ptab">
+        <thead><tr><th>Kennzahl</th><th>Jetzt</th><th>Prognose</th><th>Warum</th><th>Konfidenz</th></tr></thead>
+        <tbody>
+          <tr><td class="metric">Re-Anon (aggregiert)</td><td class="now">1,6 %</td><td class="proj">✓ übertroffen</td>
+            <td class="why">Prognose war ~3 %. Die verseuchten Alt-Versionen sind praktisch ausgestorben: im 72-h-Fenster nur noch 14 Installs auf 6.0.0/6.0.1, dagegen 2.870 auf 6.0.11 (1,5 %) und 931 auf 6.0.7 (1,3 %).</td>
+            <td><span class="conf hoch">erledigt</span></td></tr>
+          <tr><td class="metric">Registrierung (Neu-User)</td><td class="now">32,1 %</td><td class="proj">✓ übertroffen</td>
+            <td class="why">Prognose war ~25–30 %. Trend weiter steigend — von 16 % vor dem Release über 28 % am 17.07. auf jetzt 32,1 %. Der klarste positive Release-Effekt.</td>
+            <td><span class="conf hoch">erledigt</span></td></tr>
+          <tr><td class="metric">Alter/Geschlecht erfasst (6.0-Ära)</td><td class="now">32 %</td><td class="proj">✓ erreicht</td>
+            <td class="why">Prognose war 30 %+. Der Reichweiten-Fix in 6.0.8 wirkt: Alter 31,9 %, Geschlecht 32,0 % — von 18–19 % am 17.07.</td>
+            <td><span class="conf hoch">erledigt</span></td></tr>
+          <tr><td class="metric">Retention D7 (v6-Kohorte)</td><td class="now">2,3 %</td><td class="proj">✗ verfehlt</td>
+            <td class="why">Prognose war ~5–6 %. Jetzt messbar (n = 2.990) und klar darunter; die fenster-gleiche v5-Kohorte liegt bei 2,7 %, also praktisch gleichauf. Weichere Lesart „mindestens eine Rückkehr in Tag 1–7": v6 22,8 % vs. v5 20,1 %.</td>
+            <td><span class="conf niedrig">schlechter</span></td></tr>
+          <tr><td class="metric">Null-Treffer-Rate Suche</td><td class="now">~31 % real · 43,7 % roh</td><td class="proj">teilweise</td>
+            <td class="why">Prognose war 15–25 % mit Fix. Der eigentliche Fix (Namen in den Index) ist offen; gewirkt haben 189 Synonym-Regeln. Achtung: die alten 51,6 % waren nach oben verzerrt — die Historie speicherte die echte Trefferzahl nie. „Real" = Zufallsstichprobe live gegen den Index (n = 300, 95-%-KI 26–37 %).</td>
+            <td><span class="conf offen">Fix offen</span></td></tr>
+          <tr><td class="metric">Zufriedenheit (v6-Ära)</td><td class="now">79,2 %</td><td class="proj">jetzt belastbar</td>
+            <td class="why">n = 346 statt 105 — die geforderten ~300 Bewertungen sind erreicht, die Aussage ist damit erstmals tragfähig. Auf breiterer Basis fällt sie niedriger aus als die 86 % der kleinen Stichprobe. Über alle Zeiträume: 90,9 % (n = 4.877).</td>
+            <td><span class="conf mittel">belastbar</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Alle Kennzahlen im Detail -->
+    <div class="shead"><h2>Alle Kennzahlen im Detail</h2><span class="hint">Vollzählung bzw. gegengeprüfte Stichprobe · Stand 17.07.</span></div>
+    <div class="ddgrid">
+      <div class="ddcard"><h4>🔁 Bindung &amp; Retention</h4>
+        <div class="row"><span class="k">DAU / MAU (Stickiness)</span><span class="v bad">4,4 %</span></div>
+        <div class="row"><span class="k">MAU / Install-Basis</span><span class="v bad">13,4 %</span></div>
+        <div class="row"><span class="k">Nie wiedergekommen (nach Install)</span><span class="v bad">~70 %</span></div>
+        <div class="row"><span class="k">Ersparnis je realisiert</span><span class="v bad">0,8 %</span></div>
+        <div class="row"><span class="k">Retention D1 v6 vs v5 (fenster-fair)</span><span class="v good">+2,5 pp</span></div>
+        <div class="row"><span class="k">Retention D7 (v6, jetzt messbar)</span><span class="v bad">2,3 %</span></div>
+      </div>
+      <div class="ddcard"><h4>🎯 Aktivierung &amp; Funnel</h4>
+        <div class="row"><span class="k">≥ 1 Kern-Aktion je gemacht</span><span class="v warn">37,5 %</span></div>
+        <div class="row"><span class="k">… ohne Suche gerechnet</span><span class="v bad">10,5 %</span></div>
+        <div class="row"><span class="k">Scan → Einkaufszettel</span><span class="v bad">7,0 %</span></div>
+        <div class="row"><span class="k">Einkaufszettel → Kauf</span><span class="v good">21,9 %</span></div>
+        <div class="row"><span class="k">Onboarding-Abschluss (Starts)</span><span class="v">75,2 %</span></div>
+      </div>
+      <div class="ddcard"><h4>🏅 Gamification</h4>
+        <div class="row"><span class="k">Ø Level</span><span class="v">1,69</span></div>
+        <div class="row"><span class="k">Echter Fortschritt (Level ≥ 3)</span><span class="v bad">7,1 %</span></div>
+        <div class="row"><span class="k">Streak: schaffen Tag 7</span><span class="v bad">24 User</span></div>
+        <div class="row"><span class="k">Punkte vergeben (gesamt)</span><span class="v">4,6 Mio</span></div>
+      </div>
+      <div class="ddcard"><h4>🔍 Suche &amp; Scan</h4>
+        <div class="row"><span class="k">Null-Treffer (real, indexgeprüft)</span><span class="v bad">~31 %</span></div>
+        <div class="row"><span class="k">Null-Treffer (roh, wie bisher)</span><span class="v bad">43,7 %</span></div>
+        <div class="row"><span class="k">Scan-Trefferquote</span><span class="v warn">69,9 %</span></div>
+        <div class="row"><span class="k">Ursache Null-Treffer</span><span class="v bad">Ref-ID statt Name</span></div>
+        <div class="row"><span class="k">Suchen gesamt (seit Mai)</span><span class="v">87.886</span></div>
+      </div>
+      <div class="ddcard"><h4>📚 Katalog</h4>
+        <div class="row"><span class="k">Produkte / Markenprodukte</span><span class="v">7.321 / 3.360</span></div>
+        <div class="row"><span class="k">Wachstum seit 17.07.</span><span class="v warn">±0</span></div>
+        <div class="row"><span class="k">KI-Urteil vorhanden</span><span class="v good">87 %</span></div>
+        <div class="row"><span class="k">Nährwerte</span><span class="v good">85 %</span></div>
+        <div class="row"><span class="k">Zutaten</span><span class="v warn">70 %</span></div>
+        <div class="row"><span class="k">Marken-Verlinkung (NoName)</span><span class="v warn">71 %</span></div>
+        <div class="row"><span class="k">Nachgefragte Marken ohne Produkt</span><span class="v bad">64</span></div>
+      </div>
+      <div class="ddcard"><h4>💶 Cashback</h4>
+        <div class="row"><span class="k">Bons gesamt</span><span class="v good">834</span></div>
+        <div class="row"><span class="k">Zulauf</span><span class="v">~40–80 / Tag</span></div>
+        <div class="row"><span class="k">Auszahlungen (Tremendous)</span><span class="v">15</span></div>
+        <div class="row"><span class="k">Geld-Funnel (Approval/Budget)</span><span class="v warn">offen</span></div>
+      </div>
+      <div class="ddcard"><h4>📈 Wachstum &amp; Herkunft</h4>
+        <div class="row"><span class="k">Neu-User pro Tag (7 Tage)</span><span class="v">~745</span></div>
+        <div class="row"><span class="k">Release-Effekt auf Installs</span><span class="v good">×4 seit Juni-Tief</span></div>
+        <div class="row"><span class="k">Plattform (Neu-User)</span><span class="v">iOS 49 / Android 51</span></div>
+        <div class="row"><span class="k">Kampagne zuordenbar</span><span class="v bad">0 %</span></div>
+        <div class="row"><span class="k">Android-Installs ohne App-Start</span><span class="v bad">~⅓</span></div>
+      </div>
+      <div class="ddcard"><h4>👥 User-Basis</h4>
+        <div class="row"><span class="k">Registrierte User gesamt</span><span class="v">248.214</span></div>
+        <div class="row"><span class="k">davon anonym</span><span class="v">89,6 %</span></div>
+        <div class="row"><span class="k">Aktiv (7 Tage)</span><span class="v">9.261</span></div>
+        <div class="row"><span class="k">Geteilte Listen (echt geteilt)</span><span class="v bad">3</span></div>
+      </div>
     </div>
 
     <!-- ══ 1 · ONBOARDING ══ -->
