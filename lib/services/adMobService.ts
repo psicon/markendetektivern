@@ -43,7 +43,10 @@ class AdMobService {
       console.log('🎯 AdMob module check:', { 
         platform: Platform.OS,
         hasMobileAds: !!MobileAds,
-        hasInitializeMethod: typeof MobileAds?.initialize === 'function'
+        // Die Methoden haengen an der Instanz, nicht an der Factory — die
+        // frühere Prüfung auf `MobileAds.initialize` war immer false und
+        // damit ein irrefuehrendes Diagnose-Log.
+        hasInitializeMethod: typeof MobileAds?.()?.initialize === 'function',
       });
       
       // Request-Konfiguration — MUSS vor der Initialisierung laufen.
@@ -64,16 +67,27 @@ class AdMobService {
       // Trade-off: eine Obergrenze schließt Inventar aus und kann die
       // Fill-Rate leicht senken. Wenn das messbar weh tut, ist 'T' die
       // weniger strenge Alternative.
-      if (MobileAds.setRequestConfiguration) {
+      // ACHTUNG API-Form: der Default-Export ist die FACTORY-Funktion, nicht
+      // das Modul. `setRequestConfiguration` haengt an der INSTANZ
+      // (mobileAds().setRequestConfiguration(...), siehe
+      // node_modules/react-native-google-mobile-ads/lib/module/MobileAds.js).
+      // Die frühere Fassung prüfte `MobileAds.setRequestConfiguration` auf der
+      // Funktion — immer undefined, der ganze Block lief NIE. Der Fehler war
+      // unsichtbar, weil das Setzen optional ist und nichts wirft.
+      const mobileAdsInstance = MobileAds();
+      if (typeof mobileAdsInstance?.setRequestConfiguration === 'function') {
         try {
           const { MaxAdContentRating } = require('react-native-google-mobile-ads');
-          await MobileAds.setRequestConfiguration({
+          await mobileAdsInstance.setRequestConfiguration({
             maxAdContentRating: MaxAdContentRating?.PG ?? 'PG',
             ...(__DEV__ ? { testDeviceIdentifiers: AD_CONFIG.testDeviceIds } : {}),
           });
+          console.log('✅ AdMob maxAdContentRating gesetzt: PG');
         } catch (e) {
           console.warn('⚠️ AdMob setRequestConfiguration failed (non-fatal):', e);
         }
+      } else {
+        console.warn('⚠️ AdMob: setRequestConfiguration nicht verfügbar — Content-Rating NICHT gesetzt');
       }
 
       // Platform-specific initialization

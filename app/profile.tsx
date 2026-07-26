@@ -1866,7 +1866,7 @@ export default function ProfileScreen() {
                 onPress={onResetUnlocks}
               />
               <MenuRow
-                icon="receipt-text-remove"
+                icon="delete-sweep"
                 color="#dc2626"
                 label="Bons zurücksetzen"
                 sub="Löscht alle lokalen Bon-Einträge (cashback_status)"

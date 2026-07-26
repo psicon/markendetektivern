@@ -164,26 +164,53 @@ export function domainFromFreeText(text?: string | null): ProductDomain | null {
   if (has('tierbedarf', 'tiernahrung', 'hundefutter', 'katzenfutter', 'haustier'))
     return 'pet';
   if (has('babynahrung', 'babykost', 'windel', 'baby', 'kleinkind')) return 'baby';
+
+  // Substring-Matching ist hier ABSICHT — deutsche Komposita ("Vollwaschmittel",
+  // "Bio-Tiefkühlgemüse") wuerden an Wortgrenzen scheitern. Der Preis dafuer:
+  // kurze Staemme duerfen NICHT nackt in der Liste stehen. 'creme' matchte in
+  // "SchokoladenCREMEs" / "EisCREME" / "FrischkaeseCREME", 'deo' in "RoDEO" —
+  // beides schob Lebensmittel nach nonfood, worauf der Guard passende
+  // Alternativen verwarf und stattdessen Drogerie-Artikel durchliess.
+  // Darum: mehrdeutige Staemme nur noch als eindeutige Komposita.
+  // EXKLUSIV: Stämme, die auch als Kompositum-Bestandteil niemals ein
+  // Lebensmittel bezeichnen. Die duerfen sofort entscheiden.
   if (
     has(
       'drogerie', 'kosmetik', 'körperpflege', 'koerperpflege', 'zahnpflege',
-      'zahnpasta', 'zahncreme', 'mundspülung', 'mundspuelung', 'deo', 'shampoo',
-      'duschgel', 'seife', 'creme', 'sonnenschutz', 'sonnencreme', 'pflaster',
-      'apotheke', 'arznei', 'medizin', 'nahrungsergänzung', 'nahrungsergaenzung',
-      'haushalt', 'reinig', 'putz', 'spülmittel', 'spuelmittel', 'waschmittel',
-      'weichspüler', 'weichspueler', 'müllbeutel', 'muellbeutel', 'batterie',
-      'toilettenpapier', 'küchenrolle', 'kuechenrolle', 'hygiene', 'rasier',
+      'zahnpasta', 'zahncreme', 'mundspülung', 'mundspuelung', 'shampoo',
+      'duschgel', 'sonnenschutz', 'sonnencreme', 'pflaster', 'apotheke',
+      'arznei', 'spülmittel', 'spuelmittel', 'waschmittel', 'weichspüler',
+      'weichspueler', 'müllbeutel', 'muellbeutel', 'batterie',
+      'toilettenpapier', 'küchenrolle', 'kuechenrolle', 'rasier',
+      'handcreme', 'gesichtscreme', 'hautcreme', 'tagescreme', 'nachtcreme',
+      'rasiercreme', 'fußcreme', 'fusscreme', 'wundcreme', 'bodylotion',
+      'deodorant', 'deospray', 'deoroller', 'deostick',
     )
   )
     return 'nonfood';
-  if (
-    has(
-      'lebensmittel', 'getränk', 'getraenk', 'obst', 'gemüse', 'gemuese',
-      'fleisch', 'wurst', 'käse', 'kaese', 'milch', 'joghurt', 'brot',
-      'backwaren', 'süß', 'suess', 'snack', 'kaffee', 'tee', 'schokolade',
-      'nudeln', 'pasta', 'reis', 'konserve', 'tiefkühl', 'tiefkuehl',
-    )
-  )
-    return 'food';
+
+  // MEHRDEUTIG: taucht auch in Lebensmittel-Komposita auf
+  // ("HAUSHALTszucker", "ReinigungsMILCH").
+  const nonfoodWeak = has(
+    'haushalt', 'hygiene', 'reinig', 'putz', 'seife', 'medizin',
+    'nahrungsergänzung', 'nahrungsergaenzung',
+  );
+  const food = has(
+    'lebensmittel', 'getränk', 'getraenk', 'obst', 'gemüse', 'gemuese',
+    'fleisch', 'wurst', 'käse', 'kaese', 'milch', 'joghurt', 'brot',
+    'backwaren', 'süß', 'suess', 'snack', 'kaffee', 'tee', 'schokolade',
+    'nudeln', 'pasta', 'reis', 'konserve', 'tiefkühl', 'tiefkuehl',
+    'aufstrich', 'nougat', 'sahne', 'quark', 'butter', 'pudding', 'dessert',
+    'eiscreme', 'speiseeis', 'müsli', 'muesli', 'saft', 'gewürz', 'gewuerz',
+    'fisch', 'suppe', 'soße', 'sosse', 'marmelade', 'honig', 'schoko',
+    'zucker', 'mehl',
+  );
+
+  // Beide Welten getroffen ⇒ Domaene nicht sicher bestimmbar. Dann lieber
+  // null: null ist fail-open (domainsCompatible laesst durch), eine falsch
+  // geratene Domaene verwirft dagegen legitime Alternativen.
+  if (nonfoodWeak && food) return null;
+  if (nonfoodWeak) return 'nonfood';
+  if (food) return 'food';
   return null;
 }

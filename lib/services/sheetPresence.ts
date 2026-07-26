@@ -21,6 +21,36 @@
 let openCount = 0;
 const idleListeners = new Set<() => void>();
 
+// Dauerhafte Abonnenten für "gerade ist NICHTS präsentiert" (weder ein
+// registriertes Sheet noch das bewusst unregistrierte Umfrage-Sheet).
+// Bewusst getrennt von `idleListeners`: die feuern einmalig und leeren
+// sich, diese hier bleiben abonniert.
+const presentationIdleListeners = new Set<() => void>();
+
+function notifyPresentationIdle(): void {
+  if (openCount > 0 || surveyVisible) return;
+  [...presentationIdleListeners].forEach((l) => {
+    try {
+      l();
+    } catch {
+      /* ignore */
+    }
+  });
+}
+
+/**
+ * Abonniert "nichts mehr präsentiert" — dauerhaft, mehrfach feuernd.
+ *
+ * Gegenkante für Konsumenten, die einen System-Dialog nur bei freiem
+ * Bildschirm zeigen dürfen (nativer Review-Dialog). Ohne sie bliebe ein
+ * wegen offenem Sheet/offener Umfrage abgelehnter Versuch liegen, bis
+ * zufällig ein anderer Trigger den Zustand neu bewertet.
+ */
+export function onPresentationIdle(cb: () => void): () => void {
+  presentationIdleListeners.add(cb);
+  return () => presentationIdleListeners.delete(cb);
+}
+
 /**
  * Meldet ein offenes Sheet an. Gibt einen Release-Callback zurück, der
  * beim Schließen GENAU EINMAL aufgerufen werden muss (idempotent).
@@ -43,6 +73,7 @@ export function registerSheetOpen(): () => void {
           /* ignore */
         }
       });
+      notifyPresentationIdle();
     }
   };
 }
@@ -83,7 +114,11 @@ let surveyVisible = false;
 
 /** Vom SurveyProvider bei jedem Öffnen/Schließen gesetzt. */
 export function setSurveyVisible(v: boolean): void {
+  const was = surveyVisible;
   surveyVisible = v;
+  // Schliessen der Umfrage ist eine Gegenkante: sie ist fuer
+  // isAnySheetOpen() unsichtbar, blockiert aber System-Dialoge.
+  if (was && !v) notifyPresentationIdle();
 }
 
 /** Ist gerade ein Umfrage-Sheet präsentiert? */

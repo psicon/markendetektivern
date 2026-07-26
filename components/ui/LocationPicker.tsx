@@ -52,7 +52,12 @@ export const LocationPicker: React.FC<LocationPickerProps> = ({
   currentLocation,
   placeholder = 'Standort suchen...'
 }) => {
-  const { theme } = useTheme();
+  // ThemeContext liefert `colorScheme`, KEIN `theme` — die frühere
+  // Destrukturierung war immer undefined, wodurch der Picker unabhaengig
+  // von der Einstellung stets hell rendert (Colors['light'], heller
+  // Placeholder, dark-content StatusBar). Alias, damit die vier
+  // Verwendungsstellen unveraendert bleiben.
+  const { colorScheme: theme } = useTheme();
   const colors = Colors[theme ?? 'light'];
   
   const [region, setRegion] = useState<Region>({
@@ -85,11 +90,19 @@ export const LocationPicker: React.FC<LocationPickerProps> = ({
     if (visible) {
       requestLocationPermission();
       
+      // `selectedParts` MUSS zusammen mit `selectedAddress` zurueckgesetzt
+      // werden. Sonst beschreiben die strukturierten Felder noch den zuvor
+      // gewaehlten Ort, waehrend die Adresse schon der neue ist — und weil
+      // regionFromPickedLocation das strukturierte Feld dem Adress-Fallback
+      // vorzieht, wurde dann eine FALSCHE Stadt/Region gespeichert.
+      setSelectedParts({});
+
       // Wenn bereits ein Ort gesetzt ist, lade ihn
       if (currentLocation) {
         setSearchText(currentLocation);
         setSelectedAddress(currentLocation);
         // Versuche den aktuellen Ort zu geocodieren und zu zentrieren
+        // (fuellt selectedParts bei Erfolg wieder).
         searchLocation(currentLocation);
       } else {
         // Reset auf München Standard wenn kein Ort gesetzt
@@ -355,6 +368,7 @@ export const LocationPicker: React.FC<LocationPickerProps> = ({
               onPress={() => {
                 setSearchText('');
                 setSelectedAddress('');
+                setSelectedParts({}); // immer gemeinsam mit der Adresse leeren
                 // Reset auf München Standard
                 setRegion({
                   latitude: 48.1351,

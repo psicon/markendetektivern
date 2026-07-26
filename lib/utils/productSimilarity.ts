@@ -19,7 +19,29 @@ const PRODUCT_NAME_STOPWORDS = new Set([
   // Vergleich helfen sie nicht und verzerren das Score.
   'beste', 'wahl', 'gut', 'gold', 'select', 'premium',
   'feinkost',
+  // Generische Qualifizierer. KRITISCH fuer `hasStrongNameSignal`: das
+  // Gate akzeptiert JEDEN exakten Token-Match, also machte ein geteiltes
+  // "bio" aus "Bio Ziegenfrischkaese" und "Bio Speckknoedel" ein
+  // vermeintlich hartes Signal — exakt die Klasse absurder Vorschlaege,
+  // die der Guard verhindern soll. Keines dieser Worte benennt eine
+  // Produktart, sie duerfen darum weder Gate noch Ranking tragen.
+  'bio', 'öko', 'oeko', 'demeter', 'vegan', 'vegetarisch',
+  'natur', 'naturell', 'classic', 'klassisch', 'original', 'traditionell',
+  'neu', 'extra', 'plus', 'pur', 'mild', 'fein', 'zart', 'lecker',
+  'family', 'familien', 'groß', 'gross', 'klein', 'mini', 'maxi',
+  'packung', 'stück', 'stueck', 'portion', 'sorte', 'sorten',
+  'regional', 'nachhaltig', 'hausgemacht', 'qualität', 'qualitaet',
 ]);
+
+/**
+ * Mengen-/Größenangaben ("400g", "1l", "6er", "250"). Zwei beliebige
+ * Produkte teilen sich die Packungsgröße staendig — als exakter
+ * Token-Match hat das `hasStrongNameSignal` faelschlich ausgeloest.
+ * Bewusst eng: nur Ziffern plus optionale bekannte Einheit, damit
+ * Namensbestandteile wie "7up" erhalten bleiben.
+ */
+const MEASUREMENT_TOKEN =
+  /^\d+([.,]\d+)?(g|kg|mg|ml|cl|dl|l|st|stk|stueck|stück|er|x|prozent)?$/;
 
 export { PRODUCT_NAME_STOPWORDS };
 
@@ -52,7 +74,10 @@ export function tokenizeProductName(
     .split(' ')
     .filter(
       (t) =>
-        t.length >= 3 && !PRODUCT_NAME_STOPWORDS.has(t) && !hmTokens.has(t),
+        t.length >= 3 &&
+        !PRODUCT_NAME_STOPWORDS.has(t) &&
+        !MEASUREMENT_TOKEN.test(t) &&
+        !hmTokens.has(t),
     );
 }
 

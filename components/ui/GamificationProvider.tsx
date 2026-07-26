@@ -16,7 +16,11 @@ import { CoachmarkService } from '@/lib/services/coachmarkService';
 import { FirstCaseService } from '@/lib/services/firstCaseService';
 import { gamificationSettingsService } from '@/lib/services/gamificationSettingsService';
 import { ratingPromptService } from '@/lib/services/ratingPrompt';
-import { isAnySheetOpen, isSurveyVisible } from '@/lib/services/sheetPresence';
+import {
+  isAnySheetOpen,
+  isSurveyVisible,
+  onPresentationIdle,
+} from '@/lib/services/sheetPresence';
 import { RATING_POLL_INTERVAL_MS } from '@/lib/perfFlags';
 
 import { showInfoToast, showPointsToast, showStreakToast as showStreakToastNew } from '@/lib/services/ui/toast';
@@ -491,6 +495,11 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     });
     return () => sub.remove();
   }, [bumpFirstCaseTick]);
+  // Gegenkante zum Sheet-/Umfrage-Gate in Phase 2. Ohne sie haengt die
+  // Re-Evaluierung daran, dass zufaellig ein weiterer Banner kommt: die
+  // Umfrage laeuft nach JEDER Aktion, ist fuer isAnySheetOpen() aber
+  // unsichtbar, faellt also genau mit dem Erst-Fall-Moment zusammen.
+  useEffect(() => onPresentationIdle(bumpFirstCaseTick), [bumpFirstCaseTick]);
 
   // Läuft die Feier→Review-Sequenz? Wird gesetzt, sobald die Feier
   // präsentiert/eingereiht ist, und ist die BEDINGUNG dafür, dass
