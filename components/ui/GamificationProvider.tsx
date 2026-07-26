@@ -40,7 +40,13 @@ const FIRST_CASE_SETTLE_DELAY_MS = 2500;
 // das real ~9 s, und der Bezug zum Erfolgserlebnis war verloren.
 // Der Banner ist ein Animated.View, KEIN <Modal> — der native Dialog
 // darüber ist deshalb unkritisch (kein Zwei-Modal-Deadlock auf iOS).
-const FIRST_CASE_PROMPT_AFTER_BANNER_MS = 3000;
+//
+// OBERGRENZE: AUTO_DISMISS_MS des Banners (6 s). Dessen Timer startet im
+// selben Effect, der ihn einblendet, also praktisch im selben Tick wie
+// dieser hier — bei 5 s bleibt rund 1 s Rest-Standzeit. Wer diesen Wert
+// erhöht, muss den Banner laenger stehen lassen, sonst fragt die App in
+// einen leeren Bildschirm und der Kontext zum Erfolg ist wieder weg.
+const FIRST_CASE_PROMPT_AFTER_BANNER_MS = 5000;
 
 // AchievementUnlockBanner LAZY laden — sein Modul importiert
 // transitiv @shopify/react-native-skia (durch EdgeGlow) und das ist
