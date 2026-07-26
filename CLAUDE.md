@@ -1938,6 +1938,30 @@ dedupe), (4) not-in-catalog → ExternalLookupMiss, (5) BigQuery-Export (B2B).
 Bonus: Match-Precision lässt sich direkt an den bereits gesammelten
 `purchased_products` messen (kein separater OCR-Spike nötig).
 
+## Submission-Status lokal auslesen (die CLI kann es NICHT)
+
+`eas build:list`/`build:view` liefern `submissions: null` — das ist eine Lücke
+der CLI, **kein Beweis, dass kein Submit lief**. Genau daran bin ich am
+26.07. gescheitert: Auto-Submit von iOS 1258 war längst erfolgreich, ich hielt
+ihn für ausgefallen und habe zweimal nachgeschossen; beide Retries scheiterten
+als Doppel-Upload mit dem nichtssagenden „Something went wrong". Auch
+`--verbose --verbose-fastlane` zeigt nichts.
+
+Der echte Status steht in der Expo-GraphQL-API, erreichbar mit dem lokalen
+CLI-Token (`~/.expo/state.json` → `auth.sessionSecret`):
+```bash
+SEC=$(python3 -c "import json;print(json.load(open('$HOME/.expo/state.json'))['auth']['sessionSecret'])")
+curl -sS https://api.expo.dev/graphql -H "Content-Type: application/json" -H "expo-session: $SEC" \
+  -d '{"query":"query($appId:String!){app{byId(appId:$appId){submissions(filter:{platform:IOS},limit:6,offset:0){status createdAt submittedBuild{appBuildVersion appVersion} error{errorCode message}}}}}","variables":{"appId":"5b645e59-c337-44e5-81cd-7681b4515623"}}'
+```
+`submissions` verlangt zwingend `filter:{platform:IOS|ANDROID}` (ohne → 
+GRAPHQL_VALIDATION_FAILED). appId = die Project-ID aus `eas build:view`.
+Python-`urllib` scheitert hier an fehlendem CA-Bundle — curl nehmen, NICHT die
+Zertifikatsprüfung abschalten.
+
+**Vor einem manuellen `eas submit` immer erst diesen Status abfragen.** Ein
+bereits hochgeladener Build lässt sich nicht erneut einreichen.
+
 ## Android-Build scheitert bei ~9 min in `configureCMake` → Codegen-Race
 
 Symptom: `EAS_BUILD_UNKNOWN_GRADLE_ERROR`, `buildDuration` ~555–566 s (statt
