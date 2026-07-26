@@ -743,6 +743,28 @@ Beide Plattformen haben getrennte Zähler:
 
 EAS synchronisiert beide Stellen pro Plattform automatisch.
 
+### `.easignore` ERSETZT `.gitignore` — nichts wird gemerged
+
+Sobald eine `.easignore` existiert, benutzt EAS **ausschliesslich** diese Datei
+fuer den Upload-Tarball und ignoriert `.gitignore` **komplett**. Alles, was nur
+in `.gitignore` steht, landet damit im Build-Archiv.
+
+Konkreter Fall (26.07.2026): `android/app/.cxx/` (CMake/NDK-Zwischenstand) ist
+in `android/.gitignore` ausgeschlossen, stand aber nicht in `.easignore` → 1,3 GB
+mit **650 Dateien voller absoluter macOS-Pfade** (`/Users/patricksieber/...` in
+`compile_commands.json` / `build.ninja`) wanderten auf den Linux-Build-Worker.
+Upload-Archiv war dadurch **220 MB statt ~30 MB** (der Kommentar oben in
+`.easignore` nennt ~50 MB als Ziel — die Warnung der CLI ist ernst zu nehmen).
+
+Regeln:
+- Beim Anlegen/Aendern von `.easignore` **jeden relevanten `.gitignore`-Eintrag
+  gegenpruefen**, ob er dort auch stehen muss (Build-Outputs, `.cxx/`, Caches).
+- Nach `eas build` die Zeile „Your project archive is X MB" lesen. Deutlich ueber
+  ~50 MB = irgendwas Lokales wird mitgeschleppt. Diagnose: `du -sm * .[a-z]*`
+  im Repo-Root und gegen die `.easignore`-Liste abgleichen.
+- Lokale Android-Builds (Debug wie Release) erzeugen/aktualisieren `.cxx/` und
+  `app/build/` — beides darf NIE ins Archiv.
+
 ### Build-Ergebnisse
 
 Builds erscheinen unter

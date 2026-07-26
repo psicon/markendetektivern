@@ -14,6 +14,13 @@ ios/DerivedData/
 android/.gradle/
 android/build/
 android/app/build/
+# CMake/NDK-Zwischenstand. ACHTUNG: .gitignore deckt .cxx/ zwar ab, aber
+# EAS benutzt bei vorhandener .easignore AUSSCHLIESSLICH diese Datei und
+# ignoriert .gitignore komplett — also muss .cxx hier nochmal stehen.
+# Sonst landen ~1,3 GB CMake-State mit absoluten macOS-Pfaden
+# (/Users/... in 650 compile_commands.json/build.ninja) auf dem
+# Linux-Build-Worker. Upload war dadurch 220 MB statt ~30 MB.
+**/.cxx/
 **/*.xcworkspace/xcuserdata/
 **/*.xcodeproj/xcuserdata/
 **/*.xcodeproj/project.xcworkspace/xcuserdata/
