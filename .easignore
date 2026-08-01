@@ -86,3 +86,7 @@ bundletool.jar
 .DS_Store
 *.log
 Thumbs.db
+
+# Store-Screenshots gehoeren nicht ins Build-Archiv
+store/
+store.config.json

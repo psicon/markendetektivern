@@ -45,3 +45,9 @@ tmp/
 markendetektive-*.json
 service-account*.json
 *-service-account*.json
+
+# EAS-Metadata-Pull: Screenshots (12 MB) — nur lokal, store.config.json bleibt versioniert
+store/
+
+# EAS-Metadata: enthaelt Apple-Review-Demo-Zugangsdaten im Klartext
+store.config.json
