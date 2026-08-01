@@ -3,6 +3,8 @@ import { doc, serverTimestamp, setDoc, updateDoc } from '@react-native-firebase/
 import { Alert, AppState, Linking, Platform } from 'react-native';
 import { db } from '../firebase';
 import { CoachmarkService } from './coachmarkService';
+import type { RatingBlockReason, RatingTrigger } from './ratingTelemetry';
+import { RatingTelemetry } from './ratingTelemetry';
 import { isAnySheetOpen, isSurveyVisible } from './sheetPresence';
 
 const RATING_FLAG_KEY = 'pendingRatingPrompt';
@@ -22,6 +24,27 @@ const NATIVE_ASKED_VERSION_KEY = (uid: string) => `nativeReviewAskedVersion_${ui
 // uid-scoped, das Gate stünde also sofort wieder offen.
 const NATIVE_ASKED_VERSION_GLOBAL_KEY = 'nativeReviewAskedVersion_global';
 const NATIVE_ASK_COOLDOWN_MS = 14 * 24 * 60 * 60 * 1000; // 14 Tage
+
+// `hasRated_<uid>` ist KEINE Lebenssperre mehr (Aug 2026).
+//
+// Der Schlüssel bedeutet „hat unser altes Modal beantwortet" — NICHT
+// „hat im Store bewertet". Der positive Zweig führte lediglich auf einen
+// Store-Deeplink, den der Nutzer erneut antippen und im Store auch noch
+// abschließen musste; die meisten taten das nie. Trotzdem sperrte der
+// Schlüssel beide Auto-Pfade für immer. Betroffen: 4.782 Nutzer — also
+// ausgerechnet die aktivsten, die man am ehesten fragen will.
+//
+// Neue Lesart, nach Antworttyp getrennt:
+//   positiv  → zufriedener Nutzer, den wir erneut fragen dürfen. Kurze
+//              Schamfrist, damit es nicht unmittelbar hintereinander kommt.
+//   negativ  → hat uns gesagt, dass etwas nicht passt. Lange Ruhe; ihn in
+//              den Store zu schicken wäre gegen sein Interesse und gegen
+//              unseres.
+// Gemessen wird ab dem Zeitstempel der Antwort. Altbestand ohne Stempel
+// wird beim ersten Lesen auf „jetzt" migriert (siehe readRatedState) —
+// dadurch laufen Altfälle gestaffelt aus statt alle auf einmal.
+const RATED_POSITIVE_BLOCK_MS = 30 * 24 * 60 * 60 * 1000; // 30 Tage
+const RATED_NEGATIVE_BLOCK_MS = 180 * 24 * 60 * 60 * 1000; // 180 Tage
 
 // Synchroner Guard gegen Doppel-Anfragen aus konkurrierenden Kanten.
 let nativeRequestInFlight = false;
@@ -145,9 +168,7 @@ class RatingPromptService {
    * Prüft NICHT den Moment-Kontext — dafür `requestNativeReviewNow`.
    */
   async canRequestNativeReview(userId: string): Promise<boolean> {
-    return (
-      (await this.shouldShowRating(userId)) && (await this.nativeRequestAllowed(userId))
-    );
+    return (await this.blockingReason(userId)) === null;
   }
 
   /**
@@ -164,47 +185,51 @@ class RatingPromptService {
    * Beide APIs sind fire-and-forget ohne Rückkanal; ein OS-seitiges
    * Drosseln bleibt für uns unsichtbar.
    */
-  async requestNativeReviewNow(userId: string): Promise<boolean> {
+  async requestNativeReviewNow(
+    userId: string,
+    trigger?: RatingTrigger,
+    level?: number,
+  ): Promise<boolean> {
     if (nativeRequestInFlight) return false;
     // Kein System-Dialog über einem präsentierten Sheet/Modal.
-    if (isAnySheetOpen() || isSurveyVisible()) return false;
-    if (CoachmarkService.isAnyActive()) return false;
+    if (isAnySheetOpen() || isSurveyVisible()) {
+      void RatingTelemetry.log({ uid: userId, stage: 'blocked', reason: 'sheet_open', trigger, level });
+      return false;
+    }
+    if (CoachmarkService.isAnyActive()) {
+      void RatingTelemetry.log({ uid: userId, stage: 'blocked', reason: 'intro_tours_open', trigger, level });
+      return false;
+    }
     // Im Hintergrund würde der Dialog verpuffen (Android: kein
     // currentActivity → nur ein Log.w) und das Budget kosten.
-    if (AppState.currentState !== 'active') return false;
+    if (AppState.currentState !== 'active') {
+      void RatingTelemetry.log({ uid: userId, stage: 'blocked', reason: 'app_background', trigger, level });
+      return false;
+    }
     // Budget hier NOCHMAL prüfen (nicht nur beim Aufrufer): sonst können
     // zwei zeitlich versetzte Einstiegspfade — Erst-Fall-Sequenz und
     // Level-Up-Poll mit seinen 500 ms Verzögerung — beide durchkommen
     // und zwei Dialoge hintereinander anfragen (Play-Quota verbrannt).
-    if (!(await this.canRequestNativeReview(userId))) return false;
+    const blocked = await this.blockingReason(userId);
+    if (blocked) {
+      void RatingTelemetry.log({ uid: userId, stage: 'blocked', reason: blocked, trigger, level });
+      return false;
+    }
 
     nativeRequestInFlight = true;
     try {
       const ok = await this.requestNativeReview();
-      if (ok) await this.recordNativeRequest(userId);
+      if (ok) {
+        await this.recordNativeRequest(userId);
+        // EHRLICHE GRENZE (siehe Doc oben): 'requested' heißt „wir haben
+        // gefragt", NICHT „das OS hat die Karte gezeigt". Die Auswertung
+        // muss diesen Unterschied kennen, sonst liest sie hier eine
+        // Anzeige-Rate, die es technisch gar nicht geben kann.
+        void RatingTelemetry.log({ uid: userId, stage: 'requested', trigger, level });
+      }
       return ok;
     } finally {
       nativeRequestInFlight = false;
-    }
-  }
-
-  /** Gate fürs native Review: max 1×/App-Version UND ≥14 Tage Abstand. */
-  private async nativeRequestAllowed(userId: string): Promise<boolean> {
-    try {
-      const version = this.appVersion();
-      // Geräteweit (uid-frei) — überlebt einen uid-Wechsel.
-      const askedGlobal = await AsyncStorage.getItem(NATIVE_ASKED_VERSION_GLOBAL_KEY);
-      if (askedGlobal && askedGlobal === version) return false;
-      const askedVersion = await AsyncStorage.getItem(NATIVE_ASKED_VERSION_KEY(userId));
-      if (askedVersion && askedVersion === version) return false;
-      const askedAt = await AsyncStorage.getItem(NATIVE_ASKED_AT_KEY(userId));
-      if (askedAt) {
-        const age = Date.now() - Number(askedAt);
-        if (Number.isFinite(age) && age < NATIVE_ASK_COOLDOWN_MS) return false;
-      }
-      return true;
-    } catch {
-      return true; // im Zweifel erlauben — OS drosselt selbst
     }
   }
 
@@ -254,24 +279,75 @@ class RatingPromptService {
   }
 
   /**
-   * Simple check if should show rating (without complex conditions)
+   * Liest `hasRated_<uid>` und migriert Altbestand.
+   *
+   * Historie: früher stand dort nur der nackte Typ ('positive' /
+   * 'negative') ohne Datum, weshalb sich daraus keine Frist berechnen
+   * ließ und der Wert als Lebenssperre wirkte. Neu ist JSON mit
+   * Zeitstempel. Ein Altwert ohne Stempel wird beim ersten Lesen mit
+   * `Date.now()` versehen — bewusst NICHT rückdatiert: wir wissen das
+   * echte Datum nicht, und ein zu früh geöffnetes Gate wäre schlimmer
+   * als ein paar Wochen Verzögerung.
    */
-  private async shouldShowRating(userId: string): Promise<boolean> {
+  private async readRatedState(
+    userId: string,
+  ): Promise<{ type: 'positive' | 'negative'; at: number } | null> {
+    const raw = await AsyncStorage.getItem(`hasRated_${userId}`);
+    if (!raw) return null;
     try {
-      // Nie wieder nach einer Antwort (positiv wie negativ).
-      const hasRated = await AsyncStorage.getItem(`hasRated_${userId}`);
-      if (hasRated) return false;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && parsed.type) {
+        return { type: parsed.type, at: Number(parsed.at) || 0 };
+      }
+    } catch {
+      /* Altformat — fällt unten durch */
+    }
+    const type: 'positive' | 'negative' = raw === 'negative' ? 'negative' : 'positive';
+    const migrated = { type, at: Date.now() };
+    await AsyncStorage.setItem(`hasRated_${userId}`, JSON.stringify(migrated));
+    console.log(`📱 hasRated migriert (${type}) — Frist läuft ab jetzt`);
+    return migrated;
+  }
+
+  /**
+   * Welches Gate blockiert gerade? `null` = keins.
+   *
+   * Gibt bewusst den GRUND zurück statt nur true/false: ohne ihn ließ
+   * sich nicht unterscheiden, ob ein Nutzer am Budget, an einer alten
+   * Antwort oder an einem Cooldown hängt — und damit auch nicht, welche
+   * Stellschraube überhaupt etwas bringt.
+   */
+  async blockingReason(userId: string): Promise<RatingBlockReason | null> {
+    try {
+      const rated = await this.readRatedState(userId);
+      if (rated) {
+        const window =
+          rated.type === 'negative' ? RATED_NEGATIVE_BLOCK_MS : RATED_POSITIVE_BLOCK_MS;
+        if (Date.now() - rated.at < window) return 'already_rated';
+      }
       // 60-Tage-Cooldown nach X/'Später' — nicht beim naechsten
       // Level-Up sofort wieder nerven.
       const dismissedAt = await AsyncStorage.getItem(DISMISSED_AT_KEY(userId));
       if (dismissedAt) {
         const age = Date.now() - Number(dismissedAt);
-        if (Number.isFinite(age) && age < DISMISS_COOLDOWN_MS) return false;
+        if (Number.isFinite(age) && age < DISMISS_COOLDOWN_MS) return 'dismiss_cooldown';
       }
-      return true;
+
+      const version = this.appVersion();
+      // Geräteweit (uid-frei) — überlebt einen uid-Wechsel.
+      const askedGlobal = await AsyncStorage.getItem(NATIVE_ASKED_VERSION_GLOBAL_KEY);
+      if (askedGlobal && askedGlobal === version) return 'version_budget';
+      const askedVersion = await AsyncStorage.getItem(NATIVE_ASKED_VERSION_KEY(userId));
+      if (askedVersion && askedVersion === version) return 'version_budget';
+      const askedAt = await AsyncStorage.getItem(NATIVE_ASKED_AT_KEY(userId));
+      if (askedAt) {
+        const age = Date.now() - Number(askedAt);
+        if (Number.isFinite(age) && age < NATIVE_ASK_COOLDOWN_MS) return 'ask_cooldown';
+      }
+      return null;
     } catch (error) {
       console.log('❌ Error checking rating status:', error);
-      return true; // Default to show
+      return null; // im Zweifel erlauben — das OS drosselt selbst
     }
   }
 
@@ -317,8 +393,13 @@ class RatingPromptService {
    */
   async markAsRated(userId: string, type: 'positive' | 'negative', level?: number): Promise<string | undefined> {
     try {
-      // Save locally to prevent future prompts
-      await AsyncStorage.setItem(`hasRated_${userId}`, type);
+      // Mit Zeitstempel, damit sich daraus eine Frist rechnen lässt —
+      // das nackte Typ-Feld von früher war der Grund, warum der Wert
+      // faktisch als Lebenssperre wirkte (siehe RATED_*_BLOCK_MS oben).
+      await AsyncStorage.setItem(
+        `hasRated_${userId}`,
+        JSON.stringify({ type, at: Date.now() }),
+      );
       console.log(`📱 User marked as rated: ${type}`);
       
       // Save to Firestore immediately
@@ -417,6 +498,10 @@ class RatingPromptService {
         NATIVE_ASKED_VERSION_KEY(userId),
         NATIVE_ASKED_VERSION_GLOBAL_KEY,
       ]);
+      // Ohne die Telemetrie-Riegel liefe der Trichter im Test zwar
+      // erneut durch, würde aber nichts mehr melden (1 Ereignis je
+      // Stufe und App-Version) — der Dev-Durchlauf wäre blind.
+      await RatingTelemetry.resetGuards(userId);
       console.log('🧹 Rating data cleared');
     } catch (error) {
       console.error('❌ Error clearing rating data:', error);

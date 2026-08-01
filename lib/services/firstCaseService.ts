@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CoachmarkService } from './coachmarkService';
 import { ratingPromptService } from './ratingPrompt';
+import type { RatingTrigger } from './ratingTelemetry';
+import { RatingTelemetry } from './ratingTelemetry';
 
 /**
  * firstCaseService — "Erster Fall geschlossen" → nativer Review
@@ -45,6 +47,23 @@ const KEY_PREFIX = 'firstCase/v1/';
 const CASE_KEY = (uid: string) => `${KEY_PREFIX}firstCaseAt_${uid}`;
 const CELEBRATED_KEY = (uid: string) => `${KEY_PREFIX}celebratedAt_${uid}`;
 const REVIEW_KEY = (uid: string) => `${KEY_PREFIX}reviewRequestedAt_${uid}`;
+// Wie oft die Feier über SESSIONS hinweg erneut laufen darf, solange
+// der Dialog noch nicht angefragt wurde.
+//
+// WARUM ES DAS BRAUCHT: `celebratedAt` ist persistent, die Sequenz-Ref
+// für Phase 2 lebte aber nur in der laufenden Session. Wer die App
+// zwischen Feier-Banner und den 5 Sekunden bis zum Dialog schloss
+// (Anruf, Hintergrund, App-Kill), verbrannte den Erst-Fall-Pfad
+// DAUERHAFT: `shouldCelebrate` lieferte für diese uid nie wieder true,
+// Phase 2 startete nie mehr, und es blieb nur ein künftiges Level-Up —
+// das bei Bestandsnutzern (18.064 stehen schon auf Level ≥ 3) oft gar
+// nicht mehr kommt.
+//
+// Gedeckelt, damit ein Nutzer, bei dem der Dialog dauerhaft blockiert
+// (z.B. ständig offene Sheets), nicht in jeder Sitzung dieselbe Feier
+// sieht. Drei Anläufe, dann ist Schluss.
+const MAX_CELEBRATIONS = 3;
+const CELEBRATE_COUNT_KEY = (uid: string) => `${KEY_PREFIX}celebrateCount_${uid}`;
 
 export type FirstCaseOutcome =
   | 'requested'
@@ -100,6 +119,7 @@ export const FirstCaseService = {
       if (existing) return;
       await AsyncStorage.setItem(CASE_KEY(uid), String(Date.now()));
       console.log('🔍 Erster Fall gelöst (Stufe 3+ gesehen) — Trigger gearmt');
+      void RatingTelemetry.log({ uid, stage: 'trigger_armed' });
       emitArmed();
     } catch (e) {
       console.warn('FirstCase markFirstCase failed (non-fatal):', e);
@@ -118,12 +138,18 @@ export const FirstCaseService = {
   async shouldCelebrate(uid?: string | null): Promise<boolean> {
     if (!uid) return false;
     try {
-      const [review, celebrated, scan] = await Promise.all([
+      const [review, count, scan] = await Promise.all([
         AsyncStorage.getItem(REVIEW_KEY(uid)),
-        AsyncStorage.getItem(CELEBRATED_KEY(uid)),
+        AsyncStorage.getItem(CELEBRATE_COUNT_KEY(uid)),
         AsyncStorage.getItem(CASE_KEY(uid)),
       ]);
-      if (review || celebrated) return false;
+      // Dialog war durch → fertig, hier ist endgültig Schluss.
+      if (review) return false;
+      // Feier lief schon, Dialog aber nie: erneut versuchen, bis der
+      // Deckel erreicht ist (siehe MAX_CELEBRATIONS). Früher stand hier
+      // `if (review || celebrated) return false` — genau das machte
+      // einen Session-Abbruch endgültig.
+      if ((Number(count) || 0) >= MAX_CELEBRATIONS) return false;
       if (!scan) return false;
       // Walk-Through. Abgebrochen/übersprungen zählt bewusst als
       // "durch": die Tour kommt nicht wieder, der User ist mit ihr
@@ -177,7 +203,12 @@ export const FirstCaseService = {
    */
   async markCelebrated(uid: string): Promise<void> {
     try {
-      await AsyncStorage.setItem(CELEBRATED_KEY(uid), String(Date.now()));
+      const prev = Number(await AsyncStorage.getItem(CELEBRATE_COUNT_KEY(uid))) || 0;
+      await AsyncStorage.multiSet([
+        [CELEBRATED_KEY(uid), String(Date.now())],
+        [CELEBRATE_COUNT_KEY(uid), String(prev + 1)],
+      ]);
+      void RatingTelemetry.log({ uid, stage: 'celebrated' });
     } catch (e) {
       console.warn('FirstCase markCelebrated failed (non-fatal):', e);
     }
@@ -196,19 +227,44 @@ export const FirstCaseService = {
    * Armed-Flag, das auch dann als "verbraucht" galt, wenn die Gates
    * die Anzeige verhindert hatten.
    */
-  async maybeRequestReview(uid?: string | null): Promise<FirstCaseOutcome> {
+  async maybeRequestReview(
+    uid?: string | null,
+    trigger: RatingTrigger = 'first_case',
+    level?: number,
+  ): Promise<FirstCaseOutcome> {
     if (!uid) return 'no-user';
     if (inFlight) return 'busy';
     inFlight = true;
     try {
-      if (await AsyncStorage.getItem(REVIEW_KEY(uid))) return 'already';
+      if (await AsyncStorage.getItem(REVIEW_KEY(uid))) {
+        void RatingTelemetry.log({
+          uid,
+          stage: 'blocked',
+          reason: 'already_requested',
+          trigger,
+          level,
+        });
+        return 'already';
+      }
       if (!(await AsyncStorage.getItem(CELEBRATED_KEY(uid)))) return 'no-celebration';
-      if (!(await ratingPromptService.canRequestNativeReview(uid))) return 'gated';
+
+      // DAUERHAFTE Gates hier prüfen und als 'gated' melden — der
+      // GamificationProvider stellt bei 'gated' das Nachfassen ein.
+      // Ohne diese Unterscheidung liefe er bei verbrauchtem Budget an
+      // JEDER Ruhe-Kante erneut an. MOMENT-Gates (Sheet offen, App im
+      // Hintergrund, Tour aktiv) gehören ausdrücklich NICHT hierher:
+      // die prüft requestNativeReviewNow, meldet 'unavailable' und
+      // lässt den nächsten Versuch ausdrücklich zu.
+      const persistent = await ratingPromptService.blockingReason(uid);
+      if (persistent) {
+        void RatingTelemetry.log({ uid, stage: 'blocked', reason: persistent, trigger, level });
+        return 'gated';
+      }
 
       // Erst hier wird tatsächlich gefragt. Schlägt es fehl (Sheet
       // offen, App im Hintergrund, Modul fehlt), setzen wir den Key
       // NICHT → späterer Retry bleibt möglich.
-      const ok = await ratingPromptService.requestNativeReviewNow(uid);
+      const ok = await ratingPromptService.requestNativeReviewNow(uid, trigger, level);
       if (!ok) return 'unavailable';
 
       await AsyncStorage.setItem(REVIEW_KEY(uid), String(Date.now()));
@@ -232,7 +288,12 @@ export const FirstCaseService = {
   /** Dev-Panel: Trigger komplett zurücksetzen. */
   async reset(uid: string): Promise<void> {
     try {
-      await AsyncStorage.multiRemove([CASE_KEY(uid), CELEBRATED_KEY(uid), REVIEW_KEY(uid)]);
+      await AsyncStorage.multiRemove([
+        CASE_KEY(uid),
+        CELEBRATED_KEY(uid),
+        REVIEW_KEY(uid),
+        CELEBRATE_COUNT_KEY(uid),
+      ]);
       console.log('🧹 FirstCase-State zurückgesetzt');
     } catch (e) {
       console.warn('FirstCase reset failed (non-fatal):', e);

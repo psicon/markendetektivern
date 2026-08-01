@@ -20,7 +20,8 @@
 // Anchor-IDs sind exportiert; die Detail-Screens müssen sie EXAKT
 // gleich verwenden.
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { CoachmarkService } from '@/lib/services/coachmarkService';
 import { SpotlightOverlay } from './SpotlightOverlay';
@@ -132,6 +133,29 @@ export function ProductDetailWalkthrough({
       CoachmarkService.setActive('product-detail', false);
     };
   }, [visible]);
+
+  // ─── Auto-Dismiss beim Verlassen des Screens ─────────────────
+  // Ohne diesen Blur-Handler schrieb ein Zurück-Swipe MITTEN in der
+  // Tour KEINEN Seen-Key. Folge: `hasCompletedIntroTours()` blieb
+  // dauerhaft false und damit auch das Erst-Fall-/Review-Gate, das
+  // daran hängt (firstCaseService.shouldCelebrate) — der Nutzer kam
+  // nie wieder an einen Bewertungs-Prompt, ohne die Tour zufällig
+  // noch einmal komplett durchzuklicken. `HomeWalkthrough` macht es
+  // seit jeher richtig (dort ist der Blur sogar der Normalfall, weil
+  // der Demo-Tap wegnavigiert); hier fehlte das Gegenstück.
+  // 'completed' und nicht 'skipped': die Tour kommt nicht wieder, der
+  // User ist mit ihr fertig — dieselbe Lesart wie im Home-Pendant.
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        if (visibleRef.current) {
+          onDismiss('completed');
+        }
+      };
+    }, [onDismiss]),
+  );
 
   const advance = useCallback(() => {
     const idx = PHASES_ORDER.indexOf(phase);

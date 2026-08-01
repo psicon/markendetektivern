@@ -557,6 +557,12 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
   // darf Phase 2 laufen, obwohl ein Banner sichtbar ist — bei jedem
   // anderen Banner bleibt es beim Warten auf die Ruhe-Kante.
   const firstCaseBannerVisibleRef = useRef(false);
+  // Trigger-Art + Level aus Phase 1 für die Telemetrie in Phase 2 halten.
+  // Ohne das ließe sich in der Auswertung nicht trennen, ob ein Prompt bei
+  // einem Neu- oder einem Bestandsnutzer hängenblieb — und genau daran
+  // hängt die Frage, ob wir die Bestandsbasis überhaupt erreichen.
+  const firstCaseTriggerRef = useRef<'first_case' | 'veteran_case'>('first_case');
+  const firstCaseLevelRef = useRef<number | undefined>(undefined);
 
   /** PHASE 1: Feier zeigen, sobald Erst-Erfolg UND Walk-Through da sind. */
   const tryCelebrateFirstCase = useCallback(async () => {
@@ -592,6 +598,8 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
         // presentBanner reiht sich korrekt ein (Walkthrough aktiv oder
         // anderer Banner offen → Queue) — dadurch kommt unsere Feier
         // garantiert NACH etwaigen anderen Feiern.
+        firstCaseTriggerRef.current = level >= 3 ? 'veteran_case' : 'first_case';
+        firstCaseLevelRef.current = level || undefined;
         presentBanner(
           level >= 3 ? bannerDataFromVeteranCase(level) : bannerDataFromFirstCase(),
         );
@@ -625,7 +633,11 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
     if (CoachmarkService.isAnyActive()) return;
     if (isAnySheetOpen() || isSurveyVisible()) return;
     if (AppState.currentState !== 'active') return;
-    void FirstCaseService.maybeRequestReview(user?.uid).then((outcome) => {
+    void FirstCaseService.maybeRequestReview(
+      user?.uid,
+      firstCaseTriggerRef.current,
+      firstCaseLevelRef.current,
+    ).then((outcome) => {
       if (outcome === 'requested' || outcome === 'already' || outcome === 'gated') {
         // Sequenz abgeschlossen bzw. endgültig gegated → nicht weiter
         // versuchen. 'unavailable'/'busy' bleiben offen für die nächste

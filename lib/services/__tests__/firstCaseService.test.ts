@@ -55,7 +55,24 @@ const mockRequestNow = jest.fn<Promise<boolean>, [string]>();
 jest.mock('../ratingPrompt', () => ({
   ratingPromptService: {
     canRequestNativeReview: (uid: string) => mockCanRequest(uid),
+    // Spiegelt canRequestNativeReview: null = frei, sonst der Grund.
+    // Die Suite steuert weiterhin über mockCanRequest, damit die
+    // bestehenden Fälle unverändert lesbar bleiben.
+    blockingReason: async (uid: string) =>
+      (await mockCanRequest(uid)) ? null : 'version_budget',
     requestNativeReviewNow: (uid: string) => mockRequestNow(uid),
+  },
+}));
+
+// Telemetrie: reiner Seiteneffekt, darf den Trichter nie beeinflussen.
+// Gemockt, weil der echte Service `react-native` (Platform) importiert —
+// diese Suite lief bisher komplett ohne RN-Transform. Eigene Tests dafür
+// stehen in ratingTelemetry.test.ts.
+const mockTelemetryLog = jest.fn<Promise<void>, [any]>(() => Promise.resolve());
+jest.mock('../ratingTelemetry', () => ({
+  RatingTelemetry: {
+    log: (input: any) => mockTelemetryLog(input),
+    resetGuards: () => Promise.resolve(),
   },
 }));
 
@@ -124,10 +141,32 @@ describe('shouldCelebrate — Phase 1', () => {
     expect(await FirstCaseService.shouldCelebrate(UID)).toBe(false);
   });
 
-  it('nach markCelebrated: false — Feier ist einmalig', async () => {
+  // Bewusste Verhaltensänderung (Aug 2026): die Feier darf sich über
+  // SESSIONS hinweg wiederholen, solange der Dialog nie angefragt wurde.
+  // Vorher verbrannte ein Session-Ende zwischen Banner und den 5 s bis
+  // zum Dialog (Anruf, App-Kill) den Erst-Fall-Pfad DAUERHAFT — genau
+  // dieser Fall traf Bestandsnutzer, deren Level-Up-Pfad längst durch ist.
+  it('nach markCelebrated: weiterhin true — Session-Abbruch verbrennt den Pfad nicht', async () => {
     await FirstCaseService.markFirstCase(UID);
     expect(await FirstCaseService.shouldCelebrate(UID)).toBe(true);
     await FirstCaseService.markCelebrated(UID);
+    expect(await FirstCaseService.shouldCelebrate(UID)).toBe(true);
+  });
+
+  it('nach 3 Feiern ohne Dialog: false — der Deckel greift', async () => {
+    await FirstCaseService.markFirstCase(UID);
+    await FirstCaseService.markCelebrated(UID);
+    await FirstCaseService.markCelebrated(UID);
+    expect(await FirstCaseService.shouldCelebrate(UID)).toBe(true);
+    await FirstCaseService.markCelebrated(UID);
+    expect(await FirstCaseService.shouldCelebrate(UID)).toBe(false);
+  });
+
+  it('nach angefragtem Dialog: false — endgültig durch', async () => {
+    await FirstCaseService.markFirstCase(UID);
+    await FirstCaseService.markCelebrated(UID);
+    mockRequestNow.mockResolvedValue(true);
+    expect(await FirstCaseService.maybeRequestReview(UID)).toBe('requested');
     expect(await FirstCaseService.shouldCelebrate(UID)).toBe(false);
   });
 });

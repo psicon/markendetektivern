@@ -199,6 +199,30 @@ service cloud.firestore {
       allow read, delete: if false;
     }
 
+    // ── Bewertungs-Trichter (write-only Telemetrie) ──────────────────
+    // Macht sichtbar, wo der Review-Prompt hängenbleibt: ausgelöst /
+    // gefeiert / geblockt (mit Grund) / angefragt. Vorher schrieb der
+    // gesamte Pfad NUR in den AsyncStorage des Geräts — die Frage „kommt
+    // der Dialog überhaupt raus?" war serverseitig unbeantwortbar.
+    // Doc-ID ist `<uid>_<version>_<stage>[_<reason>]`, deshalb update:
+    // ein durchgerutschtes Duplikat überschreibt sich selbst, statt sich
+    // zu vervielfachen. read: false — die Auswertung läuft über BigQuery
+    // bzw. das Admin-SDK, der Client liest hier nie.
+    match /ratingFunnelEvents/{eventId} {
+      allow create: if signedIn()
+                     && request.resource.data.userId == request.auth.uid;
+      // Beim Update BEIDE Seiten prüfen: `request.resource` allein würde
+      // reichen, um ein FREMDES Doc zu überschreiben — man müsste nur die
+      // eigene userId hineinschreiben. Die Doc-ID trägt zwar die uid, ist
+      // aber kein Zugriffsschutz. `resource.data.userId` sichert, dass das
+      // bestehende Doc auch dem Schreibenden gehört (Muster wie bei
+      // productRatings).
+      allow update: if signedIn()
+                     && request.resource.data.userId == request.auth.uid
+                     && resource.data.userId == request.auth.uid;
+      allow read, delete: if false;
+    }
+
     // ── Push-Token-Registry (Admin-Broadcasts; Doc-ID = Token) ───────
     match /pushTokens/{token} {
       allow create, update: if signedIn()

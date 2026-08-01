@@ -335,6 +335,30 @@ describe('Ratings, Feedback, Telemetrie, Push-Tokens', () => {
     await assertSucceeds(setDoc(doc(alice(), 'crowd_uploads/cu1'), { userId: ALICE }));
     await assertFails(updateDoc(doc(alice(), 'crowd_uploads/cu1'), { status: 'approved' }));
   });
+  test('ratingFunnelEvents: eigenes schreiben ok, Spoof/Unauth/Read/Delete nie', async () => {
+    const own = `ratingFunnelEvents/${ALICE}_6.0.12_requested`;
+    await assertSucceeds(setDoc(doc(alice(), own), {
+      userId: ALICE, stage: 'requested', platform: 'ios', appVersion: '6.0.12',
+    }));
+    // Idempotenter Re-Write derselben Doc-ID (Duplikat überschreibt sich).
+    await assertSucceeds(setDoc(doc(alice(), own), {
+      userId: ALICE, stage: 'requested', platform: 'ios', appVersion: '6.0.12',
+    }));
+    // Fremde userId im eigenen Doc: der klassische Zähler-Fälschungsversuch.
+    await assertFails(setDoc(doc(alice(), 'ratingFunnelEvents/spoof'), {
+      userId: MALLORY, stage: 'requested',
+    }));
+    // Fremdes Doc überschreiben.
+    await assertFails(setDoc(doc(mallory(), own), {
+      userId: MALLORY, stage: 'blocked',
+    }));
+    await assertFails(setDoc(doc(unauth(), 'ratingFunnelEvents/anon'), {
+      userId: ALICE, stage: 'requested',
+    }));
+    // Write-only: der Client darf den Trichter nie auslesen oder aufräumen.
+    await assertFails(getDoc(doc(alice(), own)));
+    await assertFails(deleteDoc(doc(alice(), own)));
+  });
 });
 
 // ─── 8. LEGACY-LÖCHER & BACKDOOR ─────────────────────────────────────
