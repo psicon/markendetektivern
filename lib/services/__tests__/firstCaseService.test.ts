@@ -76,6 +76,15 @@ jest.mock('../ratingTelemetry', () => ({
   },
 }));
 
+// App-Version steuerbar machen: die Schlüssel sind versions-gebunden,
+// und genau daran hängt die Wiederholbarkeit über Releases hinweg.
+const version = { current: '6.0.12' };
+jest.mock('expo-application', () => ({
+  get nativeApplicationVersion() {
+    return version.current;
+  },
+}));
+
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { FirstCaseService } = require('../firstCaseService');
 
@@ -162,12 +171,66 @@ describe('shouldCelebrate — Phase 1', () => {
     expect(await FirstCaseService.shouldCelebrate(UID)).toBe(false);
   });
 
-  it('nach angefragtem Dialog: false — endgültig durch', async () => {
+  it('nach angefragtem Dialog: false — endgültig durch (in DIESER Version)', async () => {
     await FirstCaseService.markFirstCase(UID);
     await FirstCaseService.markCelebrated(UID);
     mockRequestNow.mockResolvedValue(true);
     expect(await FirstCaseService.maybeRequestReview(UID)).toBe('requested');
     expect(await FirstCaseService.shouldCelebrate(UID)).toBe(false);
+  });
+});
+
+// Das ist der Mechanismus hinter „alle Bestandsnutzer nach und nach":
+// nicht eine Kampagne, sondern das Aufhören, sich nach der ersten Welle
+// selbst zu blockieren. Ein Release schärft den Auslöser neu; wie oft
+// daraus wirklich ein Dialog wird, deckeln Apple (3×/Jahr) und unser
+// 14-Tage-Cooldown — beides sitzt in ratingPrompt, nicht hier.
+describe('Versions-Scoping — jeder Release schärft den Auslöser neu', () => {
+  afterEach(() => {
+    version.current = '6.0.12';
+  });
+
+  it('nach vollständigem Durchlauf ist in DERSELBEN Version Schluss', async () => {
+    await FirstCaseService.markFirstCase(UID);
+    await FirstCaseService.markCelebrated(UID);
+    mockRequestNow.mockResolvedValue(true);
+    expect(await FirstCaseService.maybeRequestReview(UID)).toBe('requested');
+
+    // Erneuter Produktbesuch in derselben Version ändert nichts.
+    await FirstCaseService.markFirstCase(UID);
+    expect(await FirstCaseService.shouldCelebrate(UID)).toBe(false);
+    expect(await FirstCaseService.maybeRequestReview(UID)).toBe('already');
+  });
+
+  it('nach einem Release ist derselbe Nutzer wieder dran', async () => {
+    await FirstCaseService.markFirstCase(UID);
+    await FirstCaseService.markCelebrated(UID);
+    mockRequestNow.mockResolvedValue(true);
+    expect(await FirstCaseService.maybeRequestReview(UID)).toBe('requested');
+
+    version.current = '6.0.13';
+
+    // Ohne Produktbesuch passiert weiterhin nichts — der Auslöser ist
+    // scharf, nicht automatisch ausgelöst.
+    expect(await FirstCaseService.shouldCelebrate(UID)).toBe(false);
+
+    await FirstCaseService.markFirstCase(UID);
+    expect(await FirstCaseService.shouldCelebrate(UID)).toBe(true);
+    await FirstCaseService.markCelebrated(UID);
+    expect(await FirstCaseService.maybeRequestReview(UID)).toBe('requested');
+  });
+
+  it('der alte Stand bleibt erhalten — ein Downgrade öffnet nichts erneut', async () => {
+    await FirstCaseService.markFirstCase(UID);
+    await FirstCaseService.markCelebrated(UID);
+    mockRequestNow.mockResolvedValue(true);
+    await FirstCaseService.maybeRequestReview(UID);
+
+    version.current = '6.0.13';
+    await FirstCaseService.markFirstCase(UID);
+    version.current = '6.0.12';
+
+    expect(await FirstCaseService.maybeRequestReview(UID)).toBe('already');
   });
 });
 

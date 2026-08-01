@@ -380,19 +380,13 @@ export default function ProductComparisonScreen() {
         // hand. This action also fires the `first_action_any`
         // achievement on the user's first visit. Fire-and-forget —
         // failures must not block the screen from rendering.
-        // "Erster Fall geloest" (ClickUp 86cav7gqm): das erste Mal ein
-        // ENTTARNTES Produkt (Stufe 3-5) vor sich zu haben — egal ob
-        // ueber den Walk-Through, per Scan, ueber die Suche oder einen
-        // Direktlink. Der Aha-Moment ist das SEHEN, nicht der Scan.
-        {
-          // Hoechste Stufe unter den angezeigten Eigenmarken — das ist
-          // die Enttarnung, die der User vor sich hat.
-          const stufeSeen = (sorted ?? []).reduce(
-            (max: number, nn: any) => Math.max(max, parseStufe(nn?.stufe)),
-            0,
-          );
-          if (stufeSeen >= 3) void FirstCaseService.markFirstCase(user?.uid);
-        }
+        // "Erster Fall geloest" (ClickUp 86cav7gqm): ALLE Stufen (1-5)
+        // zaehlen — egal ob ueber den Walk-Through, per Scan, ueber die
+        // Suche oder einen Direktlink. Der frueher hier stehende
+        // `>= 3`-Riegel ist weg (siehe noname-detail): wer auf dieser
+        // Seite steht, hat einen Vergleich vor sich, und das ist der
+        // Erfolg — unabhaengig davon wie eng die Entsprechung ausfaellt.
+        void FirstCaseService.markFirstCase(user?.uid);
 
         if (user?.uid) {
           achievementService

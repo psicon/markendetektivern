@@ -13,7 +13,7 @@ import { RatingTelemetry } from './ratingTelemetry';
  * Walk-Through durch ist. Beide Bedingungen sind persistent und
  * REIHENFOLGE-UNABHÄNGIG:
  *
- *   (a) Erstes ENTTARNTES Produkt (Stufe 3-5) gesehen → `markFirstCase`
+ *   (a) Produktseite gesehen, ALLE Stufen 1-5 → `markFirstCase`
  *       (egal ob via Walk-Through, Scan, Suche oder Direktlink)
  *   (b) Intro-Touren durch                 → `CoachmarkService.hasCompletedIntroTours()`
  *
@@ -44,9 +44,42 @@ import { RatingTelemetry } from './ratingTelemetry';
  */
 
 const KEY_PREFIX = 'firstCase/v1/';
-const CASE_KEY = (uid: string) => `${KEY_PREFIX}firstCaseAt_${uid}`;
-const CELEBRATED_KEY = (uid: string) => `${KEY_PREFIX}celebratedAt_${uid}`;
-const REVIEW_KEY = (uid: string) => `${KEY_PREFIX}reviewRequestedAt_${uid}`;
+
+/**
+ * Alle Schlüssel sind VERSIONS-GEBUNDEN.
+ *
+ * Vorher galten sie pro uid und damit für immer: `markFirstCase` schrieb
+ * genau einmal, `reviewRequestedAt` blockierte danach dauerhaft. Für die
+ * Bestandsbasis hieß das — eine einzige Welle, danach nie wieder. Wer den
+ * Moment verpasste (Sheet offen, App im Hintergrund, OS-Drosselung), war
+ * für immer raus, und die 251.747 registrierten Nutzer wären nach genau
+ * einem Durchlauf verbraucht gewesen.
+ *
+ * Mit der Version im Schlüssel schärft sich der Auslöser bei jedem
+ * Release neu. Das ist der Takt für „nach und nach": ~12 Wellen im Jahr,
+ * von denen Apple ohnehin nur 3 durchlässt (max. 3 Aufforderungen pro
+ * Nutzer und Jahr) und unser 14-Tage-Cooldown die Frequenz zusätzlich
+ * deckelt. Wir bauen also keinen eigenen Kampagnen-Mechanismus — wir
+ * hören auf, uns nach der ersten Welle selbst zu blockieren.
+ *
+ * Der Riegel gegen Doppel-Prompts bleibt unverändert wirksam: er sitzt in
+ * `ratingPrompt` (`nativeReviewAskedVersion_global`, geräteweit + uid-frei)
+ * und nutzt dieselbe Versionsquelle.
+ */
+function appVersion(): string {
+  try {
+    const Application = require('expo-application');
+    return Application?.nativeApplicationVersion ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+const CASE_KEY = (uid: string) => `${KEY_PREFIX}firstCaseAt_${uid}_${appVersion()}`;
+const CELEBRATED_KEY = (uid: string) =>
+  `${KEY_PREFIX}celebratedAt_${uid}_${appVersion()}`;
+const REVIEW_KEY = (uid: string) =>
+  `${KEY_PREFIX}reviewRequestedAt_${uid}_${appVersion()}`;
 // Wie oft die Feier über SESSIONS hinweg erneut laufen darf, solange
 // der Dialog noch nicht angefragt wurde.
 //
@@ -63,7 +96,8 @@ const REVIEW_KEY = (uid: string) => `${KEY_PREFIX}reviewRequestedAt_${uid}`;
 // (z.B. ständig offene Sheets), nicht in jeder Sitzung dieselbe Feier
 // sieht. Drei Anläufe, dann ist Schluss.
 const MAX_CELEBRATIONS = 3;
-const CELEBRATE_COUNT_KEY = (uid: string) => `${KEY_PREFIX}celebrateCount_${uid}`;
+const CELEBRATE_COUNT_KEY = (uid: string) =>
+  `${KEY_PREFIX}celebrateCount_${uid}_${appVersion()}`;
 
 export type FirstCaseOutcome =
   | 'requested'
@@ -94,19 +128,21 @@ function emitArmed(): void {
 
 export const FirstCaseService = {
   /**
-   * Der erste „gelöste Fall": das erste Mal, dass der User ein
-   * ENTTARNTES Produkt (Stufe 3, 4 oder 5) vor sich hat — egal auf
-   * welchem Weg: über den Walk-Through, per Scan, über die Suche oder
-   * einen Direktlink.
+   * Der „gelöste Fall": der User hat eine Produktseite vor sich — egal
+   * auf welchem Weg (Walk-Through, Scan, Suche, Direktlink) und in
+   * WELCHER STUFE (1 bis 5).
    *
-   * Bewusst NICHT mehr nur „Katalog-Treffer im Scanner" (so war es bis
-   * 2026-07-25): der Aha-Moment ist, die Entsprechung zu SEHEN, nicht
-   * der Scan-Vorgang. Wer über die Demo-Karte des Walk-Throughs oder
-   * über die Suche dorthin kommt, hat denselben Moment.
+   * Der Aha-Moment ist das SEHEN, nicht der Scan-Vorgang. Ein
+   * erfolgreicher Scan navigiert ohnehin genau hierher — deshalb gibt es
+   * bewusst KEINEN separaten Scan-Trigger, er wäre eine Dublette.
    *
-   * Stufe 1/2 zählt NICHT — dort gibt es keine Enttarnung zu zeigen.
+   * Der frühere `Stufe >= 3`-Riegel ist weg (Aug 2026). Er war fachlich
+   * zu eng — auch Stufe 1/2 ist der Erfolg „die App kennt mein Produkt" —
+   * und praktisch der Hauptgrund, warum nur 5,9 % der Nutzer den
+   * Bewertungs-Prompt überhaupt erreichten.
    *
-   * Idempotent — schreibt nur beim ersten Mal und feuert dann den Bus.
+   * Idempotent PRO APP-VERSION (siehe CASE_KEY): schreibt einmal je
+   * Release und feuert dann den Bus.
    * Der Emit läuft NACH dem Write (nicht `void write(); emit()`) —
    * sonst liest ein Listener, der sofort `maybeRequestReview` aufruft,
    * den Key noch als leer (bezahltes Learning, vgl.
@@ -118,7 +154,7 @@ export const FirstCaseService = {
       const existing = await AsyncStorage.getItem(CASE_KEY(uid));
       if (existing) return;
       await AsyncStorage.setItem(CASE_KEY(uid), String(Date.now()));
-      console.log('🔍 Erster Fall gelöst (Stufe 3+ gesehen) — Trigger gearmt');
+      console.log('🔍 Fall gelöst (Produktseite, Stufe 1-5) — Trigger gearmt');
       void RatingTelemetry.log({ uid, stage: 'trigger_armed' });
       emitArmed();
     } catch (e) {

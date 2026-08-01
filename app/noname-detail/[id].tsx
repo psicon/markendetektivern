@@ -470,12 +470,14 @@ export default function NoNameDetailScreen() {
         // product loads. This action also triggers the
         // `first_action_any` achievement on the user's first
         // visit. Fire-and-forget — must not block the screen.
-        // "Erster Fall geloest" — siehe product-comparison. Hier landen
-        // zwar meist Stufe 1/2 (keine Enttarnung), der Guard prueft die
-        // Stufe aber ohnehin, also ist die Stelle unkritisch.
-        if (Number((data as any)?.stufe) >= 3) {
-          void FirstCaseService.markFirstCase(user?.uid);
-        }
+        // "Erster Fall geloest" — ALLE Stufen (1-5) zaehlen.
+        // Der frueher hier stehende `>= 3`-Riegel war doppelt falsch:
+        // fachlich, weil auch Stufe 1/2 der Erfolg ist ("die App kennt
+        // mein Produkt"), und praktisch, weil er die Reichweite des
+        // Bewertungs-Prompts auf 5,9 % der Nutzer druckte. Ein
+        // erfolgreicher Scan landet ohnehin genau hier — deshalb braucht
+        // es auch keinen separaten Scan-Trigger.
+        void FirstCaseService.markFirstCase(user?.uid);
 
         if (user?.uid) {
           achievementService
