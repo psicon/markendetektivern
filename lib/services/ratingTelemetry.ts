@@ -34,6 +34,24 @@ import { Platform } from 'react-native';
 
 const COLLECTION = 'ratingFunnelEvents';
 const SENT_KEY = (uid: string, id: string) => `ratingTelemetry/v1/${uid}/${id}`;
+// Aufbewahrung: 180 Tage. Das Feld MUSS beim ersten Write dabei sein —
+// eine Firestore-TTL-Policy erfasst Dokumente ohne das Feld nie, ein
+// nachträglicher Retrofit müsste also den Altbestand einzeln anfassen.
+// Die veröffentlichte Datenschutzerklärung sagt vollständige Löschung
+// bei Kontolöschung zu; ohne TTL wäre das hier nicht eingehalten.
+// Die Policy selbst wird per `gcloud firestore fields ttls update`
+// gesetzt — NIEMALS über firestore.indexes.json (dieser Weg hat in
+// diesem Projekt schon einmal 75 produktive Indizes gelöscht).
+const RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
+
+// Sitzungs-Riegel zusätzlich zum persistenten. Der persistente wird
+// bewusst ERST nach erfolgreichem Write gesetzt (sonst gälte ein
+// offline gescheiterter Write für immer als gesendet). Genau deshalb
+// braucht es diesen zweiten: offline löst die Firestore-Promise nie
+// auf, der persistente Riegel bleibt leer, und jeder weitere Aufruf mit
+// derselben ID würde einen weiteren Write in die Mutation-Queue legen —
+// bei einem 2-Sekunden-Poll sind das hunderte auf dasselbe Dokument.
+const sentThisSession = new Set<string>();
 
 /** Wo im Trichter der Nutzer gerade steht. */
 export type RatingFunnelStage =
@@ -61,7 +79,9 @@ export type RatingBlockReason =
   | 'intro_tours_open'
   | 'sheet_open'
   | 'app_background'
-  | 'already_requested';
+  | 'already_requested'
+  /** Der native Aufruf selbst schlug fehl (Modul fehlt, OS lehnte ab). */
+  | 'native_call_failed';
 
 export type RatingTrigger = 'first_case' | 'veteran_case' | 'level_up';
 
@@ -101,7 +121,11 @@ export const RatingTelemetry = {
       // wir sähen nur je einen Grund pro Nutzer statt der echten Kette.
       const id = `${version}_${stage}${reason ? `_${reason}` : ''}`;
       const guard = SENT_KEY(uid, id);
+      if (sentThisSession.has(guard)) return;
       if (await AsyncStorage.getItem(guard)) return;
+      // VOR dem Write setzen: der Sitzungs-Riegel deckelt die Anzahl der
+      // Versuche, der persistente unten bestätigt den Erfolg.
+      sentThisSession.add(guard);
 
       // Lazy require statt statischem Import: hält den Service import-
       // sicher, damit JEDER Konsument (firstCaseService, ratingPrompt …)
@@ -121,6 +145,11 @@ export const RatingTelemetry = {
         platform: Platform.OS,
         appVersion: version,
         timestamp: serverTimestamp(),
+        // Zielfeld der TTL-Policy (siehe RETENTION_MS). Bewusst ein
+        // echtes Date und kein serverTimestamp: die TTL braucht einen
+        // konkreten Zeitpunkt im Dokument, und ein Sentinel wäre beim
+        // Schreiben noch nicht aufgelöst.
+        expireAt: new Date(Date.now() + RETENTION_MS),
       });
 
       // Riegel ERST nach erfolgreichem Write setzen — sonst wäre ein
@@ -137,6 +166,7 @@ export const RatingTelemetry = {
    *  Trichter im Test wiederholt durchspielen lässt. */
   async resetGuards(uid: string): Promise<void> {
     try {
+      sentThisSession.clear();
       const keys = await AsyncStorage.getAllKeys();
       const mine = keys.filter((k) => k.startsWith(`ratingTelemetry/v1/${uid}/`));
       if (mine.length) await AsyncStorage.multiRemove(mine);

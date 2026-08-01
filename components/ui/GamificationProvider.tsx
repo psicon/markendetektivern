@@ -297,31 +297,53 @@ export function bannerDataFromCashbackPayout(cashbackCents: number): BannerData 
  * Gleicher Mechanismus, gleiche Sicherungen, nur ehrlicher Text.
  */
 export function bannerDataFromVeteranCase(level: number): BannerData {
-  return {
-    kind: 'firstCase',
-    title: 'Wieder ein Fall gelöst!',
-    subtitle: `Starke Arbeit, Detektiv Level ${level}.`,
-    lottie: (() => {
-      try {
-        return require('@/assets/lottie/firstaction.json');
-      } catch {
-        return require('@/assets/lottie/confetti.json');
-      }
-    })(),
-    tint: '#F0A030',
-    secondaryTint: '#0d8575',
-    withGlow: true,
-  };
+  return bannerDataFromCase({ stufe: 5, everCelebrated: true, level });
 }
 
-export function bannerDataFromFirstCase(): BannerData {
+/**
+ * Der Feier-Text richtet sich nach ZWEI Dingen — beide sind Pflicht,
+ * sonst behauptet der Banner etwas, das der Bildschirm darunter
+ * widerlegt:
+ *
+ *  1. WAS der Nutzer vor sich hat (`stufe`). Auf einer Stufe-1/2-Seite
+ *     steht wörtlich „Kein direktes Markenprodukt zum Vergleich
+ *     hinterlegt" — dort ist „Fall geschlossen" schlicht falsch, und ein
+ *     Glückwunsch über einem Fehlschlag ist der direkte Weg zu weiteren
+ *     1-Stern-Bewertungen. 29 % der Produkte sind Stufe 1/2, bei Scans
+ *     mehr (man scannt, was die App noch nicht kennt).
+ *  2. OB schon jemals gefeiert wurde (`everCelebrated`). Seit die
+ *     Schlüssel versions-gebunden sind, läuft die Feier pro Release
+ *     erneut — „Erster Fall" wäre ab dem zweiten Mal nachprüfbar
+ *     gelogen. Die Weiche hing vorher am Level (≥ 3), das deckt aber nur
+ *     ~7 % der Nutzer ab; die übrigen 93 % hätten bei JEDEM Release
+ *     wieder „Erster" gelesen.
+ */
+export function bannerDataFromCase(opts: {
+  stufe: number;
+  everCelebrated: boolean;
+  level?: number;
+}): BannerData {
+  const enttarnt = opts.stufe >= 3;
+  const { title, subtitle } = (() => {
+    if (!opts.everCelebrated) {
+      return enttarnt
+        ? { title: 'Erster Fall geschlossen!', subtitle: 'Herzlichen Glückwunsch, Detektiv!' }
+        : { title: 'Produkt gefunden!', subtitle: 'Es liegt jetzt in deiner Akte.' };
+    }
+    // Wiederholung: nie „erster", und der Level nur wenn er etwas aussagt.
+    const wer = opts.level && opts.level >= 3 ? `Detektiv Level ${opts.level}` : 'Detektiv';
+    return enttarnt
+      ? { title: 'Wieder ein Fall gelöst!', subtitle: `Starke Arbeit, ${wer}.` }
+      : { title: 'Produkt gefunden!', subtitle: `Wieder eins für die Akte, ${wer}.` };
+  })();
+
   return {
     kind: 'firstCase',
-    title: 'Erster Fall geschlossen!',
+    title,
     // Kurz halten: der Banner gibt dem Subtitle 2 Zeilen neben Lottie
     // (72 px) — ein längerer Satz wird bei großer System-Schrift
     // (maxFontSizeMultiplier 1.3) abgeschnitten.
-    subtitle: 'Herzlichen Glückwunsch, Detektiv!',
+    subtitle,
     lottie: (() => {
       try {
         return require('@/assets/lottie/firstaction.json');
@@ -341,6 +363,11 @@ export function bannerDataFromFirstCase(): BannerData {
       }
     },
   };
+}
+
+/** Rückwärtskompatible Kurzform für das Dev-Panel (Optik-Vorschau). */
+export function bannerDataFromFirstCase(): BannerData {
+  return bannerDataFromCase({ stufe: 5, everCelebrated: false });
 }
 
 // Kurze Toast-Texte für abgelehnte Bons (die ausführliche Begründung
@@ -598,10 +625,21 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
         // presentBanner reiht sich korrekt ein (Walkthrough aktiv oder
         // anderer Banner offen → Queue) — dadurch kommt unsere Feier
         // garantiert NACH etwaigen anderen Feiern.
-        firstCaseTriggerRef.current = level >= 3 ? 'veteran_case' : 'first_case';
+        // Text nach dem, was der Nutzer WIRKLICH vor sich hat: die
+        // gesehene Stufe entscheidet über „Fall gelöst" vs. „Produkt
+        // gefunden", der versions-übergreifende Feier-Zähler über
+        // „Erster …" vs. Wiederholung. Die alte Weiche hing am Level
+        // (≥ 3) und deckte damit nur ~7 % der Nutzer ab — alle anderen
+        // hätten bei jedem Release wieder „Erster Fall" gelesen.
+        const ctx = await FirstCaseService.getCelebrationContext(uid);
+        firstCaseTriggerRef.current = ctx.everCelebrated ? 'veteran_case' : 'first_case';
         firstCaseLevelRef.current = level || undefined;
         presentBanner(
-          level >= 3 ? bannerDataFromVeteranCase(level) : bannerDataFromFirstCase(),
+          bannerDataFromCase({
+            stufe: ctx.stufe,
+            everCelebrated: ctx.everCelebrated,
+            level,
+          }),
         );
       }
       // Frische Kante für Phase 2 erzwingen: das Setzen einer Ref löst

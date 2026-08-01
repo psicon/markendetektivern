@@ -337,27 +337,51 @@ describe('Ratings, Feedback, Telemetrie, Push-Tokens', () => {
   });
   test('ratingFunnelEvents: eigenes schreiben ok, Spoof/Unauth/Read/Delete nie', async () => {
     const own = `ratingFunnelEvents/${ALICE}_6.0.12_requested`;
-    await assertSucceeds(setDoc(doc(alice(), own), {
+    const gut = {
       userId: ALICE, stage: 'requested', platform: 'ios', appVersion: '6.0.12',
-    }));
+    };
+    await assertSucceeds(setDoc(doc(alice(), own), gut));
     // Idempotenter Re-Write derselben Doc-ID (Duplikat überschreibt sich).
-    await assertSucceeds(setDoc(doc(alice(), own), {
-      userId: ALICE, stage: 'requested', platform: 'ios', appVersion: '6.0.12',
-    }));
+    await assertSucceeds(setDoc(doc(alice(), own), gut));
     // Fremde userId im eigenen Doc: der klassische Zähler-Fälschungsversuch.
-    await assertFails(setDoc(doc(alice(), 'ratingFunnelEvents/spoof'), {
+    await assertFails(setDoc(doc(alice(), `ratingFunnelEvents/${ALICE}_spoof`), {
       userId: MALLORY, stage: 'requested',
     }));
     // Fremdes Doc überschreiben.
     await assertFails(setDoc(doc(mallory(), own), {
       userId: MALLORY, stage: 'blocked',
     }));
-    await assertFails(setDoc(doc(unauth(), 'ratingFunnelEvents/anon'), {
-      userId: ALICE, stage: 'requested',
-    }));
+    await assertFails(setDoc(doc(unauth(), `ratingFunnelEvents/${ALICE}_anon`), gut));
     // Write-only: der Client darf den Trichter nie auslesen oder aufräumen.
     await assertFails(getDoc(doc(alice(), own)));
     await assertFails(deleteDoc(doc(alice(), own)));
+  });
+  test('ratingFunnelEvents: Doc-ID muss die eigene uid tragen', async () => {
+    // Ohne diese Bindung könnte jeder beliebig viele Dokumente unter
+    // freien IDs anlegen — die Collection ist die einzige Quelle, auf der
+    // künftige Prompt-Entscheidungen beruhen.
+    await assertFails(setDoc(doc(alice(), 'ratingFunnelEvents/frei-gewaehlt'), {
+      userId: ALICE, stage: 'requested',
+    }));
+    await assertFails(setDoc(doc(alice(), `ratingFunnelEvents/${MALLORY}_x`), {
+      userId: ALICE, stage: 'requested',
+    }));
+  });
+  test('ratingFunnelEvents: Fremdfelder und unbekannte Stufen scheitern', async () => {
+    const id = `ratingFunnelEvents/${ALICE}_6.0.12_celebrated`;
+    await assertFails(setDoc(doc(alice(), id), {
+      userId: ALICE, stage: 'celebrated', payload: 'x'.repeat(1000),
+    }));
+    await assertFails(setDoc(doc(alice(), id), {
+      userId: ALICE, stage: 'ausgedacht',
+    }));
+    await assertSucceeds(setDoc(doc(alice(), id), {
+      userId: ALICE, stage: 'celebrated',
+    }));
+  });
+  test('app_config: öffentlich lesbar (Kill-Switch beim Boot), nie client-schreibbar', async () => {
+    await assertSucceeds(getDoc(doc(unauth(), 'app_config/rating')));
+    await assertFails(setDoc(doc(alice(), 'app_config/rating'), { enabled: false }));
   });
 });
 

@@ -209,18 +209,44 @@ service cloud.firestore {
     // zu vervielfachen. read: false — die Auswertung läuft über BigQuery
     // bzw. das Admin-SDK, der Client liest hier nie.
     match /ratingFunnelEvents/{eventId} {
+      // Doc-ID an den Schreiber binden + Felder whitelisten. Ohne das
+      // könnte ein (auch anonymer) Client beliebig viele Dokumente unter
+      // freien IDs mit Fremdfeldern bis 1 MiB anlegen — und diese
+      // Collection ist die einzige Quelle, auf der künftige
+      // Prompt-Entscheidungen beruhen. Ihre Integrität ist damit direkt
+      // entscheidungsrelevant.
       allow create: if signedIn()
-                     && request.resource.data.userId == request.auth.uid;
+                     && request.resource.data.userId == request.auth.uid
+                     && eventId.matches('^' + request.auth.uid + '_.*')
+                     && request.resource.data.keys().hasOnly([
+                          'userId','stage','reason','trigger','level',
+                          'platform','appVersion','timestamp','expireAt'
+                        ])
+                     && request.resource.data.stage in
+                          ['trigger_armed','celebrated','blocked','requested'];
       // Beim Update BEIDE Seiten prüfen: `request.resource` allein würde
       // reichen, um ein FREMDES Doc zu überschreiben — man müsste nur die
-      // eigene userId hineinschreiben. Die Doc-ID trägt zwar die uid, ist
-      // aber kein Zugriffsschutz. `resource.data.userId` sichert, dass das
-      // bestehende Doc auch dem Schreibenden gehört (Muster wie bei
-      // productRatings).
+      // eigene userId hineinschreiben. Die Doc-ID ist kein Zugriffsschutz.
+      // `resource.data.userId` sichert, dass das bestehende Doc auch dem
+      // Schreibenden gehört (Muster wie bei productRatings).
       allow update: if signedIn()
                      && request.resource.data.userId == request.auth.uid
-                     && resource.data.userId == request.auth.uid;
+                     && resource.data.userId == request.auth.uid
+                     && request.resource.data.keys().hasOnly([
+                          'userId','stage','reason','trigger','level',
+                          'platform','appVersion','timestamp','expireAt'
+                        ]);
       allow read, delete: if false;
+    }
+
+    // ── App-Fernschalter (Not-Aus, z.B. Bewertungs-Prompt) ───────────
+    // Öffentlich lesbar wie cashback_config: der Wert wird beim Boot
+    // gebraucht, teils bevor der anonyme Sign-In durch ist. Schreiben
+    // ausschließlich per Admin-SDK/Console — ein Client darf sich den
+    // Schalter nicht selbst umlegen.
+    match /app_config/{document} {
+      allow read: if true;
+      allow write: if false;
     }
 
     // ── Push-Token-Registry (Admin-Broadcasts; Doc-ID = Token) ───────

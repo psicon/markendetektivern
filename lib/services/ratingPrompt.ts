@@ -34,17 +34,21 @@ const NATIVE_ASK_COOLDOWN_MS = 14 * 24 * 60 * 60 * 1000; // 14 Tage
 // Schlüssel beide Auto-Pfade für immer. Betroffen: 4.782 Nutzer — also
 // ausgerechnet die aktivsten, die man am ehesten fragen will.
 //
-// Neue Lesart, nach Antworttyp getrennt:
-//   positiv  → zufriedener Nutzer, den wir erneut fragen dürfen. Kurze
-//              Schamfrist, damit es nicht unmittelbar hintereinander kommt.
-//   negativ  → hat uns gesagt, dass etwas nicht passt. Lange Ruhe; ihn in
-//              den Store zu schicken wäre gegen sein Interesse und gegen
-//              unseres.
+// Neue Lesart: EINE Frist, unabhängig davon WAS geantwortet wurde.
+//
+// Eine erste Fassung staffelte nach Sentiment (positiv kurz, negativ
+// lang). Das ist genau die Konstruktion, die Apple unter 3.2.2 als
+// „filtered feedback" verbietet und die in Deutschland als selektive
+// Bewertungsaufforderung UWG-riskant ist: Wer zufrieden war, würde
+// schneller wieder zum Store geschickt als wer unzufrieden war. Dass
+// die Steuerung über eine Frist statt über eine Vorfrage läuft, ändert
+// daran nichts — die Auswahl erfolgt nach bekannter Zufriedenheit.
+//
 // Gemessen wird ab dem Zeitstempel der Antwort. Altbestand ohne Stempel
 // wird beim ersten Lesen auf „jetzt" migriert (siehe readRatedState) —
-// dadurch laufen Altfälle gestaffelt aus statt alle auf einmal.
-const RATED_POSITIVE_BLOCK_MS = 30 * 24 * 60 * 60 * 1000; // 30 Tage
-const RATED_NEGATIVE_BLOCK_MS = 180 * 24 * 60 * 60 * 1000; // 180 Tage
+// dadurch laufen Altfälle gestaffelt aus statt alle auf einmal, und die
+// 4.782 früher lebenslang Gesperrten kommen ab Welle 2-3 zurück.
+const RATED_BLOCK_MS = 90 * 24 * 60 * 60 * 1000; // 90 Tage, für beide
 
 // Synchroner Guard gegen Doppel-Anfragen aus konkurrierenden Kanten.
 let nativeRequestInFlight = false;
@@ -140,9 +144,24 @@ class RatingPromptService {
 
       // Endgültige Absagen (bereits bewertet / Cooldown / Budget) → Flag
       // verbrauchen, es würde sonst bei jedem Poll neu geprüft.
-      if (!(await this.canRequestNativeReview(flag.userId))) {
+      //
+      // Den Grund VOR dem Löschen protokollieren: das ist der häufigste
+      // Ausgang dieses Pfades, und ohne Log fehlte in der Auswertung
+      // ausgerechnet die Level-≥3-Gruppe komplett — also genau die
+      // 18.064 Bestandsnutzer, für die die hasRated-Lockerung gebaut
+      // wurde. Ein leerer Trichter wäre als „Level-Up spielt keine
+      // Rolle" fehlgelesen worden statt als „nicht instrumentiert".
+      const blocked = await this.blockingReason(flag.userId);
+      if (blocked) {
+        void RatingTelemetry.log({
+          uid: flag.userId,
+          stage: 'blocked',
+          reason: blocked,
+          trigger: 'level_up',
+          level: flag.triggerLevel,
+        });
         await AsyncStorage.removeItem(RATING_FLAG_KEY);
-        console.log('📱 Rating conditions no longer met - skipping');
+        console.log(`📱 Rating conditions no longer met (${blocked}) - skipping`);
         return;
       }
 
@@ -153,9 +172,11 @@ class RatingPromptService {
       // Doppel-Prompts verhindert `nativeRequestInFlight` + der
       // Budget-Recheck in requestNativeReviewNow.
       setTimeout(() => {
-        void this.requestNativeReviewNow(flag.userId).then((ok) => {
-          if (ok) void AsyncStorage.removeItem(RATING_FLAG_KEY);
-        });
+        void this.requestNativeReviewNow(flag.userId, 'level_up', flag.triggerLevel).then(
+          (ok) => {
+            if (ok) void AsyncStorage.removeItem(RATING_FLAG_KEY);
+          },
+        );
       }, 500);
     } catch (error) {
       console.error('❌ Error checking pending rating:', error);
@@ -219,6 +240,21 @@ class RatingPromptService {
     nativeRequestInFlight = true;
     try {
       const ok = await this.requestNativeReview();
+      if (!ok) {
+        // Der einzige Ausfall, den die Telemetrie sonst NICHT sieht.
+        // `requestNativeReview` fängt jeden Fehler ab und liefert false —
+        // ein Release mit kaputtem Autolinking/Pod sähe in den Daten
+        // byte-identisch aus wie „Nutzer hat die App zwischen Feier und
+        // Dialog geschlossen". Genau die Frage, für die die Telemetrie
+        // gebaut wurde, bliebe unbeantwortbar.
+        void RatingTelemetry.log({
+          uid: userId,
+          stage: 'blocked',
+          reason: 'native_call_failed',
+          trigger,
+          level,
+        });
+      }
       if (ok) {
         await this.recordNativeRequest(userId);
         // EHRLICHE GRENZE (siehe Doc oben): 'requested' heißt „wir haben
@@ -320,11 +356,10 @@ class RatingPromptService {
   async blockingReason(userId: string): Promise<RatingBlockReason | null> {
     try {
       const rated = await this.readRatedState(userId);
-      if (rated) {
-        const window =
-          rated.type === 'negative' ? RATED_NEGATIVE_BLOCK_MS : RATED_POSITIVE_BLOCK_MS;
-        if (Date.now() - rated.at < window) return 'already_rated';
-      }
+      // Bewusst OHNE Fallunterscheidung nach `rated.type` — siehe
+      // RATED_BLOCK_MS. Der Typ wird weiterhin gespeichert (er ist für
+      // die Auswertung nützlich), steuert aber nichts.
+      if (rated && Date.now() - rated.at < RATED_BLOCK_MS) return 'already_rated';
       // 60-Tage-Cooldown nach X/'Später' — nicht beim naechsten
       // Level-Up sofort wieder nerven.
       const dismissedAt = await AsyncStorage.getItem(DISMISSED_AT_KEY(userId));

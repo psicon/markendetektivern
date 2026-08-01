@@ -96,26 +96,25 @@ describe('hasRated ist keine Lebenssperre mehr', () => {
     expect(await ratingPromptService.blockingReason(UID)).toBe('already_rated');
   });
 
-  it('positive Antwort älter als 30 Tage blockiert NICHT mehr', async () => {
+  it('Antwort älter als 90 Tage blockiert NICHT mehr', async () => {
     store[`hasRated_${UID}`] = JSON.stringify({
       type: 'positive',
-      at: Date.now() - 31 * DAY,
+      at: Date.now() - 91 * DAY,
     });
     expect(await ratingPromptService.blockingReason(UID)).toBeNull();
   });
 
-  it('negative Antwort blockiert deutlich länger — wer unzufrieden war, wird in Ruhe gelassen', async () => {
-    store[`hasRated_${UID}`] = JSON.stringify({
-      type: 'negative',
-      at: Date.now() - 31 * DAY,
-    });
-    expect(await ratingPromptService.blockingReason(UID)).toBe('already_rated');
+  // Store-Richtlinie (Apple 3.2.2 "filtered feedback") und UWG: die Frist
+  // darf NICHT davon abhängen, wie zufrieden jemand war. Sonst wird nach
+  // bekannter Zufriedenheit selektiert — auch ohne Vorfrage.
+  it('negative Antwort wird GENAUSO behandelt wie positive — keine Sentiment-Steuerung', async () => {
+    for (const type of ['positive', 'negative'] as const) {
+      store[`hasRated_${UID}`] = JSON.stringify({ type, at: Date.now() - 89 * DAY });
+      expect(await ratingPromptService.blockingReason(UID)).toBe('already_rated');
 
-    store[`hasRated_${UID}`] = JSON.stringify({
-      type: 'negative',
-      at: Date.now() - 181 * DAY,
-    });
-    expect(await ratingPromptService.blockingReason(UID)).toBeNull();
+      store[`hasRated_${UID}`] = JSON.stringify({ type, at: Date.now() - 91 * DAY });
+      expect(await ratingPromptService.blockingReason(UID)).toBeNull();
+    }
   });
 
   it('Altformat (nackter Typ ohne Datum) wird migriert statt ewig zu sperren', async () => {
@@ -129,7 +128,7 @@ describe('hasRated ist keine Lebenssperre mehr', () => {
     expect(migrated.at).toBeGreaterThan(0);
 
     // Nach Ablauf der Frist ist der Altfall frei — vorher war er es NIE.
-    store[`hasRated_${UID}`] = JSON.stringify({ type: 'positive', at: migrated.at - 31 * DAY });
+    store[`hasRated_${UID}`] = JSON.stringify({ type: 'positive', at: migrated.at - 91 * DAY });
     expect(await ratingPromptService.blockingReason(UID)).toBeNull();
   });
 

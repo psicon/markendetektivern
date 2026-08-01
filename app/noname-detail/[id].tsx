@@ -477,7 +477,10 @@ export default function NoNameDetailScreen() {
         // Bewertungs-Prompts auf 5,9 % der Nutzer druckte. Ein
         // erfolgreicher Scan landet ohnehin genau hier — deshalb braucht
         // es auch keinen separaten Scan-Trigger.
-        void FirstCaseService.markFirstCase(user?.uid);
+        void FirstCaseService.markFirstCase(
+          user?.uid,
+          Number((data as any)?.stufe) || 0,
+        );
 
         if (user?.uid) {
           achievementService

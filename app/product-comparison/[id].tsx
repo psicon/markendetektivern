@@ -386,7 +386,13 @@ export default function ProductComparisonScreen() {
         // `>= 3`-Riegel ist weg (siehe noname-detail): wer auf dieser
         // Seite steht, hat einen Vergleich vor sich, und das ist der
         // Erfolg — unabhaengig davon wie eng die Entsprechung ausfaellt.
-        void FirstCaseService.markFirstCase(user?.uid);
+        void FirstCaseService.markFirstCase(
+          user?.uid,
+          (sorted ?? []).reduce(
+            (max: number, nn: any) => Math.max(max, parseStufe(nn?.stufe)),
+            0,
+          ),
+        );
 
         if (user?.uid) {
           achievementService

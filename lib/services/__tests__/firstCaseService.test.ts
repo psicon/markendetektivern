@@ -85,6 +85,23 @@ jest.mock('expo-application', () => ({
   },
 }));
 
+// Kill-Switch: standardmaessig AN. Ein eigener Test schaltet ihn ab.
+const mockKillSwitch = jest.fn<Promise<boolean>, []>(() => Promise.resolve(true));
+jest.mock('../ratingKillSwitch', () => ({
+  isRatingPromptEnabled: () => mockKillSwitch(),
+  resetRatingKillSwitchCache: () => Promise.resolve(),
+}));
+
+// Der versions-UEBERGREIFENDE Mindestabstand (30 Tage) wuerde jede
+// Wiederholung im Test blockieren — die Suite laeuft in Millisekunden.
+// Helfer: den letzten Feier-Zeitpunkt zurueckdatieren.
+const DAY_MS = 24 * 60 * 60 * 1000;
+async function feierZeitZurueckdatieren(tage: number) {
+  const k = `firstCase/v1/lastCelebratedAt_${UID}`;
+  const cur = Number(await AsyncStorage.getItem(k)) || Date.now();
+  await AsyncStorage.setItem(k, String(cur - tage * DAY_MS));
+}
+
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { FirstCaseService } = require('../firstCaseService');
 
@@ -159,15 +176,33 @@ describe('shouldCelebrate — Phase 1', () => {
     await FirstCaseService.markFirstCase(UID);
     expect(await FirstCaseService.shouldCelebrate(UID)).toBe(true);
     await FirstCaseService.markCelebrated(UID);
+    await feierZeitZurueckdatieren(31);
     expect(await FirstCaseService.shouldCelebrate(UID)).toBe(true);
+  });
+
+  it('30-Tage-Mindestabstand: direkt nach einer Feier kommt keine zweite', async () => {
+    await FirstCaseService.markFirstCase(UID);
+    await FirstCaseService.markCelebrated(UID);
+    // NICHT zurueckdatiert — der Abstand muss allein reichen.
+    expect(await FirstCaseService.shouldCelebrate(UID)).toBe(false);
   });
 
   it('nach 3 Feiern ohne Dialog: false — der Deckel greift', async () => {
     await FirstCaseService.markFirstCase(UID);
     await FirstCaseService.markCelebrated(UID);
+    await feierZeitZurueckdatieren(31);
     await FirstCaseService.markCelebrated(UID);
+    await feierZeitZurueckdatieren(31);
     expect(await FirstCaseService.shouldCelebrate(UID)).toBe(true);
     await FirstCaseService.markCelebrated(UID);
+    await feierZeitZurueckdatieren(31);
+    expect(await FirstCaseService.shouldCelebrate(UID)).toBe(false);
+  });
+
+  it('Kill-Switch aus: keine Feier, egal wie gut alles andere steht', async () => {
+    await FirstCaseService.markFirstCase(UID);
+    expect(await FirstCaseService.shouldCelebrate(UID)).toBe(true);
+    mockKillSwitch.mockResolvedValueOnce(false);
     expect(await FirstCaseService.shouldCelebrate(UID)).toBe(false);
   });
 
@@ -209,6 +244,11 @@ describe('Versions-Scoping — jeder Release schärft den Auslöser neu', () => 
     expect(await FirstCaseService.maybeRequestReview(UID)).toBe('requested');
 
     version.current = '6.0.13';
+    // Der 30-Tage-Mindestabstand ist versions-ÜBERGREIFEND und gilt
+    // trotz neuem Release — genau dafür ist er da: die Build-Kadenz darf
+    // die Feier-Frequenz nicht setzen (dieses Repo hat 6.0.1 bis 6.0.12
+    // in zwei Wochen veröffentlicht).
+    await feierZeitZurueckdatieren(31);
 
     // Ohne Produktbesuch passiert weiterhin nichts — der Auslöser ist
     // scharf, nicht automatisch ausgelöst.
@@ -306,6 +346,7 @@ describe('reset', () => {
     expect(await FirstCaseService.maybeRequestReview(UID)).toBe('no-celebration');
 
     await FirstCaseService.markFirstCase(UID);
+    console.log('DBG', JSON.stringify((AsyncStorage as any).__store()));
     expect(await FirstCaseService.shouldCelebrate(UID)).toBe(true);
     await FirstCaseService.markCelebrated(UID);
     expect(await FirstCaseService.maybeRequestReview(UID)).toBe('requested');
