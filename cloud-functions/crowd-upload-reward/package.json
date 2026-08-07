@@ -1,0 +1,13 @@
+{
+  "name": "crowd-upload-reward",
+  "description": "Credits the cashback reward when a crowd_uploads product submission is approved",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^6.0.0"
+  },
+  "private": true
+}

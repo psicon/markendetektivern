@@ -2365,6 +2365,46 @@ Auszahlungen gebrochen. Default invertiert → kein „dran-denken" mehr nötig.
   User einen Betrag wählen, der garantiert an Tremendous scheitert). Beim
   Test-Setup also Schwelle ≥ 100c + Betrag ≥ €1 (und ≤ Tremendous-Funding-Balance).
 
+## Ein Status-Feld ist KEIN Mechanismus — Geld-Versprechen brauchen einen Trigger
+
+**Vorfall 07.08.2026:** `crowd_uploads` (Produkt-Einreichungen) hatte ein
+`status`-Feld mit `pending | approved | rejected` und den Kommentar „reward
+credited later after review". Das „later" wurde nie gebaut. Ergebnis: **144
+freigegebene Einreichungen, 0 Cent ausgezahlt**, während in der App wörtlich
+„Aktuell 0,15 € pro komplettem Datensatz" stand und die Aktion aktiv lief.
+87 Menschen hatten auf ein Versprechen hin fotografiert, ihre Einreichung
+wurde bestätigt — und es kam nichts. Nachgezahlt per
+`scripts/backfill-crowd-upload-rewards.js` (13,05 € an 60 Nutzer), der
+laufende Betrieb hängt seither an `cloud-functions/crowd-upload-reward`
+(`onDocumentUpdated`, Flanke `pending → approved`).
+
+**Die übertragbare Regel:** Wer irgendwo ein Status-Feld einführt, an dem eine
+Vergütung, ein Punktestand oder eine Freischaltung hängt, muss im selben
+Commit den Trigger mitliefern ODER die Zusage aus der UI nehmen. Ein
+Kommentar „wird später gutgeschrieben" ist kein Mechanismus, und niemand
+merkt sein Fehlen — es gibt keinen Fehler, keinen Log, keine Beschwerde
+(die Nutzer sehen nur „genehmigt" und warten).
+
+**Prüffrage bei jedem Geld-Feature:** Wer genau schreibt ins Ledger? Es gibt
+GENAU DREI Stellen (`cashback-pipeline` = Bons, `survey-reward` = Umfragen,
+`crowd-upload-reward` = Produktfotos). Steht die neue Quelle nicht dort, wird
+nichts ausgezahlt — egal wie vollständig die Datenstruktur aussieht.
+
+**Buchungsform ist einheitlich, nicht neu erfinden:** EINE Transaktion mit
+Ledger-Eintrag (`type:'earn'`, `cents`, `campaignId`, `balanceAfterCents`,
+`reason`), `cashback_balance_cents` + `cashback_lifetime_cents`,
+`cashback_campaign_totals[cid]` und `budgetRemainingCents` (increment,
+race-frei). Idempotenz IMMER über eine deterministische Doc-ID
+(`crowd_<uploadId>`) statt über eine Query — dieselbe ID nutzen Backfill und
+Trigger, dadurch kann ein nachgezahlter Datensatz nicht doppelt gebucht
+werden. Firestore-Trigger sind at-least-once; ohne feste ID gibt es
+Doppelgutschriften.
+
+**Bei Nachzahlungen NICHT die Perioden-Zähler hochsetzen**
+(`cashback_campaign_weekly`, `cashback_monthly`): die deckeln laufende
+Bon-Einreichungen. Eine Nachzahlung für UNSER Versäumnis darf dem Nutzer
+nicht seine aktuelle Woche oder seinen Monat wegnehmen.
+
 ## Cashback-Pipeline — Architektur-Map + Learnings (Task 86ca0wbg7)
 
 Flow: `enqueueCashback` (https.onRequest; billige Pre-OCR-Dedups: Byte-Hash
