@@ -35,5 +35,29 @@ allprojects {
   }
 }
 
+// ─── SDK-Level — MUSS hier stehen, nicht in app.json ────────────────
+//
+// Die Werte unter `expo.android.targetSdkVersion` in app.json greifen NUR
+// beim `expo prebuild`. Dieses Projekt hat `android/` eingecheckt, EAS
+// baut also direkt aus diesem Verzeichnis und prebuild laeuft nie — die
+// app.json-Werte sind dort schlicht wirkungslos.
+//
+// Stattdessen zaehlt `rootProject.ext.targetSdkVersion` (siehe
+// app/build.gradle). Gesetzt wird das vom `expo-root-project`-Plugin,
+// und zwar per `setIfNotExist` auf den Expo-Default 35
+// (ExpoRootProjectPlugin.kt Z. 29-30). Ein ext-Block VOR dem
+// apply-plugin gewinnt deshalb — genau dafuer ist setIfNotExist da.
+//
+// Teuer gelernt (07.08.2026): ein Bump auf 36 nur in app.json lieferte
+// einen Build, der weiter targetSdk 35 trug. Aufgefallen ist es erst
+// beim Nachmessen am fertigen AAB per `aapt2 dump badging`. Wer diese
+// Werte aendert, prueft das Artefakt — nicht die Konfiguration.
+//
+// Play verlangt targetSdk >= 36 (Android 16) bis zum 31.08.2026.
+ext {
+  compileSdkVersion = 36
+  targetSdkVersion = 36
+}
+
 apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"
