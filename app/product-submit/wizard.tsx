@@ -54,6 +54,7 @@ import {
   type ProductPhotoStep,
 } from '@/lib/services/productSubmit';
 import { isOnline } from '@/lib/services/network';
+import { clientVersion, erfasseCaptureContext } from '@/lib/services/captureContext';
 import { enqueueProductUpload } from '@/lib/services/uploadQueue';
 import { showInfoToast } from '@/lib/services/ui/toast';
 
@@ -99,6 +100,8 @@ export default function ProductWizardScreen() {
   const [productIndex, setProductIndex] = useState(1);
   const [productName, setProductName] = useState('');
   const [photos, setPhotos] = useState<Partial<Record<ProductPhotoStep, string>>>({});
+  /** Wann das erste Foto dieser Einreichung entstand (siehe onCaptured). */
+  const firstCaptureAtRef = useRef<number | null>(null);
   const [stepIdx, setStepIdx] = useState(0);
   const [capturing, setCapturing] = useState(false);
   // expo-camera MUSS bereit sein, bevor takePictureAsync aufgerufen wird —
@@ -284,6 +287,11 @@ export default function ProductWizardScreen() {
   // (or review when nothing is missing).
   const onCaptured = useCallback(
     (uri: string) => {
+      // Zeitpunkt des ERSTEN Fotos dieser Einreichung festhalten. Er ist der
+      // ehrliche Bezugspunkt für jede Ortsangabe — das Firestore-Dokument
+      // entsteht erst beim Flush der Warteschlange und kann Tage später und
+      // an einem ganz anderen Ort angelegt werden.
+      if (firstCaptureAtRef.current == null) firstCaptureAtRef.current = Date.now();
       setPhotos((p) => ({ ...p, [step.key]: uri }));
       if (editingFromReview) {
         setEditingFromReview(false);
@@ -463,6 +471,14 @@ export default function ProductWizardScreen() {
       return acc;
     }, []);
 
+    // Orts-/Zeitkontext HIER erfassen, nicht beim Upload: `submitProduct`
+    // läuft erst, wenn die Warteschlange flusht — unter Umständen Tage
+    // später und an einem anderen Ort. Blockiert nie länger als ein paar
+    // Sekunden und wirft nie.
+    const capture = await erfasseCaptureContext({
+      capturedAt: firstCaptureAtRef.current ?? Date.now(),
+    });
+
     try {
       await enqueueProductUpload({
         uid: user.uid,
@@ -475,6 +491,8 @@ export default function ProductWizardScreen() {
         ean: eanCode,
         campaignId: campaign?.campaignId ?? null,
         steps,
+        capture,
+        clientVersion: clientVersion(),
       });
     } catch (e: any) {
       console.warn('enqueue product upload failed', e?.message);

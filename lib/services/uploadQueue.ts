@@ -25,6 +25,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
 import { AppState } from 'react-native';
 
+import type { CaptureContext, ClientVersion } from './captureContext';
 import { isOnline, refreshNetwork, subscribeNetwork } from './network';
 import { submitProduct, uploadProductImage, type ProductPhotoStep } from './productSubmit';
 import { showInfoToast } from './ui/toast';
@@ -65,6 +66,18 @@ export interface UploadJob {
   attempts: number;
   lastError: string | null;
   createdAt: number;
+  /**
+   * Orts-/Zeitkontext aus dem Moment der AUFNAHME. Muss mit dem Auftrag
+   * mitreisen: diese Warteschlange ist persistent und überlebt
+   * App-Neustarts, `runJob` kann also Stunden oder Tage später laufen —
+   * dann aber an einem anderen Ort. Erst mit diesem Feld beschreibt die
+   * Ortsangabe den Laden und nicht das heimische WLAN.
+   *
+   * Optional, weil Aufträge, die vor diesem Update eingereiht wurden, es
+   * nicht tragen. `submitProduct` fällt dann auf den Live-Stand zurück.
+   */
+  capture?: CaptureContext | null;
+  clientVersion?: ClientVersion | null;
 }
 
 export interface EnqueueInput {
@@ -78,6 +91,8 @@ export interface EnqueueInput {
   ean: string | null;
   campaignId: string | null;
   steps: { key: ProductPhotoStep; uri: string; fileName?: string }[];
+  capture?: CaptureContext | null;
+  clientVersion?: ClientVersion | null;
 }
 
 type Listener = (jobs: UploadJob[]) => void;
@@ -231,6 +246,8 @@ export async function enqueueProductUpload(input: EnqueueInput): Promise<string>
     attempts: 0,
     lastError: null,
     createdAt: Date.now(),
+    capture: input.capture ?? null,
+    clientVersion: input.clientVersion ?? null,
   };
 
   jobs = [job, ...jobs];
@@ -348,6 +365,8 @@ async function runJob(job: UploadJob) {
       ean: job.ean,
       campaignId: job.campaignId,
       images: uploaded,
+      capture: job.capture ?? null,
+      clientVersion: job.clientVersion ?? null,
     });
     // Success → the submission now lives in Firestore (status 'pending')
     // and shows up in the overview list. Drop the local job + its files.

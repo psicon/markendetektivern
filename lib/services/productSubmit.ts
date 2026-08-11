@@ -27,6 +27,7 @@ import {
 } from '@react-native-firebase/firestore';
 import { putFile, ref as storageRef } from '@react-native-firebase/storage';
 import journeyTrackingService from '@/lib/services/journeyTrackingService';
+import type { CaptureContext, ClientVersion } from '@/lib/services/captureContext';
 
 // ─── Step config ────────────────────────────────────────────────────
 
@@ -231,6 +232,15 @@ export interface ProductSubmissionInput {
   campaignId?: string | null;
   /** step → storage path */
   images: Partial<Record<ProductPhotoStep, string>>;
+  /**
+   * Orts-/Zeitkontext aus dem Moment der AUFNAHME (siehe
+   * `lib/services/captureContext.ts`). Wird im Wizard erfasst und reist mit
+   * dem Warteschlangen-Auftrag mit — hier ihn erst zu lesen wäre falsch,
+   * weil diese Funktion beim Flush läuft, nicht beim Einreichen.
+   */
+  capture?: CaptureContext | null;
+  /** App-Version des schreibenden Clients (Rollout messbar machen). */
+  clientVersion?: ClientVersion | null;
 }
 
 /**
@@ -251,10 +261,27 @@ export interface ProductSubmissionInput {
  * Wer beide in einen Topf wirft, misst Unsinn. Das `source`-Feld bleibt
  * deshalb erhalten.
  *
+ * ZEITPUNKT — der Grund für den `capture`-Parameter: Diese Funktion läuft
+ * NICHT beim Einreichen, sondern erst beim Flush der persistenten
+ * Upload-Warteschlange (`uploadQueue.runJob`). Die überlebt App-Neustarts
+ * und wird erst wieder aktiv, wenn `/product-submit` geöffnet wird. Ein
+ * offline im Laden aufgenommenes Foto bekäme also die Ortung von später,
+ * zuhause. Deshalb wird der Kontext im Wizard erfasst und hier nur noch
+ * durchgereicht; die Live-Abfrage ist ausschließlich der Notnagel, wenn
+ * kein Aufnahme-Kontext mitgeliefert wurde (Aufträge, die vor diesem
+ * Update in der Warteschlange lagen).
+ *
+ * INTERPRETIERT WIRD HIER NICHTS. Der Client liefert Rohsignale, die
+ * Bewertung macht `cloud-functions/crowd-upload-location`. So braucht eine
+ * Modelländerung kein App-Update.
+ *
  * Nie werfen: fehlende Ortsangaben dürfen eine Einreichung niemals
  * verhindern — es sind Zusatzdaten, kein Pflichtfeld.
  */
-async function collectContext(uid: string): Promise<Record<string, any>> {
+async function collectContext(
+  uid: string,
+  capture: CaptureContext | null,
+): Promise<Record<string, any>> {
   const ctx: Record<string, any> = {};
 
   try {
@@ -279,38 +306,61 @@ async function collectContext(uid: string): Promise<Record<string, any>> {
   }
 
   try {
-    const loc = journeyTrackingService.getCurrentJourneyLocation();
+    // Der Aufnahme-Kontext aus dem Wizard hat immer Vorrang — er beschreibt
+    // den Moment, um den es geht. Nur wenn er fehlt (Altauftrag aus der
+    // Warteschlange), wird der aktuelle Stand als Notnagel gelesen.
+    const loc =
+      capture?.journeyLocation ?? journeyTrackingService.getCurrentJourneyLocation() ?? null;
+
     if (loc) {
+      // lat/lon sind BEREITS auf ~5 km gerundet — anonymousLocationService
+      // rechnet `Math.round(wert * 20) / 20`, bevor der Wert die App
+      // überhaupt erreicht. Rasterpunkte, keine Präzisionskoordinaten;
+      // `geohash5` ist nichts anderes als `lat_lon` dieser Werte.
+      //
+      // `city` ist die Stadt des NETZZUGANGS, nicht der Aufenthaltsort:
+      // gegen die vier Dokumente mit echtem EXIF-GPS liegt sie 61,7 / 61,7 /
+      // 99,5 / 377,2 km daneben, und in 64 Vergleichen mit der
+      // Selbstauskunft stimmte sie kein einziges Mal. Verwertbar ist sie
+      // ausschließlich auf LANDESEBENE (dort 4 von 4 richtig) — die
+      // Bewertung in `crowd-upload-location` nutzt sie auch nur dafür.
       ctx.journeyLocation = {
-        // lat/lon sind BEREITS auf ~5 km gerundet — anonymousLocationService
-        // rechnet `Math.round(wert * 20) / 20`, bevor der Wert die App
-        // überhaupt erreicht. Es sind also Rasterpunkte, keine
-        // Präzisionskoordinaten, und `geohash5` ist nichts anderes als
-        // `lat_lon` dieser gerundeten Werte.
-        //
-        // `city` ist die Stadt des NETZZUGANGS, nicht der Aufenthaltsort.
-        // An 292 nachgetragenen Einreichungen gemessen (11.08.2026): von 64
-        // Fällen, in denen Selbstauskunft UND IP-Stadt vorlagen, stimmte
-        // KEIN EINZIGER überein, und 7 Nutzer „sprangen" bis zu 651 km —
-        // einer 479 km (Aachen/Erfurt/Dachau) in 28 Stunden. Das sind
-        // Mobilfunk-Gateways, keine Reisen. Für „wohnt hier / kauft dort"
-        // ist das Stadtfeld daher UNBRAUCHBAR; belastbar ist es nur als
-        // grober, pro Nutzer stabiler Regionsschlüssel (115 von 127
-        // Nutzern haben durchgehend dieselbe IP-Stadt).
         lat: typeof loc.lat === 'number' ? loc.lat : null,
         lon: typeof loc.lon === 'number' ? loc.lon : null,
         city: loc.city ?? null,
         geohash5: loc.geohash5 ?? null,
         // 'ip' = echte Geolokalisierung. 'fallback' = DACH-Mittelpunkt
-        // (51.15/10.45), weil die IP-Abfrage scheiterte — für einen
-        // Ortsvergleich WERTLOS und beim Auswerten auszuschließen.
+        // (51.15/10.45), weil die IP-Abfrage scheiterte — kein Ort.
         source: loc.source ?? null,
       };
     }
-    const jid = journeyTrackingService.getCurrentJourneyId();
+
+    const jid = capture?.journeyId ?? journeyTrackingService.getCurrentJourneyId();
     if (jid) ctx.journeyId = jid;
   } catch (e) {
     console.warn('[productSubmit] Journey-Kontext nicht lesbar (non-fatal):', e);
+  }
+
+  // Rohsignale der Aufnahme — unverändert, uninterpretiert. `gpsStatus`
+  // wird auch ohne GPS geschrieben: ohne ihn ist „Nutzer hat abgelehnt"
+  // nicht von „alte App-Version" zu unterscheiden, und die Abdeckung der
+  // Standortfreigabe bliebe unmessbar.
+  if (capture) {
+    ctx.capture = {
+      capturedAt: new Date(capture.capturedAt),
+      gpsStatus: capture.gpsStatus,
+      ...(capture.gps
+        ? {
+            gps: {
+              lat: capture.gps.lat,
+              lon: capture.gps.lon,
+              accuracyM: capture.gps.accuracyM,
+              fixAt: new Date(capture.gps.fixAt),
+            },
+          }
+        : {}),
+      ...(capture.confirmedPlace ? { confirmedPlace: capture.confirmedPlace } : {}),
+    };
   }
 
   return ctx;
@@ -321,7 +371,7 @@ export async function submitProduct(
   input: ProductSubmissionInput,
 ): Promise<string> {
   if (!auth.currentUser) throw codeErr('not_authenticated');
-  const context = await collectContext(uid);
+  const context = await collectContext(uid, input.capture ?? null);
   const docRef = await addDoc(collection(db, 'crowd_uploads'), {
     userId: uid,
     sessionId: input.sessionId,
@@ -335,6 +385,7 @@ export async function submitProduct(
     images: input.images,
     stepCount: Object.keys(input.images).length,
     status: 'pending',
+    ...(input.clientVersion ? { clientVersion: input.clientVersion } : {}),
     ...context,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
