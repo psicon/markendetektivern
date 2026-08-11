@@ -282,8 +282,28 @@ async function collectContext(uid: string): Promise<Record<string, any>> {
     const loc = journeyTrackingService.getCurrentJourneyLocation();
     if (loc) {
       ctx.journeyLocation = {
+        // lat/lon sind BEREITS auf ~5 km gerundet — anonymousLocationService
+        // rechnet `Math.round(wert * 20) / 20`, bevor der Wert die App
+        // überhaupt erreicht. Es sind also Rasterpunkte, keine
+        // Präzisionskoordinaten, und `geohash5` ist nichts anderes als
+        // `lat_lon` dieser gerundeten Werte.
+        //
+        // `city` ist die Stadt des NETZZUGANGS, nicht der Aufenthaltsort.
+        // An 292 nachgetragenen Einreichungen gemessen (11.08.2026): von 64
+        // Fällen, in denen Selbstauskunft UND IP-Stadt vorlagen, stimmte
+        // KEIN EINZIGER überein, und 7 Nutzer „sprangen" bis zu 651 km —
+        // einer 479 km (Aachen/Erfurt/Dachau) in 28 Stunden. Das sind
+        // Mobilfunk-Gateways, keine Reisen. Für „wohnt hier / kauft dort"
+        // ist das Stadtfeld daher UNBRAUCHBAR; belastbar ist es nur als
+        // grober, pro Nutzer stabiler Regionsschlüssel (115 von 127
+        // Nutzern haben durchgehend dieselbe IP-Stadt).
+        lat: typeof loc.lat === 'number' ? loc.lat : null,
+        lon: typeof loc.lon === 'number' ? loc.lon : null,
         city: loc.city ?? null,
         geohash5: loc.geohash5 ?? null,
+        // 'ip' = echte Geolokalisierung. 'fallback' = DACH-Mittelpunkt
+        // (51.15/10.45), weil die IP-Abfrage scheiterte — für einen
+        // Ortsvergleich WERTLOS und beim Auswerten auszuschließen.
         source: loc.source ?? null,
       };
     }

@@ -2365,6 +2365,35 @@ Auszahlungen gebrochen. Default invertiert → kein „dran-denken" mehr nötig.
   User einen Betrag wählen, der garantiert an Tremendous scheitert). Beim
   Test-Setup also Schwelle ≥ 100c + Betrag ≥ €1 (und ≤ Tremendous-Funding-Balance).
 
+## IP-Ortung (`journeyLocation.city`) ist der Netzzugang, NICHT der Aufenthaltsort
+
+Auf `crowd_uploads` (und in jeder Journey) steht neben der Selbstauskunft
+`userLocation` auch `journeyLocation` aus `anonymousLocationService` — IP-basiert
+über ipapi.co. **Das Stadtfeld beantwortet NICHT „wo war der Nutzer".**
+
+Gemessen am Backfill vom 11.08.2026 (292 Einreichungen, 127 Nutzer):
+- Von 64 Einreichungen mit Selbstauskunft UND IP-Stadt stimmte **keine einzige**
+  überein (0/64). Bei einem echten Ortsbezug wären 40–70 % zu erwarten.
+- 7 Nutzer „sprangen" >100 km, Spitzenwert 651 km; einer 479 km
+  (Aachen/Erfurt/Dachau) **in 28 Stunden** — physisch nicht plausibel.
+- Das Muster ist eindeutig Mobilfunk-Gateway: ländliche Selbstauskunft →
+  Berlin/München/Frankfurt/Wien.
+
+Was das Feld TROTZDEM taugt: **pro Nutzer stabiler Regionsschlüssel** — 115 von
+127 Nutzern haben durchgehend dieselbe IP-Stadt. Für Gruppierung/Kohorten also
+brauchbar, für „wohnt hier, kauft dort" nicht.
+
+Regeln beim Auswerten:
+- `source: 'fallback'` immer ausschließen — das ist der DACH-Mittelpunkt
+  (51.15/10.45), eingetragen wenn die IP-Abfrage scheiterte, kein Ort.
+- `lat`/`lon` sind auf ~5 km gerundet (`Math.round(wert * 20) / 20`),
+  `geohash5` = `lat_lon` derselben Werte. Rasterpunkte, keine Koordinaten.
+- Nachgetragene Werte tragen `journeyLocationMatch` (Zuordnung über die Zeit,
+  nächste Journey vor dem Upload, Fenster 6 h, `deltaMinutes` je Dokument).
+  Der Vorwärtspfad hat das Feld NICHT — dort stammt die Location direkt aus der
+  laufenden Journey. Wer Aufnahme-Beobachtung von Rekonstruktion trennen will,
+  filtert auf das Vorhandensein dieses Felds.
+
 ## Ein Status-Feld ist KEIN Mechanismus — Geld-Versprechen brauchen einen Trigger
 
 **Vorfall 07.08.2026:** `crowd_uploads` (Produkt-Einreichungen) hatte ein
