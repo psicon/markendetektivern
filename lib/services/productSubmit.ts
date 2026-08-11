@@ -17,6 +17,8 @@ import { getActiveCashbackCampaigns, getCashbackConfig } from '@/lib/services/ca
 import {
   addDoc,
   collection,
+  doc,
+  getDoc,
   onSnapshot,
   query,
   serverTimestamp,
@@ -24,6 +26,7 @@ import {
   type Unsubscribe,
 } from '@react-native-firebase/firestore';
 import { putFile, ref as storageRef } from '@react-native-firebase/storage';
+import journeyTrackingService from '@/lib/services/journeyTrackingService';
 
 // ─── Step config ────────────────────────────────────────────────────
 
@@ -230,11 +233,75 @@ export interface ProductSubmissionInput {
   images: Partial<Record<ProductPhotoStep, string>>;
 }
 
+/**
+ * Ortsangaben + Lieblingsmarkt für die Einreichung sammeln.
+ *
+ * Bewusst DENORMALISIERT ins Einreichungs-Dokument: die Auswertung soll
+ * nicht pro Datensatz das Nutzerprofil nachladen müssen, und ein später
+ * geänderter Lieblingsmarkt darf alte Einreichungen nicht rückwirkend
+ * umdeuten — der Wert gehört zum Zeitpunkt der Aufnahme.
+ *
+ * ZWEI VERSCHIEDENE QUELLEN, absichtlich getrennt gehalten:
+ *  - `userLocation` ist die SELBSTAUSKUNFT aus dem Profil (LocationPicker
+ *    in edit-profile / Registrierung). Verlässlich, aber nur bei einem
+ *    kleinen Teil der Nutzer gesetzt.
+ *  - `journeyLocation` ist IP-GELOKALISIERT (ipapi.co) bzw. ein
+ *    DACH-Fallback, gerundet auf ~5 km. Sagt, wo das Gerät ins Netz
+ *    geht — nicht, wo jemand wohnt oder einkauft.
+ * Wer beide in einen Topf wirft, misst Unsinn. Das `source`-Feld bleibt
+ * deshalb erhalten.
+ *
+ * Nie werfen: fehlende Ortsangaben dürfen eine Einreichung niemals
+ * verhindern — es sind Zusatzdaten, kein Pflichtfeld.
+ */
+async function collectContext(uid: string): Promise<Record<string, any>> {
+  const ctx: Record<string, any> = {};
+
+  try {
+    const snap = await getDoc(doc(db, 'users', uid));
+    const u = (snap.exists() ? snap.data() : {}) as Record<string, any>;
+
+    if (u.favoriteMarket || u.favoriteMarketName) {
+      ctx.favoriteMarket = {
+        id: u.favoriteMarket ?? null,
+        name: u.favoriteMarketName ?? null,
+      };
+    }
+    if (u.location || u.city || u.bundesland) {
+      ctx.userLocation = {
+        address: u.location ?? null,
+        city: u.city ?? null,
+        bundesland: u.bundesland ?? null,
+      };
+    }
+  } catch (e) {
+    console.warn('[productSubmit] Profil-Kontext nicht lesbar (non-fatal):', e);
+  }
+
+  try {
+    const loc = journeyTrackingService.getCurrentJourneyLocation();
+    if (loc) {
+      ctx.journeyLocation = {
+        city: loc.city ?? null,
+        geohash5: loc.geohash5 ?? null,
+        source: loc.source ?? null,
+      };
+    }
+    const jid = journeyTrackingService.getCurrentJourneyId();
+    if (jid) ctx.journeyId = jid;
+  } catch (e) {
+    console.warn('[productSubmit] Journey-Kontext nicht lesbar (non-fatal):', e);
+  }
+
+  return ctx;
+}
+
 export async function submitProduct(
   uid: string,
   input: ProductSubmissionInput,
 ): Promise<string> {
   if (!auth.currentUser) throw codeErr('not_authenticated');
+  const context = await collectContext(uid);
   const docRef = await addDoc(collection(db, 'crowd_uploads'), {
     userId: uid,
     sessionId: input.sessionId,
@@ -248,6 +315,7 @@ export async function submitProduct(
     images: input.images,
     stepCount: Object.keys(input.images).length,
     status: 'pending',
+    ...context,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });

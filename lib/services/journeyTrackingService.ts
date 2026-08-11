@@ -398,6 +398,20 @@ class JourneyTrackingService {
   }
 
   /**
+   * Grobe Ortsangabe der laufenden Journey.
+   *
+   * ACHTUNG bei der Auswertung: die stammt aus der IP-Geolokalisierung
+   * (`source: 'ip'`) bzw. einem DACH-Fallback (`source: 'fallback'`) —
+   * NICHT vom Nutzer. Sie ist auf geohash5 gerundet (~5 km) und sagt,
+   * wo das Gerät ins Netz geht, nicht wo jemand wohnt oder einkauft.
+   * Die Selbstauskunft liegt getrennt auf `users/{uid}` (location,
+   * city, bundesland) und ist im Zweifel die verlässlichere Quelle.
+   */
+  getCurrentJourneyLocation(): JourneyContext['location'] | null {
+    return this.currentJourney?.location ?? null;
+  }
+
+  /**
    * Holt den Index eines Produkts in viewedProducts (für eindeutige Zuordnung)
    * NACH einer Add-to-Cart Action
    */
