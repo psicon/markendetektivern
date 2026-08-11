@@ -49,7 +49,7 @@
           "UIInterfaceOrientationPortrait"
         ],
         "NSCameraUsageDescription": "Diese App benötigt Zugriff auf die Kamera, um Barcodes von Produkten zu scannen und Preise zu vergleichen.",
-        "NSLocationWhenInUseUsageDescription": "Diese App benötigt Zugriff auf deinen Standort, um dir lokale Angebote und Märkte in deiner Nähe zu zeigen.",
+        "NSLocationWhenInUseUsageDescription": "Beim Einreichen von Bons, Produktfotos und Umfragen wird dein Standort erfasst und dem Datensatz zugeordnet — nur so ist nachvollziehbar, wo ein Produkt oder Preis zu finden war. Die Standortfreigabe ist Voraussetzung für die Teilnahme am Cashback-Programm.",
         "NSPhotoLibraryUsageDescription": "Diese App benötigt Zugriff auf deine Fotos, um dein Profilbild aus der Galerie auszuwählen."
       }
     },

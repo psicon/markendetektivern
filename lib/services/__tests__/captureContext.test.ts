@@ -11,6 +11,7 @@
 
 const mockLocation = {
   getForegroundPermissionsAsync: jest.fn(),
+  requestForegroundPermissionsAsync: jest.fn(),
   getLastKnownPositionAsync: jest.fn(),
   getCurrentPositionAsync: jest.fn(),
   Accuracy: { Balanced: 3 },
@@ -35,7 +36,12 @@ jest.mock('@/lib/services/journeyTrackingService', () => ({
   default: mockJourney,
 }));
 
-import { clientVersion, erfasseCaptureContext, standortStatus } from '../captureContext';
+import {
+  clientVersion,
+  erfasseCaptureContext,
+  standortAnfordern,
+  standortStatus,
+} from '../captureContext';
 
 const erlaubt = (over = {}) => ({ granted: true, canAskAgain: true, ...over });
 
@@ -75,6 +81,44 @@ describe('Berechtigungsstatus wird gelesen, nie erfragt', () => {
       erlaubt({ android: { accuracy: 'coarse' } }),
     );
     expect(await standortStatus()).toBe('granted_coarse');
+  });
+});
+
+describe('standortAnfordern löst den System-Dialog aus — und nur diese Funktion', () => {
+  it('meldet die erteilte Freigabe', async () => {
+    mockLocation.requestForegroundPermissionsAsync.mockResolvedValue(erlaubt());
+    expect(await standortAnfordern()).toBe('granted_precise');
+  });
+
+  it('unterscheidet eine endgültige Ablehnung von einer aufschiebbaren', async () => {
+    // Der Unterschied entscheidet über die Reaktion: Bei „denied" zeigt
+    // iOS den Dialog NIE wieder, der Aufruf kehrt still zurück — dort muss
+    // ein eigener Hinweis mit dem Weg in die Einstellungen übernehmen,
+    // sonst wirkt der Knopf kaputt.
+    mockLocation.requestForegroundPermissionsAsync.mockResolvedValue({
+      granted: false,
+      canAskAgain: false,
+    });
+    expect(await standortAnfordern()).toBe('denied');
+
+    mockLocation.requestForegroundPermissionsAsync.mockResolvedValue({
+      granted: false,
+      canAskAgain: true,
+    });
+    expect(await standortAnfordern()).toBe('not_asked');
+  });
+
+  it('wirft nicht, wenn die Abfrage selbst scheitert', async () => {
+    mockLocation.requestForegroundPermissionsAsync.mockRejectedValue(new Error('x'));
+    expect(await standortAnfordern()).toBe('unavailable');
+  });
+
+  it('wird vom stillen Erfassungspfad NICHT aufgerufen', async () => {
+    // Die Trennung ist der ganze Punkt: erfasseCaptureContext läuft beim
+    // Einreichen im Hintergrund und darf den einen iOS-Versuch niemals
+    // dort verbrauchen.
+    await erfasseCaptureContext();
+    expect(mockLocation.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
   });
 });
 

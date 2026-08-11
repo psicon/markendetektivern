@@ -98,7 +98,7 @@
     <key>NSLocationAlwaysUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to access your location</string>
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>Diese App benötigt Zugriff auf deinen Standort, um dir lokale Angebote und Märkte in deiner Nähe zu zeigen.</string>
+    <string>Beim Einreichen von Bons, Produktfotos und Umfragen wird dein Standort erfasst und dem Datensatz zugeordnet — nur so ist nachvollziehbar, wo ein Produkt oder Preis zu finden war. Die Standortfreigabe ist Voraussetzung für die Teilnahme am Cashback-Programm.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to access your microphone</string>
     <key>NSPhotoLibraryUsageDescription</key>

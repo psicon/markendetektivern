@@ -137,6 +137,32 @@ export async function standortStatus(): Promise<GpsStatus> {
   }
 }
 
+/**
+ * Fordert die Standortfreigabe an — löst also den SYSTEM-DIALOG aus.
+ *
+ * Bewusst getrennt von `standortStatus()`: Der Dialog erscheint auf iOS
+ * genau einmal im Leben der App, ein „Nein" ist danach nur noch über die
+ * Einstellungen umkehrbar. Diese Funktion darf deshalb ausschließlich aus
+ * einem Moment heraus aufgerufen werden, in dem der Nutzer gerade erklärt
+ * bekommen hat, wofür gefragt wird — nie beiläufig aus einem
+ * Hintergrundpfad.
+ *
+ * Wichtig für die Behandlung des Ergebnisses: Wurde früher schon endgültig
+ * abgelehnt (`canAskAgain === false`), kehrt der Aufruf SOFORT und ohne
+ * jeden sichtbaren Dialog zurück. Wer darauf nicht reagiert, hinterlässt
+ * beim Nutzer den Eindruck, der Knopf sei kaputt.
+ */
+export async function standortAnfordern(): Promise<GpsStatus> {
+  try {
+    const p = await Location.requestForegroundPermissionsAsync();
+    if (!p.granted) return p.canAskAgain ? 'not_asked' : 'denied';
+    if (p.android?.accuracy === 'coarse') return 'granted_coarse';
+    return 'granted_precise';
+  } catch {
+    return 'unavailable';
+  }
+}
+
 async function holeGps(status: GpsStatus): Promise<{ gps: CaptureGps | null; status: GpsStatus }> {
   if (status !== 'granted_precise' && status !== 'granted_coarse') {
     return { gps: null, status };

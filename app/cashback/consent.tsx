@@ -20,6 +20,7 @@ import React, {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import {
@@ -57,6 +58,7 @@ import {
   getCashbackConfig,
   hasValidCashbackConsent,
 } from '@/lib/services/cashbackService';
+import { standortAnfordern } from '@/lib/services/captureContext';
 import { consentService } from '@/lib/services/consentService';
 
 const PRIVACY_URL = 'https://markendetektive.de/datenschutz';
@@ -417,10 +419,21 @@ function RewardsMarquee({
 // Rechtsgrundlage Einwilligung (Art. 6 Abs. 1 lit. a DSGVO). Finale rechtliche
 // Abnahme (insb. Benennung des Auszahlungs-Drittanbieters + Drittland) erfolgt
 // auf Doc-Ebene durch den Anwalt, nicht im App-Text.
+// Der Standort steht hier, WEIL er Teilnahmebedingung ist (Entscheidung
+// 11.08.2026): Der Aufnahme- bzw. Einkaufsort gehört zum vergüteten
+// Datensatz, ohne ihn gibt es keine Teilnahme am Reward-Programm. Genau
+// deshalb muss er VOR dem Tippen auf „Akzeptieren" sichtbar sein — sonst
+// löst der Knopf einen Standort-Dialog aus, von dem vorher nie die Rede
+// war, und die Bedingung wäre weder informiert noch durchsetzbar.
+//
+// „Jederzeit widerrufbar" ist bewusst raus: Es wäre irreführend neben
+// einer Bedingung, deren Wegfall die Teilnahme beendet. Der Widerruf
+// bleibt selbstverständlich möglich — er beendet dann eben die Teilnahme,
+// und genau das sagt die Datenschutzerklärung.
 const TRUST: { icon: string; label: string }[] = [
   { icon: 'shield-check-outline', label: 'EU-Datenschutz' },
   { icon: 'chart-box-outline', label: 'Anonyme Marktdaten' },
-  { icon: 'account-cancel-outline', label: 'Jederzeit widerrufbar' },
+  { icon: 'map-marker-outline', label: 'Standort erforderlich' },
 ];
 
 export default function CashbackConsentScreen() {
@@ -497,6 +510,13 @@ export default function CashbackConsentScreen() {
   const [, setConsentVersion] = useState<string>('');
   const [isSubmitting, setSubmitting] = useState(false);
   const [hasAccepted, setHasAccepted] = useState(false);
+  /**
+   * Spiegel auf `handleAccept`, damit der „Standort freigeben"-Knopf im
+   * Hinweis-Dialog den Vorgang erneut anstoßen kann. Ein direkter
+   * Selbstbezug in `useCallback` ginge nicht, und den Callback über die
+   * Abhängigkeiten hereinzureichen würde eine Endlosschleife bauen.
+   */
+  const handleAcceptRef = useRef<() => void>(() => {});
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
@@ -521,6 +541,41 @@ export default function CashbackConsentScreen() {
       alive = false;
     };
   }, [user?.uid, goAfterConsent]);
+
+  /**
+   * Was passiert, wenn die Standortfreigabe nicht erteilt wird.
+   *
+   * Das übliche Muster guter Apps — und der Grund dafür: Nach einer
+   * endgültigen Ablehnung zeigt iOS den System-Dialog NIE wieder an. Ein
+   * erneuter Aufruf läuft still ins Leere und wirkt wie ein Defekt.
+   * Deshalb übernimmt hier ein eigener Hinweis mit dem Weg in die
+   * Einstellungen.
+   *
+   * Der zweite Knopf ist kein Nachgeben, sondern der Kern der Sache: Die
+   * Anforderung des Reward-Programms lautet „sag uns, wo du bist" — nicht
+   * „gib GPS frei". Der Ort lässt sich im Wizard genauso eintippen, und
+   * das erfüllt die Bedingung vollwertig. Ohne JEDE Ortsangabe gibt es
+   * keine Vergütung; das setzt `crowd-upload-reward` serverseitig durch,
+   * nicht dieser Dialog. Eine Sackgasse an dieser Stelle würde nur Leute
+   * verlieren, die den Ort bereitwillig eintippen würden.
+   */
+  const zeigeStandortHinweis = useCallback((status: string, erneutVersuchen: () => void) => {
+    Alert.alert(
+      'Standort wird benötigt',
+      status === 'denied'
+        ? 'Der Ort gehört zu jedem Datensatz, den wir vergüten — nur so ist nachvollziehbar, wo ein Produkt oder Preis wirklich zu finden war. Du kannst den Standort jederzeit in den Einstellungen freigeben und dann direkt loslegen.'
+        : 'Der Ort gehört zu jedem Datensatz, den wir vergüten — nur so ist nachvollziehbar, wo ein Produkt oder Preis wirklich zu finden war. Gib den Standort frei, dann kann es losgehen.',
+      status === 'denied'
+        ? [
+            { text: 'Später', style: 'cancel' as const },
+            { text: 'Einstellungen öffnen', onPress: () => Linking.openSettings() },
+          ]
+        : [
+            { text: 'Später', style: 'cancel' as const },
+            { text: 'Standort freigeben', onPress: erneutVersuchen },
+          ],
+    );
+  }, []);
 
   const handleAccept = useCallback(async () => {
     if (!user?.uid) {
@@ -548,6 +603,22 @@ export default function CashbackConsentScreen() {
 
     setSubmitting(true);
     try {
+      // Standortfreigabe ist Teilnahmebedingung für das gesamte
+      // Reward-Programm — Bons, Produktfotos UND Umfragen (Entscheidung
+      // 11.08.2026). Der Ort gehört zum vergüteten Datensatz; ohne ihn
+      // keine Teilnahme.
+      //
+      // ZUERST fragen, DANN speichern: Sonst entstünde ein halber Zustand —
+      // Consent gespeichert, Bedingung nicht erfüllt. `hasValidCashbackConsent`
+      // würde dann true liefern für jemanden, der gar nicht teilnehmen darf.
+      // „Angenommen" muss heißen: vollständig angenommen.
+      const status = await standortAnfordern();
+      if (status !== 'granted_precise' && status !== 'granted_coarse') {
+        setSubmitting(false);
+        zeigeStandortHinweis(status, handleAcceptRef.current);
+        return;
+      }
+
       await acceptCashbackConsent(user.uid);
       setHasAccepted(true);
       // 86cagb57g: Wer den App-Start-Tracking-Consent (UMP, Android)
@@ -567,7 +638,11 @@ export default function CashbackConsentScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [user?.uid, isAnonymous, goAfterConsent]);
+  }, [user?.uid, isAnonymous, goAfterConsent, zeigeStandortHinweis]);
+
+  // Nach jedem Render aktualisieren, damit der Dialog-Knopf nie eine
+  // veraltete Closure aufruft.
+  handleAcceptRef.current = handleAccept;
 
   const handleCancel = useCallback(() => router.back(), []);
 
