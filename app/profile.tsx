@@ -74,6 +74,17 @@ import {
   CoachmarkService,
   type TourKey,
 } from '@/lib/services/coachmarkService';
+// Statisch, nicht per `await import` wie die älteren Debug-Handler
+// daneben — Projektregel: dynamische Imports nur mit konkretem
+// Lazy-Load-Argument, und das gibt es hier nicht.
+import * as Location from 'expo-location';
+import { standortAnfordern, standortStatus } from '@/lib/services/captureContext';
+import {
+  getCashbackConsent,
+  hasValidCashbackConsent,
+  revokeCashbackConsent,
+} from '@/lib/services/cashbackService';
+import journeyTrackingService from '@/lib/services/journeyTrackingService';
 import { FirestoreService } from '@/lib/services/firestore';
 import type { Level } from '@/lib/types/achievements';
 import {
@@ -713,6 +724,70 @@ export default function ProfileScreen() {
       Alert.alert('Fehler', String(e?.message ?? e));
     }
   };
+  // ─── Dev: Standort als Teilnahmebedingung (11.08.2026) ──────────
+  //
+  // Der Ort ist seit 368117d Voraussetzung für die Teilnahme am
+  // Reward-Programm. Diese beiden Einträge machen den Pfad im Simulator
+  // prüfbar, ohne die App neu zu installieren.
+  const onStandortStatus = async () => {
+    try {
+      const status = await standortStatus();
+      const consent = user?.uid ? await getCashbackConsent(user.uid) : null;
+      const gueltig = user?.uid ? await hasValidCashbackConsent(user.uid) : false;
+      const journey = journeyTrackingService.getCurrentJourneyLocation();
+
+      let fix = 'keiner';
+      if (status === 'granted_precise' || status === 'granted_coarse') {
+        const p = await Location.getLastKnownPositionAsync({});
+        if (p?.coords) {
+          const alterMin = Math.round((Date.now() - (p.timestamp ?? 0)) / 60000);
+          fix = `${p.coords.latitude.toFixed(4)}, ${p.coords.longitude.toFixed(4)}\n±${Math.round(p.coords.accuracy ?? 0)} m · vor ${alterMin} Min`;
+        }
+      }
+
+      Alert.alert(
+        'Standort & Teilnahme',
+        `BERECHTIGUNG\n${status}\n\n` +
+          `LETZTER FIX\n${fix}\n\n` +
+          `JOURNEY (IP)\n${journey ? `${journey.city ?? '—'} · ${journey.source}` : 'keine'}\n\n` +
+          `CASHBACK-CONSENT\nangenommen: ${consent?.accepted ? '✓' : '✗'}` +
+          `${consent?.version ? ` (v${consent.version})` : ''}\n` +
+          `aktuell gültig: ${gueltig ? '✓' : '✗ — Consent-Screen erscheint'}\n\n` +
+          // Eine erteilte System-Berechtigung lässt sich aus der App heraus
+          // NICHT zurücknehmen — dafür braucht es den Simulator-Befehl bzw.
+          // die Einstellungen. Ohne diesen Hinweis sucht man lange.
+          `ZURÜCKSETZEN (Simulator)\nxcrun simctl privacy booted reset location de.markendetektive`,
+        [
+          { text: 'Schließen', style: 'cancel' },
+          ...(status === 'not_asked'
+            ? [{ text: 'Jetzt anfragen', onPress: () => void standortAnfordern() }]
+            : []),
+        ],
+      );
+    } catch (e: any) {
+      Alert.alert('Fehler', String(e?.message ?? e));
+    }
+  };
+
+  const onCashbackConsentReset = async () => {
+    if (!user?.uid) {
+      Alert.alert('Cashback-Consent', 'Kein User eingeloggt.');
+      return;
+    }
+    try {
+      await revokeCashbackConsent(user.uid);
+      Alert.alert(
+        'Cashback-Consent zurückgesetzt',
+        'Beim nächsten Aufruf von Bons, Produktfotos oder Umfragen erscheint der ' +
+          'Consent-Screen erneut — inklusive Standort-Abfrage.\n\n' +
+          'Damit auch der System-Dialog wieder kommt, zusätzlich die Berechtigung ' +
+          'zurücksetzen:\nxcrun simctl privacy booted reset location de.markendetektive',
+      );
+    } catch (e: any) {
+      Alert.alert('Fehler', String(e?.message ?? e));
+    }
+  };
+
   // ─── Dev: "Erster Fall" → nativer Review (ClickUp 86cav7gqm) ────
   const onFirstCaseStatus = async () => {
     try {
@@ -1823,6 +1898,20 @@ export default function ProfileScreen() {
                 color="#10b981"
                 label="Consent-Status anzeigen"
                 onPress={onConsentStatus}
+              />
+              <MenuRow
+                icon="map-marker-radius-outline"
+                color="#0d8575"
+                label="Standort & Teilnahme prüfen"
+                sub="Berechtigung, letzter Fix, IP-Ortung + Cashback-Consent auf einen Blick"
+                onPress={onStandortStatus}
+              />
+              <MenuRow
+                icon="map-marker-off-outline"
+                color="#dc2626"
+                label="Cashback-Consent zurücksetzen"
+                sub="Consent-Screen erscheint neu — inkl. Standort-Abfrage"
+                onPress={onCashbackConsentReset}
               />
               <MenuRow
                 icon="star-face"
