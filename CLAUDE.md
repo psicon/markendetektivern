@@ -2379,9 +2379,20 @@ Gemessen am Backfill vom 11.08.2026 (292 Einreichungen, 127 Nutzer):
 - Das Muster ist eindeutig Mobilfunk-Gateway: ländliche Selbstauskunft →
   Berlin/München/Frankfurt/Wien.
 
-Was das Feld TROTZDEM taugt: **pro Nutzer stabiler Regionsschlüssel** — 115 von
-127 Nutzern haben durchgehend dieselbe IP-Stadt. Für Gruppierung/Kohorten also
-brauchbar, für „wohnt hier, kauft dort" nicht.
+**Harte Ground Truth (EXIF-GPS, 4 Dokumente, 11.08.2026):** ein Vollscan über alle
+2.086 Bilder fand 10 mit GPS-IFD in 4 Dokumenten. Gegen diese echten Aufnahmeorte
+liegt die IP-Position **61,7 / 61,7 / 99,5 / 377,2 km** daneben. Auf LANDESEBENE
+stimmte sie in 4 von 4 Fällen — mehr darf daraus nicht abgeleitet werden.
+
+**KORREKTUR (11.08.2026): das Feld taugt auch NICHT als Regionsschlüssel.**
+Hier stand vorher „115 von 127 Nutzern haben durchgehend dieselbe IP-Stadt".
+Diese Zahl war ein Artefakt — sie betrachtete NUR die zu den Uploads gematchten
+Journeys. Über den VOLLEN Journey-Verlauf gemessen haben nur **41 von 132**
+Einreichern genau eine Stadt; 90 haben mehrere (bis zu 25), und bei Nutzern mit
+≥3 IP-Journeys liegt der Anteil der häufigsten Stadt im **Median bei 55 %**
+(p25 38 %, p75 75 %). Nur 11,8 % haben eine 100-%-Stadt. Wer auf der alten
+Annahme ein Kohorten- oder Konfidenzmodell baut, kalibriert es falsch.
+**Verwertbar ist die IP-Ortung ausschließlich auf Landesebene.**
 
 Regeln beim Auswerten:
 - `source: 'fallback'` immer ausschließen — das ist der DACH-Mittelpunkt

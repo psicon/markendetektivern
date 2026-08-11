@@ -41,6 +41,7 @@ module.exports = {
       roots: [
         '<rootDir>/cloud-functions/ai-product-comparison',
         '<rootDir>/cloud-functions/external-product-lookup',
+        '<rootDir>/cloud-functions/crowd-upload-location',
       ],
       testMatch: ['**/__tests__/**/*.test.js'],
       // Plain CommonJS — kein Transform (würde sonst die Expo-Babel-Config
