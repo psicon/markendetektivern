@@ -39,6 +39,10 @@ import {
   type ScannerTuning,
 } from 'bon-edge-detector';
 
+import {
+  LocationConfirmStep,
+  type ConfirmedPlace,
+} from '@/components/product-submit/LocationConfirmStep';
 import { MarketSelector } from '@/components/ui/MarketSelector';
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { useColorScheme } from '@/hooks/useColorScheme';
@@ -77,7 +81,10 @@ const LABEL_TUNING: ScannerTuning = {
   minReadableHeight: 0.44,
 };
 
-type Phase = 'market' | 'intro' | 'capture' | 'review';
+// `place` liegt bewusst direkt hinter `market`: beides beantwortet dieselbe
+// Frage („wo bist du"), und beides steht VOR dem ersten Foto. Eine
+// Ortsabfrage nach der Aufnahme würde fertige Arbeit gefährden.
+type Phase = 'market' | 'place' | 'intro' | 'capture' | 'review';
 
 export default function ProductWizardScreen() {
   const insets = useSafeAreaInsets();
@@ -102,6 +109,8 @@ export default function ProductWizardScreen() {
   const [photos, setPhotos] = useState<Partial<Record<ProductPhotoStep, string>>>({});
   /** Wann das erste Foto dieser Einreichung entstand (siehe onCaptured). */
   const firstCaptureAtRef = useRef<number | null>(null);
+  /** Der im `place`-Schritt bestätigte Ort — gilt für die ganze Sitzung. */
+  const [confirmedPlace, setConfirmedPlace] = useState<ConfirmedPlace | null>(null);
   const [stepIdx, setStepIdx] = useState(0);
   const [capturing, setCapturing] = useState(false);
   // expo-camera MUSS bereit sein, bevor takePictureAsync aufgerufen wird —
@@ -477,6 +486,7 @@ export default function ProductWizardScreen() {
     // Sekunden und wirft nie.
     const capture = await erfasseCaptureContext({
       capturedAt: firstCaptureAtRef.current ?? Date.now(),
+      confirmedPlace,
     });
 
     try {
@@ -534,11 +544,22 @@ export default function ProductWizardScreen() {
           setEanCode(null);
           setProductIndex((n) => n + 1);
           setStepIdx(0);
+          // Ohne diesen Reset trüge das ZWEITE Produkt die Aufnahmezeit des
+          // ersten — bei mehreren Einreichungen hintereinander wäre die
+          // Zeitangabe damit systematisch zu früh.
+          firstCaptureAtRef.current = null;
           setPhase('intro');
+          // `confirmedPlace` bleibt bewusst stehen: gleicher Markt,
+          // gleicher Ort — danach ein zweites Mal zu fragen wäre nur lästig.
         },
       },
     ]);
-  }, [user?.uid, allCaptured, photos, sessionId, productIndex, marketId, marketName, marketLand, productName, eanCode, campaign?.campaignId]);
+    // `confirmedPlace` MUSS in den Abhängigkeiten stehen: ohne ihn hielte
+    // doSubmit die Closure eines früheren Renders fest und schriebe den
+    // Ort, der beim letzten Deps-Wechsel galt — bei einem korrigierten Ort
+    // also den alten. Genau diese Klasse von Fehler ist unsichtbar, weil
+    // das Feld gefüllt aussieht.
+  }, [user?.uid, allCaptured, photos, sessionId, productIndex, marketId, marketName, marketLand, productName, eanCode, campaign?.campaignId, confirmedPlace]);
 
   // ─── Render ───────────────────────────────────────────────────────
 
@@ -577,8 +598,27 @@ export default function ProductWizardScreen() {
             setMarketName(m.name);
             setMarketId(m.id);
             setMarketLand((m as any).land ?? null);
+            // Ort nur einmal je Wizard-Sitzung erfragen: wer mehrere Produkte
+            // im selben Markt einreicht, steht dabei am selben Ort.
+            setPhase(confirmedPlace ? 'intro' : 'place');
+          }}
+        />
+      </View>
+    );
+  }
+
+  if (phase === 'place') {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.bg }}>
+        <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} />
+        <Header title="Standort" sub={marketName} />
+        <LocationConfirmStep
+          marketName={marketName}
+          onConfirm={(place) => {
+            setConfirmedPlace(place);
             setPhase('intro');
           }}
+          onBack={() => setPhase('market')}
         />
       </View>
     );
