@@ -26,9 +26,11 @@ import React, {
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Image,
   type ImageSourcePropType,
   Linking,
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -58,7 +60,7 @@ import {
   getCashbackConfig,
   hasValidCashbackConsent,
 } from '@/lib/services/cashbackService';
-import { standortAnfordern } from '@/lib/services/captureContext';
+import { standortAnfordern, standortStatus } from '@/lib/services/captureContext';
 import { consentService } from '@/lib/services/consentService';
 
 const PRIVACY_URL = 'https://markendetektive.de/datenschutz';
@@ -517,6 +519,31 @@ export default function CashbackConsentScreen() {
    * Abhängigkeiten hereinzureichen würde eine Endlosschleife bauen.
    */
   const handleAcceptRef = useRef<() => void>(() => {});
+  /** Gesetzt, sobald die Standortfreigabe verweigert wurde. */
+  const [standortFehlt, setStandortFehlt] = useState<'denied' | null>(null);
+
+  /**
+   * Wer in die Einstellungen geht und zurückkommt, soll nicht raten müssen,
+   * ob es geklappt hat. Beim Zurückkehren wird der Status neu gelesen und
+   * die Anleitung verschwindet, sobald die Freigabe steht.
+   *
+   * Bewusst KEIN automatisches Fortfahren: Die Rückkehr in die App heißt
+   * nicht zwangsläufig, dass jemand gerade die Berechtigung erteilt hat —
+   * er kann aus jedem beliebigen Grund in den Einstellungen gewesen sein.
+   * Der letzte Schritt bleibt seiner.
+   */
+  useEffect(() => {
+    if (!standortFehlt) return;
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s !== 'active') return;
+      void standortStatus().then((status) => {
+        if (status === 'granted_precise' || status === 'granted_coarse') {
+          setStandortFehlt(null);
+        }
+      });
+    });
+    return () => sub.remove();
+  }, [standortFehlt]);
 
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
@@ -559,21 +586,33 @@ export default function CashbackConsentScreen() {
    * nicht dieser Dialog. Eine Sackgasse an dieser Stelle würde nur Leute
    * verlieren, die den Ort bereitwillig eintippen würden.
    */
+  /**
+   * Reaktion auf eine verweigerte Standortfreigabe.
+   *
+   * Zwei Fälle, die sich grundlegend unterscheiden:
+   *
+   * 'not_asked' — der Dialog wurde weggetippt, das System fragt weiter.
+   *   Ein kurzer Alert mit einem zweiten Versuch reicht.
+   *
+   * 'denied' — endgültig abgelehnt. iOS zeigt den System-Dialog dann NIE
+   *   wieder; ein erneuter Aufruf kehrt still zurück und wirkt wie ein
+   *   Defekt. Hier übernimmt die feste Anleitung auf dem Screen, weil sie
+   *   auch dann noch da ist, wenn der Nutzer aus den Einstellungen
+   *   zurückkommt — ein Alert wäre längst weg.
+   */
   const zeigeStandortHinweis = useCallback((status: string, erneutVersuchen: () => void) => {
+    if (status === 'denied') {
+      setStandortFehlt('denied');
+      return;
+    }
     Alert.alert(
       'Standort wird benötigt',
-      status === 'denied'
-        ? 'Der Ort gehört zu jedem Datensatz, den wir vergüten — nur so ist nachvollziehbar, wo ein Produkt oder Preis wirklich zu finden war. Du kannst den Standort jederzeit in den Einstellungen freigeben und dann direkt loslegen.'
-        : 'Der Ort gehört zu jedem Datensatz, den wir vergüten — nur so ist nachvollziehbar, wo ein Produkt oder Preis wirklich zu finden war. Gib den Standort frei, dann kann es losgehen.',
-      status === 'denied'
-        ? [
-            { text: 'Später', style: 'cancel' as const },
-            { text: 'Einstellungen öffnen', onPress: () => Linking.openSettings() },
-          ]
-        : [
-            { text: 'Später', style: 'cancel' as const },
-            { text: 'Standort freigeben', onPress: erneutVersuchen },
-          ],
+      'Der Ort gehört zu jedem Datensatz, den wir vergüten — nur so ist nachvollziehbar, ' +
+        'wo ein Produkt oder Preis wirklich zu finden war. Gib den Standort frei, dann kann es losgehen.',
+      [
+        { text: 'Später', style: 'cancel' as const },
+        { text: 'Standort freigeben', onPress: erneutVersuchen },
+      ],
     );
   }, []);
 
@@ -827,6 +866,65 @@ export default function CashbackConsentScreen() {
         borderTopColor: theme.border ?? 'rgba(0,0,0,0.06)',
         backgroundColor: theme.bg,
       },
+      // Anleitung bei verweigerter Standortfreigabe — sitzt über dem
+      // Akzeptieren-Knopf, damit der Zusammenhang unmittelbar ist.
+      locHint: {
+        backgroundColor: theme.surfaceAlt,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: theme.border,
+        padding: 14,
+        gap: 8,
+        marginBottom: 12,
+      },
+      locHintHead: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 7 },
+      locHintTitle: {
+        fontFamily,
+        fontWeight: fontWeight.bold as any,
+        fontSize: 14,
+        color: theme.text,
+      },
+      locHintBody: {
+        fontFamily,
+        fontWeight: fontWeight.medium as any,
+        fontSize: 12,
+        lineHeight: 17,
+        color: theme.textSub,
+      },
+      locStep: { flexDirection: 'row' as const, alignItems: 'flex-start' as const, gap: 8 },
+      locStepNum: {
+        fontFamily,
+        fontWeight: fontWeight.bold as any,
+        fontSize: 11,
+        color: accent,
+        // Feste Breite hält die Textspalte bündig — bei einstelligen
+        // Schrittzahlen reicht das, tabular-nums braucht es dafür nicht.
+        width: 14,
+      },
+      locStepText: {
+        flex: 1,
+        fontFamily,
+        fontWeight: fontWeight.medium as any,
+        fontSize: 12,
+        lineHeight: 17,
+        color: theme.text,
+      },
+      locHintBtn: {
+        flexDirection: 'row' as const,
+        alignItems: 'center' as const,
+        justifyContent: 'center' as const,
+        gap: 7,
+        height: 42,
+        borderRadius: 12,
+        backgroundColor: accent,
+        marginTop: 2,
+      },
+      locHintBtnText: {
+        color: '#fff',
+        fontFamily,
+        fontWeight: fontWeight.bold as any,
+        fontSize: 13,
+      },
       acceptButton: {
         backgroundColor: accent,
         borderRadius: 14,
@@ -958,6 +1056,51 @@ export default function CashbackConsentScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
+        {/* Anleitung bleibt STEHEN, statt als Alert zu verschwinden: Der
+            Nutzer liest sie, während er in den Einstellungen sucht, und
+            findet sie bei der Rückkehr noch vor. Ein Dialog wäre genau
+            dann weg, wenn man ihn braucht. */}
+        {standortFehlt === 'denied' && (
+          <View style={styles.locHint}>
+            <View style={styles.locHintHead}>
+              <MaterialCommunityIcons name="map-marker-alert-outline" size={16} color={accent} />
+              <Text style={styles.locHintTitle}>Standort noch freigeben</Text>
+            </View>
+            <Text style={styles.locHintBody}>
+              Der Ort gehört zu jedem Datensatz, den wir vergüten. Ohne ihn ist keine
+              Teilnahme möglich — freigeben kannst du ihn jederzeit:
+            </Text>
+            {(Platform.OS === 'ios'
+              ? [
+                  'Einstellungen öffnen (Knopf unten)',
+                  'Auf „Standort" tippen',
+                  '„Beim Verwenden der App" auswählen',
+                  'Zurück in die App — dann auf Akzeptieren',
+                ]
+              : [
+                  'Einstellungen öffnen (Knopf unten)',
+                  'Auf „Berechtigungen" → „Standort" tippen',
+                  '„Nur während der Nutzung der App zulassen" wählen',
+                  '„Genauen Standort verwenden" einschalten',
+                  'Zurück in die App — dann auf Akzeptieren',
+                ]
+            ).map((s, i) => (
+              <View key={s} style={styles.locStep}>
+                <Text style={styles.locStepNum}>{i + 1}</Text>
+                <Text style={styles.locStepText}>{s}</Text>
+              </View>
+            ))}
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => Linking.openSettings()}
+              style={styles.locHintBtn}
+            >
+              <MaterialCommunityIcons name="cog-outline" size={16} color="#fff" />
+              <Text style={styles.locHintBtnText}>Einstellungen öffnen</Text>
+            </Pressable>
+          </View>
+        )}
+
         <Pressable
           accessibilityRole="button"
           disabled={isSubmitting || hasAccepted}
