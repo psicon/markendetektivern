@@ -2440,6 +2440,26 @@ Trigger, dadurch kann ein nachgezahlter Datensatz nicht doppelt gebucht
 werden. Firestore-Trigger sind at-least-once; ohne feste ID gibt es
 Doppelgutschriften.
 
+**Geld-Regeln knüpfen an TATSACHEN an, nie an ein versioniertes Modell.**
+Die Ortsanforderung des Foto-Rewards (`crowd-upload-reward/src/locationGate.js`,
+11.08.2026) prüft `capture.confirmedPlace || capture.gps` — also ob der Nutzer
+einen Ort ANGEGEBEN hat. Sie prüft bewusst NICHT `probableLocation.confidence`,
+obwohl das naheläge: diese Bewertung stammt aus einem Modell, das sich ändern
+darf (`crowd-upload-location/src/scorer.js`, versioniert). Hinge das Geld daran,
+entschiede eine Modelländerung rückwirkend darüber, wer bezahlt wird — und
+niemand würde es merken.
+
+**Eine neue Anforderung braucht eine Übergangsfrist für alte Clients.** Eine
+Regel, die nur der aktualisierte Client erfüllen kann, darf nicht sofort für
+alle gelten — sonst trifft sie Leute, die schlicht noch nicht aktualisiert
+haben. `locationGate` greift deshalb nur bei Dokumenten mit `clientVersion`
+(= App kennt den Pflicht-Schritt); ohne das Feld wird vergütet und der Vorgang
+mit `grund: 'gnadenfrist_alter_client'` markiert, damit messbar bleibt, wann
+man die Frist gefahrlos abschalten kann. Und: ein ausbleibender Betrag wird
+IMMER ins Dokument geschrieben (`rewardSkipped` + `rewardSkippedReason`), nie
+nur geloggt — ein still ausbleibender Betrag ist genau das Muster, das zu
+„144 freigegeben, 0 Cent ausgezahlt" geführt hat.
+
 **Bei Nachzahlungen NICHT die Perioden-Zähler hochsetzen**
 (`cashback_campaign_weekly`, `cashback_monthly`): die deckeln laufende
 Bon-Einreichungen. Eine Nachzahlung für UNSER Versäumnis darf dem Nutzer

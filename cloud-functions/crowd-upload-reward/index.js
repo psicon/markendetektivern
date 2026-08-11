@@ -38,6 +38,8 @@ const { onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
 
+const { pruefeOrtsanforderung } = require('./src/locationGate');
+
 admin.initializeApp();
 const db = admin.firestore();
 
@@ -66,6 +68,27 @@ exports.onCrowdUploadApproved = onDocumentUpdated(
     }
     if (!cid) {
       logger.info('[crowd-reward] ohne Aktion — keine Vergütung', { uploadId, uid });
+      return;
+    }
+
+    // Ortsanforderung des Reward-Programms. Der Wizard verlangt den Ort
+    // verpflichtend, aber nur bei aktualisierten Apps — eine Geld-Regel,
+    // die nur im Client steht, ist keine Regel.
+    const ort = pruefeOrtsanforderung(after);
+    if (!ort.ok) {
+      // AUSDRÜCKLICH ins Dokument schreiben, nicht nur loggen. Ein still
+      // ausbleibender Betrag ist genau das Muster, das schon einmal zu
+      // „144 freigegeben, 0 Cent ausgezahlt" geführt hat: niemand sieht
+      // einen Fehler, der Nutzer wartet, und es fällt monatelang nicht auf.
+      logger.warn('[crowd-reward] ohne Ortsangabe — keine Vergütung', {
+        uploadId,
+        uid,
+        grund: ort.grund,
+      });
+      await event.data.after.ref.set(
+        { rewardSkipped: true, rewardSkippedReason: ort.grund },
+        { merge: true },
+      );
       return;
     }
 
