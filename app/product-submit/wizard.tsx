@@ -58,7 +58,11 @@ import {
   type ProductPhotoStep,
 } from '@/lib/services/productSubmit';
 import { isOnline } from '@/lib/services/network';
-import { clientVersion, erfasseCaptureContext } from '@/lib/services/captureContext';
+import {
+  clientVersion,
+  erfasseCaptureContext,
+  standortStatus,
+} from '@/lib/services/captureContext';
 import { enqueueProductUpload } from '@/lib/services/uploadQueue';
 import { showInfoToast } from '@/lib/services/ui/toast';
 
@@ -111,6 +115,27 @@ export default function ProductWizardScreen() {
   const firstCaptureAtRef = useRef<number | null>(null);
   /** Der im `place`-Schritt bestätigte Ort — gilt für die ganze Sitzung. */
   const [confirmedPlace, setConfirmedPlace] = useState<ConfirmedPlace | null>(null);
+  /**
+   * Ob die Standortfreigabe steht. `null` = noch nicht geprüft.
+   *
+   * Ist sie erteilt, wird der Ort beim Einreichen ohnehin still erfasst —
+   * dann ist die Nachfrage im Wizard reine Reibung und entfällt. Der
+   * Schritt bleibt aber für die Fälle, in denen sie fehlt: Ohne laufende
+   * Aktion ist die Produkt-Einreichung NICHT consent-gegatet (auch anonym
+   * möglich, siehe product-submit/index.tsx), und eine Berechtigung kann
+   * jederzeit in den Einstellungen entzogen werden.
+   */
+  const [standortFrei, setStandortFrei] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let lebt = true;
+    void standortStatus().then((s) => {
+      if (lebt) setStandortFrei(s === 'granted_precise' || s === 'granted_coarse');
+    });
+    return () => {
+      lebt = false;
+    };
+  }, []);
   const [stepIdx, setStepIdx] = useState(0);
   const [capturing, setCapturing] = useState(false);
   // expo-camera MUSS bereit sein, bevor takePictureAsync aufgerufen wird —
@@ -598,9 +623,15 @@ export default function ProductWizardScreen() {
             setMarketName(m.name);
             setMarketId(m.id);
             setMarketLand((m as any).land ?? null);
-            // Ort nur einmal je Wizard-Sitzung erfragen: wer mehrere Produkte
-            // im selben Markt einreicht, steht dabei am selben Ort.
-            setPhase(confirmedPlace ? 'intro' : 'place');
+            // Nachfragen nur, wenn es nötig ist: Mit erteilter Freigabe wird
+            // der Ort beim Einreichen still erfasst, dann wäre der Schritt
+            // reine Reibung. Und nur einmal je Sitzung — wer mehrere
+            // Produkte im selben Markt einreicht, steht am selben Ort.
+            //
+            // `standortFrei === null` (Prüfung noch nicht durch) führt
+            // bewusst IN den Schritt: lieber einmal zu viel fragen als die
+            // Pflichtangabe still überspringen.
+            setPhase(confirmedPlace || standortFrei === true ? 'intro' : 'place');
           }}
         />
       </View>
