@@ -24,6 +24,7 @@ import {
 import { Image as RNImage, InteractionManager } from 'react-native';
 import { db } from '../firebase';
 import { rankAlternatives } from '@/lib/utils/alternativePlausibility';
+import { getProductImage } from '@/lib/utils/productImage';
 import type { CatalogProfileLike } from '@/lib/utils/productTaxonomy';
 import {
     Discounter,
@@ -1644,7 +1645,15 @@ export class FirestoreService {
         // with the reference fetch — by the time the screen renders,
         // the image typically loads instantly (no "image pops in
         // mid-fade" pop).
-        prefetchImage((productData as any).bild);
+        //
+        // WICHTIG: dieselbe Variante vorwärmen, die der Screen auch
+        // RENDERT (noname-detail: getProductImage(p, 'png')). Vorher
+        // wurde hier das ORIGINAL (`bild`) geladen, der Screen zeigte
+        // aber bildCleanPng — zwei verschiedene Dateien, das Original
+        // (oft ein Mehrfaches der Clean-Größe) wurde bei jedem Antippen
+        // umsonst heruntergeladen. Anteil an den 258 GB Bild-Egress im
+        // Juli; gemessen 16.08.2026.
+        prefetchImage(getProductImage(productData as any, 'png'));
 
         // Fire the staged-load hook — caller can render the hero now.
         // Wrapped in try/catch so a screen-side render error never
@@ -1854,8 +1863,11 @@ export class FirestoreService {
       const productData = productSnap.data() as MarkenProdukte;
 
       // Pre-warm the image cache — same reasoning as the noname
-      // path above (avoid hero-image-pops-in-mid-fade).
-      prefetchImage((productData as any).bild);
+      // path above (avoid hero-image-pops-in-mid-fade). Auch hier:
+      // die 'png'-Variante, die product-comparison rendert — nicht
+      // das Original. Hersteller-Logos haben keine Clean-Varianten,
+      // dort bleibt `bild` korrekt.
+      prefetchImage(getProductImage(productData as any, 'png'));
       prefetchImage((productData as any).hersteller?.bild);
 
       // Fire the staged-load hook with the raw product BEFORE any
