@@ -27,6 +27,26 @@ const {
 // namer, ai-product-comparison). Override via CASHBACK_OCR_MODEL.
 const DEFAULT_MODEL = process.env.CASHBACK_OCR_MODEL || 'gemini-3.5-flash';
 
+// Denk-Budget der Flash-Lesungen (Kostenanalyse 16.08.2026): Ohne gesetztes
+// thinkingConfig erzeugt gemini-3.5-flash unsichtbare Denk-Token — gemessen
+// 60-69 % ALLER Output-Token, abgerechnet zum Output-Preis (9 $/1M). Das
+// waren ~92 % der OCR-Kosten. Der Wert kommt aus der Env, damit sich das
+// Verhalten OHNE Deploy-Risiko steuern lässt:
+//   nicht gesetzt → Verhalten wie bisher (Denk-Budget frei, teuer)
+//   '0'           → Denken aus (wie crowd-upload-namer + receipt-matcher
+//                   es projektweit längst tun)
+//   'N'           → gedeckeltes Budget
+// NUR nach bestandener Regressionsmessung an echten Juli-Bons setzen — die
+// Konsens-Mechanik (2 übereinstimmende Lesungen, sonst Eskalation) bleibt
+// unverändert die Qualitätssicherung dahinter. Gilt bewusst NICHT für die
+// Pro-Eskalation (opts.model gesetzt): das starke Modell behält sein Denken
+// als letzte Rettung schwerer Bons.
+const THINKING_BUDGET_RAW = process.env.CASHBACK_OCR_THINKING_BUDGET;
+const THINKING_BUDGET =
+  THINKING_BUDGET_RAW != null && THINKING_BUDGET_RAW !== '' && Number.isFinite(Number(THINKING_BUDGET_RAW))
+    ? Number(THINKING_BUDGET_RAW)
+    : null;
+
 let _client = null;
 function getClient() {
   if (_client) return _client;
@@ -84,6 +104,14 @@ async function extractReceipt(imageBytes, mimeType, opts = {}) {
       // (viele Artikel × raw-Zeile) werden mittendrin abgeschnitten → kaputtes
       // JSON oder gedroppte Items. Gleicher Guard wie im cv-hybrid-Parser.
       maxOutputTokens: 32768,
+      // Denk-Budget nur für Flash-Lesungen (s. Kommentar oben). Entscheidend
+      // ist die MODELLKLASSE, nicht ob opts.model gesetzt ist — ocr_robust
+      // übergibt das Modell auch für Flash-Reads immer explizit. Die
+      // Pro-Eskalation ('gemini-2.5-pro') bleibt unangetastet: sie
+      // unterstützt Budget 0 nicht und ist die letzte Rettung schwerer Bons.
+      ...(THINKING_BUDGET != null && /flash/i.test(model)
+        ? { thinkingConfig: { thinkingBudget: THINKING_BUDGET } }
+        : {}),
     },
   });
 
@@ -107,6 +135,11 @@ async function extractReceipt(imageBytes, mimeType, opts = {}) {
     latencyMs,
     inputTokens: usage.promptTokenCount ?? null,
     outputTokens: usage.candidatesTokenCount ?? null,
+    // Unsichtbare Denk-Token — bisher nirgends erfasst, dadurch war der
+    // Hauptkostentreiber (60-69 % der Output-Token) monatelang unsichtbar.
+    // Ab jetzt fließt der Wert in receipts/*.ocr und macht die Kosten je
+    // Bon aus den eigenen Daten ablesbar (Kostenanalyse 16.08.2026).
+    thoughtsTokens: usage.thoughtsTokenCount ?? null,
     raw,
   };
 }
