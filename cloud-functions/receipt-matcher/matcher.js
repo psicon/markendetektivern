@@ -36,6 +36,34 @@ const MARKE_K = 10;
 const AUTO_LOCK = 0.9; // ≥ → automatisch locken (Tier-1) bzw. Promotion (Tier-2)
 const REVIEW_MIN = 0.7; // [REVIEW_MIN, AUTO_LOCK) → Mensch-Review
 
+// Negativ-Cache (Fix 16.08.2026): Wie lange ein 'needs_review'/'promotion_
+// pending'-Ergebnis als frisch gilt. Innerhalb des Fensters wird dieselbe
+// (Markt, normKey)-Zeile NICHT erneut durch Embedding+KI geschickt —
+// gemessen liefen 26,8 % aller KI-Aufrufe auf bereits analysierte Strings
+// ("Wasser still" 23x), weil diese Ausgänge keinen Alias hinterließen.
+// Nach Ablauf bekommt die Zeile eine frische Analyse: der Katalog wächst,
+// aus needs_review kann ein Treffer werden.
+const PENDING_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+
+/**
+ * Ist ein Pending-Marker am Alias-Doc frisch genug, um die teure
+ * Neu-Analyse zu ersetzen? Pure Funktion — testbar ohne Firestore.
+ *
+ * Bewusst NICHT frisch, wenn:
+ *  • das Doc gelockt ist (menschliche/automatische Entscheidung gewinnt
+ *    IMMER — der Marker schreibt deshalb auch nie `resolvedBy`),
+ *  • eine andere MATCH_VERSION ihn schrieb (neue Logik → neu analysieren),
+ *  • er älter als PENDING_TTL_MS ist.
+ */
+function istPendingFrisch(a, nowMs, version) {
+  if (!a || !a.pendingStatus) return false;
+  const locked = a.resolvedBy && a.resolvedBy !== 'ai-review-pending';
+  if (locked) return false;
+  if (a.pendingMatchVersion !== version) return false;
+  const t = a.lastAiAt && typeof a.lastAiAt.toMillis === 'function' ? a.lastAiAt.toMillis() : 0;
+  return t > 0 && nowMs - t < PENDING_TTL_MS;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────
 const norm = (s) =>
   String(s || '')
@@ -457,6 +485,44 @@ async function matchLine(ctx, opts = {}) {
         }
         return { status: 'alias-hit', alias: a };
       }
+
+      // NEGATIV-CACHE: Ein frischer Pending-Marker heißt, EXAKT diese
+      // (Markt, normKey)-Zeile wurde bereits voll analysiert (Embedding +
+      // KI) und wartet auf menschliche Review — eine erneute Analyse
+      // liefert dasselbe Ergebnis und kostet nur Geld. Der Skip greift
+      // NUR, wenn der User keine persönlichen Anker hat (Einkaufszettel /
+      // kürzliche Käufe): mit passendem Zettel-Item kann dieselbe Zeile
+      // über die abgesenkte Schwelle zu 'matched' werden — diese Chance
+      // darf der Cache nicht nehmen. hitCount der Queue zählt beim Skip
+      // weiter, es bleibt das Demand-Signal für die Review-Priorisierung.
+      if (istPendingFrisch(a, Date.now(), MATCH_VERSION)) {
+        const persoenliche = userId ? await fetchPersonalCandidates(userId) : [];
+        if (!persoenliche.length) {
+          if (!dryRun) {
+            await aliasRef.set(
+              { votes: FieldValue.increment(1), lastSeen: FieldValue.serverTimestamp() },
+              { merge: true },
+            );
+            if (a.pendingStatus === 'promotion_pending' && a.pendingReweapifyId) {
+              await db
+                .collection('promotionQueue')
+                .doc(String(a.pendingReweapifyId))
+                .set({ hitCount: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+            } else {
+              await db
+                .collection('receiptReviewQueue')
+                .doc(aliasId(marktSlug, normKey))
+                .set({ hitCount: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+            }
+          }
+          if (a.pendingStatus === 'promotion_pending') {
+            await writePP({ matchStatus: 'promotion_pending', reweapifyId: a.pendingReweapifyId || null, lineType: 'product', matchConfidence: a.pendingConfidence ?? null, matchSource: 'ai-cached' });
+            return { status: 'promotion_pending', source: 'pending-cache', confidence: a.pendingConfidence ?? null };
+          }
+          await writePP({ matchStatus: 'needs_review', lineType: 'product', matchConfidence: a.pendingConfidence ?? null, matchSource: 'ai-cached' });
+          return { status: 'needs_review', source: 'pending-cache', confidence: a.pendingConfidence ?? null };
+        }
+      }
     }
   }
 
@@ -531,6 +597,11 @@ async function matchLine(ctx, opts = {}) {
   // Tier-2 (reweapify) plausibel → Promotion-Queue (Mensch gibt frei, kein Auto-Katalog).
   if (cand && cand.tier === 2 && conf >= REVIEW_MIN) {
     if (!dryRun) await enqueuePromotion({ reweapifyId: cand.id, name: cand.name, gtin: cand.gtin, kind: cand.type, marktSlug, normKey, sampleName: itemName, confidence: conf, ppId: ppRef && ppRef.id, userId, receiptId, market: bonMeta.market, bonDate: bonMeta.bonDate, priceCents, bonSize: bonMeta.bonSize });
+    // Pending-Marker fürs Negativ-Cache (s. istPendingFrisch). Bewusst OHNE
+    // `resolvedBy`: der Marker darf eine parallel laufende menschliche
+    // Freigabe (setzt resolvedBy) niemals überschreiben — der locked-Check
+    // im Lookup gewinnt dann automatisch.
+    if (!dryRun) await aliasRef.set({ marktSlug: norm(marktSlug), normKey, pendingStatus: 'promotion_pending', pendingReweapifyId: cand.id, pendingConfidence: conf, pendingMatchVersion: MATCH_VERSION, lastAiAt: FieldValue.serverTimestamp(), sampleName: itemName, lastSeen: FieldValue.serverTimestamp() }, { merge: true });
     await writePP({ matchStatus: 'promotion_pending', reweapifyId: cand.id, lineType: 'product', matchConfidence: conf, matchSource: 'ai' });
     return { status: 'promotion_pending', tier: 2, reweapifyId: cand.id, confidence: conf };
   }
@@ -539,6 +610,8 @@ async function matchLine(ctx, opts = {}) {
   // KI RÄT NICHT automatisch → Mensch entscheidet (Vorschlag + Confidence + Shortlist + Katalog-Suche).
   // (cands ist hier garantiert nicht leer — der no-candidates-Fall ist oben abgefangen.)
   if (!dryRun) await enqueueReview({ marktSlug, normKey, sampleName: itemName, priceCents, bonSize: bonMeta.bonSize, bonDate: bonMeta.bonDate, market: bonMeta.market, candidates: cands.slice(0, 20), suggestionIdx: pick.candidateIdx, confidence: conf, ppId: ppRef && ppRef.id, userId, receiptId });
+  // Pending-Marker fürs Negativ-Cache — ohne `resolvedBy`, s. Tier-2-Zweig.
+  if (!dryRun) await aliasRef.set({ marktSlug: norm(marktSlug), normKey, pendingStatus: 'needs_review', pendingConfidence: conf, pendingMatchVersion: MATCH_VERSION, lastAiAt: FieldValue.serverTimestamp(), sampleName: itemName, lastSeen: FieldValue.serverTimestamp() }, { merge: true });
   await writePP({ matchStatus: 'needs_review', lineType: 'product', matchConfidence: conf, matchSource: 'ai' });
   return { status: 'needs_review', confidence: conf, suggestion: cand };
 }
@@ -618,4 +691,4 @@ async function enrichCandidates(cands) {
   return cands;
 }
 
-module.exports = { matchLine, norm, aliasId, parseSize, embedQuery, shortlist, enrichCandidates, discounterIdsForSlug, MATCH_VERSION };
+module.exports = { matchLine, norm, aliasId, parseSize, embedQuery, shortlist, enrichCandidates, discounterIdsForSlug, MATCH_VERSION, istPendingFrisch, PENDING_TTL_MS };
