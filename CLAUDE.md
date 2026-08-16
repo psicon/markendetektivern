@@ -2405,6 +2405,27 @@ Regeln beim Auswerten:
   laufenden Journey. Wer Aufnahme-Beobachtung von Rekonstruktion trennen will,
   filtert auf das Vorhandensein dieses Felds.
 
+## Cloud-Kosten: Konto-Realität (abgelesen 16.08.2026, Billing-Console)
+
+Bei Kostenfragen NIE aus Monitoring-Metriken hochrechnen, ohne diese Fakten:
+- **Billing-Konto `010830-229407-74D273` (StuByteFlexCo) trägt 8+ Projekte.**
+  Konto-Summen (z.B. "1.160 € in 15 Tagen") sind NICHT MarkenDetektive —
+  Aug 1.–15.: RevealyIQ-Familie ~740 €, MrToots 258 €, MarkenDetektive 186 €.
+- **Netto zahlt das Konto derzeit ~0 €**: Google-for-Startups-Guthaben
+  (20.017 $ von 23.000 $ übrig, bis 27.06.2028) + 855 € GenAI-Trial decken
+  alles. Bei ~2.400 €/Monat Brutto-Burn ist das Guthaben ~Frühjahr 2027 leer —
+  DAS ist die relevante Uhr, nicht die Monatsrechnung.
+- **MarkenDetektives Gemini-Kosten erscheinen unter Projekt "MrToots"**
+  (crapsnap-3390b), weil `GEMINI_API_KEY` ein CrapSnap-Key ist (Fingerprint
+  223ca7349d61, Secret-Version 1, Functions pinnen key '1' — eine neue
+  Secret-Version wirkt NICHT ohne Redeploy aller 5 Codebases).
+- **Firestore-Reads firmieren in der Rechnung unter Dienst "App Engine"**
+  (SKU "Cloud Firestore Read Ops"). MarkenDetektive Aug-Tempo: ~190 €/Monat —
+  größter eigener Serverposten; enthält die nächtlichen 4-Mio-Dokument-Reads
+  der Backup-Extension, die in der Firebase-Nutzungsanzeige UNSICHTBAR sind.
+- MarkenDetektive real: ~380 €/Monat Infrastruktur + ~517 €/Monat Gemini
+  (Aug-Tempo; Gemini hat sich seit Juli verdoppelt, wächst mit Bon-Volumen).
+
 ## Ein Status-Feld ist KEIN Mechanismus — Geld-Versprechen brauchen einen Trigger
 
 **Vorfall 07.08.2026:** `crowd_uploads` (Produkt-Einreichungen) hatte ein
