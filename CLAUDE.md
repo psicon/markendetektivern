@@ -2415,10 +2415,15 @@ Bei Kostenfragen NIE aus Monitoring-Metriken hochrechnen, ohne diese Fakten:
   (20.017 $ von 23.000 $ übrig, bis 27.06.2028) + 855 € GenAI-Trial decken
   alles. Bei ~2.400 €/Monat Brutto-Burn ist das Guthaben ~Frühjahr 2027 leer —
   DAS ist die relevante Uhr, nicht die Monatsrechnung.
-- **MarkenDetektives Gemini-Kosten erscheinen unter Projekt "MrToots"**
-  (crapsnap-3390b), weil `GEMINI_API_KEY` ein CrapSnap-Key ist (Fingerprint
-  223ca7349d61, Secret-Version 1, Functions pinnen key '1' — eine neue
-  Secret-Version wirkt NICHT ohne Redeploy aller 5 Codebases).
+- **Gemini läuft seit 16.08.2026 auf EIGENEM Key** (Secret-Version 2,
+  Fingerprint 84151aee2f6f, beschränkt auf generativelanguage; alle 5
+  Codebases neu deployt und auf key '2' gepinnt, End-to-End gegen
+  runComparisonForProduct bewiesen). Kosten erscheinen ab jetzt im
+  EIGENEN Projekt als Dienst "Gemini API" — die MrToots-Position
+  (crapsnap-3390b, alter Key 223ca7349d61) fällt auf ~0. Secret-Version 1
+  NICHT disablen, bis der crapsnap-Traffic bestätigt bei 0 liegt
+  (Rollback-Pfad). Merke: Functions pinnen die beim Deploy neueste
+  ENABLED-Version — eine neue Secret-Version wirkt NIE ohne Redeploy.
 - **Firestore-Reads firmieren in der Rechnung unter Dienst "App Engine"**
   (SKU "Cloud Firestore Read Ops"). MarkenDetektive Aug-Tempo: ~190 €/Monat —
   größter eigener Serverposten; enthält die nächtlichen 4-Mio-Dokument-Reads
