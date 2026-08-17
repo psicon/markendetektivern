@@ -181,6 +181,16 @@ function buildOcrField(ocr, recon, escalation) {
     // Self-consistency confidence from the robust engine (high/medium/low/none)
     // + attempts — for monitoring + an optional approval gate.
     robust: ocr.robust ?? null,
+    // Token-Verbrauch der GEWÄHLTEN Lesung (nicht Summe aller Versuche —
+    // dafür steht robust.attempts daneben). `thoughts` sind die unsichtbaren
+    // Denk-Token: 60-69 % der Output-Token und damit der Hauptkostentreiber
+    // der Pipeline, bis 16.08.2026 nirgends erfasst und deshalb monatelang
+    // nur per Nachmessung sichtbar. Ab jetzt je Bon ablesbar.
+    chosenReadTokens: {
+      input: ocr.inputTokens ?? null,
+      output: ocr.outputTokens ?? null,
+      thoughts: ocr.thoughtsTokens ?? null,
+    },
     escalation: escalation?.fired ? escalation : null,
     reconciliation: {
       ok: recon.ok,
