@@ -40,10 +40,6 @@ const {
 
 // ─── ENV ──────────────────────────────────────────────────────────
 
-if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
-  console.error('❌ Set FIREBASE_SERVICE_ACCOUNT (JSON-encoded service account)');
-  process.exit(1);
-}
 if (!process.env.GEMINI_API_KEY) {
   console.error('❌ Set GEMINI_API_KEY');
   process.exit(1);
@@ -71,12 +67,22 @@ const SKIP_DISCOUNTERS = (process.env.SKIP_DISCOUNTERS || 'REWE,Aldi')
 
 // ─── Firebase Admin init ──────────────────────────────────────────
 
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  projectId: serviceAccount.project_id,
-  storageBucket: `${serviceAccount.project_id}.appspot.com`,
-});
+// Auth: entweder explizit per FIREBASE_SERVICE_ACCOUNT (JSON) — oder, wenn
+// nicht gesetzt, über Application Default Credentials (gcloud auth
+// application-default login). Kein Pflicht-Schlüssel mehr: ein auf der
+// Maschine liegender Service-Account-Key ist ein vermeidbares Risiko,
+// wenn ADC dasselbe leistet.
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    projectId: serviceAccount.project_id,
+    storageBucket: `${serviceAccount.project_id}.appspot.com`,
+  });
+} else {
+  const projectId = process.env.GCLOUD_PROJECT || 'markendetektive-895f7';
+  admin.initializeApp({ projectId, storageBucket: `${projectId}.appspot.com` });
+}
 const db = admin.firestore();
 const bucket = admin.storage().bucket();
 const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
