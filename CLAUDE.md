@@ -2405,6 +2405,13 @@ Regeln beim Auswerten:
   laufenden Journey. Wer Aufnahme-Beobachtung von Rekonstruktion trennen will,
   filtert auf das Vorhandensein dieses Felds.
 
+## Journeys werden NICHT gelöscht — endgültige User-Entscheidung (17.08.2026)
+
+User-Wortlaut: "journeys löschen wir nicht - fertig." Keine Retention-Regel,
+kein Cleanup-Löschen, keine Vorschläge mehr in diese Richtung. Kostensenkung
+bei Journeys läuft ausschließlich über LESE-Optimierung (Zeitfenster/
+Inkremente in den Nacht-Aggregatoren), nie über Datenlöschung.
+
 ## Cloud-Kosten: Konto-Realität (abgelesen 16.08.2026, Billing-Console)
 
 Bei Kostenfragen NIE aus Monitoring-Metriken hochrechnen, ohne diese Fakten:
