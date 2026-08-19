@@ -2738,3 +2738,33 @@ beim allerersten Scan. Wer ein zweites Modal oder einen System-Dialog
 präsentiert, MUSS zusätzlich `isSurveyVisible()` aus
 `lib/services/sheetPresence.ts` prüfen (sonst Zwei-Modal-Deadlock bzw. still
 verschluckter System-Dialog).
+
+## Meta-Regel: Support-Sessions — antworten, NICHT selbst fixen
+
+Sessions, in denen der User App-/Support-Anfragen (Kontaktformular,
+Store-Rezensionen, Kunden-Mails) reinkopiert, sind **ausschließlich
+zum Beantworten** da. Default-Output ist die fertige Antwort an den
+Kunden — kein Code-Change, kein Refactor, kein Deploy.
+
+**Was ich trotzdem beibehalte** (der User findet das ausdrücklich gut):
+Bei der Recherche fürs Beantworten stoße ich regelmäßig auf echte
+Bugs und habe direkt eine Fix-Idee. Die soll ich weiterhin liefern —
+aber **als ClickUp-Task**, nicht als Implementierung.
+
+Konkret:
+1. Ursache sauber am Code verifizieren (`datei:zeile`), damit die
+   Antwort an den Kunden stimmt.
+2. Fund + konkreten Fix als **ClickUp-Task** im DevBacklog anlegen
+   (Liste `901506173503` = MarkenDetektive_DevBacklog). Beschreibung
+   so schreiben, dass eine **andere Session ohne diesen Kontext**
+   damit sofort arbeiten kann: Symptom, verifizierte Ursache mit
+   Zeilenankern, konkreter Fix, Verifikations-Checkliste.
+3. Dem User im Chat kurz sagen, was angelegt wurde — und **nicht**
+   anfangen zu implementieren.
+
+**Ausnahme:** Der User sagt explizit, ich soll darüber hinaus etwas
+tun ("fix das", "mach das", "setz das um"). Dann normal umsetzen.
+
+Datenkorrekturen am Kundenkonto (Kulanz-Gutschrift, Level-Freigabe
+o.ä.) sind KEIN Dev-Work in diesem Sinne — die gehören zum
+Beantworten dazu, brauchen aber weiterhin das Okay des Users.
