@@ -47,15 +47,41 @@ const THINKING_BUDGET =
     ? Number(THINKING_BUDGET_RAW)
     : null;
 
-let _client = null;
-function getClient() {
-  if (_client) return _client;
+const _clients = new Map(); // Cache: Vertex-Location bzw. 'apikey' → GoogleGenAI
+function getClient(model) {
+  // Backend-Umschaltung (Incident 19.08.2026): AI-Studio-Keys haengen am
+  // monatlichen Spending-Cap der Rechnungskontostufe. Ist der erreicht,
+  // liefern ALLE Gemini-Calls 429 RESOURCE_EXHAUSTED — die OCR faellt dann
+  // auf den isReceipt:false-Stub zurueck und der Nutzer sieht faelschlich
+  // "kein Kassenbon". Vertex AI rechnet ueber die normale GCP-Abrechnung
+  // und kennt dieses Stufenlimit nicht. Default = Vertex; per
+  // GEMINI_USE_VERTEX=false zurueck auf den AI-Studio-Key.
+  const useVertex = String(process.env.GEMINI_USE_VERTEX ?? 'true') !== 'false';
+  if (useVertex) {
+    // Standort ist MODELL-abhaengig (beides geprueft 19.08.2026):
+    // gemini-3.5-flash ist NUR unter 'global' publiziert, gemini-2.5-pro
+    // (die Robust-Eskalation) dagegen NUR regional → pro Modell aufloesen,
+    // sonst 404t die Pro-Eskalation still im catch der Robust-Schleife.
+    const location = /2\.5-pro/i.test(String(model || ''))
+      ? process.env.GEMINI_VERTEX_LOCATION_PRO || 'europe-west4'
+      : process.env.GEMINI_VERTEX_LOCATION || 'global';
+    if (_clients.has(location)) return _clients.get(location);
+    const client = new GoogleGenAI({
+      vertexai: true,
+      project: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'markendetektive-895f7',
+      location,
+    });
+    _clients.set(location, client);
+    return client;
+  }
+  if (_clients.has('apikey')) return _clients.get('apikey');
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY not set on Cloud Function env');
   }
-  _client = new GoogleGenAI({ apiKey });
-  return _client;
+  const client = new GoogleGenAI({ apiKey });
+  _clients.set('apikey', client);
+  return client;
 }
 
 /**
@@ -76,8 +102,8 @@ function getClient() {
  * }>}
  */
 async function extractReceipt(imageBytes, mimeType, opts = {}) {
-  const client = getClient();
   const model = opts.model || DEFAULT_MODEL;
+  const client = getClient(model);
   const started = Date.now();
 
   const base64 = Buffer.isBuffer(imageBytes)

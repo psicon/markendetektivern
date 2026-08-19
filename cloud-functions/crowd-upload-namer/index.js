@@ -28,6 +28,27 @@ const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
 const { GoogleGenAI, Type } = require('@google/genai');
 
+// Backend-Umschaltung (Incident 19.08.2026): AI-Studio-Keys haengen am
+// monatlichen Spending-Cap der Rechnungskontostufe — bei Erreichen liefern
+// ALLE Keys des Kontos 429. Vertex AI rechnet uebers GCP-Projekt-Billing und
+// kennt das Limit nicht; gemini-3.5-flash ist unter 'global' publiziert
+// (geprueft 19.08.2026). GEMINI_USE_VERTEX=false = alter Key-Pfad.
+let _ai = null;
+function getGenAIClient() {
+  if (_ai) return _ai;
+  const useVertex = String(process.env.GEMINI_USE_VERTEX ?? 'true') !== 'false';
+  if (useVertex) {
+    _ai = new GoogleGenAI({
+      vertexai: true,
+      project: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'markendetektive-895f7',
+      location: process.env.GEMINI_VERTEX_LOCATION || 'global',
+    });
+    return _ai;
+  }
+  _ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
+  return _ai;
+}
+
 admin.initializeApp();
 
 const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
@@ -124,7 +145,7 @@ exports.onCrowdUploadNameOcr = onDocumentCreated(
     let name = '';
     let confidence = 0;
     try {
-      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
+      const ai = getGenAIClient();
       const response = await ai.models.generateContent({
         model: MODEL,
         contents: [{ role: 'user', parts }],

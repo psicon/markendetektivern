@@ -48,15 +48,40 @@ function getVisionClient() {
   return _vision;
 }
 
-let _genai = null;
-function getGenAIClient() {
-  if (_genai) return _genai;
+const _genaiClients = new Map(); // Cache: Vertex-Location bzw. 'apikey' → GoogleGenAI
+function getGenAIClient(model) {
+  // Backend-Umschaltung (Incident 19.08.2026): AI-Studio-Keys haengen am
+  // monatlichen Spending-Cap der Rechnungskontostufe. Ist der erreicht,
+  // liefern ALLE Gemini-Calls 429 RESOURCE_EXHAUSTED — die OCR faellt dann
+  // auf den isReceipt:false-Stub zurueck und der Nutzer sieht faelschlich
+  // "kein Kassenbon". Vertex AI rechnet ueber die normale GCP-Abrechnung
+  // und kennt dieses Stufenlimit nicht. Default = Vertex; per
+  // GEMINI_USE_VERTEX=false zurueck auf den AI-Studio-Key.
+  const useVertex = String(process.env.GEMINI_USE_VERTEX ?? 'true') !== 'false';
+  if (useVertex) {
+    // Standort ist MODELL-abhaengig (beides geprueft 19.08.2026):
+    // gemini-3.5-flash ist NUR unter 'global' publiziert, gemini-2.5-pro
+    // dagegen NUR regional → pro Modell aufloesen (gleiche Logik wie ocr.js).
+    const location = /2\.5-pro/i.test(String(model || ''))
+      ? process.env.GEMINI_VERTEX_LOCATION_PRO || 'europe-west4'
+      : process.env.GEMINI_VERTEX_LOCATION || 'global';
+    if (_genaiClients.has(location)) return _genaiClients.get(location);
+    const client = new GoogleGenAI({
+      vertexai: true,
+      project: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'markendetektive-895f7',
+      location,
+    });
+    _genaiClients.set(location, client);
+    return client;
+  }
+  if (_genaiClients.has('apikey')) return _genaiClients.get('apikey');
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY not set on Cloud Function env');
   }
-  _genai = new GoogleGenAI({ apiKey });
-  return _genai;
+  const client = new GoogleGenAI({ apiKey });
+  _genaiClients.set('apikey', client);
+  return client;
 }
 
 // ─── Cloud Vision: image → raw text ─────────────────────────────────
@@ -97,7 +122,7 @@ async function callGeminiTextParser(ocrText, model) {
 
   const callOnce = async () => {
     const started = Date.now();
-    const response = await getGenAIClient().models.generateContent({
+    const response = await getGenAIClient(model).models.generateContent({
       model,
       contents: [{ role: 'user', parts: [{ text: buildUserPrompt(safeText) }] }],
       config: {

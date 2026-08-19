@@ -20,7 +20,8 @@
  *   50k Produkte initial: ~$5 für komplettes Backfill.
  */
 
-const { GoogleGenAI, Type } = require('@google/genai');
+const { Type } = require('@google/genai');
+const { getGenAIClient } = require('./genaiClient');
 const { scoreNutrition, scoreLabels, combineScore } = require('./scorer');
 
 const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
@@ -360,7 +361,7 @@ async function callGemini({ apiKey, snapshot, model = DEFAULT_MODEL }) {
   const computedFacts = [...nut.facts, ...lab.facts];
 
   // ─── Schritt 2: KI NUR für Zutaten-Verdikt + Reasoning-Text ──────
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = getGenAIClient(apiKey);
   const userContent = buildUserContent({ noname, original, computedFacts });
 
   const response = await ai.models.generateContent({

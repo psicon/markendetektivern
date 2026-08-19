@@ -2422,15 +2422,14 @@ Bei Kostenfragen NIE aus Monitoring-Metriken hochrechnen, ohne diese Fakten:
   (20.017 $ von 23.000 $ übrig, bis 27.06.2028) + 855 € GenAI-Trial decken
   alles. Bei ~2.400 €/Monat Brutto-Burn ist das Guthaben ~Frühjahr 2027 leer —
   DAS ist die relevante Uhr, nicht die Monatsrechnung.
-- **Gemini läuft seit 16.08.2026 auf EIGENEM Key** (Secret-Version 2,
-  Fingerprint 84151aee2f6f, beschränkt auf generativelanguage; alle 5
-  Codebases neu deployt und auf key '2' gepinnt, End-to-End gegen
-  runComparisonForProduct bewiesen). Kosten erscheinen ab jetzt im
-  EIGENEN Projekt als Dienst "Gemini API" — die MrToots-Position
-  (crapsnap-3390b, alter Key 223ca7349d61) fällt auf ~0. Secret-Version 1
-  NICHT disablen, bis der crapsnap-Traffic bestätigt bei 0 liegt
-  (Rollback-Pfad). Merke: Functions pinnen die beim Deploy neueste
-  ENABLED-Version — eine neue Secret-Version wirkt NIE ohne Redeploy.
+- **Gemini läuft seit 19.08.2026 über VERTEX AI** (siehe Incident-Abschnitt
+  unten) — Kosten erscheinen im eigenen Projekt als Dienst "Vertex AI",
+  guthabengedeckt, ohne AI-Studio-Stufendeckel. Historie: 16.–19.08. lief es
+  auf eigenem AI-Studio-Key (Secret-Version 2, Fingerprint 84151aee2f6f; am
+  19.08. disabled, Version 3 = alter Key als Zwischen-Rollback angelegt —
+  beide Keys sind bei erreichtem Konto-Cap gleichermaßen tot). Merke:
+  Functions pinnen die beim Deploy neueste ENABLED-Version — eine neue
+  Secret-Version wirkt NIE ohne Redeploy.
 - **Firestore-Reads firmieren in der Rechnung unter Dienst "App Engine"**
   (SKU "Cloud Firestore Read Ops"). MarkenDetektive Aug-Tempo: ~190 €/Monat —
   größter eigener Serverposten; enthält die nächtlichen 4-Mio-Dokument-Reads
@@ -2610,6 +2609,49 @@ in der App — Metro/TestFlight/App-Version beeinflussen die Erkennung NICHT.
   (1/6→5/6) — noch NICHT in der Pipeline (bräuchte `sharp`).
 - **Testen:** ein NEU fotografierter Bon läuft frisch; exakt dasselbe Bild-File
   trifft per Dedup (`receipts` contentHash) das alte gecachte Ergebnis.
+
+## Gemini läuft über VERTEX AI, nicht AI Studio (Incident 19.08.2026)
+
+**Was passiert ist:** Der AI-Studio-Monatsdeckel („monthly spending cap",
+Stufen-Limit des Rechnungskontos, ~219 €) wurde erreicht → **ALLE Gemini-Keys
+des Kontos** (eigener Key UND alter crapsnap-Key) lieferten 429
+RESOURCE_EXHAUSTED. Der Deckel gilt KONTOWEIT (StuByteFlexCo) und ist **nicht
+manuell anhebbar** (Google stuft nur automatisch hoch). Key-Rotation/Rollback
+ist bei diesem Fehler ZWECKLOS — erst per Direkt-Curl beweisen, WELCHER Scope
+gesperrt ist, bevor man Keys tauscht.
+
+**Fix (deployt 19.08.):** Alle 5 Gemini-Codebases (cashback-pipeline,
+receipt-matcher, ai-product-comparison, crowd-upload-namer, image-cleanup)
+nutzen `new GoogleGenAI({ vertexai: true, project, location })` — läuft übers
+GCP-Projekt-Billing (Startup-Guthaben), kennt den AI-Studio-Deckel nicht.
+Rückschalter: `GEMINI_USE_VERTEX=false` in der jeweiligen `.env` → alter
+Key-Pfad (Secret GEMINI_API_KEY bleibt gebunden).
+
+**Vertex-Modell-Verfügbarkeit ist PRO LOCATION verschieden (19.08. geprüft):**
+- `gemini-3.5-flash`, `gemini-2.5-flash-image`, `gemini-embedding-001` (via
+  SDK `embedContent`; REST nur `:predict`): NUR `global`.
+- `gemini-2.5-pro` (Robust-OCR-Eskalation): NICHT unter `global`, nur regional
+  → `GEMINI_VERTEX_LOCATION_PRO`, Default `europe-west4` (Client-Factory in
+  lib/ocr.js ist modell-bewusst). Bei neuen Modellen IMMER erst curl-Test
+  gegen die Ziel-Location, 404 heißt „woanders publiziert".
+- `gemini-3-pro-image-preview` (image-cleanup Retry-Stufe B): auf Vertex
+  NIRGENDS → schlägt unter Vertex fehl (Item endet 'failed'); Nachbearbeitung
+  via retry-failures.js mit GEMINI_USE_VERTEX=false wenn der Cap frei ist.
+- Embeddings sind zwischen AI Studio und Vertex **byte-identisch** (Kosinus
+  1.0000 gegen Bestandsvektoren verifiziert) → Vektor-Index kompatibel.
+
+**Der eigentliche Bug (gefixt 19.08.):** ocr_robust.js verschluckte geworfene
+Lese-Versuche (`catch { continue; }` ohne Log). Bei Totalausfall lieferte
+Phase 4 den `isReceipt:false`-Stub → Nutzer sah fälschlich „kein Kassenbon".
+**Es gab bis dahin NIE eine echte not_a_receipt-Ablehnung** — alle 53 waren
+verschluckte Infrastrukturfehler (Marker: `ocr.robust.attempts == 0` = OCR
+lief nie). Jetzt: leere reads → Error `code:'ocr_unavailable'` → index.js
+behandelt transient (Retry), nach MAX_PROCESS_ATTEMPTS → Status **'review'**
+(reviewReason 'ocr_unavailable'), NIE 'rejected'. Regel: ein Infrastruktur-
+fehler darf nie als inhaltliche Aussage über User-Daten enden. Reprocessing
+abgelehnter Bons: `ocr`-Feld LÖSCHEN (sonst re-used der Retry den kaputten
+Cache), Status auf 'ocr_pending', Message mit `{cashbackId, uid}` (BEIDE
+Pflicht) auf Topic `cashback-ocr-jobs` republishen.
 
 ## Sim-Testing: NUR wenn's wirklich nötig ist (User-Vorgabe 2026-06-12)
 

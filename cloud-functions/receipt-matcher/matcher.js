@@ -122,6 +122,22 @@ function negativeType(name) {
 let _ai = null;
 function ai() {
   if (_ai) return _ai;
+  // Backend-Umschaltung (Incident 19.08.2026): AI-Studio-Keys haengen am
+  // monatlichen Spending-Cap der Rechnungskontostufe — bei Erreichen liefern
+  // ALLE Keys des Kontos 429. Vertex AI rechnet uebers GCP-Projekt-Billing
+  // und kennt das Limit nicht. Beide hier genutzten Modelle sind unter
+  // 'global' publiziert (gemini-3.5-flash, gemini-embedding-001 — Embeddings
+  // byte-identisch zu AI Studio, Kosinus 1.0000 gegen Bestandsvektoren
+  // verifiziert 19.08.2026). GEMINI_USE_VERTEX=false = alter Key-Pfad.
+  const useVertex = String(process.env.GEMINI_USE_VERTEX ?? 'true') !== 'false';
+  if (useVertex) {
+    _ai = new GoogleGenAI({
+      vertexai: true,
+      project: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'markendetektive-895f7',
+      location: process.env.GEMINI_VERTEX_LOCATION || 'global',
+    });
+    return _ai;
+  }
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY not set');
   _ai = new GoogleGenAI({ apiKey });

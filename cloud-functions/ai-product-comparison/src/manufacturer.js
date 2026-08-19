@@ -27,7 +27,8 @@
  *   bekannt ist → nur neutrale Herkunfts-/Einordnungs-Aussage.
  */
 
-const { GoogleGenAI, Type } = require('@google/genai');
+const { Type } = require('@google/genai');
+const { getGenAIClient } = require('./genaiClient');
 
 const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
 
@@ -130,7 +131,7 @@ function buildUserContent(s) {
 }
 
 async function callGeminiManufacturer({ apiKey, snapshot, model = DEFAULT_MODEL }) {
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = getGenAIClient(apiKey);
   const userContent = buildUserContent(snapshot);
 
   const response = await ai.models.generateContent({

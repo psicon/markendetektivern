@@ -939,7 +939,12 @@ exports.processCashback = onMessagePublished(
   {
     region: REGION,
     topic: PUBSUB_TOPIC,
-    timeoutSeconds: 120,
+    // 19.08.2026: 120 s reichten nach der Vertex-Umstellung nicht mehr — ein
+    // langer Bon (52 Positionen) lief in "maximum request timeout". Die
+    // robuste OCR liest bis zu 6-mal (2 Flash + 2 enhanced + 2 Pro), dazu
+    // Forensik + ggf. DocAI-Eskalation. 540 s = Maximum fuer event-driven
+    // Functions, gibt Luft ohne Verhaltensaenderung im Normalfall (~10-20 s).
+    timeoutSeconds: 540,
     memory: '1GiB',
     secrets: [GEMINI_API_KEY],
   },
@@ -1582,14 +1587,25 @@ exports.processCashback = onMessagePublished(
       // (teurer) Retry bis zur PubSub-TTL.
       const attempts = (receipt.attempts || 0) + 1;
       const lastError = String(err && err.message ? err.message : err).slice(0, 300);
-      logger.error('process-failed', { cashbackId, err: err.message, attempts });
+      logger.error('process-failed', { cashbackId, err: err.message, attempts, code: err?.code ?? null });
       if (attempts >= MAX_PROCESS_ATTEMPTS) {
-        await docRef
-          .update({ status: 'rejected', rejectReason: 'max_retries_exceeded', attempts, lastError, updatedAt: now })
-          .catch(() => {});
+        // Incident 19.08.2026: War die OCR-Infrastruktur down (ocr_unavailable —
+        // alle Lesungen geworfen, z.B. 429 Spending-Cap), wurde der Bon NIE
+        // angesehen → niemals endgültig ablehnen. Auf 'review' halten; die App
+        // zeigt „wird geprüft", Auflösung per Reprocessing (ocr-Feld leeren +
+        // republishen) oder resolveCashbackReview. Nur echte Poison-Messages
+        // (Bild kaputt, Parser-Crash) enden weiterhin als 'rejected'.
+        const infra = err && err.code === 'ocr_unavailable';
+        const finalDoc = infra
+          ? { status: 'review', reviewReason: 'ocr_unavailable', attempts, lastError, updatedAt: now }
+          : { status: 'rejected', rejectReason: 'max_retries_exceeded', attempts, lastError, updatedAt: now };
+        const finalMirror = infra
+          ? { status: 'review', reviewReason: 'ocr_unavailable', attempts, updatedAt: now }
+          : { status: 'rejected', rejectReason: 'max_retries_exceeded', attempts, updatedAt: now };
+        await docRef.update(finalDoc).catch(() => {});
         await db
           .doc(`users/${uid}/cashback_status/${cashbackId}`)
-          .set({ status: 'rejected', rejectReason: 'max_retries_exceeded', attempts, updatedAt: now }, { merge: true })
+          .set(finalMirror, { merge: true })
           .catch(() => {});
         return; // ack → stoppt den PubSub-Retry (kein throw)
       }

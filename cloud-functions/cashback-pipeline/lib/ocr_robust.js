@@ -57,7 +57,7 @@ function findAgreement(reads) {
   return null;
 }
 
-function pack(chosen, confidence, method, reads) {
+function pack(chosen, confidence, method, reads, failedAttempts = 0) {
   const proAttempts = reads.filter((r) => r && r.__pro).length;
   const usedEnhanced = reads.some((r) => r && r.__enh);
   const out = { ...chosen };
@@ -68,6 +68,7 @@ function pack(chosen, confidence, method, reads) {
     confidence, // 'high' | 'medium' | 'low' | 'none'
     method, // how the result was chosen
     attempts: reads.length,
+    failedAttempts, // geworfene (nicht gezählte) Lese-Versuche — Observability
     proAttempts,
     enhanced: usedEnhanced,
     agreement: confidence === 'high' || confidence === 'medium',
@@ -86,6 +87,16 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
   const proModel = opts.proModel || PRO_MODEL;
   const maxFlash = opts.maxFlash || MAX_FLASH;
   const reads = [];
+  // Incident 19.08.2026: geworfene Versuche wurden hier still verschluckt.
+  // Bei Totalausfall (z.B. 429 Spending-Cap) blieb `reads` leer → Phase 4
+  // lieferte den isReceipt:false-Stub → Nutzer sah fälschlich „kein
+  // Kassenbon". Jetzt: jeden Fehlversuch loggen + sammeln; bleibt ALLES
+  // leer, ist das ein Infrastrukturfehler → werfen (Retry/Review), nie Stub.
+  const failed = [];
+  const noteFailure = (phase, e) => {
+    failed.push(`${phase}: ${String(e && e.message ? e.message : e).slice(0, 160)}`);
+    console.warn('ocr-attempt-failed', { phase, err: String(e && e.message ? e.message : e).slice(0, 300) });
+  };
 
   // Phase 1 — flash self-consistency with early stop on agreement.
   for (let i = 0; i < maxFlash; i++) {
@@ -93,11 +104,12 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
     try {
       r = await extractReceipt(imageBytes, mimeType, { model });
     } catch (e) {
+      noteFailure(`flash-${i + 1}`, e);
       continue;
     }
     reads.push(r);
     const agreed = findAgreement(reads);
-    if (agreed) return pack(agreed, 'high', 'flash-agreement', reads);
+    if (agreed) return pack(agreed, 'high', 'flash-agreement', reads, failed.length);
   }
 
   // Phase 1.5 — no agreement on the ORIGINAL → enhance the image (upscale +
@@ -116,12 +128,13 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
       try {
         r = await extractReceipt(escImg, 'image/jpeg', { model });
       } catch (e) {
+        noteFailure(`enhanced-${i + 1}`, e);
         continue;
       }
       r.__enh = true;
       reads.push(r);
       const agreed = findAgreement(reads);
-      if (agreed) return pack(agreed, 'high', 'enhanced-agreement', reads);
+      if (agreed) return pack(agreed, 'high', 'enhanced-agreement', reads, failed.length);
     }
   }
 
@@ -132,6 +145,7 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
     try {
       r = await extractReceipt(escImg, enhanced ? 'image/jpeg' : mimeType, { model: proModel });
     } catch (e) {
+      noteFailure(`pro-${i + 1}`, e);
       continue;
     }
     r.__pro = true;
@@ -139,17 +153,29 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
     const agreed = findAgreement(reads);
     if (agreed) {
       const conf = agreed.__pro ? 'medium' : 'high';
-      return pack(agreed, conf, 'pro-agreement', reads);
+      return pack(agreed, conf, 'pro-agreement', reads, failed.length);
     }
+  }
+
+  // Infrastruktur-Gate (Incident 19.08.2026): KEIN einziger Versuch hat eine
+  // Antwort geliefert → das Bild wurde nie angesehen. Das ist ein Backend-
+  // Ausfall (429/Netz/Auth), NIEMALS eine Aussage über den Bon. Werfen statt
+  // Stub → index.js behandelt es als transient (Retry, danach 'review').
+  if (reads.length === 0) {
+    const err = new Error(`ocr_unavailable: all ${failed.length} read attempts failed — last: ${failed[failed.length - 1] || 'n/a'}`);
+    err.code = 'ocr_unavailable';
+    throw err;
   }
 
   // Phase 3 — no agreement. Prefer any reconciling read (best-effort), low conf.
   const anyRec = reads.find(reconciles);
-  if (anyRec) return pack(anyRec, 'low', 'reconcile-no-agreement', reads);
+  if (anyRec) return pack(anyRec, 'low', 'reconcile-no-agreement', reads, failed.length);
 
   // Phase 4 — nothing reconciles; hand back the first read for the recon gate.
+  // `reads` ist hier garantiert nicht leer (Infrastruktur-Gate oben) — der
+  // Stub-Fallback bleibt nur als Form-Sicherheit erhalten.
   const first = reads[0] || { parsed: { isReceipt: false, items: [] }, model, promptVersion: null, latencyMs: 0 };
-  return pack(first, 'none', 'no-reconcile', reads);
+  return pack(first, 'none', 'no-reconcile', reads, failed.length);
 }
 
 module.exports = { extractReceiptRobust, sigOf, PRO_MODEL };

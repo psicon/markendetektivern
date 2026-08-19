@@ -24,7 +24,8 @@
  * thinkingBudget=0, niedrige Temperature).
  */
 
-const { GoogleGenAI, Type } = require('@google/genai');
+const { Type } = require('@google/genai');
+const { getGenAIClient } = require('./genaiClient');
 
 const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
 
@@ -226,7 +227,7 @@ function isAssessable(s) {
 }
 
 async function callGeminiAssessment({ apiKey, snapshot, category, model = DEFAULT_MODEL }) {
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = getGenAIClient(apiKey);
   const userContent = buildUserContent({ product: snapshot, category });
 
   const response = await ai.models.generateContent({
