@@ -1,3 +1,4 @@
+import { wireFcmNotificationTaps } from '@/lib/services/fcmDeepLinks';
 import { pushNotificationService } from '@/lib/services/pushNotificationService';
 import * as Notifications from 'expo-notifications';
 import React, { createContext, useContext, useEffect, useState } from 'react';
@@ -52,11 +53,23 @@ export const PushNotificationProvider: React.FC<PushNotificationProviderProps> =
   // wurde, holen wir den Response NACH dem ersten Mount nach und
   // routen den User. Einmal kurz warten damit der Root-Navigator
   // mounted ist.
+  //
+  // 86cb7gfc9: FCM-Pushes werden von @react-native-firebase/messaging
+  // zugestellt — expo-notifications sieht deren Taps NIE. Deshalb hier
+  // zusätzlich die RNFB-Kanäle verdrahten (Hintergrund-Tap + Cold Start),
+  // im selben 500-ms-Fenster.
   useEffect(() => {
+    let cleanupFcmTaps: (() => void) | undefined;
     const t = setTimeout(() => {
       void pushNotificationService.handleColdStartNotification();
+      void wireFcmNotificationTaps().then((cleanup) => {
+        cleanupFcmTaps = cleanup;
+      });
     }, 500);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      cleanupFcmTaps?.();
+    };
   }, []);
 
   // Permission-Status auch refreshen wenn User aus den iOS-Settings

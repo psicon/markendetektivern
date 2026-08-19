@@ -10,6 +10,11 @@ import { extractDeepLink, navigateToDeepLink } from './pushDeepLinks';
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
+    // SDK 53+: shouldShowAlert ist deprecated und wird von neuen
+    // expo-notifications-Versionen ignoriert — ohne Banner/List-Flags
+    // erscheinen Foreground-Pushes sonst gar nicht (86cb7gfc9).
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
   }),

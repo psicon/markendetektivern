@@ -106,7 +106,7 @@ async function recordState(uid: string, state: FcmState, reason?: string): Promi
  * when the dev-client hasn't been rebuilt with @react-native-firebase
  * /messaging yet.
  */
-function isMessagingLinked(): boolean {
+export function isMessagingLinked(): boolean {
   try {
     // RNFB modules register under the `RNFBMessagingModule` name on
     // the bridge (different across versions; we probe both).
@@ -124,7 +124,7 @@ function isMessagingLinked(): boolean {
   }
 }
 
-async function getMessagingModule(): Promise<any | null> {
+export async function getMessagingModule(): Promise<any | null> {
   if (!isMessagingLinked()) {
     console.log('[fcm] native module not linked — skipping push registration');
     return null;
