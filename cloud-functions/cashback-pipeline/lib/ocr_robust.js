@@ -79,7 +79,15 @@ function pack(chosen, confidence, method, reads, failedAttempts = 0) {
 /**
  * @param {Buffer} imageBytes
  * @param {string} mimeType
- * @param {object} [opts] {model, proModel, maxFlash}
+ * @param {object} [opts] {model, proModel, maxFlash, escalationGate}
+ *   escalationGate: optionale async Funktion (reads) => string|null.
+ *   Eskalations-Deckel (Kosten, 86cb-Nachtrag 19.08.2026): Liefert sie einen
+ *   Grund (z.B. 'bon_too_old'), wird die TEURE Leiter (Enhance-Lesungen +
+ *   Pro-Modell) übersprungen und das beste vorhandene Ergebnis zurückgegeben —
+ *   der Bon scheitert ohnehin an einem Policy-Gate, jede weitere Lesung wäre
+ *   verschwendet. Die eigentliche Ablehnung trifft weiterhin NUR der
+ *   Gate-Block in index.js (gleiche Resolver/Berechnungen, kein Drift).
+ *   Gate-Fehler führen NIE zum Kappen (fail-open zu voller Qualität).
  * @returns extractReceipt()-shaped result + `robust` metadata.
  */
 async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
@@ -112,6 +120,30 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
     if (agreed) return pack(agreed, 'high', 'flash-agreement', reads, failed.length);
   }
 
+  // Eskalations-Deckel: Vor der teuren Leiter (Enhance + Pro) prüfen, ob der
+  // Bon laut ≥2 unabhängigen Basis-Lesungen ohnehin an einem Policy-Gate
+  // scheitern wird. Wenn ja: bestes vorhandenes Ergebnis zurückgeben, Leiter
+  // sparen. Confidence bleibt ehrlich (low/none) — sollte der Bon wider
+  // Erwarten alle Gates passieren, hält das Review-Gate ihn (nie Auto-Payout).
+  const checkCap = async () => {
+    if (typeof opts.escalationGate !== 'function') return null;
+    try {
+      return await opts.escalationGate(reads);
+    } catch (e) {
+      console.warn('escalation-gate-failed', { err: String(e && e.message ? e.message : e).slice(0, 200) });
+      return null; // fail-open: volle Qualität
+    }
+  };
+  const capReason = await checkCap();
+  if (capReason) {
+    const best = reads.find(reconciles) || reads[0];
+    if (best) {
+      const out = pack(best, reconciles(best) ? 'low' : 'none', `escalation-capped:${capReason}`, reads, failed.length);
+      out.robust.cappedReason = capReason;
+      return out;
+    }
+  }
+
   // Phase 1.5 — no agreement on the ORIGINAL → enhance the image (upscale +
   // sharpen + contrast) and read it again. Image quality, not reasoning, is
   // the bottleneck on creased bons. Best-effort: fall back to original bytes.
@@ -135,6 +167,18 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
       reads.push(r);
       const agreed = findAgreement(reads);
       if (agreed) return pack(agreed, 'high', 'enhanced-agreement', reads, failed.length);
+    }
+  }
+
+  // Eskalations-Deckel, zweiter Check-Punkt: die Enhance-Lesungen können das
+  // Policy-Signal erhärtet haben; die Pro-Phase ist die teuerste Stufe.
+  const capReason2 = await checkCap();
+  if (capReason2) {
+    const best = reads.find(reconciles) || reads[0];
+    if (best) {
+      const out = pack(best, reconciles(best) ? 'low' : 'none', `escalation-capped:${capReason2}`, reads, failed.length);
+      out.robust.cappedReason = capReason2;
+      return out;
     }
   }
 

@@ -114,6 +114,13 @@ const OCR_ENGINE = (process.env.CASHBACK_OCR_ENGINE || 'gemini-direct').toLowerC
 // re-run via DocAI Expense Parser as a fallback. Cost: $0.05/page only
 // on the bons that need it. Auto-no-op if DocAI env vars unset.
 const ESCALATE_ON_RECON_FAIL = process.env.CASHBACK_ESCALATE_DOCAI !== 'false';
+// Eskalations-Deckel (Kosten, 19.08.2026): teure OCR-Leiter (Enhance/Pro/
+// DocAI) überspringen, wenn ≥2 unabhängige Basis-Lesungen zeigen, dass der
+// Bon ohnehin an einem Policy-Gate scheitert (deutlich zu alt / Markt
+// unbekannt). Kill-Switch: CASHBACK_OCR_ESCALATION_CAP=false. Die Alters-
+// Marge schützt gegen Datums-Fehllesungen (Kappen erst DEUTLICH über Limit).
+const ESCALATION_CAP_ENABLED = String(process.env.CASHBACK_OCR_ESCALATION_CAP ?? 'true') !== 'false';
+const ESCALATION_CAP_AGE_MARGIN_DAYS = Number(process.env.CASHBACK_OCR_ESCALATION_CAP_AGE_MARGIN || 14);
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
@@ -1009,13 +1016,52 @@ exports.processCashback = onMessagePublished(
         if (OCR_ENGINE === 'cv-hybrid') {
           ocr = await extractReceiptCVHybrid(bytes, mimeType, { model: config.ocrModel });
         } else {
+          // Eskalations-Deckel: Gate-Closure für den Robust-Wrapper. Nutzt
+          // EXAKT dieselben Resolver/Berechnungen wie der Gate-Block unten
+          // (bonAgeDays, resolveMerchant, Kampagnen-maxAgeDays) — kein Drift.
+          // Kappt nur, wenn das Signal über ALLE Lesungen stabil ist:
+          //  (a) Bon auf jeder Lesung deutlich älter als Limit + Marge, oder
+          //  (b) Markt auf jeder Lesung ausgefüllt UND vom Resolver unbekannt.
+          // Kampagnen-Limit lazy laden (nur harte Bons zahlen den Read).
+          let _maxAgePromise = null;
+          const lazyEffectiveMaxAge = () => {
+            if (!_maxAgePromise) {
+              const capCid = config.campaignsEnabled ? (receipt.campaignId || null) : null;
+              _maxAgePromise = (capCid ? loadCampaignById(capCid) : Promise.resolve(null))
+                .then((c) => {
+                  const m = Number(c?.maxAgeDays);
+                  return Number.isFinite(m) && m > 0 ? m : MAX_BON_AGE_DAYS;
+                })
+                .catch(() => MAX_BON_AGE_DAYS);
+            }
+            return _maxAgePromise;
+          };
+          const escalationGate = ESCALATION_CAP_ENABLED
+            ? async (reads) => {
+                const parsedReads = reads.map((r) => r && r.parsed).filter((p) => p && p.isReceipt !== false);
+                if (parsedReads.length < 2) return null;
+                const ages = parsedReads.map((p) => bonAgeDays(p.bonDate));
+                if (ages.every((a) => a != null)) {
+                  const maxAge = await lazyEffectiveMaxAge();
+                  if (Math.min(...ages) > maxAge + ESCALATION_CAP_AGE_MARGIN_DAYS) return 'bon_too_old';
+                }
+                if (parsedReads.every((p) => String(p.merchant || '').trim())) {
+                  const infos = await Promise.all(
+                    parsedReads.map((p) => resolveMerchant(p.merchant, p.bonCountry)),
+                  );
+                  if (infos.every((m) => !m)) return 'unknown_merchant';
+                }
+                return null;
+              }
+            : undefined;
+
           // Primary path — ROBUST Gemini-on-image: reads the image several
           // times and trusts what independent runs AGREE on (sequence-level,
           // so it catches swaps/compensating errors Σ alone misses). Rescues
           // flaky/creased bons that a single read would mis-read → reject.
           // Confidence (high/medium/low/none) lands in ocr.robust. Validated
           // on 42 real bons: 40/40 reconcile, 0 high-confident-but-wrong.
-          ocr = await extractReceiptRobust(bytes, mimeType, { model: config.ocrModel });
+          ocr = await extractReceiptRobust(bytes, mimeType, { model: config.ocrModel, escalationGate });
           ocr.cvLatencyMs = 0;
           ocr.geminiLatencyMs = ocr.latencyMs;
           ocr.ocrText = '';
@@ -1034,6 +1080,8 @@ exports.processCashback = onMessagePublished(
           && ESCALATE_ON_RECON_FAIL
           && isDocAIConfigured()
           && ocr.parsed?.isReceipt !== false
+          // Eskalations-Deckel: reject-gebundener Bon → auch DocAI sparen.
+          && !ocr.robust?.cappedReason
         ) {
           try {
             const docai = await extractReceiptDocAI(bytes, mimeType);

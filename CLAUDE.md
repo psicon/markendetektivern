@@ -2604,6 +2604,19 @@ in der App — Metro/TestFlight/App-Version beeinflussen die Erkennung NICHT.
   hängen + low → User-Tap/Review.
 - **Modell:** `gemini-3.5-flash` primär, `gemini-2.5-pro` Eskalation. An echten
   Bons: 3.5-flash 30/42 reconcile-clean vs 2.5-flash 18/42; pro ~33% teurer.
+- **„Billig zuerst" (Phase-0 ohne Denken) ist ENDGÜLTIG No-Go (2× gemessen,
+  08/2026):** Runde 1 (60 Juli-Bons): 2 falsch akzeptiert; Runde 2 (100 frische
+  Bons, Kurz-Bon-Schranke ≤25 Artikel): 4 falsch akzeptiert (davon 3 KURZE Bons
+  — die Schranke hilft nicht) bei nur 50,5 % Phase-0-Ausbeute. Regel war
+  „falsch akzeptiert muss 0 sein". Thinking-Budget 0/1024 wird vom Modell
+  zudem geclampt. Die Konsens-Lesungen brauchen das Denken — hier NICHT sparen.
+  Der stattdessen gebaute Spar-Hebel ist der **Eskalations-Deckel**
+  (`opts.escalationGate` in ocr_robust.js + Gate-Closure in index.js): kappt
+  Enhance/Pro/DocAI für Bons, die laut ≥2 unabhängigen Basis-Lesungen sicher
+  an Policy-Gates scheitern (deutlich zu alt mit +14-Tage-Marge / Markt auf
+  allen Lesungen unbekannt). Kill-Switch `CASHBACK_OCR_ESCALATION_CAP=false`.
+  Entscheidung trifft weiter NUR der Gate-Block; gedeckelte Ergebnisse tragen
+  confidence low/none → Review-Gate fängt Drift (nie Auto-Payout).
 - **Bildqualität ist der eigentliche Engpass** (Knicke durch Ziffern), nicht das
   Modell-Reasoning. 2×-Upscale+Kontrast+Schärfen hebt harte Bons messbar
   (1/6→5/6) — noch NICHT in der Pipeline (bräuchte `sharp`).
