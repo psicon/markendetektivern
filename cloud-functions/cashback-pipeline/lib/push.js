@@ -17,6 +17,7 @@
 
 'use strict';
 
+const crypto = require('crypto');
 const admin = require('firebase-admin');
 const { logger } = require('firebase-functions');
 
@@ -79,12 +80,20 @@ async function sendCashbackReady(uid, payload) {
   }
 
   const tokens = entries.map((e) => e.token);
+  // 86cb22c0m: eindeutige Push-ID für Konversions-Tracking. Wandert (a) in
+  // die data-Payload (der Client protokolliert den Tap als
+  // users/{uid}/push_events/{pushId}) und (b) ins Send-Log push_log/{pushId}
+  // (admin-only). Auswertung „wer hat nach Push X gehandelt": push_log ×
+  // push_events × receipts/crowd_uploads über uid + Zeitfenster joinen.
+  const pushId = `p_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`;
+  const deepLink = payload.deepLink || `markendetektivern://cashback/pending/${payload.cashbackId}`;
   const message = {
     notification: { title: payload.title, body: payload.body },
     data: {
       cashbackId: String(payload.cashbackId),
-      deepLink: payload.deepLink || `markendetektivern://cashback/pending/${payload.cashbackId}`,
+      deepLink,
       kind: 'cashback_ready',
+      pushId,
     },
     apns: {
       payload: {
@@ -110,15 +119,35 @@ async function sendCashbackReady(uid, payload) {
 
   await pruneInvalidTokens(uid, entries, response.responses);
 
+  // Send-Log (86cb22c0m) — admin-only Collection (kein Rules-Block nötig,
+  // der Whitelist-deny-all deckt sie). Basis der Konversions-Auswertung.
+  await admin
+    .firestore()
+    .doc(`push_log/${pushId}`)
+    .set({
+      pushId,
+      uid,
+      kind: 'cashback_ready',
+      cashbackId: String(payload.cashbackId),
+      deepLink,
+      title: payload.title,
+      sentAt: admin.firestore.FieldValue.serverTimestamp(),
+      tokens: tokens.length,
+      success: response.successCount,
+      failure: response.failureCount,
+    })
+    .catch((e) => logger.warn('[cashback.push] push_log write failed', { pushId, err: e.message }));
+
   logger.info('[cashback.push] sent', {
     uid,
+    pushId,
     cashbackId: payload.cashbackId,
     tokens: tokens.length,
     success: response.successCount,
     failure: response.failureCount,
   });
 
-  return { sent: response.successCount, failed: response.failureCount };
+  return { sent: response.successCount, failed: response.failureCount, pushId };
 }
 
 module.exports = { sendCashbackReady };

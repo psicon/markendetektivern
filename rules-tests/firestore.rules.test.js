@@ -269,6 +269,23 @@ describe('User-Subcollections: Owner ja, Fremde/Unauth nie', () => {
     await assertFails(getDoc(doc(mallory(), `users/${ALICE}/someFutureSub/x1`)));
     await assertFails(setDoc(doc(alice(), `users/${ALICE}/someFutureSub/x2`), { a: 1 }));
   });
+  test('push_events (86cb22c0m): Owner create-only mit Shape, ID = pushId', async () => {
+    // Legitimer Open-Event (exakt die Client-Shape aus fcmDeepLinks.ts)
+    await assertSucceeds(setDoc(doc(alice(), `users/${ALICE}/push_events/p_abc123`), {
+      pushId: 'p_abc123', kind: 'cashback_ready', deepLink: 'markendetektivern://x',
+      openedAt: serverTimestamp(),
+    }));
+    // ANGRIFF/Drift: falsche Shape, ID ≠ pushId, fremder User, mutieren
+    await assertFails(setDoc(doc(alice(), `users/${ALICE}/push_events/p_noshape`), { foo: 1 }));
+    await assertFails(setDoc(doc(alice(), `users/${ALICE}/push_events/p_other`), {
+      pushId: 'p_MISMATCH', openedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(mallory(), `users/${ALICE}/push_events/p_evil`), {
+      pushId: 'p_evil', openedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(alice(), `users/${ALICE}/push_events/p_abc123`), { kind: 'x' }));
+    await assertFails(deleteDoc(doc(alice(), `users/${ALICE}/push_events/p_abc123`)));
+  });
 });
 
 // ─── 6. PUNKTE-LEDGER (append-only + Shape) ──────────────────────────

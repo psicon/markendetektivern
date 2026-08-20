@@ -317,6 +317,18 @@ service cloud.firestore {
           && request.resource.data.timestamp is timestamp;
         allow update, delete: if false;
       }
+      // Push-Open-Events (86cb22c0m): Client protokolliert den Tap auf eine
+      // Push-Benachrichtigung. Doc-ID = pushId (idempotent, nur create) —
+      // Auswertung joint serverseitig gegen push_log/{pushId} (admin-only).
+      match /push_events/{pushId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && request.resource.data.keys().hasAll(['pushId', 'openedAt'])
+          && request.resource.data.pushId is string
+          && request.resource.data.pushId == pushId
+          && request.resource.data.openedAt is timestamp;
+        allow update, delete: if false;
+      }
       // GELD-Ledger + OCR-Artikel-Trail: NUR Cloud Functions schreiben.
       match /cashback_ledger/{document} {
         allow read: if isOwner(userId);
