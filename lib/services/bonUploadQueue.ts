@@ -24,6 +24,7 @@ import * as FileSystem from 'expo-file-system';
 import { AppState } from 'react-native';
 
 import { prepareForUpload } from '@/lib/utils/cashbackImage';
+import { auth } from '@/lib/firebase';
 import journeyTrackingService from './journeyTrackingService';
 import { isOnline, refreshNetwork, subscribeNetwork } from './network';
 import {
@@ -39,6 +40,12 @@ const STORAGE_KEY = 'bon_upload_queue_v1';
 const QUEUE_DIR = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? ''}bon_upload_queue/`;
 const MAX_RETRY_DELAY_MS = 5 * 60_000;
 const MAX_AUTO_ATTEMPTS = 5;
+// 86cb6tx29: Das Retry-Budget ist ein FENSTER, kein Lebenszeit-Zähler.
+// Vorher verbrannten die 5 Versuche in ~100 s (linear 10-40 s) und der Job
+// lag danach für immer — unsichtbar. Jetzt: nach 30 min Ruhe wird das
+// Budget wieder freigegeben (jede Auto-Wiederbelebung — AppState, NetInfo,
+// kickBonQueue — prüft das Fenster).
+const RETRY_WINDOW_MS = 30 * 60_000;
 
 export type BonJobStatus = 'queued' | 'uploading' | 'enqueueing' | 'failed';
 
@@ -57,6 +64,14 @@ export interface BonJob {
   attempts: number;
   lastError: string | null;
   createdAt: number;
+  /** Zeitpunkt des letzten Versuchs — Basis fürs Retry-Fenster (86cb6tx29). */
+  lastAttemptAt?: number;
+  /** Harte Server-Ablehnung (consent_missing/rate_limited): kein Auto-Retry,
+   *  nur manuell — verbrennt kein Budget. */
+  terminal?: boolean;
+  /** Mirror-Write (users/{uid}/cashback_status) schlug fehl — der Job ist
+   *  dann NUR über die lokale Queue-Anzeige sichtbar (history.tsx). */
+  mirrorFailed?: boolean;
 }
 
 export interface EnqueueBonInput {
@@ -224,7 +239,7 @@ export async function enqueueBon(input: EnqueueBonInput): Promise<string> {
   // real merchant. Writing "Wird hochgeladen …" as merchantName leaked into
   // the bon TITLE even after the status moved to "Wird geprüft" (Task
   // 86ca5fazh) — status and title contradicted each other.
-  void createPendingMirror(input.uid, id).catch(() => {});
+  void createPendingMirror(input.uid, id).catch((e) => noteMirrorFailure(id, e));
 
   void processQueue();
   return id;
@@ -245,7 +260,25 @@ export function getBonJob(id: string): BonJob | null {
 
 export async function retryBonJob(id: string) {
   await ensureLoaded();
-  setJob(id, { status: 'queued', attempts: 0, lastError: null });
+  setJob(id, { status: 'queued', attempts: 0, lastError: null, terminal: false });
+  void processQueue();
+}
+
+/** Alle fehlgeschlagenen Jobs erneut anstoßen (manuell — „Alle erneut"-Pill
+ *  in „Meine Bons"). Setzt Budget UND terminal zurück, 1:1 wie die
+ *  Schwester-Queue (uploadQueue.retryAllFailed). */
+export async function retryAllFailedBons() {
+  await ensureLoaded();
+  let changed = false;
+  jobs = jobs.map((j) => {
+    if (j.status !== 'failed') return j;
+    changed = true;
+    return { ...j, status: 'queued' as BonJobStatus, attempts: 0, lastError: null, terminal: false };
+  });
+  if (changed) {
+    emit();
+    void persist();
+  }
   void processQueue();
 }
 
@@ -272,11 +305,19 @@ function pickNext(): BonJob | null {
 }
 
 function requeueFailed() {
+  const now = Date.now();
   let changed = false;
   jobs = jobs.map((j) => {
-    if (j.status !== 'failed' || j.attempts >= MAX_AUTO_ATTEMPTS) return j;
+    if (j.status !== 'failed' || j.terminal) return j;
+    const windowElapsed = !j.lastAttemptAt || now - j.lastAttemptAt > RETRY_WINDOW_MS;
+    if (j.attempts >= MAX_AUTO_ATTEMPTS && !windowElapsed) return j;
     changed = true;
-    return { ...j, status: 'queued' as BonJobStatus };
+    // Ruhefenster abgelaufen → Budget auffrischen, sonst nur re-queuen.
+    return {
+      ...j,
+      status: 'queued' as BonJobStatus,
+      ...(j.attempts >= MAX_AUTO_ATTEMPTS ? { attempts: 0 } : {}),
+    };
   });
   if (changed) {
     emit();
@@ -285,7 +326,9 @@ function requeueFailed() {
 }
 
 function scheduleRetry(attempts: number) {
-  const delay = Math.min(MAX_RETRY_DELAY_MS, 10_000 * Math.max(1, attempts));
+  // Exponentiell (10/20/40/80/160 s, Deckel 5 min) statt linear — vorher
+  // war MAX_RETRY_DELAY_MS unerreichbar und das Budget in ~100 s verbrannt.
+  const delay = Math.min(MAX_RETRY_DELAY_MS, 10_000 * 2 ** Math.max(0, attempts - 1));
   if (retryTimer) clearTimeout(retryTimer);
   retryTimer = setTimeout(() => {
     retryTimer = null;
@@ -294,14 +337,49 @@ function scheduleRetry(attempts: number) {
   }, delay);
 }
 
+/** Mirror-Write-Fehler NICHT verschlucken: loggen + am Job markieren, damit
+ *  die Queue-Anzeige in „Meine Bons" den Job trotzdem sichtbar macht. */
+function noteMirrorFailure(jobId: string, e: any) {
+  console.warn('[bonQueue] mirror write failed', jobId, e?.message);
+  const j = getJob(jobId);
+  if (j && !j.mirrorFailed) setJob(jobId, { mirrorFailed: true });
+}
+
 async function runJob(job: BonJob) {
+  // uid-Drift (86cb6tx29): anonym → registriert / Re-Login. Der Job trägt
+  // die uid vom Einreihen ein; storage.rules verlangt request.auth.uid ==
+  // userId → mit alter uid schlägt JEDER Versuch dauerhaft fehl und
+  // verbrannte vorher still das Budget. Vor dem Upload auf die aktuelle
+  // uid umschreiben + Mirror umziehen.
+  const currentUid = auth.currentUser?.uid ?? null;
+  if (currentUid && currentUid !== job.uid) {
+    const oldUid = job.uid;
+    console.log('[bonQueue] uid drift — rewriting job', job.id);
+    setJob(job.id, { uid: currentUid });
+    job = { ...job, uid: currentUid };
+    void deletePendingMirror(oldUid, job.id).catch(() => {});
+    void createPendingMirror(currentUid, job.id).catch((e) => noteMirrorFailure(job.id, e));
+  }
+
   setJob(job.id, { status: 'uploading', progress: 0, lastError: null });
   // Reset the mirror status back to 'uploading' (a previous fail may have left
   // it 'upload_failed'). Fire-and-forget.
-  void setPendingMirrorProgress(job.uid, job.id, 0).catch(() => {});
+  void setPendingMirrorProgress(job.uid, job.id, 0).catch((e) => noteMirrorFailure(job.id, e));
 
   try {
     const prepared = await prepareForUpload(job.imageUri, 2000, job.width, job.height);
+    // Sicherheitsnetz-Fall (Datei war > Upload-Limit und wurde eben doch
+    // skaliert): Hash der TATSÄCHLICH hochgeladenen Bytes nachziehen —
+    // Server-Dedup + Forensik vergleichen capture.hash gegen den Upload.
+    let effectiveHash = job.hash;
+    if (prepared.resized && prepared.uri !== job.imageUri) {
+      const { hashImageFile } = await import('@/lib/utils/cashbackImage');
+      const rehashed = await hashImageFile(prepared.uri);
+      if (rehashed) {
+        effectiveHash = rehashed;
+        setJob(job.id, { hash: rehashed });
+      }
+    }
 
     let lastWrittenPct = 0;
     const upload = await uploadBonImage(prepared.uri, job.uid, {
@@ -338,7 +416,7 @@ async function runJob(job: BonJob) {
     const result = await enqueueCashback({
       clientUploadId: job.id,
       storagePath: upload.storagePath,
-      bytesHash: job.hash,
+      bytesHash: effectiveHash,
       capturedAt: job.capturedAt,
       source: job.source,
       campaignId: job.campaignId,
@@ -356,13 +434,27 @@ async function runJob(job: BonJob) {
     await persist();
     emit();
   } catch (e: any) {
-    const attempts = (getJob(job.id)?.attempts ?? job.attempts) + 1;
+    // Fehlerklassen trennen (86cb6tx29): harte Server-Ablehnungen sind mit
+    // Wiederholen NICHT heilbar — sie verbrennen kein Budget und werden
+    // nicht auto-retried (consent_missing braucht die Einwilligung des
+    // Nutzers, rate_limited löst sich erst am Folgetag). Manueller Retry
+    // (retryBonJob / retryAllFailedBons) setzt terminal zurück.
+    const code = e?.code as string | undefined;
+    const terminal = code === 'consent_missing' || code === 'rate_limited';
+    const prevAttempts = getJob(job.id)?.attempts ?? job.attempts;
+    const attempts = terminal ? prevAttempts : prevAttempts + 1;
     const human = humanError(e);
-    setJob(job.id, { status: 'failed', attempts, lastError: human });
+    setJob(job.id, {
+      status: 'failed',
+      attempts,
+      lastError: human,
+      lastAttemptAt: Date.now(),
+      ...(terminal ? { terminal: true } : {}),
+    });
     // Persist failure to the mirror so history/other screens don't show a
     // forever-"uploading" zombie (fire-and-forget — hangs offline).
-    void setPendingMirrorError(job.uid, job.id, human).catch(() => {});
-    if (attempts < MAX_AUTO_ATTEMPTS) scheduleRetry(attempts);
+    void setPendingMirrorError(job.uid, job.id, human).catch((err) => noteMirrorFailure(job.id, err));
+    if (!terminal && attempts < MAX_AUTO_ATTEMPTS) scheduleRetry(attempts);
   }
 }
 

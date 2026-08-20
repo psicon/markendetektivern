@@ -112,6 +112,14 @@ function ThemedApp() {
         // cached ist, lässt positive Treffer in Ruhe).
         const { default: OpenFoodService } = await import('@/lib/services/openfood');
         OpenFoodService.purgeNegativeCacheOnce().catch(() => null);
+        // 86cb6tx29: Upload-Queues (Bons + Produktfotos) beim Boot wecken.
+        // Vorher registrierten sich deren AppState-/NetInfo-Listener erst,
+        // wenn der Nutzer einen Cashback-/Submit-Screen öffnete — nach
+        // App-Kill lagen persistierte Jobs bis dahin unangetastet.
+        const { kickBonQueue } = await import('@/lib/services/bonUploadQueue');
+        const { kickUploadQueue } = await import('@/lib/services/uploadQueue');
+        kickBonQueue();
+        kickUploadQueue();
         if (!cancelled) {
           console.log('🔥 Stöbern Reference-Data prewarmed');
         }
