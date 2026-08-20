@@ -36,7 +36,7 @@ import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { enqueueBon } from '@/lib/services/bonUploadQueue';
 import { getSelectedCampaignId } from '@/lib/services/cashbackUpload';
-import { verdictFor, type CapturedBon } from '@/lib/utils/cashbackImage';
+import { hashImageFile, verdictFor, type CapturedBon } from '@/lib/utils/cashbackImage';
 
 const CHECK_ITEMS: { key: 'corners' | 'date' | 'items'; label: string; sub: string }[] = [
   {
@@ -175,8 +175,17 @@ export default function CashbackReviewScreen() {
   const allChecked = checks.corners && checks.date && checks.items;
   // "Looks ready" drives the visual state (color stays green while
   // submitting). canSubmit gates the actual press handler.
-  const looksReady = allChecked && verdict.hashOk && verdict.sizeOk;
+  // 86cb6twnp: hashOk blockiert NICHT mehr — ein fehlender Hash wird in
+  // handleSubmit einmal nachgerechnet (Fallback) statt stumm zu sperren.
+  // sizeOk bleibt Gate (Storage-Rule 8 MB), ist aber durch die Capture-
+  // seitige Verkleinerung praktisch immer erfüllt — und wenn nicht, sieht
+  // der Nutzer jetzt WARUM (blockerHint unten + Tap-Erklärung am Button).
+  const looksReady = allChecked && verdict.sizeOk;
   const canSubmit = looksReady && !submitting;
+
+  // Sichtbare Erklärung, sobald die Checkboxen bestätigt sind, aber ein
+  // File-Gate blockt. Vorher war der EINZIGE Hinweis ein graues Icon.
+  const blockerHint = allChecked && !verdict.sizeOk ? verdict.sizeLabel : null;
 
   const handleRetake = useCallback(() => {
     router.replace('/cashback/capture');
@@ -210,6 +219,18 @@ export default function CashbackReviewScreen() {
       return;
     }
     setSubmitting(true);
+    // Hash-Fallback (86cb6twnp): schlug das Hashen beim Aufnehmen fehl
+    // (Heap/IO), einmal nachziehen statt hart zu blockieren. Der Server
+    // rechnet ohnehin autoritativ nach — aber Dedup braucht einen Wert.
+    let bytesHash = bon.bytesHash;
+    if (bytesHash.length !== 64) {
+      bytesHash = await hashImageFile(bon.uri);
+      if (bytesHash.length !== 64) {
+        setSubmitError('Das Bild konnte nicht geprüft werden — bitte nimm den Bon noch einmal auf.');
+        setSubmitting(false);
+        return;
+      }
+    }
     // Hand the receipt to the persistent background upload queue: it copies
     // the image to a durable dir + creates the placeholder mirror, then uploads
     // in the background with NetInfo auto-resume. Survives LEAVING this screen
@@ -220,7 +241,7 @@ export default function CashbackReviewScreen() {
       localId = await enqueueBon({
         uid: user.uid,
         imageUri: bon.uri,
-        hash: bon.bytesHash,
+        hash: bytesHash,
         width: bon.width,
         height: bon.height,
         capturedAt: bon.capturedAt,
@@ -447,7 +468,7 @@ export default function CashbackReviewScreen() {
             );
           })}
 
-          {submitError ? (
+          {submitError || blockerHint ? (
             <View
               style={{
                 marginTop: 12,
@@ -461,7 +482,7 @@ export default function CashbackReviewScreen() {
             >
               <MaterialCommunityIcons name="alert-circle-outline" size={18} color="#d6603a" />
               <Text style={{ color: '#d6603a', fontFamily: fontFamilyVariants.body, fontSize: 13, flex: 1, lineHeight: 18 }}>
-                {submitError}
+                {submitError || blockerHint}
               </Text>
             </View>
           ) : null}
@@ -474,8 +495,19 @@ export default function CashbackReviewScreen() {
             <Text style={styles.ctaSecondaryText}>Nochmal</Text>
           </Pressable>
           <Pressable
-            disabled={!canSubmit}
-            onPress={handleSubmit}
+            // 86cb6twnp: NIE mehr ein stummer toter Button. Blockiert ein
+            // Gate, bleibt der Button tippbar und der Tap zeigt die
+            // Erklärung im Fehler-Block — disabled nur während des Submits.
+            disabled={submitting}
+            onPress={
+              canSubmit
+                ? handleSubmit
+                : () =>
+                    setSubmitError(
+                      blockerHint ??
+                        'Bitte bestätige zuerst die drei Punkte oben — dann kannst du einreichen.',
+                    )
+            }
             style={[styles.cta, styles.ctaPrimary, { flex: 1.4 }]}
           >
             {submitting ? (
@@ -484,7 +516,11 @@ export default function CashbackReviewScreen() {
               <>
                 <MaterialCommunityIcons name="cloud-upload-outline" size={18} color={looksReady ? '#fff' : theme.textMuted ?? '#888'} />
                 <Text style={styles.ctaPrimaryText}>
-                  {allChecked ? 'Einreichen' : `Noch ${3 - Object.values(checks).filter(Boolean).length} bestätigen`}
+                  {!allChecked
+                    ? `Noch ${3 - Object.values(checks).filter(Boolean).length} bestätigen`
+                    : blockerHint
+                    ? 'Datei zu groß'
+                    : 'Einreichen'}
                 </Text>
               </>
             )}

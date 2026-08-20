@@ -21,6 +21,14 @@
 
 import * as Crypto from 'expo-crypto';
 import * as FileSystem from 'expo-file-system';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { Image } from 'react-native';
+
+// Storage-Rule-Limit (storage.rules: request.resource.size < 8 MB) minus
+// Sicherheitsmarge. Dateien darüber kann der Upload NIE annehmen — sie
+// blockierten das Einreichen bisher STUMM (86cb6twnp, Fall Uwe: ~10 Bons
+// über 4 Wochen, serverseitig 0 Spuren).
+const UPLOAD_SIZE_LIMIT_BYTES = 7_500_000;
 
 export interface CapturedBon {
   uri: string;
@@ -74,28 +82,97 @@ export async function estimateBrightness(_uri: string): Promise<number> {
   return 128;
 }
 
+/** Bild-Dimensionen ermitteln (0/0 wenn nicht lesbar). */
+async function getImageDims(uri: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve) => {
+    Image.getSize(
+      uri,
+      (width, height) => resolve({ width, height }),
+      () => resolve({ width: 0, height: 0 }),
+    );
+  });
+}
+
 /**
- * Pass-through "prepare for upload" — Phase 1.5 doesn't resize because
- * we don't have expo-image-manipulator installed. expo-camera quality
- * 0.9 produces JPEGs around 1-3 MB which is comfortable for the 8 MB
- * upload limit in the storage rules.
+ * Stellt sicher, dass die Datei unters Upload-Limit passt (86cb6twnp).
  *
- * Phase 1.5.1 brings native resize via ML-Kit's pipeline; until then
- * Cloud Functions can downscale server-side if size becomes an issue.
+ * WICHTIG (CLAUDE.md „volle Qualität für die Analyse"): Bilder unterhalb
+ * des Limits werden NICHT angefasst — der Default bleibt Pass-Through in
+ * Originalqualität. Skaliert wird AUSSCHLIESSLICH, wenn die Datei sonst an
+ * der Storage-Rule (8 MB) scheitern würde — dann ist „leicht verkleinert
+ * einreichen" strikt besser als „gar nicht einreichbar" (moderne Android-
+ * Kameras liefern >8-MB-JPEGs; genau die blockierten bisher stumm).
+ * Die Stufen sind bewusst konservativ (3000 px lange Kante zuerst, nicht
+ * die 800px/q40-Kaputt-Stufe aus dem optimizeImage-Vorfall), damit die
+ * OCR-Lesbarkeit kleiner Bon-Schrift erhalten bleibt.
+ */
+export async function ensureUploadableSize(
+  uri: string,
+  width?: number,
+  height?: number,
+): Promise<{ uri: string; width: number; height: number; sizeBytes: number; resized: boolean }> {
+  const sizeBytes = await getFileSize(uri);
+  if (sizeBytes > 0 && sizeBytes <= UPLOAD_SIZE_LIMIT_BYTES) {
+    return { uri, width: width ?? 0, height: height ?? 0, sizeBytes, resized: false };
+  }
+  if (sizeBytes === 0) {
+    // Größe nicht lesbar → nichts riskieren, Original durchreichen.
+    return { uri, width: width ?? 0, height: height ?? 0, sizeBytes, resized: false };
+  }
+
+  let dims = { width: width || 0, height: height || 0 };
+  if (!dims.width || !dims.height) dims = await getImageDims(uri);
+  const longEdge = Math.max(dims.width, dims.height);
+
+  // Konservative Leiter: erst moderat runter, nur bei Bedarf weiter.
+  const steps: Array<{ maxLongEdge: number; compress: number }> = [
+    { maxLongEdge: 3000, compress: 0.92 },
+    { maxLongEdge: 2400, compress: 0.88 },
+    { maxLongEdge: 2000, compress: 0.85 },
+  ];
+
+  for (const step of steps) {
+    try {
+      const actions =
+        longEdge > 0 && longEdge > step.maxLongEdge
+          ? [
+              dims.width >= dims.height
+                ? { resize: { width: step.maxLongEdge } }
+                : { resize: { height: step.maxLongEdge } },
+            ]
+          : []; // Kante unbekannt/klein → nur re-komprimieren
+      const out = await manipulateAsync(uri, actions, {
+        compress: step.compress,
+        format: SaveFormat.JPEG,
+      });
+      const outSize = await getFileSize(out.uri);
+      if (outSize > 0 && outSize <= UPLOAD_SIZE_LIMIT_BYTES) {
+        return { uri: out.uri, width: out.width, height: out.height, sizeBytes: outSize, resized: true };
+      }
+    } catch (e) {
+      console.warn('⚠️ ensureUploadableSize step failed:', e);
+      // nächste Stufe probieren
+    }
+  }
+
+  // Alle Stufen gescheitert → Original zurück; das Größen-Gate in der
+  // Review zeigt dem Nutzer dann eine SICHTBARE Erklärung (nie mehr stumm).
+  return { uri, width: dims.width, height: dims.height, sizeBytes, resized: false };
+}
+
+/**
+ * "Prepare for upload" — Sicherheitsnetz in der Upload-Queue: greift nur,
+ * wenn ein Job mit Über-Limit-Datei in die Queue gelangt ist (Altbestand,
+ * oder die Capture-seitige Verkleinerung schlug fehl). Normalfall =
+ * Pass-Through in Originalqualität (siehe ensureUploadableSize).
  */
 export async function prepareForUpload(
   uri: string,
   _maxLongEdge = 2000,
   width?: number,
   height?: number,
-): Promise<{ uri: string; width: number; height: number; sizeBytes: number }> {
-  const sizeBytes = await getFileSize(uri);
-  return {
-    uri,
-    width: width ?? 0,
-    height: height ?? 0,
-    sizeBytes,
-  };
+): Promise<{ uri: string; width: number; height: number; sizeBytes: number; resized: boolean }> {
+  return ensureUploadableSize(uri, width, height);
 }
 
 /**
@@ -106,15 +183,22 @@ export async function buildCapturedBon(
   width: number,
   height: number,
 ): Promise<CapturedBon> {
+  // 86cb6twnp: ZUERST unters Upload-Limit bringen (Pass-Through im
+  // Normalfall), DANN hashen. So ist der Hash konsistent mit den Bytes,
+  // die tatsächlich hochgeladen werden (Server-Dedup vergleicht
+  // capture.hash), und hashImageFile liest nie eine >8-MB-Datei komplett
+  // als Base64 in den JS-Heap (das war Blockier-Ursache Nr. 2).
+  const prepared = await ensureUploadableSize(uri, width, height);
+
   const [bytesHash, sizeBytes] = await Promise.all([
-    hashImageFile(uri),
-    getFileSize(uri),
+    hashImageFile(prepared.uri),
+    prepared.sizeBytes > 0 ? Promise.resolve(prepared.sizeBytes) : getFileSize(prepared.uri),
   ]);
 
   return {
-    uri,
-    width,
-    height,
+    uri: prepared.uri,
+    width: prepared.width || width,
+    height: prepared.height || height,
     bytesHash,
     approxBrightness: 128,
     sizeBytes,
