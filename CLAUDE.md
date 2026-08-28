@@ -743,6 +743,32 @@ Beide Plattformen haben getrennte Zähler:
 
 EAS synchronisiert beide Stellen pro Plattform automatisch.
 
+### Android-Submit landet NUR im INTERNAL-Track — Promotion ist manuelle Pflicht
+
+`eas.json` → `submit.production.android` hat KEINEN `track`-Eintrag → EAS lädt
+aufs Default-Ziel **internal**, NICHT production. Der Play-Store-Rollout braucht
+danach IMMER die manuelle Promotion in der Play Console (Internal → Production).
+
+**Vorfall (aufgedeckt 28.08.2026):** Android vc 1234 (6.0.15, Capture/Standort-
+Feature, identischer Commit wie iOS 1264) wurde am 11.08. gebaut + submitted —
+und blieb dann **~2 Wochen unbemerkt im Internal-Track** liegen. Die Nutzer
+liefen durchgehend auf vc 1230 (6.0.13; per Reporting-API bewiesen: 0 Nutzer
+auf 1234 bis mind. 23.08.). Folge: iOS lieferte ab 11.08. Standort-Daten in
+crowd_uploads, Android gar keine — sah aus wie ein Android-Bug, war aber ein
+nie ausgerollter Release. Auch vc 1231–1233 erreichten nie ein Feld-Gerät.
+
+Regeln:
+- Nach jedem Android-Submit gehört die **Promotion zur Definition of Done**
+  (oder bewusst dokumentiert, dass der Build im Internal-Track bleibt).
+- Rollout VERIFIZIEREN, nicht annehmen: Track-Status via Android-Publisher-API
+  (edits→tracks.list, read-only) zeigt was promoted ist; die Reporting-API
+  (`crashRateMetricSet:query` mit dimension versionCode + metric distinctUsers)
+  zeigt, welche versionCodes WIRKLICH im Feld laufen (~4 Tage Daten-Latenz,
+  endTime ≤ "current freshness" sonst 400).
+- Merker: iOS-Verhalten ≠ Android-Verhalten bei identischem Commit → IMMER erst
+  prüfen, ob beide Builds überhaupt bei Nutzern angekommen sind, bevor man
+  einen Plattform-Bug sucht.
+
 ### `.easignore` ERSETZT `.gitignore` — nichts wird gemerged
 
 Sobald eine `.easignore` existiert, benutzt EAS **ausschliesslich** diese Datei
