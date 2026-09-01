@@ -1,0 +1,84 @@
+{
+  "erstellt_am": "2026-09-01T13:22:36Z",
+  "zweck": "Nachweis von Datenkopien aus der MarkenDetektive-Produktdatenbank",
+  "fiktiver_hersteller": {
+    "doc": "hersteller_new/krellhofer_lw_ref",
+    "name": "Krellhofer Lebensmittelwerke GmbH"
+  },
+  "eintraege": [
+    {
+      "doc_id": "cUQM1Oyi1S4qY6tvUaoH",
+      "ean": "2911000000017",
+      "bezeichnung": "Alpengut Bergkaese wuerzig 200g",
+      "beschreibung": "Kaese, Hartkaese"
+    },
+    {
+      "doc_id": "wk56U702UxHtGAiulhkN",
+      "ean": "2911000000024",
+      "bezeichnung": "Hafergold Knuspermuesli Nuss 500g",
+      "beschreibung": "Muesli, Fruehstueck"
+    },
+    {
+      "doc_id": "kIpRo6IwFRUV3ZjSOLZy",
+      "ean": "2911000000031",
+      "bezeichnung": "Talblick Bio-Vollmilch 3,8% 1l",
+      "beschreibung": "Milch, Molkereiprodukte"
+    },
+    {
+      "doc_id": "RPHI5W03x1wcN6MbnTBQ",
+      "ean": "2911000000048",
+      "bezeichnung": "Sonnenfeld Rapsoel nativ 750ml",
+      "beschreibung": "Speiseoel"
+    },
+    {
+      "doc_id": "4uye9UVXpN4FAroXaHXB",
+      "ean": "2911000000055",
+      "bezeichnung": "Wiesengruen Kraeuterquark 250g",
+      "beschreibung": "Quark, Molkereiprodukte"
+    },
+    {
+      "doc_id": "QSsiKaJ6fA6SfSqY4DfR",
+      "ean": "2911000000062",
+      "bezeichnung": "Ofenfrisch Dinkelbrot geschnitten",
+      "beschreibung": "Brot, Backwaren"
+    },
+    {
+      "doc_id": "LDPD3sAKFwKVHGsQ5fTk",
+      "ean": "2911000000079",
+      "bezeichnung": "Frostklar Rahmspinat portioniert",
+      "beschreibung": "Tiefkuehl, Gemuese"
+    },
+    {
+      "doc_id": "1tsXBbDuudxfhfba6CJB",
+      "ean": "2911000000086",
+      "bezeichnung": "Zartschmelz Nussnougatcreme 400g",
+      "beschreibung": "Brotaufstrich, Suesswaren"
+    },
+    {
+      "doc_id": "acn6clKbNxkTPhsL9tks",
+      "ean": "2911000000093",
+      "bezeichnung": "Klarquell Mineralwasser still 1,5l",
+      "beschreibung": "Wasser, Getraenke"
+    },
+    {
+      "doc_id": "pkTnBvHpxuCwbLGeZtmH",
+      "ean": "2911000000109",
+      "bezeichnung": "Herzhaft Gemuesebruehe koernig 250g",
+      "beschreibung": "Wuerzmittel"
+    },
+    {
+      "doc_id": "zTIFQSY7tSQ1bxGjOtW5",
+      "ean": "2911000000116",
+      "bezeichnung": "Seidenpflege Duschgel Sensitiv 300ml",
+      "beschreibung": "Koerperpflege, Drogerie"
+    },
+    {
+      "doc_id": "IfMJXaTeyuw53wRhBE36",
+      "ean": "2911000000123",
+      "bezeichnung": "Reinweiss Vollwaschmittel Pulver 1,3kg",
+      "beschreibung": "Waschmittel, Drogerie"
+    }
+  ],
+  "sha256": "882201b2424d158bdd6e087244e00977425f1a7c8b42e018a1c43a37d49cfba6",
+  "hinweis": "Diese Datei ist das Beweismittel. Nicht veroeffentlichen. Der Git-Commit dieser Datei datiert die Existenz der Eintraege."
+}
