@@ -331,10 +331,16 @@ function parseBonDateMs(iso) {
   return Number.isFinite(ms) ? ms : null;
 }
 
-function bonAgeDays(iso) {
+/**
+ * Alter des Bons in Tagen — bezogen auf `refMs` (Default: jetzt). Die Pipeline
+ * übergibt den UPLOAD-Zeitpunkt: die Pflicht des Nutzers ist „innerhalb von
+ * N Tagen nach dem Kauf hochladen"; Verarbeitungsverzögerungen (Retries,
+ * Incidents, Reprocessing) dürfen den Bon nicht nachträglich „zu alt" machen.
+ */
+function bonAgeDays(iso, refMs = Date.now()) {
   const ms = parseBonDateMs(iso);
   if (ms == null) return null;
-  return Math.floor((Date.now() - ms) / (24 * 60 * 60 * 1000));
+  return Math.floor((refMs - ms) / (24 * 60 * 60 * 1000));
 }
 
 /**
@@ -1211,7 +1217,7 @@ exports.processCashback = onMessagePublished(
         ocr.parsed.bonDate = plaus.bonDate;
         logger.info('bon-date-corrected', { cashbackId, ...bonDateCorrection });
       }
-      const ageDays = bonAgeDays(ocr.parsed.bonDate);
+      const ageDays = bonAgeDays(ocr.parsed.bonDate, uploadedAt.getTime());
       // Bon-Datum in der Zukunft (> 1 Tag Toleranz) ist IMMER eine Fehllesung —
       // nie ablehnen, sondern in die Prüfung (Status-Entscheidung unten).
       const bonDateFuture = ageDays != null && ageDays < -1;
@@ -1395,12 +1401,18 @@ exports.processCashback = onMessagePublished(
 
       if (config.campaignsEnabled) {
         // cid + selectedCampaign bereits oben bestimmt (für das Alters-Gate).
-        const nowMs = Date.now();
+        // Kampagnenfenster gegen den UPLOAD-Zeitpunkt prüfen, nicht gegen
+        // „jetzt": ein pünktlich eingereichter Bon behält seine Aktion auch bei
+        // späterer Verarbeitung (Retry/Incident/Reprocessing) und nach dem
+        // Auslaufen der Aktion. `active:false` ist nur dann ein Ausschluss,
+        // wenn die Aktion VOR dem Upload gestoppt wurde (deactivatedAt).
+        const refMs = uploadedAt.getTime();
+        const killedAtMs = selectedCampaign?.deactivatedAt ? toMs(selectedCampaign.deactivatedAt) : null;
         const inWindow =
           selectedCampaign
-          && selectedCampaign.active === true
-          && toMs(selectedCampaign.startAt) <= nowMs
-          && nowMs <= toMs(selectedCampaign.endAt);
+          && toMs(selectedCampaign.startAt) <= refMs
+          && refMs <= toMs(selectedCampaign.endAt)
+          && (killedAtMs == null || refMs <= killedAtMs);
 
         if (!gatesOk) {
           cashbackCents = 0; // harter Gate (Merchant/recon/dup/alt) → Section 7
