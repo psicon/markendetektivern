@@ -338,6 +338,30 @@ function bonAgeDays(iso) {
 }
 
 /**
+ * 86cb9zuq1: Jahres-Fehllesung erkennen. Liest die OCR „24.08.26" als
+ * 2020-08-24, landet der Bon als bon_too_old — obwohl Tag+Monat exakt dem
+ * Upload-Tag entsprechen (37 Live-Fälle, alle dieses Musters; niemand lädt
+ * Jahre später am selben Kalendertag hoch). Regel: Tag+Monat == Upload-Tag
+ * (Berlin) UND Jahr != Upload-Jahr → Jahr auf das Upload-Jahr korrigieren.
+ * @returns {{ bonDate: string|null, corrected: null|{from:string,to:string,reason:string} }}
+ */
+function plausibilizeBonDate(iso, uploadedAt) {
+  if (typeof iso !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    return { bonDate: iso ?? null, corrected: null };
+  }
+  const up = uploadedAt instanceof Date && Number.isFinite(uploadedAt.getTime()) ? uploadedAt : new Date();
+  const upIso = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(up); // YYYY-MM-DD
+  const upYear = upIso.slice(0, 4);
+  if (iso.slice(5) === upIso.slice(5) && iso.slice(0, 4) !== upYear) {
+    const to = `${upYear}-${iso.slice(5)}`;
+    return { bonDate: to, corrected: { from: iso, to, reason: 'year_misread_same_day' } };
+  }
+  return { bonDate: iso, corrected: null };
+}
+
+/**
  * Per-user purchased-products trail (architecture §3.2). One doc per
  * (receiptId × item-name-slug) so reprocesses are idempotent (same
  * input → same doc-id → set with merge, no dupes).
@@ -412,12 +436,18 @@ async function writePurchasedProducts(uid, cashbackId, parsed, merchantInfo, met
  *
  * Runs in a transaction so concurrent re-publishes can't race.
  */
-async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, bonDateIso, campaignId, campaignMode) {
+async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, bonDateIso, campaignId, campaignMode, caps = null) {
   const ledgerCol = userRef.collection('cashback_ledger');
   // Tatsächlich gutgeschriebener Betrag — kann durch Budget-Deckelung IN
   // der Transaktion < cashbackCents sein (+ ob das Budget dabei leer war).
   let creditedCents = cashbackCents;
   let budgetExhausted = false;
+  // 86cb7ygjh + Audit R6#1: Wochen-/Per-User-/Monats-/Tageslimit werden
+  // ebenfalls HIER, gegen den frischen userSnap der Transaktion, geprüft —
+  // race-frei (zwei parallele Bons sehen nicht denselben stalen Zähler) und
+  // selbst-exklusiv (dieser Zweig läuft nur ohne aktiven Earn; das Tages-
+  // limit ignoriert den eigenen receiptId). capReason → Status außen.
+  let capReason = null;
 
   await db.runTransaction(async (tx) => {
     // ── Alle Reads ZUERST (Firestore-Transaktions-Regel) ──
@@ -478,14 +508,48 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
       // Aktions-Modus: Betrag ATOMAR auf das verbleibende Budget cappen —
       // das schließt die Race-Lücke (2 Bons am letzten Budget-Rest).
       let earnCents = cashbackCents;
-      if (campaignMode && campaignSnap) {
+      if (caps) {
+        const bonDay = (bonDateIso || todayBerlin()).slice(0, 10);
+        if (earnCents > 0 && campaignMode && campaignId && caps.weeklyBonCap > 0) {
+          const used = (((u.cashback_campaign_weekly || {})[campaignId] || {})[weekKey] || {}).count || 0;
+          if (used >= caps.weeklyBonCap) {
+            earnCents = 0;
+            capReason = 'weekly_cap_reached';
+          }
+        }
+        if (earnCents > 0 && campaignMode && campaignId && caps.maxPerUserCents > 0) {
+          const earnedSoFar = (u.cashback_campaign_totals || {})[campaignId] || 0;
+          const headroom = Math.max(0, caps.maxPerUserCents - earnedSoFar);
+          if (earnCents > headroom) {
+            earnCents = headroom;
+            if (earnCents === 0) capReason = 'per_user_cap_reached';
+          }
+        }
+        if (earnCents > 0 && !campaignMode && caps.monthlyMaxCents > 0) {
+          const earnedThisMonth = ((u.cashback_monthly || {})[monthKey] || {}).earnedCents || 0;
+          const headroom = Math.max(0, caps.monthlyMaxCents - earnedThisMonth);
+          if (earnCents > headroom) {
+            earnCents = headroom;
+            if (earnCents === 0) capReason = 'monthly_cap_reached';
+          }
+        }
+        if (earnCents > 0 && caps.dailyCap > 0) {
+          const lastDay = u.cashback_last_bon_date || null;
+          const lastRid = u.cashback_last_bon_receiptId || null;
+          if (lastDay === bonDay && lastRid !== cashbackId) {
+            earnCents = 0;
+            capReason = 'daily_cap_reached';
+          }
+        }
+      }
+      if (earnCents > 0 && campaignMode && campaignSnap) {
         const remaining = Number.isFinite(campaignSnap.data()?.budgetRemainingCents)
           ? campaignSnap.data().budgetRemainingCents
           : 0;
-        earnCents = Math.max(0, Math.min(cashbackCents, remaining));
+        earnCents = Math.max(0, Math.min(earnCents, remaining));
       }
       creditedCents = earnCents;
-      budgetExhausted = campaignMode && earnCents === 0 && cashbackCents > 0;
+      budgetExhausted = campaignMode && earnCents === 0 && cashbackCents > 0 && !capReason;
 
       if (earnCents > 0) {
         const ref = ledgerCol.doc();
@@ -502,7 +566,16 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
           {
             cashback_balance_cents: balance + earnCents,
             cashback_lifetime_cents: lifetime + earnCents,
-            cashback_last_bon_date: bonDateIso || todayBerlin(),
+            // Nur VORWÄRTS bewegen (ein nachverarbeiteter älterer Bon darf das
+            // Tageslimit eines späteren Tages nicht aufweichen) + merken, WELCHER
+            // Bon das Datum gesetzt hat (Selbst-Ausschluss beim Tageslimit).
+            ...(() => {
+              const bonDayIso = bonDateIso || todayBerlin();
+              const prevDay = u.cashback_last_bon_date || '';
+              return prevDay > bonDayIso
+                ? {}
+                : { cashback_last_bon_date: bonDayIso, cashback_last_bon_receiptId: cashbackId };
+            })(),
             ...monthlyDelta(earnCents, 1),
             ...campaignDelta(campaignId, earnCents, 1),
           },
@@ -567,7 +640,7 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
     // else: not approved + no prior earn — noop.
   });
 
-  return { creditedCents, budgetExhausted };
+  return { creditedCents, budgetExhausted, capReason };
 }
 
 async function verifyAuthFromRequest(req) {
@@ -1128,7 +1201,20 @@ exports.processCashback = onMessagePublished(
       // Bons older than MAX_BON_AGE_DAYS are rejected — protects
       // against backdated bons + the "drawer treasure" case where a
       // user submits a 6-month-old bon all at once.
+      // 86cb9zuq1: Jahres-Fehllesung (DD.MM.YY → falsches Jahrhundert) VOR dem
+      // Alters-Gate korrigieren; die Korrektur landet am Doc (bonDateCorrection).
+      // Läuft auch über den OCR-Cache — Reprocessing braucht keinen Gemini-Call.
+      const uploadedAt = receipt.createdAt?.toDate ? receipt.createdAt.toDate() : new Date();
+      const plaus = plausibilizeBonDate(ocr.parsed.bonDate, uploadedAt);
+      const bonDateCorrection = plaus.corrected;
+      if (bonDateCorrection) {
+        ocr.parsed.bonDate = plaus.bonDate;
+        logger.info('bon-date-corrected', { cashbackId, ...bonDateCorrection });
+      }
       const ageDays = bonAgeDays(ocr.parsed.bonDate);
+      // Bon-Datum in der Zukunft (> 1 Tag Toleranz) ist IMMER eine Fehllesung —
+      // nie ablehnen, sondern in die Prüfung (Status-Entscheidung unten).
+      const bonDateFuture = ageDays != null && ageDays < -1;
 
       // 5) Merchant resolution against /discounter, country-aware.
       const merchantInfo = await resolveMerchant(
@@ -1282,6 +1368,26 @@ exports.processCashback = onMessagePublished(
         && !duplicateOf
         && (ageDays == null || ageDays <= effectiveMaxAgeDays);
 
+      // 86cb7ygjh: Ein Bon, der SCHON gutgeschrieben ist (PubSub-Redelivery,
+      // Reprocessing, App-Retry), darf sich nicht an seinen eigenen Zählern
+      // deckeln — sonst storniert syncLedgerForReceipt die eigene Gutschrift
+      // (Live-Schaden 19.08. + 26.08.). Bei bestehendem Netto-Earn werden alle
+      // Cap-Pre-Checks übersprungen; die Transaktion behandelt den Bon als
+      // Noop bzw. amount_correction. Race-Schutz liegt zusätzlich IN der
+      // Transaktion (caps-Parameter von syncLedgerForReceipt).
+      let alreadyCredited = false;
+      try {
+        const ledgerCol = db.collection(`users/${uid}/cashback_ledger`);
+        const [earnsSnap, reversesSnap] = await Promise.all([
+          ledgerCol.where('receiptId', '==', cashbackId).where('type', '==', 'earn').get(),
+          ledgerCol.where('receiptId', '==', cashbackId).where('type', '==', 'reverse').get(),
+        ]);
+        const sum = (s) => s.docs.reduce((a, d) => a + (d.data().cents || 0), 0);
+        alreadyCredited = sum(earnsSnap) - sum(reversesSnap) > 0;
+      } catch (e) {
+        logger.warn('ledger-precheck-failed', { cashbackId, err: e.message });
+      }
+
       let cashbackCents = 0;
       // no_active_campaign | below_min_items | weekly_cap_reached |
       // per_user_cap_reached | campaign_budget_exhausted | monthly_cap_reached
@@ -1316,7 +1422,7 @@ exports.processCashback = onMessagePublished(
             }
             // Wochenlimit der Aktion (pro User, Mo–So Berlin).
             const weeklyCap = Number(selectedCampaign.weeklyBonCap) || 0;
-            if (weeklyCap > 0) {
+            if (!alreadyCredited && weeklyCap > 0) {
               const wk = isoWeekKey(ocr.parsed.bonDate || todayBerlin());
               const used = (((uData.cashback_campaign_weekly || {})[cid] || {})[wk] || {}).count || 0;
               if (used >= weeklyCap) {
@@ -1325,7 +1431,7 @@ exports.processCashback = onMessagePublished(
               }
             }
             // Per-User-Gesamtdeckel der Aktion (cappt auf Headroom).
-            if (reward > 0) {
+            if (!alreadyCredited && reward > 0) {
               const perUserCap = Number(selectedCampaign.maxPerUserCents) || 0;
               if (perUserCap > 0) {
                 const earned = (uData.cashback_campaign_totals || {})[cid] || 0;
@@ -1350,7 +1456,7 @@ exports.processCashback = onMessagePublished(
 
         // Monats-Limit nur im Dauer-Modus (im Aktions-Modus gilt der
         // Per-User-Cap der Aktion statt eines globalen Monatslimits).
-        if (config.monthlyMaxCents > 0 && cashbackCents > 0) {
+        if (!alreadyCredited && config.monthlyMaxCents > 0 && cashbackCents > 0) {
           const month = (ocr.parsed.bonDate || todayBerlin()).slice(0, 7); // YYYY-MM
           let earnedThisMonth = 0;
           try {
@@ -1375,12 +1481,14 @@ exports.processCashback = onMessagePublished(
       // statt Verwerfen). Ersetzt den früheren harten Enqueue-Block. Nutzt das
       // bestehende cashback_last_bon_date (Bon-Datum-Semantik); config.dailyCap
       // 1 = max ein vergüteter Bon pro Tag (aktuelle Konfig).
-      if (cashbackCents > 0 && Number(config.dailyCap) > 0) {
+      if (!alreadyCredited && cashbackCents > 0 && Number(config.dailyCap) > 0) {
         try {
           const dSnap = await db.doc(`users/${uid}`).get();
           const lastBonDay = dSnap.exists ? dSnap.data().cashback_last_bon_date || null : null;
+          const lastBonRid = dSnap.exists ? dSnap.data().cashback_last_bon_receiptId || null : null;
           const bonDay = (ocr.parsed.bonDate || todayBerlin()).slice(0, 10);
-          if (lastBonDay && lastBonDay === bonDay) {
+          // Eigener Bon zählt nicht als „schon vergüteter Bon des Tages".
+          if (lastBonDay && lastBonDay === bonDay && lastBonRid !== cashbackId) {
             cashbackCents = 0;
             zeroReason = 'daily_cap_reached';
           }
@@ -1402,6 +1510,9 @@ exports.processCashback = onMessagePublished(
       } else if (ageDays != null && ageDays > effectiveMaxAgeDays) {
         status = 'rejected';
         rejectReason = 'bon_too_old';
+      } else if (bonDateFuture) {
+        // Zukunfts-Datum = Fehllesung → prüfen statt ablehnen (86cb9zuq1).
+        status = 'review';
       } else if (ageDays == null) {
         // Bon-Datum nicht erkannt → ABLEHNEN (keine manuelle Prüfung).
         status = 'rejected';
@@ -1447,6 +1558,7 @@ exports.processCashback = onMessagePublished(
       // (→ approved + Gutschrift) oder lehnt ab. Rejected/no_reward bleiben
       // unverändert — durch DIESES Gate wird KEIN Bon abgelehnt.
       let reviewReason = null;
+      if (status === 'review' && bonDateFuture) reviewReason = 'bon_date_future';
       if (status === 'approved') {
         const conf = ocr.robust?.confidence || null;
         const lowConfidence = conf === 'medium' || conf === 'low' || conf === 'none';
@@ -1470,15 +1582,21 @@ exports.processCashback = onMessagePublished(
         ocr.parsed.bonDate,
         selectedCampaign?.id || null,
         campaignMode,
+        {
+          weeklyBonCap: campaignMode ? Number(selectedCampaign.weeklyBonCap) || 0 : 0,
+          maxPerUserCents: campaignMode ? Number(selectedCampaign.maxPerUserCents) || 0 : 0,
+          monthlyMaxCents: !campaignMode ? Number(config.monthlyMaxCents) || 0 : 0,
+          dailyCap: Number(config.dailyCap) || 0,
+        },
       );
-      // Budget war beim Verbuchen leer → Betrag + Status korrigieren, damit
-      // Mirror/Receipt das echte Ergebnis zeigen (kein „approved +X" ohne
-      // tatsächliche Gutschrift).
+      // Transaktion hat den Betrag gedeckelt (Budget leer ODER ein Limit
+      // race-frei erkannt) → Betrag + Status korrigieren, damit Mirror/Receipt
+      // das echte Ergebnis zeigen (kein „approved +X" ohne Gutschrift).
       if (status === 'approved' && settle.creditedCents !== cashbackCents) {
         cashbackCents = settle.creditedCents;
         if (cashbackCents === 0) {
           status = 'no_reward';
-          rejectReason = 'campaign_budget_exhausted';
+          rejectReason = settle.capReason || 'campaign_budget_exhausted';
         }
       }
 
@@ -1562,6 +1680,7 @@ exports.processCashback = onMessagePublished(
           ? { id: 'unknown', raw: ocr.parsed.merchant, matchedScore: 0 }
           : null,
         bonDate: ocr.parsed.bonDate || null,
+        bonDateCorrection: bonDateCorrection ?? null,
         bonTime: ocr.parsed.bonTime || null,
         bonTotalCents: ocr.parsed.totalCents ?? null,
         contentHash: contentHash ?? null,

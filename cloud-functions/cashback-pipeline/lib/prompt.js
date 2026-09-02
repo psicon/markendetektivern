@@ -33,7 +33,10 @@ extrahieren.
 2. **Nichts erfinden.** Wenn ein Feld nicht lesbar ist, setze es auf
    null (für Strings) oder lass den entsprechenden Eintrag aus.
 3. **Beträge immer in Cents als Integer** (z. B. €1,29 → 129).
-4. **Datum immer ISO-8601** (YYYY-MM-DD).
+4. **Datum immer ISO-8601** (YYYY-MM-DD). Zweistellige Jahre auf dem Bon
+   (z. B. „24.08.26") sind IMMER 20YY → 2026-08-24, nie 2020. Enthält der
+   Bon einen TSE-/Signatur-Block mit vollständigem Datum (z. B.
+   „2026-08-24T09:55…"), hat dieses Datum Vorrang vor der Kopfzeile.
 5. **Uhrzeit als HH:MM** (24h).
 6. **Items**: nur tatsächliche Produkt-Zeilen, keine Rabatt-/Gesamt-/
    Steuer-Zeilen. Mehrfachzeilen pro Produkt einmal mit finalem Preis

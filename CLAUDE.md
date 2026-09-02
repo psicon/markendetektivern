@@ -2463,6 +2463,29 @@ Bei Kostenfragen NIE aus Monitoring-Metriken hochrechnen, ohne diese Fakten:
 - MarkenDetektive real: ~380 €/Monat Infrastruktur + ~517 €/Monat Gemini
   (Aug-Tempo; Gemini hat sich seit Juli verdoppelt, wächst mit Bon-Volumen).
 
+## Kampagnen laufen still aus — Nachfolger ist Pflicht VOR dem Monatsende
+
+**Vorfall 01.09.2026:** Alle Cashback-Kampagnen endeten am 31.08. (endAt),
+drei blieben auf `active: true` stehen, niemand legte einen Nachfolger an.
+Folge in 2 Tagen: 157 Bons, davon 119 `no_reward (no_active_campaign)`; bei
+Produktfotos fand der Client keine Aktion mehr → 33 Uploads mit
+`campaignId: null`, die bei Freigabe NIE vergütet worden wären (der Trigger
+crowd-upload-reward bricht ohne campaignId nur mit logger.info ab — kein
+`rewardSkipped`, nichts fällt auf). Erst die Backlog-Analyse fand es.
+
+Regeln:
+- Kampagnen-Zeitraum ist die WAHRHEIT (Pipeline UND Client filtern auf
+  `active && startAt <= now <= endAt`); `active:false` beim Auslaufen setzen
+  ist Hygiene, ersetzt aber keinen Nachfolger.
+- Vor jedem Monatsende: Nachfolge-Kampagne(n) je `kind` (receipt,
+  product_photos) anlegen — Felder 1:1 klonen, Budget = Restbudget des
+  Vorgängers, `startAt` = endAt des Vorgängers. Skript-Muster: 02.09.2026
+  (`september-2026`, `produkt-fotos-september-2026`).
+- Prüf-Signal, das nie fehlen darf: Anteil `no_active_campaign` unter den
+  Bons der letzten 24 h. Steigt er sprunghaft → Kampagne fehlt.
+- Uploads, die im Loch eingingen, per `campaignId`-Backfill dem Nachfolger
+  zuordnen (Zeitraum des Nachfolgers dafür rückdatieren).
+
 ## Ein Status-Feld ist KEIN Mechanismus — Geld-Versprechen brauchen einen Trigger
 
 **Vorfall 07.08.2026:** `crowd_uploads` (Produkt-Einreichungen) hatte ein
