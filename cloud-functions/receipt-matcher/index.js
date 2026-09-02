@@ -420,6 +420,15 @@ exports.onPurchasedProductMatch = onDocumentCreated(
       await snap.ref.set({ matchStatus: 'skipped_ineligible' }, { merge: true }).catch(() => {});
       return;
     }
+    // Journey-/Zettel-Abschluss NUR für frische Käufe (Money-Ops-Review
+    // 02.09.2026): nachgezogene Positionen (Review-Freigabe/Backfill →
+    // backfilled===true) oder Bons älter als 14 Tage dürfen keinen HEUTIGEN
+    // Einkaufszettel-Eintrag als „per Bon gekauft" abhaken. Matching + Alias-
+    // Lernen laufen weiter (noClose = nur der Cart-/Journey-Side-Effect entfällt).
+    const bonAgeDays = d.bonDate && Number.isFinite(Date.parse(d.bonDate))
+      ? (Date.now() - Date.parse(d.bonDate)) / 86_400_000
+      : null;
+    const noClose = d.backfilled === true || (bonAgeDays != null && bonAgeDays > 14);
     try {
       await matcher.matchLine({
         itemName: d.itemName,
@@ -431,7 +440,7 @@ exports.onPurchasedProductMatch = onDocumentCreated(
         merchantName: d.merchantName || null,
         merchantLand: d.merchantLand || null,
         bonDate: d.bonDate || null,
-      });
+      }, noClose ? { noClose: true } : {});
     } catch (e) {
       console.error('onPurchasedProductMatch failed', event.params, e);
       await snap.ref.set({ matchStatus: 'error', matchError: e.message }, { merge: true }).catch(() => {});

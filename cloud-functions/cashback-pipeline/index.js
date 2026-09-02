@@ -298,13 +298,16 @@ function isoWeekKey(iso) {
   return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
 }
 
-async function loadConfig() {
+async function loadConfig(opts = {}) {
   try {
     const snap = await db.doc(CONFIG_DOC_PATH).get();
     if (!snap.exists) return DEFAULT_CONFIG;
     return { ...DEFAULT_CONFIG, ...snap.data() };
   } catch (e) {
     logger.warn('config-load-failed', { err: e.message });
+    // strict (Resolver): NICHT auf DEFAULT_CONFIG (campaignsEnabled:false)
+    // zurückfallen — ein Aktions-Bon würde sonst im Dauer-Modus verbucht.
+    if (opts.strict) throw e;
     return DEFAULT_CONFIG;
   }
 }
@@ -417,6 +420,9 @@ async function writePurchasedProducts(uid, cashbackId, parsed, merchantInfo, met
           bonStatus: meta.status || null,
           rejectReason: meta.rejectReason || null,
           rewardEligible: meta.rewardEligible !== false,
+          // Nachträglich geschrieben (Review-Freigabe/Backfill): der Matcher
+          // matcht + lernt, schließt aber KEINE Journey/keinen Zettel (noClose).
+          ...(meta.backfilled ? { backfilled: true } : {}),
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         },
         { merge: true },
@@ -456,6 +462,12 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
   let capReason = null;
 
   await db.runTransaction(async (tx) => {
+    // Firestore wiederholt den Callback bei Konflikt → Ergebnisfelder pro
+    // Versuch zurücksetzen, sonst bleibt z.B. capReason aus dem verworfenen
+    // ersten Versuch stehen (Backlog-Audit 02.09.).
+    creditedCents = cashbackCents;
+    budgetExhausted = false;
+    capReason = null;
     // ── Alle Reads ZUERST (Firestore-Transaktions-Regel) ──
     const earns = await tx.get(
       ledgerCol.where('receiptId', '==', cashbackId).where('type', '==', 'earn'),
@@ -1084,6 +1096,14 @@ exports.processCashback = onMessagePublished(
           latencyMs: cachedOcr.latencyMs ?? null,
           cvLatencyMs: cachedOcr.cvLatencyMs ?? null,
           geminiLatencyMs: cachedOcr.geminiLatencyMs ?? null,
+          // Self-Consistency-Ergebnis MIT übernehmen (Money-Ops-Review 02.09.):
+          // ohne `robust` sah das Review-Gate 6w bei jedem Retry/Reprocessing
+          // conf=null → kein Halt → ungeprüfte Gutschrift, und der Final-Write
+          // überschrieb robust am Doc mit null.
+          robust: cachedOcr.robust ?? null,
+          inputTokens: cachedOcr.chosenReadTokens?.input ?? null,
+          outputTokens: cachedOcr.chosenReadTokens?.output ?? null,
+          thoughtsTokens: cachedOcr.chosenReadTokens?.thoughts ?? null,
           ocrText: '',
         };
         recon =
@@ -1391,7 +1411,13 @@ exports.processCashback = onMessagePublished(
         const sum = (s) => s.docs.reduce((a, d) => a + (d.data().cents || 0), 0);
         alreadyCredited = sum(earnsSnap) - sum(reversesSnap) > 0;
       } catch (e) {
+        // FAIL-CLOSED (Backlog-Audit 02.09.): ohne diese Antwort dürfen die
+        // Cap-Pre-Checks nicht laufen — sie sähen die eigene Gutschrift in den
+        // Zählern und würden sie stornieren. Transienter Fehler → PubSub-Retry.
         logger.warn('ledger-precheck-failed', { cashbackId, err: e.message });
+        const err = new Error(`ledger precheck failed: ${e.message}`);
+        err.code = 'ledger_precheck_failed';
+        throw err;
       }
 
       let cashbackCents = 0;
@@ -1571,7 +1597,11 @@ exports.processCashback = onMessagePublished(
       // unverändert — durch DIESES Gate wird KEIN Bon abgelehnt.
       let reviewReason = null;
       if (status === 'review' && bonDateFuture) reviewReason = 'bon_date_future';
-      if (status === 'approved') {
+      // Money-Ops-Review 02.09.: das Gate darf einen bereits gutgeschriebenen
+      // oder per Resolver freigegebenen Bon NIE wieder halten — sonst würde eine
+      // PubSub-Redelivery (Cache-Pfad trägt jetzt robust) die Gutschrift über
+      // syncLedgerForReceipt(status='review') stornieren (Selbststorno-Klasse).
+      if (status === 'approved' && !alreadyCredited && receipt.reviewDecision !== 'approve') {
         const conf = ocr.robust?.confidence || null;
         const lowConfidence = conf === 'medium' || conf === 'low' || conf === 'none';
         const editedImage = receipt.capture?.forensicFlags?.suspiciousSoftware === true;
@@ -1774,12 +1804,14 @@ exports.processCashback = onMessagePublished(
         // zeigt „wird geprüft", Auflösung per Reprocessing (ocr-Feld leeren +
         // republishen) oder resolveCashbackReview. Nur echte Poison-Messages
         // (Bild kaputt, Parser-Crash) enden weiterhin als 'rejected'.
-        const infra = err && err.code === 'ocr_unavailable';
+        const infraCode =
+          err && (err.code === 'ocr_unavailable' || err.code === 'ledger_precheck_failed') ? err.code : null;
+        const infra = !!infraCode;
         const finalDoc = infra
-          ? { status: 'review', reviewReason: 'ocr_unavailable', attempts, lastError, updatedAt: now }
+          ? { status: 'review', reviewReason: infraCode, attempts, lastError, updatedAt: now }
           : { status: 'rejected', rejectReason: 'max_retries_exceeded', attempts, lastError, updatedAt: now };
         const finalMirror = infra
-          ? { status: 'review', reviewReason: 'ocr_unavailable', attempts, updatedAt: now }
+          ? { status: 'review', reviewReason: infraCode, attempts, updatedAt: now }
           : { status: 'rejected', rejectReason: 'max_retries_exceeded', attempts, updatedAt: now };
         await docRef.update(finalDoc).catch(() => {});
         await db
@@ -2213,7 +2245,7 @@ exports.tremendousWebhook = onRequest(
 // Key-gated (Secret NUTRITION_SCRAPER_TRIGGER_KEY). Aufruf:
 //   …/resolveCashbackReview?key=…&receiptId=…&decision=approve|reject
 exports.resolveCashbackReview = onRequest(
-  { region: REGION, timeoutSeconds: 30, memory: '256MiB', cors: false, secrets: [CASHBACK_ADMIN_KEY] },
+  { region: REGION, timeoutSeconds: 60, memory: '256MiB', cors: false, secrets: [CASHBACK_ADMIN_KEY] },
   async (req, res) => {
     if (String(req.query.key || '') !== CASHBACK_ADMIN_KEY.value()) {
       res.status(403).json({ code: 'forbidden' });
@@ -2221,8 +2253,29 @@ exports.resolveCashbackReview = onRequest(
     }
     const receiptId = String(req.query.receiptId || '');
     const decision = String(req.query.decision || '');
-    if (!receiptId || (decision !== 'approve' && decision !== 'reject')) {
-      res.status(400).json({ code: 'bad_request', message: 'receiptId + decision=approve|reject erforderlich' });
+    // 02.09.2026: zwei weitere Entscheidungen, damit die Auflösung eines
+    // Review-Rückstaus dieselben Ergebnisse produziert wie die Pipeline selbst
+    // (statt nur „manual_review_rejected"):
+    //   reject    + reason=duplicate_content_self (+duplicateOf=<receiptId>)
+    //   no_reward + reason=daily_cap_reached|weekly_cap_reached|per_user_cap_reached
+    //               (valider Bon, aber ein Limit greift → purchased_products
+    //               werden wie bei der Pipeline geschrieben, kein Geld)
+    const reason = String(req.query.reason || '');
+    const duplicateOfId = String(req.query.duplicateOf || '');
+    const PRIOR_STATUSES = new Set(['approved', 'paid', 'no_reward', 'review', 'matched', 'ocr_pending']);
+    const priorStatusParam = String(req.query.priorStatus || '');
+    const priorStatus = PRIOR_STATUSES.has(priorStatusParam) ? priorStatusParam : 'approved';
+    const REJECT_REASONS = new Set(['manual_review_rejected', 'duplicate_content_self', 'duplicate_content_cross_user']);
+    const NO_REWARD_REASONS = new Set(['daily_cap_reached', 'weekly_cap_reached', 'per_user_cap_reached']);
+    const validDecision =
+      decision === 'approve'
+      || (decision === 'reject' && (!reason || REJECT_REASONS.has(reason)))
+      || (decision === 'no_reward' && NO_REWARD_REASONS.has(reason));
+    if (!receiptId || !validDecision) {
+      res.status(400).json({
+        code: 'bad_request',
+        message: 'receiptId + decision=approve|reject[&reason=manual_review_rejected|duplicate_content_self]|no_reward&reason=daily_cap_reached|weekly_cap_reached|per_user_cap_reached',
+      });
       return;
     }
     try {
@@ -2241,43 +2294,148 @@ exports.resolveCashbackReview = onRequest(
       const uid = r.userId;
       const ts = admin.firestore.FieldValue.serverTimestamp();
       const mirrorRef = db.doc(`users/${uid}/cashback_status/${receiptId}`);
+      const userRef = db.doc(`users/${uid}`);
+      // Config STRIKT (kein Fallback auf campaignsEnabled:false) + Kampagne —
+      // für alle drei Zweige: approve bucht, reject/no_reward REVERSEN einen
+      // evtl. vorhandenen Earn (z.B. Wiederanlauf nach Teilfehler NACH der
+      // Transaktion), genau wie die Pipeline bei nicht-approved Status.
+      const config = await loadConfig({ strict: true });
+      const campaign = r.campaignId ? await loadCampaignById(r.campaignId) : null;
+      if (r.campaignId && !campaign) {
+        res.status(409).json({ code: 'campaign_missing', campaignId: r.campaignId });
+        return;
+      }
+      const campaignMode = !!config.campaignsEnabled && !!campaign;
 
       if (decision === 'reject') {
-        await ref.update({ status: 'rejected', rejectReason: 'manual_review_rejected', updatedAt: ts });
+        const rejectReason = reason || 'manual_review_rejected';
+        // Duplikat-Form wie in processCashback (Content-Dedup-Self) — der Mirror
+        // trägt nur sameUser + priorReceiptId (nie fremde uid).
+        const isDup = rejectReason === 'duplicate_content_self' || rejectReason === 'duplicate_content_cross_user';
+        const sameUser = rejectReason === 'duplicate_content_self';
+        const duplicateOf =
+          isDup && duplicateOfId ? { receiptId: duplicateOfId, sameUser, priorStatus } : null;
+        await syncLedgerForReceipt(userRef, receiptId, 'rejected', 0, r.bonDate || null, campaign?.id || null, campaignMode);
+        await ref.update({
+          status: 'rejected',
+          rejectReason,
+          ...(duplicateOf ? { duplicateOf } : {}),
+          reviewDecision: 'reject',
+          reviewResolvedAt: ts,
+          updatedAt: ts,
+        });
         await mirrorRef.set(
-          { status: 'rejected', rejectReason: 'manual_review_rejected', updatedAt: ts },
+          {
+            status: 'rejected',
+            rejectReason,
+            ...(duplicateOf
+              ? { duplicate: { sameUser, priorReceiptId: sameUser ? duplicateOf.receiptId : null } }
+              : {}),
+            updatedAt: ts,
+          },
           { merge: true },
         );
-        logger.info('cashback-review-rejected', { receiptId, uid });
-        res.json({ ok: true, status: 'rejected' });
+        logger.info('cashback-review-rejected', { receiptId, uid, rejectReason });
+        res.json({ ok: true, status: 'rejected', rejectReason });
+        return;
+      }
+
+      if (decision === 'no_reward') {
+        // Valider Bon ohne Geld (Limit) — exakt das Pipeline-Ergebnis 6y)/6z):
+        // Status no_reward + Grund, cashbackCents 0, Positionen ins Tracking.
+        await syncLedgerForReceipt(userRef, receiptId, 'no_reward', 0, r.bonDate || null, campaign?.id || null, campaignMode);
+        await ref.update({
+          status: 'no_reward',
+          cashbackCents: 0,
+          rejectReason: reason,
+          reviewDecision: 'no_reward',
+          reviewResolvedAt: ts,
+          updatedAt: ts,
+        });
+        await mirrorRef.set(
+          { status: 'no_reward', cashbackCents: 0, rejectReason: reason, updatedAt: ts },
+          { merge: true },
+        );
+        if (r.ocr?.parsed) {
+          await writePurchasedProducts(uid, receiptId, r.ocr.parsed, r.merchant || null, {
+            status: 'no_reward',
+            rejectReason: reason,
+            rewardEligible: true,
+            backfilled: true,
+          });
+        }
+        logger.info('cashback-review-no-reward', { receiptId, uid, reason });
+        res.json({ ok: true, status: 'no_reward', rejectReason: reason });
         return;
       }
 
       // approve: gutschreiben. syncLedgerForReceipt ist idempotent per receiptId
       // (netActive===0-Guard) → ein versehentlicher Doppel-Aufruf erzeugt keinen
       // zweiten earn; zudem ist der Bon danach 'approved' (oben 409).
+      //
+      // 02.09.2026: Die Freigabe läuft mit DENSELBEN Caps wie processCashback
+      // (Wochen-/Per-User-/Monats-/Tageslimit in der Ledger-Transaktion) —
+      // vorher wurden Review-Bons ohne jede Limit-Prüfung gutgeschrieben, obwohl
+      // der User seit dem Halten längst weitere Bons vergütet bekommen haben
+      // kann. Und: purchased_products werden nachgezogen — beim Halten (status
+      // 'review') schreibt die Pipeline sie nicht, ein freigegebener Bon fehlte
+      // damit im B2B-Trail und im receipt-matcher.
       const cents = Number(r.cashbackCents) || 0;
-      const config = await loadConfig();
-      const campaignMode = !!config.campaignsEnabled && !!r.campaignId;
+      if (cents <= 0) {
+        // Kein berechnetes Cashback (z.B. ocr_unavailable-Hold ohne OCR) →
+        // NICHT still als „Budget erschöpft" final schreiben.
+        res.status(409).json({ code: 'no_cashback_computed', reviewReason: r.reviewReason || null });
+        return;
+      }
       const settle = await syncLedgerForReceipt(
-        db.doc(`users/${uid}`),
+        userRef,
         receiptId,
         'approved',
         cents,
         r.bonDate || null,
-        r.campaignId || null,
+        campaign?.id || null,
         campaignMode,
+        {
+          weeklyBonCap: campaignMode ? Number(campaign.weeklyBonCap) || 0 : 0,
+          maxPerUserCents: campaignMode ? Number(campaign.maxPerUserCents) || 0 : 0,
+          monthlyMaxCents: !campaignMode ? Number(config.monthlyMaxCents) || 0 : 0,
+          dailyCap: Number(config.dailyCap) || 0,
+        },
       );
       const credited = Number(settle?.creditedCents) || 0;
       const finalStatus = credited > 0 ? 'approved' : 'no_reward';
-      const finalReason = credited > 0 ? null : 'campaign_budget_exhausted';
-      await ref.update({ status: finalStatus, cashbackCents: credited, rejectReason: finalReason, updatedAt: ts });
+      const finalReason = credited > 0 ? null : settle?.capReason || 'campaign_budget_exhausted';
+      await ref.update({
+        status: finalStatus,
+        cashbackCents: credited,
+        rejectReason: finalReason,
+        reviewDecision: 'approve',
+        reviewResolvedAt: ts,
+        updatedAt: ts,
+      });
       await mirrorRef.set(
         { status: finalStatus, cashbackCents: credited, rejectReason: finalReason, updatedAt: ts },
         { merge: true },
       );
-      logger.info('cashback-review-approved', { receiptId, uid, credited, finalStatus });
-      res.json({ ok: true, status: finalStatus, creditedCents: credited });
+      // Spiegel von processCashback 7a): approved UND no_reward gelten als valide
+      // Bons (rewardEligible=true) → Positionen fürs Matching/B2B nachziehen.
+      if (r.ocr?.parsed) {
+        await writePurchasedProducts(uid, receiptId, r.ocr.parsed, r.merchant || null, {
+          status: finalStatus,
+          rejectReason: finalReason,
+          rewardEligible: true,
+          backfilled: true, // nachgezogen → Matcher darf keinen heutigen Zettel abhaken
+        });
+      }
+      if (credited > 0) {
+        await sendCashbackReady(uid, {
+          title: '🎉 Cashback bereit!',
+          body: `Du hast ${(credited / 100).toFixed(2).replace('.', ',')} € Cashback erhalten.`,
+          cashbackId: receiptId,
+        });
+      }
+      logger.info('cashback-review-approved', { receiptId, uid, credited, finalStatus, capReason: settle?.capReason || null });
+      res.json({ ok: true, status: finalStatus, creditedCents: credited, capReason: settle?.capReason || null });
     } catch (e) {
       logger.error('resolveCashbackReview-failed', { receiptId, err: e.message });
       res.status(500).json({ code: 'internal' });

@@ -2486,6 +2486,54 @@ Regeln:
 - Uploads, die im Loch eingingen, per `campaignId`-Backfill dem Nachfolger
   zuordnen (Zeitraum des Nachfolgers dafür rückdatieren).
 
+## Bons nachverarbeiten / Review auflösen — Regeln (Money-Ops 02.09.2026)
+
+Am 02.09. wurden 163 Review-Bons (seit Juli gehalten, „meistens innerhalb eines
+Tages" versprochen) und 120 Bons ohne Aktion nachverarbeitet. Zwei adversarielle
+Review-Runden (29 Funde) haben Fallen gezeigt, die für JEDE Nacharbeit gelten:
+
+- **Das Tageslimit kennt nur das JÜNGSTE vergütete Bon-Datum**
+  (`cashback_last_bon_date`, nur vorwärts). Wer ÄLTERE Bons nachverarbeitet
+  (Republish, Reprocessing, Review-Freigabe), umgeht es → zwei Gutschriften für
+  dasselbe Bon-Datum. Regel: bei Nacharbeit die Same-Date-Frage SELBST
+  entscheiden — Ledger frisch lesen (earn−reverse>0 → receipts.bonDate),
+  pro User SEQUENZIELL (publish → auf finalen Status pollen → nächster Bon),
+  eigener Bon ausgeschlossen. Lauf B (`.repair-campaign.js`) vor Lauf A
+  (`.review-approve.js`); A prüft per Gate, dass B final ist. Root-Fix
+  (Tageszähler statt Vorwärts-Feld) steht als Follow-up im Backlog-Report.
+- **Der OCR-Cache-Pfad muss `ocr.robust` mitführen** (index.js Cache-Zweig).
+  Ohne ihn ist das Review-Gate 6w bei jedem Retry/Reprocessing blind
+  (conf=null → keine Prüfung) und der Final-Write löscht robust am Doc.
+- **Gates, die einen Status VON approved WEG bewegen, müssen an
+  `alreadyCredited` hängen** (6w: `!alreadyCredited && reviewDecision !==
+  'approve'`). Sonst storniert eine PubSub-Redelivery über
+  `syncLedgerForReceipt(status='review')` eine echte Gutschrift — dieselbe
+  Klasse wie die Selbststornos vom 19./26.08.
+- **Ledger-Precheck ist fail-CLOSED** (`ledger_precheck_failed` → Retry, nach
+  MAX_PROCESS_ATTEMPTS `review`, nie `rejected`). Infrastrukturfehler sind
+  keine Aussage über den Bon.
+- **`resolveCashbackReview`** hat dieselben Caps wie die Pipeline, lädt die
+  Config STRIKT (kein Fallback auf campaignsEnabled:false), reversed bei
+  reject/no_reward einen evtl. vorhandenen Earn, schreibt purchased_products
+  mit `backfilled:true` und pusht. Decisions: `approve` |
+  `reject[&reason=duplicate_content_self|_cross_user&duplicateOf=…&priorStatus=…]`
+  | `no_reward&reason=daily_cap_reached|weekly_cap_reached|per_user_cap_reached`.
+  `cents<=0` → 409 (nie still „Budget erschöpft").
+- **Nachgezogene purchased_products dürfen keinen HEUTIGEN Zettel abhaken:**
+  `receipt-matcher` onPurchasedProductMatch setzt `noClose` bei
+  `backfilled===true` oder Bon älter als 14 Tage (Matching + Alias-Lernen
+  laufen weiter, nur der Cart-/Journey-Side-Effect entfällt).
+- **Cross-User-Dedup greift nur bei gleicher Bon-Uhrzeit** (transactionHash).
+  Gleicher Markt+Tag+Summe aus zwei Accounts binnen Minuten (OCR liest die Zeit
+  verschieden) rutscht durch → bei Freigaben skippen und manuell sichten.
+- **Skripte für Geld-Läufe:** Fail-fast bei jedem Nicht-200, Ergebnisdatei
+  nach JEDEM Bon, IDs VOR dem ersten Write merken (und mergen, nie
+  überschreiben), Publish mit Retry, Key nur aus ENV und nie loggen, DRY_RUN
+  zuerst. Vor dem Lauf zwei Skeptiker-Runden gegen die AKTUELLEN Dateien —
+  Runde 1 fand 14, Runde 2 (nach Fixes) 15 Punkte, davon 15 am neuen Stand
+  widerlegt. Ohne diese Runden wären u.a. Journey-Abschlüsse aus Juli-Bons und
+  der Review-Gate-Selbststorno live gegangen.
+
 ## Ein Status-Feld ist KEIN Mechanismus — Geld-Versprechen brauchen einen Trigger
 
 **Vorfall 07.08.2026:** `crowd_uploads` (Produkt-Einreichungen) hatte ein
