@@ -67,6 +67,33 @@ describe('Wer noch nicht aktualisiert hat, geht nicht leer aus', () => {
   });
 });
 
+describe('Die App hat den Orts-Schritt übersprungen, der GPS-Fix blieb aus', () => {
+  it('vergütet bei gpsStatus unavailable — der Nutzer wurde nie gefragt', () => {
+    // Wizard ≤ 6.0.15 (18b8cb6): Berechtigung erteilt → Schritt entfällt →
+    // GPS liefert nichts → Einreichung ohne Ort, ohne dass der Nutzer je
+    // die Chance hatte, einen einzutippen. 53 von 55 Fällen am 03.09.2026.
+    const r = pruefeOrtsanforderung({
+      clientVersion: { app: '6.0.15', build: '1234', platform: 'android' },
+      capture: { gpsStatus: 'unavailable' },
+    });
+    expect(r.ok).toBe(true);
+    expect(r.grund).toBe('gps_fix_fehlt_schritt_uebersprungen');
+  });
+
+  it('vergütet ebenso bei timeout', () => {
+    const r = pruefeOrtsanforderung({ clientVersion: { app: '6.0.15' }, capture: { gpsStatus: 'timeout' } });
+    expect(r.ok).toBe(true);
+  });
+
+  it('lehnt weiterhin ab, wenn der Nutzer die Berechtigung verweigert hat', () => {
+    // denied = die App hat den Orts-Schritt angeboten, der Nutzer hat ihn
+    // übersprungen — das ist eine Entscheidung, keine Lücke der App.
+    const r = pruefeOrtsanforderung({ clientVersion: { app: '6.0.15' }, capture: { gpsStatus: 'denied' } });
+    expect(r.ok).toBe(false);
+    expect(r.grund).toBe('no_location');
+  });
+});
+
 describe('Robustheit', () => {
   it('kommt mit null/undefined zurecht, statt zu werfen', () => {
     // Ein Fehler hier würde den Trigger abbrechen lassen — und damit eine

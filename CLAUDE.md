@@ -2660,9 +2660,13 @@ Gotchas:
   wenn der GPS-Fix ausbleibt → Einreichung ohne Ort, `locationGate` würde
   `no_location` → approved ohne Cent. 55 solche Uploads stehen pending mit
   `holdReasons: ort_fehlt_gps_unavailable_app_uebersprang_schritt`. Der
-  Gate-Fix (`gpsStatus unavailable/timeout` → vergüten wie Gnadenfrist) ist
-  entworfen, aber nicht angewendet (Geld-Gate, wartet auf Freigabe). Wizard
-  braucht den Fallback (Orts-Schritt zeigen, wenn GPS scheitert).
+  Gate-Fix (`gpsStatus unavailable/timeout` → vergüten mit Grund
+  `gps_fix_fehlt_schritt_uebersprungen`) ist am 03.09. mit Freigabe von Patrick
+  deployt; die 55 sind freigegeben. Wizard-Fallback: ClickUp 86cbe02xm.
+  Falle dabei: wer Kampagnen-Budget „in einen Topf" überträgt (Rest → 0),
+  muss VORHER alle noch offenen Freigaben der alten Kampagne buchen — sonst
+  läuft der Trigger ins Budget 0 und bucht still nichts (38 Fälle am 03.09.,
+  Nachbuchung per `.crowd-retrigger-0903.js`). Tracking-Task: 86cbe02vk.
   Per-User-Deckel greift still: der Trigger schreibt bei „Deckel/Budget" NICHTS
   ans Doc (nur Log) — 41 Freigaben am 03.09. ohne Buchung waren korrekt
   (6 Nutzer am 5-€-Cap), sind aber nur per Ledger-Abgleich erkennbar.

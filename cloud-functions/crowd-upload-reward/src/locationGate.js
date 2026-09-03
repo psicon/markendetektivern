@@ -62,6 +62,21 @@ function pruefeOrtsanforderung(doc) {
     return { ok: true, grund: 'gnadenfrist_alter_client' };
   }
 
+  // 03.09.2026 (Freigabe Patrick): Der Wizard (≤ 6.0.15, Commit 18b8cb6)
+  // überspringt den Orts-Schritt, sobald die Standortberechtigung erteilt
+  // ist, und verlässt sich auf den GPS-Fix. Bleibt der aus (gpsStatus
+  // unavailable/timeout — 53 von 55 ortlosen Einreichungen einer Runde, alle
+  // Android 6.0.15), gibt es KEINEN Fallback zur manuellen Ortsangabe: der
+  // Nutzer wurde nie gefragt. Das ist dieselbe Lage wie beim alten Client —
+  // die App konnte die Pflichtangabe nicht einholen, nicht der Nutzer hat
+  // sie verweigert. Deshalb vergüten, mit eigenem Grund (auswertbar), bis der
+  // Wizard den Fallback hat. 'denied' bleibt no_location: da hat der Nutzer
+  // die Berechtigung verweigert UND den angebotenen Orts-Schritt übersprungen.
+  const gpsStatus = String(capture?.gpsStatus || '');
+  if (gpsStatus === 'unavailable' || gpsStatus === 'timeout') {
+    return { ok: true, grund: 'gps_fix_fehlt_schritt_uebersprungen' };
+  }
+
   return { ok: false, grund: 'no_location' };
 }
 
