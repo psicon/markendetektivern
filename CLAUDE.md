@@ -2640,6 +2640,32 @@ Gotchas:
 - **Pfand zählt NICHT** als eligible: `isPfandItem()` in lib/ocr.js
   (`category==='Pfand'` ODER name~pfand/leergut) → in `countEligibleItems`
   + beide per-Item-`eligible`-Flags. Reconciliation UNBERÜHRT.
+- **Verhungerte Bons (03.09.2026):** ~1 Bon pro 5 Tage bleibt in `ocr_pending`
+  mit `attempts=0` und `updatedAt===createdAt` — processCashback hat die
+  PubSub-Nachricht nie gesehen, obwohl enqueue den Publish als Erfolg meldete
+  (9 Fälle, bis 41 Tage alt, in der App ewig „wird geprüft"). Ursache im
+  Eventarc/PubSub-Pfad nicht belegbar (keine Logs). Abhilfe: `sweepStuckReceipts`
+  (onSchedule alle 15 min) republiziert `ocr_pending` älter als 20 min, max.
+  5× pro Bon (`sweptAt`/`sweepCount`). Doppelzustellung ist Noop (OCR-Cache,
+  Ledger-Idempotenz, alreadyCredited). Normale Verarbeitung: p50 ≈ 40 s,
+  p90 ≈ 2 min; Ausreißer bis ~17 min sind Eskalation/Cold-Start, kein Stau.
+  Zweiter Befund derselben Runde: die App überschreibt den Mirror mit
+  `upload_failed`/`uploading`, NACHDEM der Server final war (10 Fälle in
+  45 Tagen; Queue-Retry nach Timeout, obwohl enqueue durch war) → Nutzer sieht
+  „Upload fehlgeschlagen" für einen vergüteten Bon. Reparatur per
+  `.fix-stale-mirrors.js`; Root-Fix (bonUploadQueue darf den Mirror nur
+  schreiben, wenn dort kein Server-Status steht) ist offen.
+- **Produktfoto-Freigabe, Ortsangabe (03.09.2026):** Android 6.0.15 überspringt
+  den Orts-Schritt bei erteilter Berechtigung (18b8cb6) und hat KEINEN Fallback,
+  wenn der GPS-Fix ausbleibt → Einreichung ohne Ort, `locationGate` würde
+  `no_location` → approved ohne Cent. 55 solche Uploads stehen pending mit
+  `holdReasons: ort_fehlt_gps_unavailable_app_uebersprang_schritt`. Der
+  Gate-Fix (`gpsStatus unavailable/timeout` → vergüten wie Gnadenfrist) ist
+  entworfen, aber nicht angewendet (Geld-Gate, wartet auf Freigabe). Wizard
+  braucht den Fallback (Orts-Schritt zeigen, wenn GPS scheitert).
+  Per-User-Deckel greift still: der Trigger schreibt bei „Deckel/Budget" NICHTS
+  ans Doc (nur Log) — 41 Freigaben am 03.09. ohne Buchung waren korrekt
+  (6 Nutzer am 5-€-Cap), sind aber nur per Ledger-Abgleich erkennbar.
 - **Retry app-level (KEIN PubSub-Dead-Letter):** `MAX_PROCESS_ATTEMPTS=5`;
   transient → NICHT voreilig „rejected" (Mirror bleibt in-progress), nur
   `attempts`/`lastError` + throw; nach Max → `max_retries_exceeded`.

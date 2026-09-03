@@ -47,6 +47,7 @@ const functions = require('firebase-functions');
 const { logger } = require('firebase-functions');
 const { defineSecret } = require('firebase-functions/params');
 const { onRequest } = require('firebase-functions/v2/https');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { onMessagePublished } = require('firebase-functions/v2/pubsub');
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { PubSub } = require('@google-cloud/pubsub');
@@ -2440,5 +2441,52 @@ exports.resolveCashbackReview = onRequest(
       logger.error('resolveCashbackReview-failed', { receiptId, err: e.message });
       res.status(500).json({ code: 'internal' });
     }
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────
+// Sweeper: verhungerte Bons (03.09.2026)
+//
+// Befund: 9 Bons standen bis zu 41 Tage in 'ocr_pending' mit attempts=0 und
+// updatedAt === createdAt — processCashback hat sie NIE gesehen (kein einziger
+// process-*-Logeintrag), obwohl enqueueCashback den Publish als Erfolg
+// gemeldet hat. Rate ~1 pro 5 Tage. Ein Bon, den niemand anfasst, bleibt in
+// der App für immer „wird geprüft" — genau die Klasse „Status ohne
+// Mechanismus". Der Sweeper legt solche Bons erneut auf das Topic. Das ist
+// gefahrlos: OCR-Cache (falls vorhanden) + Ledger-Idempotenz + alreadyCredited-
+// Precheck machen eine Doppelzustellung zum Noop.
+// Query nur auf status (kein Composite-Index nötig), Alter im Speicher.
+const SWEEP_MIN_AGE_MS = 20 * 60 * 1000;
+const SWEEP_MAX_PER_RUN = 50;
+exports.sweepStuckReceipts = onSchedule(
+  { region: REGION, schedule: 'every 15 minutes', timeoutSeconds: 120, memory: '256MiB' },
+  async () => {
+    const snap = await db.collection('receipts').where('status', '==', 'ocr_pending').limit(500).get();
+    const cutoff = Date.now() - SWEEP_MIN_AGE_MS;
+    const stuck = snap.docs.filter((d) => {
+      const x = d.data();
+      const created = x.createdAt?.toMillis?.() ?? 0;
+      const lastSweep = x.sweptAt?.toMillis?.() ?? 0;
+      // Nicht öfter als alle 20 min pro Bon; nach 5 Sweeps aufgeben (dann ist
+      // es kein verlorener Publish mehr, sondern ein echter Verarbeitungsfehler).
+      return created && created < cutoff && lastSweep < cutoff && (x.sweepCount || 0) < 5;
+    }).slice(0, SWEEP_MAX_PER_RUN);
+    if (!stuck.length) return;
+    const topic = pubsub.topic(PUBSUB_TOPIC);
+    let n = 0;
+    for (const d of stuck) {
+      const x = d.data();
+      try {
+        await d.ref.update({
+          sweptAt: admin.firestore.FieldValue.serverTimestamp(),
+          sweepCount: admin.firestore.FieldValue.increment(1),
+        });
+        await topic.publishMessage({ json: { cashbackId: d.id, uid: x.userId }, attributes: { uid: x.userId, cashbackId: d.id } });
+        n++;
+      } catch (e) {
+        logger.warn('sweep-republish-failed', { cashbackId: d.id, err: e.message });
+      }
+    }
+    logger.warn('sweep-stuck-receipts', { candidates: stuck.length, republished: n, oldestMin: Math.round((Date.now() - Math.min(...stuck.map((d) => d.data().createdAt.toMillis()))) / 60000) });
   },
 );
