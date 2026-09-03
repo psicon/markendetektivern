@@ -2855,6 +2855,24 @@ Aktueller Stand: Auto-Prompt = **nativer Dialog direkt**, ausgelöst nach dem
 ersten Erfolg + Walk-Through (`lib/services/firstCaseService.ts`, ClickUp
 86cav7gqm) sowie beim Level-Up ≥3 (`ratingPrompt.ts`).
 
+- **PRODUKTENTSCHEIDUNG (02./03.09.2026, endgültig): Der Dialog nach dem
+  ersten Fall bleibt — auch wenn er beim Neu-Nutzer über den Walkthrough-Demo-
+  Tap binnen 1–2 Minuten kommt. KEIN Reife-Gate (Sessions/Tage/Scans) bauen,
+  nicht mehr als Bug flaggen** (ClickUp 86cbc0kyq wurde dafür rejected).
+  Datenlage (Stand 03.09.): App-Store-Text-Rezensionen vorher/nachher (1.5.–
+  25.7. vs. 26.7.–2.9.) Ø 1,5 → 3,5, 0 → 3 Fünf-Sterne bei je n=6; Trichter
+  `ratingFunnelEvents` seit 1.8.: 18.148 Dialog-Anfragen, 52 % binnen 5 min
+  nach Kontoerstellung, 90 % auf Level ≤ 2, genau EINE Beschwerde (Play, 31.8.).
+  Harte Store-Regeln (3/365, keine Vorfrage, kein Incentive) sind eingehalten;
+  nur die Empfehlung „erst nach Engagement" nicht — das ist kein Ablehnungs-
+  grund. Der Play-Gesamttrend ist per API NICHT abrufbar (nur Console).
+  Was davon unabhängig offen bleibt (S, optional): drei kontextfreie Pfade
+  prompten ~3 s nach App-Öffnen ohne Feier (Resume mit offener Sequenz, Level-
+  Up-Flag beim Kaltstart, 30-Tage-Re-Feier ohne Produktseite) — das ist der
+  Pfad, der zur „3 Sekunden"-Rezension passt; und das Telemetrie-Label
+  (GamificationProvider ruft markCelebrated VOR getCelebrationContext → alles
+  wird `veteran_case`). Beides darf man schließen, ohne den Erst-Fall-Dialog
+  anzutasten.
 - **NIEMALS eine Vorfrage vor dem nativen Dialog** („Gefällt dir die App?" →
   Weiche). Google verbietet das **wörtlich** in den In-App-Review-Guidelines
   („shouldn't ask the user any questions before or while presenting the rating
