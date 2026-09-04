@@ -1540,9 +1540,15 @@ exports.processCashback = onMessagePublished(
       //                  too-old > duplicate > recon > below-min)
       let status = 'matched';
       let rejectReason = null;
+      let rejectDetail = null; // Freitext zum Code (z.B. OCR-Begründung bei not_a_receipt)
       if (!ocr.parsed.isReceipt) {
         status = 'rejected';
-        rejectReason = ocr.parsed.notReceiptReason || 'not_a_receipt';
+        // 04.09.2026: rejectReason ist ein CODE, den die App mappt (pending/[id].tsx
+        // → „Kein Kassenbon erkannt"). Der OCR-Freitext („Das Bild ist komplett
+        // schwarz …") stand bisher direkt im Feld und fiel in der App auf den
+        // generischen Fallback „Bon abgelehnt". Freitext jetzt separat.
+        rejectReason = 'not_a_receipt';
+        rejectDetail = ocr.parsed.notReceiptReason || null;
       } else if (!merchantInfo) {
         status = 'rejected';
         rejectReason = 'unknown_merchant';
@@ -1697,6 +1703,7 @@ exports.processCashback = onMessagePublished(
               ? { sameUser: duplicateOf.sameUser, priorReceiptId: duplicateOf.sameUser ? duplicateOf.receiptId : null }
               : null,
             rejectReason,
+            rejectDetail: rejectDetail ?? null,
             updatedAt: now,
           },
           { merge: true },
@@ -1706,6 +1713,7 @@ exports.processCashback = onMessagePublished(
       await docRef.update({
         status,
         rejectReason,
+        rejectDetail: rejectDetail ?? null,
         reviewReason,
         ocr: buildOcrField(ocr, recon, escalation),
         merchant: merchantInfo
