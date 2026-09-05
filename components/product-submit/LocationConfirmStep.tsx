@@ -59,11 +59,16 @@ interface Props {
   marketName: string;
   onConfirm: (place: ConfirmedPlace) => void;
   onBack: () => void;
+  /**
+   * Optionaler Hinweis, warum der Schritt (erneut) kommt — z.B. wenn der
+   * stille GPS-Fix beim Einreichen scheiterte (Submit-Gate im Wizard).
+   */
+  hinweis?: string | null;
 }
 
 type Status = 'frage' | 'ermittelt' | 'gefunden' | 'eingabe';
 
-export function LocationConfirmStep({ marketName, onConfirm, onBack }: Props) {
+export function LocationConfirmStep({ marketName, onConfirm, onBack, hinweis }: Props) {
   const { theme } = useTokens();
   const [status, setStatus] = useState<Status>('frage');
   const [ort, setOrt] = useState('');
@@ -209,6 +214,12 @@ export function LocationConfirmStep({ marketName, onConfirm, onBack }: Props) {
 
       {status === 'frage' && (
         <Karte>
+          {hinweis ? (
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
+              <MaterialCommunityIcons name="map-marker-question-outline" size={18} color={theme.primary} style={{ marginTop: 1 }} />
+              <Text style={[T.text, { flex: 1 }]}>{hinweis}</Text>
+            </View>
+          ) : null}
           <Haupttaste label="Meinen Standort verwenden" icon="crosshairs-gps" onPress={standortVerwenden} />
           <Nebentaste label="Ort eintippen" onPress={() => setStatus('eingabe')} />
           <Text style={T.klein}>

@@ -115,6 +115,12 @@ export default function ProductWizardScreen() {
   const firstCaptureAtRef = useRef<number | null>(null);
   /** Der im `place`-Schritt bestätigte Ort — gilt für die ganze Sitzung. */
   const [confirmedPlace, setConfirmedPlace] = useState<ConfirmedPlace | null>(null);
+  // Submit-Gate (Orts-Audit 05.09.2026): scheitert der stille GPS-Fix beim
+  // Einreichen UND liegt kein bestätigter Ort vor, geht es in den Orts-
+  // Schritt statt still ohne Ort raus — vorher landeten 54 Android-
+  // Einreichungen ohne jede Ortsangabe (gpsStatus unavailable/timeout).
+  const [ortHinweis, setOrtHinweis] = useState<string | null>(null);
+  const submitNachOrtRef = useRef(false);
   /**
    * Ob die Standortfreigabe steht. `null` = noch nicht geprüft.
    *
@@ -514,6 +520,19 @@ export default function ProductWizardScreen() {
       confirmedPlace,
     });
 
+    // Kein Ort auf beiden Wegen → einmal nachfragen, Fotos bleiben erhalten.
+    // Nach der Ortsangabe reicht der Effekt unten automatisch ein.
+    if (!capture.gps && !confirmedPlace) {
+      submitNachOrtRef.current = true;
+      setOrtHinweis(
+        capture.gpsStatus === 'denied' || capture.gpsStatus === 'not_asked'
+          ? 'Ohne Standortfreigabe brauchen wir einmal kurz den Ort, damit die Aufnahmen dem Markt zugeordnet werden.'
+          : 'Dein Standort ließ sich gerade nicht ermitteln — bitte kurz den Ort angeben, dann geht es direkt weiter.',
+      );
+      setPhase('place');
+      return;
+    }
+
     try {
       await enqueueProductUpload({
         uid: user.uid,
@@ -586,6 +605,13 @@ export default function ProductWizardScreen() {
     // das Feld gefüllt aussieht.
   }, [user?.uid, allCaptured, photos, sessionId, productIndex, marketId, marketName, marketLand, productName, eanCode, campaign?.campaignId, confirmedPlace]);
 
+  // Orts-Schritt aus dem Submit-Gate abgeschlossen → Einreichung fortsetzen.
+  useEffect(() => {
+    if (!submitNachOrtRef.current || !confirmedPlace) return;
+    submitNachOrtRef.current = false;
+    void doSubmit();
+  }, [confirmedPlace, doSubmit]);
+
   // ─── Render ───────────────────────────────────────────────────────
 
   const Header = ({ title, sub }: { title: string; sub?: string }) => (
@@ -630,8 +656,19 @@ export default function ProductWizardScreen() {
             //
             // `standortFrei === null` (Prüfung noch nicht durch) führt
             // bewusst IN den Schritt: lieber einmal zu viel fragen als die
-            // Pflichtangabe still überspringen.
-            setPhase(confirmedPlace || standortFrei === true ? 'intro' : 'place');
+            // Pflichtangabe still überspringen. Der Status wird HIER frisch
+            // gelesen (nicht nur beim Mount): iOS „Einmal erlauben" erlischt
+            // mit dem nächsten Hintergrund-Wechsel, Ortungsdienste können
+            // inzwischen aus sein (Orts-Audit 05.09.2026).
+            if (confirmedPlace) {
+              setPhase('intro');
+            } else {
+              void standortStatus().then((st) => {
+                const frei = st === 'granted_precise' || st === 'granted_coarse';
+                setStandortFrei(frei);
+                setPhase(frei ? 'intro' : 'place');
+              });
+            }
           }}
         />
       </View>
@@ -645,11 +682,19 @@ export default function ProductWizardScreen() {
         <Header title="Standort" sub={marketName} />
         <LocationConfirmStep
           marketName={marketName}
+          hinweis={ortHinweis}
           onConfirm={(place) => {
             setConfirmedPlace(place);
-            setPhase('intro');
+            setOrtHinweis(null);
+            // Aus dem Submit-Gate: zurück zur Übersicht, der Effekt oben
+            // reicht ein. Sonst regulär weiter zum Intro.
+            setPhase(submitNachOrtRef.current ? 'review' : 'intro');
           }}
-          onBack={() => setPhase('market')}
+          onBack={() => {
+            setOrtHinweis(null);
+            setPhase(submitNachOrtRef.current ? 'review' : 'market');
+            submitNachOrtRef.current = false;
+          }}
         />
       </View>
     );

@@ -94,6 +94,12 @@ export interface CaptureContext {
     source: string | null;
   } | null;
   journeyId: string | null;
+  /**
+   * Fehlercode/-text, wenn der GPS-Fix scheiterte (Orts-Audit 05.09.2026:
+   * `unavailable` war bis dahin nicht auswertbar, weil die Exception
+   * verworfen wurde — Ortungsdienste aus? Provider ohne Ergebnis?).
+   */
+  gpsError?: string | null;
 }
 
 export interface ClientVersion {
@@ -121,6 +127,16 @@ export async function standortStatus(): Promise<GpsStatus> {
   try {
     const p = await Location.getForegroundPermissionsAsync();
     if (!p.granted) return p.canAskAgain ? 'not_asked' : 'denied';
+
+    // Berechtigung erteilt, aber Ortungsdienste am Gerät AUS → es gibt
+    // keinen Fix. Als 'unavailable' melden, damit der Wizard den Orts-
+    // Schritt zeigt statt still ohne Ort einzureichen (Orts-Audit 05.09.:
+    // 53 Android-Einreichungen ohne Ort, alle gpsStatus unavailable).
+    try {
+      if (!(await Location.hasServicesEnabledAsync())) return 'unavailable';
+    } catch {
+      // Nicht abfragbar → optimistisch weiter; der Submit-Gate fängt es.
+    }
 
     // Android 12+ meldet eine bewusst ungenaue Freigabe direkt.
     if (p.android?.accuracy === 'coarse') return 'granted_coarse';
@@ -163,7 +179,9 @@ export async function standortAnfordern(): Promise<GpsStatus> {
   }
 }
 
-async function holeGps(status: GpsStatus): Promise<{ gps: CaptureGps | null; status: GpsStatus }> {
+async function holeGps(
+  status: GpsStatus,
+): Promise<{ gps: CaptureGps | null; status: GpsStatus; error?: string | null }> {
   if (status !== 'granted_precise' && status !== 'granted_coarse') {
     return { gps: null, status };
   }
@@ -203,8 +221,10 @@ async function holeGps(status: GpsStatus): Promise<{ gps: CaptureGps | null; sta
     // `fixAt`, die Bewertung stuft ihn serverseitig entsprechend herab.
     if (bekannt) return { gps: bekannt, status };
     return { gps: null, status: 'timeout' };
-  } catch {
-    return { gps: null, status: 'unavailable' };
+  } catch (e: any) {
+    // Fehlercode mitgeben — nur so ist 'unavailable' später auswertbar.
+    const error = String(e?.code || e?.message || e || 'unknown').slice(0, 120);
+    return { gps: null, status: 'unavailable', error };
   }
 }
 
@@ -230,9 +250,10 @@ export async function erfasseCaptureContext(opts?: {
 
   try {
     const status = await standortStatus();
-    const { gps, status: endStatus } = await holeGps(status);
+    const { gps, status: endStatus, error } = await holeGps(status);
     basis.gps = gps;
     basis.gpsStatus = endStatus;
+    if (error) basis.gpsError = error;
   } catch (e) {
     console.warn('[captureContext] Standort nicht ermittelbar (non-fatal):', e);
   }
