@@ -122,6 +122,34 @@ Unklarheit kurz fragen. Bei Vergleichen ("warum ist X auf Home
 anders als Stöbern?") **nicht** raten welche Seite gewinnt — beide
 Optionen anbieten oder fragen.
 
+## Meta-Regel: Arbeitsweise — clever, gewissenhaft, kostenbewusst, selbstgeprüft (User-Vorgabe 05.09.2026)
+
+User-Wortlaut: „immer best practices nutzen, sei clever und gewissenhaft,
+kostenorientiert und immer nach der besten lösung bestrebt (ohne die kosten
+überzustrapazieren). prüfe dich immer selbst und erschaffe rollen zur prüfung
+die passen."
+
+Was das konkret heißt — bei JEDER Aufgabe, nicht nur bei großen:
+1. **Beste Lösung, nicht schnellste.** Erst Root-Cause und Alternativen
+   abwägen, dann bauen. Workarounds nur mit Begründung + Follow-up-Task.
+2. **Kostenbewusst.** Laufende Kosten (Gemini-Calls, Firestore-Reads,
+   Storage, Builds, Token) sind Teil der Lösung: pro Vorschlag die
+   Kostenwirkung nennen und die günstigste Variante wählen, die das Ziel
+   VOLL erreicht. Nicht sparen, wo es Qualität kostet (siehe „Billig
+   zuerst"-No-Go bei der OCR) — aber auch nichts verbrennen (z.B. Re-OCR
+   von 4.700 Bons, wenn ein Feld schon im Cache steht).
+3. **Selbstprüfung ist Pflicht, mit passenden Rollen.** Vor „fertig":
+   Prüfrollen definieren, die zum Risiko der Änderung passen, und jede
+   Rolle die Änderung angreifen lassen (Skeptiker/Refuter, Geld-Buchhalter
+   bei Ledger-Änderungen, Datenschutz bei personenbezogenen Feldern,
+   Alt-Client/Migration bei Schema-Änderungen, Ops/Rollback bei Deploys,
+   Nutzer-Sicht bei Copy/UI). Bei Geld/Daten: zwei Runden gegen den
+   AKTUELLEN Stand, Funde fixen, erneut prüfen. Umsetzung: Workflow mit
+   Rollen-Agenten oder explizite Checkliste — aber nie „ich hab's gelesen,
+   passt".
+4. **Gewissenhaft berichten.** Was verifiziert ist, was nur plausibel ist,
+   was offen bleibt — getrennt und ehrlich.
+
 ## Meta-Regel: Best Practices — IMMER, ohne Ausnahme
 
 Wir entwickeln **immer nach Best Practices**. Das ist keine
