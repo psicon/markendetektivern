@@ -52,7 +52,7 @@ import { useNetworkStatus } from '@/lib/services/network';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
-type ViewState = 'unknown' | 'uploading' | 'upload_failed' | 'pending' | 'review' | 'approved' | 'no_reward' | 'rejected' | 'not_found';
+type ViewState = 'unknown' | 'uploading' | 'upload_failed' | 'pending' | 'review' | 'approved' | 'no_reward' | 'rejected' | 'superseded' | 'not_found';
 
 interface MirrorItem {
   name: string;
@@ -85,6 +85,9 @@ interface MirrorDoc {
   storagePath?: string | null;
   reconciliationDeltaCents?: number | null;
   rejectReason?: string | null;
+  // Duplikat-Platzhalter (enqueueCashback): dieser Upload war byte-identisch zu
+  // einem vorhandenen Bon → der kanonische Eintrag steht in supersededBy.
+  supersededBy?: string | null;
   // Client-side placeholder fields:
   isClientPlaceholder?: boolean;
   uploadProgress?: number; // 0–100
@@ -112,7 +115,9 @@ function viewStateFor(status?: string | null): ViewState {
     case 'rejected':
       return 'rejected';
     case 'superseded':
-      return 'not_found';
+      // 86cb6tx5u: eigener Zustand — vorher auf not_found gemappt, was sich wie
+      // ein Ladefehler las („Eintrag nicht gefunden"), obwohl alles korrekt war.
+      return 'superseded';
     default:
       return 'unknown';
   }
@@ -380,6 +385,15 @@ export default function CashbackPendingScreen() {
         cashback: null,
       };
     }
+    if (state === 'superseded') {
+      return {
+        icon: <MaterialCommunityIcons name="content-copy" size={42} color={primary} />,
+        bg: primary + '18',
+        title: 'Diesen Bon hast du schon eingereicht',
+        body: 'Dein erster Eintrag bleibt gültig und wird nur einmal gezählt — hier ist nichts weiter zu tun.',
+        cashback: null,
+      };
+    }
     if (state === 'rejected') {
       // T17.30: Konkreten Reject-Grund zeigen — Backend emittiert
       // duplicate_content_self/_cross_user und pubsub_publish_failed
@@ -411,12 +425,20 @@ export default function CashbackPendingScreen() {
           : 'Wir konnten den Bon nicht sicher lesen. Ein scharfes, vollständiges Foto bei gutem Licht hilft — probier es einfach noch mal.';
       // Titel je nach Grund: „schlecht lesbar"-Fälle bekommen einen
       // freundlichen, nicht-anklagenden Titel (Copy-Ton: nie Frustration).
+      // R5#17: kein anklagendes „Bon abgelehnt" mehr — jeder Grund bekommt
+      // einen sachlichen Titel, der Grund steht ohnehin im Text darunter.
       const rejTitle =
         reason === 'not_a_receipt'
           ? 'Kein Kassenbon erkannt'
           : ['reconciliation_delta', 'process_error', 'pubsub_publish_failed', 'no_bon_date', ''].includes(reason)
           ? 'Bon nicht lesbar'
-          : 'Bon abgelehnt';
+          : reason === 'unknown_merchant'
+          ? 'Markt nicht dabei'
+          : reason === 'bon_too_old'
+          ? 'Bon außerhalb der Frist'
+          : reason === 'duplicate_content_self' || reason === 'duplicate_content_cross_user'
+          ? 'Bereits eingereicht'
+          : 'Bon nicht berücksichtigt';
       return {
         icon: <MaterialCommunityIcons name="close-circle-outline" size={42} color={warn} />,
         bg: warn + '22',
@@ -913,7 +935,9 @@ export default function CashbackPendingScreen() {
         </Pressable>
         <Pressable
           onPress={() =>
-            state === 'rejected' || state === 'not_found'
+            state === 'superseded' && doc?.supersededBy
+              ? router.replace({ pathname: '/cashback/pending/[id]' as any, params: { id: doc.supersededBy } })
+              : state === 'rejected' || state === 'not_found'
               ? onScanBon()
               : router.replace('/(tabs)/rewards')
           }
@@ -930,12 +954,22 @@ export default function CashbackPendingScreen() {
           })}
         >
           <MaterialCommunityIcons
-            name={state === 'rejected' || state === 'not_found' ? 'camera-outline' : 'check'}
+            name={
+              state === 'superseded' && doc?.supersededBy
+                ? 'receipt'
+                : state === 'rejected' || state === 'not_found'
+                ? 'camera-outline'
+                : 'check'
+            }
             size={16}
             color="#fff"
           />
           <Text style={{ color: '#fff', fontFamily: fontFamilyVariants.bold, fontWeight: fontWeight.bold as any, fontSize: 14 }}>
-            {state === 'rejected' || state === 'not_found' ? 'Neuer Bon' : 'Fertig'}
+            {state === 'superseded' && doc?.supersededBy
+              ? 'Zum vorhandenen Bon'
+              : state === 'rejected' || state === 'not_found'
+              ? 'Neuer Bon'
+              : 'Fertig'}
           </Text>
         </Pressable>
       </View>

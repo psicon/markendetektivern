@@ -139,7 +139,7 @@ function statusVisual(s: string | undefined, primary: string): StatusVisual {
  * Must stay consistent with the status chip — never "Wird hochgeladen" while
  * the chip already says "Wird geprüft"/"In Prüfung" (Task 86ca5fazh).
  */
-function merchantTitleForStatus(status?: string): string {
+function merchantTitleForStatus(status?: string, rejectReason?: string | null): string {
   switch (status) {
     case 'uploading':
       return 'Neuer Bon';
@@ -150,8 +150,31 @@ function merchantTitleForStatus(status?: string): string {
     case 'matched':
     case 'review':
       return 'Markt wird erkannt …';
+    // 86cb7h3gy: kein Sammel-Fallback „Unbekannte Filiale" mehr — der Titel
+    // folgt dem echten Zustand. „Unbekannte Filiale" las sich wie „Markt nicht
+    // erkannt", galt aber für JEDEN abgelehnten Bon ohne aufgelösten Markt
+    // (z.B. not_a_receipt während des OCR-Ausfalls) — und ALDI-Bons wurden
+    // als „nicht bekannt" missverstanden, obwohl der Markt nie das Problem war.
+    case 'rejected':
+      switch (rejectReason) {
+        case 'unknown_merchant':
+          return 'Markt nicht dabei';
+        case 'not_a_receipt':
+          return 'Kein Kassenbon erkannt';
+        case 'duplicate_content_self':
+        case 'duplicate_content_cross_user':
+          return 'Bereits eingereicht';
+        case 'bon_too_old':
+          return 'Bon außerhalb der Frist';
+        default:
+          return 'Bon nicht berücksichtigt';
+      }
+    case 'superseded':
+      return 'Bereits eingereicht';
+    case 'no_reward':
+      return 'Bon gespeichert';
     default:
-      return 'Unbekannte Filiale';
+      return 'Bon';
   }
 }
 
@@ -363,7 +386,7 @@ export default function CashbackHistoryScreen() {
       ? (discLand ? `${disc.name} (${discLand})` : disc.name)
       : isResolvedMerchant(rawMerchant)
         ? rawMerchant
-        : merchantTitleForStatus(item.status);
+        : merchantTitleForStatus(item.status, (item as any).rejectReason ?? null);
     const logoUrl: string | null = disc?.bild || (item as any).merchantLogoUrl || null;
     const cashback = item.cashbackCents ? formatCents(item.cashbackCents) : null;
 

@@ -409,6 +409,13 @@ export interface ProductSubmissionEntry {
   stepCount?: number;
   status?: 'pending' | 'approved' | 'rejected';
   createdAt?: any;
+  // Freigabe-Metadaten (86cbam5ep): maschinenlesbare Gründe aus der Review-
+  // Runde; `reviewNote` ist interner Freitext und wird NICHT angezeigt.
+  holdReasons?: string[];
+  rejectReason?: string | null;
+  reviewedAt?: any;
+  rewardSkipped?: boolean;
+  rewardSkippedReason?: string | null;
 }
 
 /** Live list of the user's product submissions (newest first). */

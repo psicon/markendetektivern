@@ -39,18 +39,27 @@ import {
   type UploadJob,
 } from '@/lib/services/uploadQueue';
 import { useNetworkStatus } from '@/lib/services/network';
+import { describeSubmission, type SubmissionStatusCopy } from '@/lib/utils/productSubmissionCopy';
 
 const PURPLE = '#5b4f9c';
 
-function statusVisual(status?: string) {
-  switch (status) {
-    case 'approved':
-      return { label: 'Bestätigt', color: '#2e7d32', bg: 'rgba(46,125,50,0.12)', icon: 'check-circle' };
-    case 'rejected':
-      return { label: 'Abgelehnt', color: '#d6603a', bg: 'rgba(214,96,58,0.12)', icon: 'close-circle' };
+// 86cbam5ep: Status + Grund kommen aus describeSubmission (eine Quelle für
+// Chip, Zeile und Detail-Karte). Farben je Tönung; kein „Abgelehnt"-Rot mehr —
+// der Nutzer soll lernen, nicht sich schämen (Copy-Ton).
+function toneVisual(copy: SubmissionStatusCopy) {
+  switch (copy.tone) {
+    case 'ok':
+      return { color: '#2e7d32', bg: 'rgba(46,125,50,0.12)' };
+    case 'held':
+      return { color: '#8a5a00', bg: 'rgba(176,136,0,0.14)' };
+    case 'pending':
     default:
-      return { label: 'In Prüfung', color: '#b08800', bg: 'rgba(176,136,0,0.12)', icon: 'progress-clock' };
+      return { color: '#b08800', bg: 'rgba(176,136,0,0.12)' };
   }
+}
+function statusVisual(entry: ProductSubmissionEntry) {
+  const copy = describeSubmission(entry);
+  return { ...toneVisual(copy), label: copy.label, icon: copy.icon, copy };
 }
 
 const STEP_LABEL: Record<ProductPhotoStep, string> = PRODUCT_PHOTO_STEPS.reduce(
@@ -391,7 +400,7 @@ export default function ProductSubmitOverview() {
           </View>
         ) : (
           rows.slice(0, 20).map((r) => {
-            const v = statusVisual(r.status);
+            const v = statusVisual(r);
             const title = r.productName || `Produkt ${r.productIndex ?? ''}`.trim();
             const land = normalizeLand(r.marketLand);
             const marketLine = r.marketName ? `${r.marketName}${land ? ` (${land})` : ''} · ` : '';
@@ -430,6 +439,11 @@ export default function ProductSubmitOverview() {
                       {formatRelative(r.createdAt)}
                     </Text>
                   </View>
+                  {v.copy.tone === 'held' ? (
+                    <Text numberOfLines={1} style={{ color: v.color, fontFamily: fontFamilyVariants.body, fontSize: 12, marginTop: 4 }}>
+                      {v.copy.headline}
+                    </Text>
+                  ) : null}
                 </View>
                 <MaterialCommunityIcons name="chevron-right" size={24} color={theme.textMuted ?? theme.textSub} />
               </Pressable>
@@ -446,7 +460,7 @@ export default function ProductSubmitOverview() {
       >
         {detailRow
           ? (() => {
-              const v = statusVisual(detailRow.status);
+              const v = statusVisual(detailRow);
               const land = normalizeLand(detailRow.marketLand);
               return (
                 <View style={{ paddingBottom: 8, gap: 14 }}>
@@ -462,14 +476,18 @@ export default function ProductSubmitOverview() {
                     ) : null}
                   </View>
 
-                  {detailRow.status !== 'approved' && detailRow.status !== 'rejected' ? (
-                    <View style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start', backgroundColor: 'rgba(176,136,0,0.10)', borderRadius: 12, padding: 12 }}>
-                      <MaterialCommunityIcons name="progress-clock" size={18} color="#b08800" style={{ marginTop: 1 }} />
-                      <Text style={{ flex: 1, color: theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 13, lineHeight: 18 }}>
-                        Deine Einreichung ist da und wird geprüft — das kann ein bisschen dauern. Danke für deine Geduld, du hilfst, den Katalog zu vervollständigen.
+                  {/* Status-Karte: Grund + nächster Schritt (86cbam5ep) */}
+                  <View style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start', backgroundColor: v.bg, borderRadius: 12, padding: 12 }}>
+                    <MaterialCommunityIcons name={v.icon as any} size={18} color={v.color} style={{ marginTop: 1 }} />
+                    <View style={{ flex: 1, gap: 3 }}>
+                      <Text style={{ color: theme.text, fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 13 }}>
+                        {v.copy.headline}
+                      </Text>
+                      <Text style={{ color: theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 13, lineHeight: 18 }}>
+                        {v.copy.body}
                       </Text>
                     </View>
-                  ) : null}
+                  </View>
 
                   <View style={{ gap: 3 }}>
                     {formatAbsolute(detailRow.createdAt) ? (
