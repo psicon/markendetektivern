@@ -2499,8 +2499,32 @@ Review-Runden (29 Funde) haben Fallen gezeigt, die für JEDE Nacharbeit gelten:
   entscheiden — Ledger frisch lesen (earn−reverse>0 → receipts.bonDate),
   pro User SEQUENZIELL (publish → auf finalen Status pollen → nächster Bon),
   eigener Bon ausgeschlossen. Lauf B (`.repair-campaign.js`) vor Lauf A
-  (`.review-approve.js`); A prüft per Gate, dass B final ist. Root-Fix
-  (Tageszähler statt Vorwärts-Feld) steht als Follow-up im Backlog-Report.
+  (`.review-approve.js`); A prüft per Gate, dass B final ist.
+  **Root-Fix seit 05.09.2026:** das Tageslimit ist ein echter Zähler —
+  `users/{uid}/cashback_days/{YYYY-MM-DD}` = `{ bonDate, receiptIds[] }`
+  (server-only, kein Rules-Block nötig). `syncLedgerForReceipt` liest das
+  Tages-Doc in der Transaktion (Cap = `receiptIds` ohne eigenen Bon ≥
+  `config.dailyCap`), schreibt beim Earn den Bon hinein (+ `bonDate` am Ledger-
+  Earn) und entfernt ihn beim Reverse aus ALLEN Kandidaten-Tagen (Ledger-Earns,
+  Aufrufer-Datum, `opts.extraDays` = gespeichertes receipts.bonDate — die OCR
+  kann zwischen Earn und Reverse ein anderes Datum lesen). Pre-Check 6y liest
+  dasselbe Doc, ist aber nicht autoritativ. Übergangs-Fallback: bei
+  `dailyCap === 1` UND `config.dailyCapLegacyFallback !== false` zählt das alte
+  Vorwärts-Feld mit (Earns aus dem Fenster Backfill↔Deploy); der Reverse
+  löscht das Feld, wenn es auf den stornierten Bon zeigt. Nach Backfill 2 +
+  VERIFY grün wird `dailyCapLegacyFallback: false` gesetzt (Sunset, kein
+  Deploy). Liest eine neue OCR-Lesung ein anderes Datum, hängt der Noop-Zweig
+  den Bon in den neuen Tag um. Backfill `.backfill-cashback-days.js` ist
+  TRANSAKTIONAL pro User (setzt die aktive Menge je Tag, entfernt stale IDs,
+  löscht leere Docs, datiert Legacy-Earns; VERIFY=1 → exit 1 bei fehlend ODER
+  stale). Reihenfolge: Config `dailyCap=1` → Backfill → Deploy → Backfill
+  erneut → VERIFY → Fallback-Sunset. 27 historische Tage mit 2 vergüteten Bons
+  = die alte Lücke; 16 aktive Earns ohne auflösbares Receipt/Datum (alte
+  Test-Resets) zählen an keinem Tag. `cashback_last_bon_date` bleibt für den
+  Client-Softcheck.
+  `cashback_config/v1.dailyCap` ist jetzt semantisch ein Zähler — von 3 auf 1
+  gesetzt, damit das gelebte Verhalten bleibt; 3 würde ab sofort 3 Bons/Tag
+  vergüten (kein Deploy nötig).
 - **Der OCR-Cache-Pfad muss `ocr.robust` mitführen** (index.js Cache-Zweig).
   Ohne ihn ist das Review-Gate 6w bei jedem Retry/Reprocessing blind
   (conf=null → keine Prüfung) und der Final-Write löscht robust am Doc.
@@ -2677,7 +2701,8 @@ Gotchas:
   nutzt sie → kein erneuter Gemini-Call.
 - **Test-Reset eines Users:** NUR `receipts` löschen reicht NICHT (→ Doppel-
   Gutschrift, Geister-Historie, Budget-Leck). Sauber = `receipts`(des Users) +
-  `cashback_status` + `purchased_products` + `cashback_ledger` löschen +
+  `cashback_status` + `purchased_products` + `cashback_ledger` + `cashback_days`
+  (Tageszähler — sonst bleibt der Tag für den User gesperrt) löschen +
   User-Cashback-Felder zurücksetzen + `budgetRemainingCents` je Kampagne um den
   vom User verbrauchten Betrag (Ledger `earn`−`reverse` je `campaignId`) zurückgeben.
 - **App-Reject-Texte ohne Hardcode:** Pipeline schreibt angewandte `maxAgeDays`

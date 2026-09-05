@@ -449,7 +449,7 @@ async function writePurchasedProducts(uid, cashbackId, parsed, merchantInfo, met
  *
  * Runs in a transaction so concurrent re-publishes can't race.
  */
-async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, bonDateIso, campaignId, campaignMode, caps = null) {
+async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, bonDateIso, campaignId, campaignMode, caps = null, opts = {}) {
   const ledgerCol = userRef.collection('cashback_ledger');
   // Tatsächlich gutgeschriebener Betrag — kann durch Budget-Deckelung IN
   // der Transaktion < cashbackCents sein (+ ob das Budget dabei leer war).
@@ -480,6 +480,29 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
     // Aktions-Budget FRISCH in der Transaktion lesen → race-frei cappen.
     const campaignRef = campaignId ? db.collection(CAMPAIGNS_COL).doc(campaignId) : null;
     const campaignSnap = campaignMode && campaignRef ? await tx.get(campaignRef) : null;
+    // Tageszähler (Money-Ops 05.09.2026): users/{uid}/cashback_days/{YYYY-MM-DD}
+    // = { bonDate, receiptIds[] } ist die Quelle der Wahrheit fürs Tageslimit.
+    // Ersetzt das Vorwärts-Feld cashback_last_bon_date, das nur das JÜNGSTE
+    // Datum kannte — jeder nachgereichte ältere Bon umging so das Limit.
+    // Gelesen VOR allen Writes (Transaktions-Regel); der eigene Bon zählt nie.
+    const bonDay = (bonDateIso || todayBerlin()).slice(0, 10);
+    const dayRef = userRef.collection('cashback_days').doc(bonDay);
+    const daySnap = await tx.get(dayRef);
+    const dayIds = Array.isArray(daySnap.data()?.receiptIds) ? daySnap.data().receiptIds : [];
+    const dayOthers = dayIds.filter((id) => id !== cashbackId);
+    // Reverse: der Bon kann unter MEHREREN Tagen stehen (Datum zwischen Earn
+    // und Reverse geändert, Altbestand ohne ledger.bonDate, Backfill-Schlüssel
+    // = gespeichertes receipts.bonDate). Darum ALLE Kandidaten-Tage lesen —
+    // Ledger-Earns, Aufrufer-Datum, opts.extraDays — und überall entfernen.
+    const candidateDays = new Set([
+      bonDay,
+      ...(Array.isArray(opts.extraDays) ? opts.extraDays : []).filter((v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)),
+      ...earns.docs.map((d) => d.data().bonDate).filter((v) => typeof v === 'string' && v),
+    ]);
+    const daySnaps = new Map([[bonDay, daySnap]]);
+    for (const day of candidateDays) {
+      if (!daySnaps.has(day)) daySnaps.set(day, await tx.get(userRef.collection('cashback_days').doc(day)));
+    }
 
     const totalEarned = earns.docs.reduce((s, d) => s + (d.data().cents || 0), 0);
     const totalReversed = reverses.docs.reduce((s, d) => s + (d.data().cents || 0), 0);
@@ -528,7 +551,6 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
       // das schließt die Race-Lücke (2 Bons am letzten Budget-Rest).
       let earnCents = cashbackCents;
       if (caps) {
-        const bonDay = (bonDateIso || todayBerlin()).slice(0, 10);
         if (earnCents > 0 && campaignMode && campaignId && caps.weeklyBonCap > 0) {
           const used = (((u.cashback_campaign_weekly || {})[campaignId] || {})[weekKey] || {}).count || 0;
           if (used >= caps.weeklyBonCap) {
@@ -552,10 +574,20 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
             if (earnCents === 0) capReason = 'monthly_cap_reached';
           }
         }
+        // Tageslimit = max. `dailyCap` vergütete Bons pro Bon-Datum (echter
+        // Zähler, eigener Bon ausgeschlossen). Übergangs-Fallback bei
+        // dailyCap === 1: das alte Vorwärts-Feld zählt weiter mit, damit ein
+        // Earn aus dem Fenster zwischen Backfill und Deploy nicht durchrutscht
+        // (bei dailyCap > 1 würde der Fallback fälschlich blocken → nur bei 1).
         if (earnCents > 0 && caps.dailyCap > 0) {
-          const lastDay = u.cashback_last_bon_date || null;
-          const lastRid = u.cashback_last_bon_receiptId || null;
-          if (lastDay === bonDay && lastRid !== cashbackId) {
+          // Sunset: caps.legacyFallback (= config.dailyCapLegacyFallback, Default
+          // true) wird nach Backfill 2 + VERIFY auf false gesetzt — ohne Deploy.
+          const legacyHit =
+            caps.legacyFallback !== false
+            && caps.dailyCap === 1
+            && u.cashback_last_bon_date === bonDay
+            && u.cashback_last_bon_receiptId !== cashbackId;
+          if (dayOthers.length >= caps.dailyCap || legacyHit) {
             earnCents = 0;
             capReason = 'daily_cap_reached';
           }
@@ -577,9 +609,15 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
           cents: earnCents,
           receiptId: cashbackId,
           campaignId: campaignId || null, // für Budget-Refund beim Reverse
+          bonDate: bonDay, // Tag des Tageszählers (für den Reverse)
           balanceAfterCents: balance + earnCents,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
+        tx.set(
+          dayRef,
+          { bonDate: bonDay, receiptIds: [...dayOthers, cashbackId], updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+          { merge: true },
+        );
         tx.set(
           userRef,
           {
@@ -606,6 +644,28 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
       // no_reward / campaign_budget_exhausted gesetzt.
     } else if (wantApproved && netActive > 0) {
       // Already credited (PubSub redelivery). Noop unless cents changed.
+      // Tageszähler: liest eine NEUE OCR-Lesung ein anderes Bon-Datum als der
+      // Earn kannte (Reprocessing), hängt der Bon in den neuen Tag um — der Tag,
+      // den Receipt/Mirror zeigen, ist die Wahrheit; alle alten Tage werden geräumt.
+      const earnDays = new Set(earns.docs.map((d) => d.data().bonDate).filter((v) => typeof v === 'string' && v));
+      if (!earnDays.has(bonDay)) {
+        for (const [day, snap] of daySnaps) {
+          if (day === bonDay) continue;
+          const ids = Array.isArray(snap.data()?.receiptIds) ? snap.data().receiptIds : [];
+          if (!ids.includes(cashbackId)) continue;
+          tx.set(
+            userRef.collection('cashback_days').doc(day),
+            { bonDate: day, receiptIds: ids.filter((id) => id !== cashbackId), updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+            { merge: true },
+          );
+        }
+        tx.set(
+          dayRef,
+          { bonDate: bonDay, receiptIds: [...dayOthers, cashbackId], updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+          { merge: true },
+        );
+        earns.docs.forEach((d) => tx.set(d.ref, { bonDate: bonDay }, { merge: true }));
+      }
       if (netActive !== cashbackCents) {
         const delta = cashbackCents - netActive;
         // Adjust to match current cents — write a delta entry.
@@ -650,11 +710,26 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
           cashback_lifetime_cents: Math.max(0, lifetime - netActive),
           ...monthlyDelta(-netActive, -1),
           ...campaignDelta(reverseCid, -netActive, -1),
+          // Übergangs-Fallback neutral halten: zeigt das Vorwärts-Feld auf
+          // genau diesen (jetzt stornierten) Bon, darf es den Tag nicht sperren.
+          ...(u.cashback_last_bon_receiptId === cashbackId
+            ? { cashback_last_bon_date: admin.firestore.FieldValue.delete(), cashback_last_bon_receiptId: admin.firestore.FieldValue.delete() }
+            : {}),
         },
         { merge: true },
       );
       // Budget zurück an die Kampagne, die ursprünglich gutgeschrieben hat.
       adjustBudget(reverseCid, netActive);
+      // Tageszähler: dieser Bon zählt an keinem Kandidaten-Tag mehr.
+      for (const [day, snap] of daySnaps) {
+        const ids = Array.isArray(snap.data()?.receiptIds) ? snap.data().receiptIds : [];
+        if (!ids.includes(cashbackId)) continue;
+        tx.set(
+          userRef.collection('cashback_days').doc(day),
+          { bonDate: day, receiptIds: ids.filter((id) => id !== cashbackId), updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+          { merge: true },
+        );
+      }
     }
     // else: not approved + no prior earn — noop.
   });
@@ -1514,20 +1589,28 @@ exports.processCashback = onMessagePublished(
         }
       }
 
-      // 6y) Tageslimit (ClickUp 86ca8hr90): hat der User für ein Bon DIESES
-      // Datums schon Cashback bekommen, gibt's für weitere Bons desselben Tages
-      // KEIN Cashback mehr — der Bon wird aber angenommen + getrackt (no_reward
-      // statt Verwerfen). Ersetzt den früheren harten Enqueue-Block. Nutzt das
-      // bestehende cashback_last_bon_date (Bon-Datum-Semantik); config.dailyCap
-      // 1 = max ein vergüteter Bon pro Tag (aktuelle Konfig).
+      // 6y) Tageslimit (ClickUp 86ca8hr90): max. config.dailyCap vergütete Bons
+      // pro BON-DATUM (Bon-Datum-Semantik). Seit 05.09.2026 ein echter Zähler
+      // (users/{uid}/cashback_days/{Tag}.receiptIds) statt des Vorwärts-Felds
+      // cashback_last_bon_date — nachgereichte ältere Bons zählen damit korrekt.
+      // Der Bon wird angenommen + getrackt (no_reward statt Verwerfen). Der
+      // Pre-Check ist nur Vorsortierung; autoritativ entscheidet die Ledger-
+      // Transaktion (caps.dailyCap) gegen dasselbe Doc.
       if (!alreadyCredited && cashbackCents > 0 && Number(config.dailyCap) > 0) {
         try {
-          const dSnap = await db.doc(`users/${uid}`).get();
-          const lastBonDay = dSnap.exists ? dSnap.data().cashback_last_bon_date || null : null;
-          const lastBonRid = dSnap.exists ? dSnap.data().cashback_last_bon_receiptId || null : null;
           const bonDay = (ocr.parsed.bonDate || todayBerlin()).slice(0, 10);
+          const daySnap = await db.doc(`users/${uid}/cashback_days/${bonDay}`).get();
+          const dayIds = Array.isArray(daySnap.data()?.receiptIds) ? daySnap.data().receiptIds : [];
+          const cap = Number(config.dailyCap);
+          // Übergangs-Fallback (nur bei Cap 1): altes Vorwärts-Feld, siehe Tx.
+          let legacyHit = false;
+          if (cap === 1 && config.dailyCapLegacyFallback !== false) {
+            const uSnap = await db.doc(`users/${uid}`).get();
+            const u = uSnap.exists ? uSnap.data() : {};
+            legacyHit = u.cashback_last_bon_date === bonDay && u.cashback_last_bon_receiptId !== cashbackId;
+          }
           // Eigener Bon zählt nicht als „schon vergüteter Bon des Tages".
-          if (lastBonDay && lastBonDay === bonDay && lastBonRid !== cashbackId) {
+          if (dayIds.filter((id) => id !== cashbackId).length >= cap || legacyHit) {
             cashbackCents = 0;
             zeroReason = 'daily_cap_reached';
           }
@@ -1636,7 +1719,11 @@ exports.processCashback = onMessagePublished(
           maxPerUserCents: campaignMode ? Number(selectedCampaign.maxPerUserCents) || 0 : 0,
           monthlyMaxCents: !campaignMode ? Number(config.monthlyMaxCents) || 0 : 0,
           dailyCap: Number(config.dailyCap) || 0,
+          legacyFallback: config.dailyCapLegacyFallback !== false,
         },
+        // Reverse-Kandidat: das GESPEICHERTE Bon-Datum (Backfill-Schlüssel),
+        // falls die frische OCR-Lesung ein anderes Datum liefert.
+        { extraDays: [receipt.bonDate] },
       );
       // Transaktion hat den Betrag gedeckelt (Budget leer ODER ein Limit
       // race-frei erkannt) → Betrag + Status korrigieren, damit Mirror/Receipt
@@ -2409,6 +2496,7 @@ exports.resolveCashbackReview = onRequest(
           maxPerUserCents: campaignMode ? Number(campaign.maxPerUserCents) || 0 : 0,
           monthlyMaxCents: !campaignMode ? Number(config.monthlyMaxCents) || 0 : 0,
           dailyCap: Number(config.dailyCap) || 0,
+          legacyFallback: config.dailyCapLegacyFallback !== false,
         },
       );
       const credited = Number(settle?.creditedCents) || 0;
