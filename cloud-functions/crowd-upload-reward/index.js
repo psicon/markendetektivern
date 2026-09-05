@@ -92,12 +92,20 @@ exports.onCrowdUploadApproved = onDocumentUpdated(
       return;
     }
 
+    // Orts-Audit 05.09.2026: der ok-GRUND wurde bisher verworfen — 731
+    // Gnadenfrist- und 54 GPS-Ausnahme-Zahlungen waren in Firestore von
+    // regulären nicht unterscheidbar. Ab jetzt steht die angewandte Regel am
+    // Doc (rewardLocationRule), ebenso das Buchungsergebnis (rewardResult /
+    // rewardCents / rewardNotCreditedReason) — ein still ausbleibender Betrag
+    // ist genau das Muster, das niemand merkt.
+    const rewardLocationRule = ort.grund || 'ort_vorhanden';
+
     const userRef = db.collection('users').doc(uid);
     const ledgerRef = userRef.collection('cashback_ledger').doc(`crowd_${uploadId}`);
     const campRef = db.collection(CAMPAIGNS_COL).doc(cid);
 
     try {
-      const credited = await db.runTransaction(async (tx) => {
+      const outcome = await db.runTransaction(async (tx) => {
         // ── Reads zuerst (Firestore-Transaktionsregel) ──
         const [ledgerSnap, userSnap, campSnap] = await Promise.all([
           tx.get(ledgerRef),
@@ -105,12 +113,12 @@ exports.onCrowdUploadApproved = onDocumentUpdated(
           tx.get(campRef),
         ]);
 
-        if (ledgerSnap.exists) return 0; // schon gebucht (Retry oder Backfill)
-        if (!campSnap.exists) return -1; // Aktion existiert nicht mehr
+        if (ledgerSnap.exists) return { cents: 0, reason: 'already_booked' }; // Retry oder Backfill
+        if (!campSnap.exists) return { cents: 0, reason: 'campaign_missing' };
 
         const camp = campSnap.data();
         let pay = Number(camp.cashbackPerBonCents) || 0;
-        if (pay <= 0) return 0;
+        if (pay <= 0) return { cents: 0, reason: 'no_reward_configured' };
 
         const u = userSnap.exists ? userSnap.data() : {};
         const balance = u.cashback_balance_cents || 0;
@@ -122,7 +130,7 @@ exports.onCrowdUploadApproved = onDocumentUpdated(
         if (perUserCap > 0) {
           const earned = (u.cashback_campaign_totals || {})[cid] || 0;
           pay = Math.min(pay, Math.max(0, perUserCap - earned));
-          if (pay <= 0) return 0;
+          if (pay <= 0) return { cents: 0, reason: 'per_user_cap_reached' };
         }
 
         // Budget frisch IN der Transaktion lesen — sonst überzieht ein
@@ -130,7 +138,7 @@ exports.onCrowdUploadApproved = onDocumentUpdated(
         const remaining = Number(camp.budgetRemainingCents);
         if (Number.isFinite(remaining)) {
           pay = Math.min(pay, Math.max(0, remaining));
-          if (pay <= 0) return 0;
+          if (pay <= 0) return { cents: 0, reason: 'campaign_budget_exhausted' };
         }
 
         const inc = admin.firestore.FieldValue.increment;
@@ -154,20 +162,28 @@ exports.onCrowdUploadApproved = onDocumentUpdated(
         );
         tx.set(campRef, { budgetRemainingCents: inc(-pay) }, { merge: true });
 
-        return pay;
+        return { cents: pay, reason: null };
       });
 
+      const credited = outcome.cents;
       if (credited > 0) {
-        logger.info('[crowd-reward] gutgeschrieben', { uploadId, uid, cid, cents: credited });
-      } else if (credited === -1) {
+        logger.info('[crowd-reward] gutgeschrieben', { uploadId, uid, cid, cents: credited, rewardLocationRule });
+      } else if (outcome.reason === 'campaign_missing') {
         logger.warn('[crowd-reward] Aktion existiert nicht', { uploadId, cid });
       } else {
-        logger.info('[crowd-reward] nichts zu buchen (bereits gebucht, Deckel oder Budget)', {
-          uploadId,
-          uid,
-          cid,
-        });
+        logger.info('[crowd-reward] nichts zu buchen', { uploadId, uid, cid, reason: outcome.reason });
       }
+      // Ergebnis ans Doc — messbar, nicht nur im Log. Ein bereits gebuchter
+      // Retry (already_booked) überschreibt ein vorhandenes 'credited' NICHT.
+      const rewardDoc = { rewardLocationRule, rewardCheckedAt: admin.firestore.FieldValue.serverTimestamp() };
+      if (credited > 0) {
+        Object.assign(rewardDoc, { rewardResult: 'credited', rewardCents: credited, rewardNotCreditedReason: admin.firestore.FieldValue.delete() });
+      } else if (outcome.reason !== 'already_booked') {
+        Object.assign(rewardDoc, { rewardResult: 'not_credited', rewardCents: 0, rewardNotCreditedReason: outcome.reason });
+      }
+      await event.data.after.ref.set(rewardDoc, { merge: true }).catch((e) =>
+        logger.warn('[crowd-reward] Ergebnis-Marker nicht geschrieben', { uploadId, err: e.message }),
+      );
     } catch (e) {
       // Werfen, damit Firestore erneut zustellt — die Idempotenz über die
       // feste Doc-ID macht einen Retry gefahrlos.

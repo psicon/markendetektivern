@@ -53,13 +53,13 @@ describe('Wer noch nicht aktualisiert hat, geht nicht leer aus', () => {
     // Diese Leute haben nichts falsch gemacht — ihre App kennt den
     // Pflicht-Schritt schlicht nicht. Genau so entstand schon einmal
     // „144 freigegeben, 0 Cent ausgezahlt".
-    const r = pruefeOrtsanforderung({ marketName: 'Aldi Süd', status: 'approved' });
+    const r = pruefeOrtsanforderung({ marketName: 'Aldi Süd', status: 'approved', createdAt: new Date('2026-08-20T10:00:00Z') });
     expect(r.ok).toBe(true);
     expect(r.grund).toBe('gnadenfrist_alter_client');
   });
 
   it('markiert die Gnadenfrist erkennbar, statt sie stillschweigend zu gewähren', () => {
-    const r = pruefeOrtsanforderung({});
+    const r = pruefeOrtsanforderung({ createdAt: new Date('2026-08-20T10:00:00Z') });
     // Ohne diesen Vermerk ließe sich später nicht messen, wie viele
     // Auszahlungen noch auf der Übergangsregel beruhen — und man wüsste
     // nie, wann man sie gefahrlos abschalten kann.
@@ -105,5 +105,30 @@ describe('Robustheit', () => {
   it('wertet ein leeres capture-Objekt nicht als Ortsangabe', () => {
     const r = pruefeOrtsanforderung({ clientVersion: { app: '6.0.16' }, capture: {} });
     expect(r.ok).toBe(false);
+  });
+});
+
+describe('Die Gnadenfrist ist datumsbasiert (Orts-Audit 05.09.2026)', () => {
+  it('vergütet ein Alt-Client-Dokument von vor dem Stichtag — auch bei später Freigabe', () => {
+    const r = pruefeOrtsanforderung({ status: 'approved', createdAt: { toMillis: () => Date.parse('2026-09-01T23:59:00Z') } });
+    expect(r.ok).toBe(true);
+    expect(r.grund).toBe('gnadenfrist_alter_client');
+  });
+
+  it('lehnt ein Dokument ohne clientVersion ab, das NACH dem Stichtag entstand', () => {
+    const r = pruefeOrtsanforderung({ status: 'approved', createdAt: { toMillis: () => Date.parse('2026-09-02T00:00:01Z') } });
+    expect(r.ok).toBe(false);
+    expect(r.grund).toBe('no_location');
+  });
+
+  it('behandelt ein Dokument ohne createdAt wie einen aktuellen Client (keine stille Gnade)', () => {
+    const r = pruefeOrtsanforderung({ status: 'approved' });
+    expect(r.ok).toBe(false);
+  });
+
+  it('akzeptiert createdAt als Firestore-Timestamp-Form {seconds}', () => {
+    const r = pruefeOrtsanforderung({ status: 'approved', createdAt: { seconds: Math.floor(Date.parse('2026-08-15T00:00:00Z') / 1000) } });
+    expect(r.ok).toBe(true);
+    expect(r.grund).toBe('gnadenfrist_alter_client');
   });
 });

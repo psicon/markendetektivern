@@ -38,7 +38,27 @@
  * die man vergisst: ab dann verdient niemand mehr ohne Ortsangabe.
  */
 
+// 05.09.2026 (Orts-Audit): Die Gnadenfrist ist jetzt DATUMSBASIERT statt
+// boolesch. Datenlage: Alt-Clients ohne clientVersion liefen mit der
+// Android-Promotion (28.08.) aus — letzter Upload 01.09., seit 02.09. null.
+// Dokumente, die VOR dem Stichtag entstanden sind, werden weiter vergütet
+// (auch wenn sie erst später freigegeben werden — die Leute haben nichts
+// falsch gemacht); ab dem Stichtag gilt die Ortsanforderung für alle.
+const GNADENFRIST_BIS_ISO = '2026-09-02T00:00:00Z';
+const GNADENFRIST_BIS_MS = Date.parse(GNADENFRIST_BIS_ISO);
+/** Rückwärtskompatibel: true, solange Dokumente vor dem Stichtag existieren. */
 const GNADENFRIST_ALTE_CLIENTS = true;
+
+function createdAtMs(doc) {
+  const c = doc?.createdAt;
+  if (!c) return null;
+  if (c instanceof Date) return c.getTime();
+  if (typeof c.toMillis === 'function') return c.toMillis();
+  if (typeof c === 'number') return c;
+  if (typeof c === 'string') { const t = Date.parse(c); return Number.isFinite(t) ? t : null; }
+  if (typeof c.seconds === 'number') return c.seconds * 1000;
+  return null;
+}
 
 /**
  * @param {object} doc Das crowd_uploads-Dokument.
@@ -59,7 +79,12 @@ function pruefeOrtsanforderung(doc) {
   // Kein Ort. Konnte diese App überhaupt danach fragen?
   const kanntePflichtSchritt = Boolean(doc?.clientVersion);
   if (!kanntePflichtSchritt && GNADENFRIST_ALTE_CLIENTS) {
-    return { ok: true, grund: 'gnadenfrist_alter_client' };
+    const created = createdAtMs(doc);
+    // Vor dem Stichtag entstanden → Gnadenfrist. Ohne createdAt (anomal)
+    // oder danach → wie ein aktueller Client behandeln.
+    if (created != null && created < GNADENFRIST_BIS_MS) {
+      return { ok: true, grund: 'gnadenfrist_alter_client' };
+    }
   }
 
   // 03.09.2026 (Freigabe Patrick): Der Wizard (≤ 6.0.15, Commit 18b8cb6)
@@ -80,4 +105,4 @@ function pruefeOrtsanforderung(doc) {
   return { ok: false, grund: 'no_location' };
 }
 
-module.exports = { pruefeOrtsanforderung, GNADENFRIST_ALTE_CLIENTS };
+module.exports = { pruefeOrtsanforderung, GNADENFRIST_ALTE_CLIENTS, GNADENFRIST_BIS_ISO };
