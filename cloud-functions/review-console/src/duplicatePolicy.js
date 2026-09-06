@@ -75,12 +75,18 @@ function manufacturerEqual(a, b) {
   return levenshtein(x, y) <= 2;
 }
 
+// NUR server-geschriebene OCR-Felder (crowd-upload-namer, Admin-SDK) als
+// Vergleichswerte. Top-Level `priceCents`/`manufacturer` wären client-
+// schreibbar (crowd_uploads create erlaubt beliebige Felder) — ein Nutzer
+// könnte sich sonst durch einen erfundenen Preis aus der Sperre schreiben.
 function priceOf(u) {
-  const p = u && (u.priceCents ?? u.priceOcr?.priceCents ?? u.priceOcrCents);
+  const p = u && u.priceOcr && u.priceOcr.priceCents;
   return Number.isFinite(p) && p > 0 ? Math.round(p) : null;
 }
 function manufacturerOf(u) {
-  return (u && (u.manufacturer ?? u.manufacturerOcr?.name ?? u.manufacturerOcr)) || null;
+  const m = u && u.manufacturerOcr;
+  const name = m && typeof m === 'object' ? m.name : null;
+  return (typeof name === 'string' && name.trim()) || null;
 }
 
 /**
@@ -104,6 +110,16 @@ function dataDiffers(candidate, prior) {
  * @param {object[]} others   alle anderen Einreichungen mit derselben EAN (beliebiger Status)
  * @returns {{verdict:'ok'|'locked'|'hold', reason:string|null, priorId:string|null, priorUserId:string|null,
  *            sameUser:boolean|null, lockUntil:number|null, updatedFields:string[], diff:object|null}}
+ *
+ * Das Fenster ist SYMMETRISCH (|Kandidat − Referenz| < 30 Tage) und prüft
+ * JEDE Freigabe darin, nicht nur die jüngste:
+ *  - Backlog-Reihenfolge: wird ein älterer Bon erst nach einem jüngeren
+ *    entschieden, ist der jüngere trotzdem eine Referenz — sonst rutscht ein
+ *    identisches Doppel durch, nur weil es zuerst eingereicht wurde.
+ *  - Mehrere Freigaben: es genügt EINE, zu der es keine anderen Daten gibt →
+ *    Sperre. Sonst schriebe sich ein Nutzer über eine zwischenzeitlich
+ *    freigegebene Preisänderung an seiner eigenen identischen Wiederholung
+ *    vorbei.
  */
 function evaluateDuplicate(candidate, others) {
   const cid = candidate?.id ?? null;
@@ -119,29 +135,37 @@ function evaluateDuplicate(candidate, others) {
     return { verdict: 'hold', reason: REASON.PENDING_OLDER, priorId: p.id, priorUserId: p.userId ?? null, sameUser: p.userId === candidate.userId, lockUntil: null, updatedFields: [], diff: null };
   }
 
-  const approved = list
-    .filter((o) => o.status === 'approved' && (ms(o.createdAt) ?? 0) <= cAt)
+  // Alle Freigaben im 30-Tage-Fenster um den Kandidaten herum, jüngste zuerst.
+  const inWindow = list
+    .filter((o) => o.status === 'approved' && Math.abs((ms(o.createdAt) ?? 0) - cAt) < LOCK_MS)
     .sort((a, b) => (ms(b.createdAt) ?? 0) - (ms(a.createdAt) ?? 0));
-  const prior = approved[0];
-  if (!prior) return { verdict: 'ok', reason: null, priorId: null, priorUserId: null, sameUser: null, lockUntil: null, updatedFields: [], diff: null };
+  if (!inWindow.length) {
+    // Referenz außerhalb des Fensters nur zur Information (priorId), nie sperrend.
+    const older = list
+      .filter((o) => o.status === 'approved')
+      .sort((a, b) => (ms(b.createdAt) ?? 0) - (ms(a.createdAt) ?? 0))[0];
+    return {
+      verdict: 'ok', reason: null,
+      priorId: older ? older.id : null, priorUserId: older ? older.userId ?? null : null,
+      sameUser: older ? older.userId === candidate.userId : null,
+      lockUntil: older ? (ms(older.createdAt) ?? 0) + LOCK_MS : null,
+      updatedFields: older ? ['price', 'manufacturer', 'market'].filter((k) => dataDiffers(candidate, older)[k]) : [],
+      diff: older ? dataDiffers(candidate, older).details : null,
+    };
+  }
 
-  const pAt = ms(prior.createdAt) ?? 0;
+  // Sperrend ist die JÜNGSTE Referenz ohne andere Daten (deren Frist gilt).
+  const blocking = inWindow.find((p) => !dataDiffers(candidate, p).any);
+  const ref = blocking || inWindow[0];
+  const pAt = ms(ref.createdAt) ?? 0;
   const lockUntil = pAt + LOCK_MS;
-  const sameUser = prior.userId === candidate.userId;
-  const diff = dataDiffers(candidate, prior);
+  const sameUser = ref.userId === candidate.userId;
+  const diff = dataDiffers(candidate, ref);
   const updatedFields = ['price', 'manufacturer', 'market'].filter((k) => diff[k]);
+  const base = { priorId: ref.id, priorUserId: ref.userId ?? null, sameUser, lockUntil, diff: diff.details };
 
-  if (cAt >= lockUntil) {
-    return { verdict: 'ok', reason: null, priorId: prior.id, priorUserId: prior.userId ?? null, sameUser, lockUntil, updatedFields, diff: diff.details };
-  }
-  if (diff.any) {
-    return { verdict: 'ok', reason: null, priorId: prior.id, priorUserId: prior.userId ?? null, sameUser, lockUntil, updatedFields, diff: diff.details };
-  }
-  return {
-    verdict: 'locked',
-    reason: sameUser ? REASON.SAME_USER : REASON.OTHER_USER,
-    priorId: prior.id, priorUserId: prior.userId ?? null, sameUser, lockUntil, updatedFields: [], diff: diff.details,
-  };
+  if (!blocking) return { verdict: 'ok', reason: null, updatedFields, ...base };
+  return { verdict: 'locked', reason: sameUser ? REASON.SAME_USER : REASON.OTHER_USER, updatedFields: [], ...base };
 }
 
 /** Vollständigkeits-Vorprüfung (dieselben Regeln wie die manuellen Freigabe-Runden 08/2026). */

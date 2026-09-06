@@ -129,14 +129,20 @@
     <script type="module">
       import { $, call, esc, euro, fmtDate, fmtDateTime, ago, short, toast, imgUrl, initAdmin, installZoom } from './admin-common.js';
 
+      // Werte aus Firestore landen teils in Klassen-/data-Attributen: alles
+      // escapen, Klassen auf bekannte Werte begrenzen, Zahlen als Zahlen.
+      const cls = (v, allowed) => (allowed.includes(v) ? v : '');
+      const num = (v) => (Number.isFinite(v) ? String(v) : '—');
+      const dayStart = (v) => { if (!v) return undefined; const [y, m, d] = v.split('-').map(Number); return new Date(y, m - 1, d).getTime(); };
+      const dayEnd = (v) => { if (!v) return undefined; const [y, m, d] = v.split('-').map(Number); return new Date(y, m - 1, d, 23, 59, 59, 999).getTime(); };
+
       const state = { rows: [], total: 0, offset: 0, limit: 100, open: null };
       const STATUS_DE = { review: 'Prüfung', ocr_pending: 'in Verarbeitung', approved: 'vergütet', no_reward: 'ohne Prämie', rejected: 'abgelehnt' };
 
       const filters = () => ({
         status: $('fStatus').value, reason: $('fReason').value.trim() || undefined, merchantId: $('fMerchant').value.trim() || undefined,
         q: $('fQ').value.trim() || undefined,
-        from: $('fFrom').value ? Date.parse($('fFrom').value) : undefined,
-        to: $('fTo').value ? Date.parse($('fTo').value) + 86399999 : undefined,
+        from: dayStart($('fFrom').value), to: dayEnd($('fTo').value),
         limit: state.limit, offset: state.offset,
       });
 
@@ -165,12 +171,12 @@
             `<td><div class="nm">${esc(r.merchantName || r.merchantId || '—')}</div><div class="sub">${esc(storeLabel(r) || (r.merchantLand || ''))}</div></td>` +
             `<td class="mono">${esc(r.bonDate || '—')}<div class="sub">${esc(r.bonTime || '')}${r.bonDateCorrection ? ' · korrigiert' : ''}</div></td>` +
             `<td>${euro(r.bonTotalCents)}<div class="sub">${r.cashbackCents ? 'Cashback ' + euro(r.cashbackCents) : ''}</div></td>` +
-            `<td>${r.eligibleItemCount ?? '—'}<div class="sub">${r.itemCount != null ? r.itemCount + ' Zeilen' : ''}</div></td>` +
-            `<td><span class="chip ${esc(r.ocrConfidence || '')}">${esc(r.ocrConfidence || '—')}</span><div class="sub">${r.reconOk === false ? 'Σ≠Total ' + (r.reconDeltaCents ?? '') + ' ct' : r.reconOk ? 'Σ ok' : ''}</div></td>` +
-            `<td><span class="chip ${esc(r.status)}">${esc(STATUS_DE[r.status] || r.status)}</span>${reason ? `<div class="sub" title="${esc(r.rejectDetail || '')}">${esc(reason)}${r.duplicateOf && r.duplicateOf.receiptId ? ' → <span class="link mono" data-open="' + esc(r.duplicateOf.receiptId) + '">' + esc(short(r.duplicateOf.receiptId, 8)) + '</span>' : ''}</div>` : ''}</td>` +
+            `<td>${num(r.eligibleItemCount)}<div class="sub">${r.itemCount != null ? num(r.itemCount) + ' Zeilen' : ''}</div></td>` +
+            `<td><span class="chip ${cls(r.ocrConfidence, ['high', 'medium', 'low', 'none'])}">${esc(r.ocrConfidence || '—')}</span><div class="sub">${r.reconOk === false ? 'Σ≠Total ' + num(r.reconDeltaCents) + ' ct' : r.reconOk ? 'Σ ok' : ''}</div></td>` +
+            `<td><span class="chip ${cls(r.status, Object.keys(STATUS_DE))}">${esc(STATUS_DE[r.status] || r.status)}</span>${reason ? `<div class="sub" title="${esc(r.rejectDetail || '')}">${esc(reason)}${r.duplicateOf && r.duplicateOf.receiptId ? ' → <span class="link mono" data-open="' + esc(r.duplicateOf.receiptId) + '">' + esc(short(r.duplicateOf.receiptId, 8)) + '</span>' : ''}</div>` : ''}</td>` +
             `<td><span class="link mono" data-user="${esc(r.userId)}">${short(r.userId)}</span></td>` +
             `<td title="${esc(fmtDateTime(r.createdAt))}">${ago(r.createdAt)}<div class="sub">${esc(fmtDate(r.createdAt))}</div></td>` +
-            `<td>${r.status === 'review' ? `<button class="sm primary act" data-act="decide" data-id="${r.id}">Entscheiden…</button> ` : ''}<button class="sm ghost act" data-act="detail" data-id="${r.id}">${state.open === r.id ? 'Zu' : 'Details'}</button></td>`;
+            `<td>${r.status === 'review' ? `<button class="sm primary act" data-act="decide" data-id="${esc(r.id)}">Entscheiden…</button> ` : ''}<button class="sm ghost act" data-act="detail" data-id="${esc(r.id)}">${state.open === r.id ? 'Zu' : 'Details'}</button></td>`;
           tb.appendChild(tr);
           if (state.open === r.id) tb.appendChild(detailRow(r));
         }
@@ -202,7 +208,7 @@
                 <div class="k">OCR</div><div class="v">${esc(row.ocrConfidence || '—')} · ${esc(row.ocrMethod || '')} · ${d.ocr.promptVersion || ''} · ${row.reconOk === false ? 'Σ weicht ab (' + (row.reconDeltaCents ?? '?') + ' ct)' : 'Σ passt'}</div>
                 <div class="k">Status</div><div class="v"><span class="chip ${esc(row.status)}">${esc(STATUS_DE[row.status] || row.status)}</span> ${esc(row.rejectReason || row.reviewReason || '')} ${row.rejectDetail ? '· ' + esc(row.rejectDetail) : ''}</div>
                 <div class="k">Doppel</div><div class="v">${d.duplicate ? `<span class="link mono" data-open="${esc(d.duplicate.id)}">${esc(short(d.duplicate.id, 10))}</span> · ${esc(STATUS_DE[d.duplicate.status] || d.duplicate.status)} · ${esc(d.duplicate.bonDate || '')} · ${row.duplicateOf && row.duplicateOf.sameUser ? 'gleicher Nutzer' : 'anderer Nutzer'}` : '—'}</div>
-                <div class="k">Versuche</div><div class="v">${row.attempts ?? 0}${row.lastError ? ' · ' + esc(String(row.lastError).slice(0, 120)) : ''}</div>
+                <div class="k">Versuche</div><div class="v">${num(row.attempts) === '—' ? 0 : num(row.attempts)}${row.lastError ? ' · ' + esc(String(row.lastError).slice(0, 120)) : ''}</div>
                 <div class="k">Entschieden</div><div class="v">${row.reviewDecision ? esc(row.reviewDecision) + ' · ' + esc(fmtDateTime(row.reviewResolvedAt)) : '—'}</div>
                 <div class="k">Ledger</div><div class="v">${d.ledger.length ? d.ledger.map((l) => `${esc(l.type)} ${euro(l.cents)} ${esc(fmtDate(l.createdAt))}`).join(' · ') : '—'}</div>
               </div></div>

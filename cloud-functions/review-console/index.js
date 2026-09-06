@@ -29,6 +29,12 @@ const REGION = 'europe-west1';
 const COL = 'crowd_uploads';
 const REQUIRED_STEPS = ['front', 'rueckseite', 'hersteller', 'ean', 'naehrwerte', 'zutaten', 'preis'];
 const MAX_BATCH = 100;
+// Werte, die in der Konsole in HTML-Attribute wandern, dürfen NUR aus einer
+// bekannten Menge kommen — crowd_uploads ist client-anlegbar (die Rules
+// erlauben create mit beliebigen Feldern), ein freier `status` wäre sonst ein
+// XSS-Vektor im Admin-Browser.
+const UPLOAD_STATUSES = new Set(['pending', 'approved', 'rejected']);
+const safeStatus = (v) => (UPLOAD_STATUSES.has(v) ? v : 'unknown');
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 500;
 
@@ -70,11 +76,15 @@ function noteFor(reason, ctx = {}) {
 
 function rowOf(d) {
   const x = d.data() || {};
-  const price = x.priceCents ?? x.priceOcr?.priceCents ?? null;
-  const manufacturer = x.manufacturer ?? x.manufacturerOcr?.name ?? (typeof x.manufacturerOcr === 'string' ? x.manufacturerOcr : null) ?? null;
+  // Anzeige = dieselbe Quelle wie die Doppel-Regel: NUR die server-geschriebenen
+  // OCR-Felder. Ein client-gesetztes Top-Level-Feld darf weder die Regel noch
+  // die Anzeige beeinflussen (crowd_uploads ist client-anlegbar).
+  const price = x.priceOcr && Number.isFinite(x.priceOcr.priceCents) ? x.priceOcr.priceCents : null;
+  const manufacturer = x.manufacturerOcr && typeof x.manufacturerOcr.name === 'string' ? x.manufacturerOcr.name : null;
   return {
     id: d.id,
-    status: x.status ?? null,
+    status: safeStatus(x.status),
+    statusRaw: typeof x.status === 'string' ? x.status.slice(0, 40) : null,
     userId: x.userId ?? null,
     campaignId: x.campaignId ?? null,
     marketId: x.marketId ?? null,
@@ -106,7 +116,7 @@ function rowOf(d) {
     manufacturer,
     review: x.review ?? null,
     // Für die Doppel-Regel (nicht im UI nötig, aber im Kandidaten-Vergleich)
-    _policy: { id: d.id, userId: x.userId ?? null, ean: x.ean ?? null, marketId: x.marketId ?? null, status: x.status ?? null, createdAt: ms(x.createdAt), priceCents: Number.isFinite(price) ? price : null, manufacturer },
+    _policy: { id: d.id, userId: x.userId ?? null, ean: x.ean ?? null, marketId: x.marketId ?? null, status: safeStatus(x.status), createdAt: ms(x.createdAt), priceOcr: x.priceOcr ?? null, manufacturerOcr: x.manufacturerOcr ?? null },
   };
 }
 
@@ -176,12 +186,19 @@ exports.reviewListUploads = onCall({ region: REGION, memory: '512MiB', timeoutSe
     );
   }
 
-  // Vorprüfung für offene Einreichungen — frisch berechnet gegen ALLE
-  // Einreichungen derselben EAN (auch außerhalb des Filters).
-  const pendingRows = rows.filter((r) => r.status === 'pending');
-  const byEan = pendingRows.length ? await loadByEans(pendingRows.map((r) => r.ean)) : new Map();
+  // Vorprüfung für offene Einreichungen — frisch gegen ALLE Einreichungen
+  // derselben EAN. Bewusst über ALLE offenen, nicht nur die gefilterte Seite:
+  // sonst zeigte der Kopfzeilen-Zähler „davon Sperre" den Ausschnitt neben
+  // globalen Werten.
+  const allPending = status === 'pending' && !p.userId
+    ? rows.filter((r) => r.status === 'pending')
+    : (await db.collection(COL).where('status', '==', 'pending').get()).docs.map(rowOf);
+  const byEan = allPending.length ? await loadByEans(allPending.map((r) => r.ean)) : new Map();
+  const preById = new Map(allPending.map((r) => [r.id, precheckOf(r, byEan.get(r.ean) || [])]));
+  let lockedPendingCount = 0;
+  for (const pre of preById.values()) if (pre.verdict === 'locked') lockedPendingCount++;
   for (const r of rows) {
-    r.precheck = r.status === 'pending' ? precheckOf(r, byEan.get(r.ean) || []) : r.review?.precheck ?? null;
+    r.precheck = r.status === 'pending' ? preById.get(r.id) ?? precheckOf(r, byEan.get(r.ean) || []) : r.review?.precheck ?? null;
   }
   if (p.precheck && p.precheck !== 'all') rows = rows.filter((r) => r.precheck && r.precheck.verdict === p.precheck);
 
@@ -200,11 +217,9 @@ exports.reviewListUploads = onCall({ region: REGION, memory: '512MiB', timeoutSe
   const cToday = await db.collection(COL).where('reviewedAt', '>=', todayStart).count().get().catch(() => null);
   const campaigns = campaignsSnap.docs.map((d) => ({ id: d.id, title: d.data().title || d.id, kind: d.data().kind || 'receipt', active: !!d.data().active, endAt: ms(d.data().endAt) }))
     .filter((c) => c.kind === 'product_photos').sort((a, b) => (b.endAt || 0) - (a.endAt || 0));
-  const lockedPending = status === 'pending' || !status ? rows.filter((r) => r.status === 'pending' && r.precheck && r.precheck.verdict === 'locked').length : null;
-
   return {
     rows: page, total, offset, limit,
-    stats: { pending: cPending.data().count, approved: cApproved.data().count, rejected: cRejected.data().count, reviewedToday: cToday ? cToday.data().count : null, lockedPending },
+    stats: { pending: cPending.data().count, approved: cApproved.data().count, rejected: cRejected.data().count, reviewedToday: cToday ? cToday.data().count : null, lockedPending: lockedPendingCount },
     campaigns,
   };
 });
@@ -245,8 +260,21 @@ exports.reviewDecideUploads = onCall({ region: REGION, timeoutSeconds: 120 }, as
   if ((decision === 'reject' || decision === 'hold') && !reason) throw new HttpsError('invalid-argument', 'reason fehlt.');
   if (decision === 'approve' && force && !note) throw new HttpsError('invalid-argument', 'force braucht eine Notiz.');
 
+  // Chronologisch verarbeiten (älteste zuerst): sonst sieht bei zwei offenen
+  // Einreichungen derselben EAN die NEUERE die ältere noch als `pending` und
+  // wird als „doppelt_eingereicht" blockiert, obwohl sie nach Freigabe der
+  // älteren regulär entschieden würde. Die Liste im Client ist createdAt DESC.
+  let ordered = ids;
+  try {
+    const snaps = await db.getAll(...ids.map((id) => db.collection(COL).doc(id)), { fieldMask: ['createdAt'] });
+    const at = new Map(snaps.map((sn) => [sn.id, ms(sn.data() && sn.data().createdAt) ?? 0]));
+    ordered = [...ids].sort((a, b) => (at.get(a) ?? 0) - (at.get(b) ?? 0));
+  } catch (e) {
+    logger.warn('[review-console] Sortierung fehlgeschlagen, Eingabereihenfolge', { err: e.message });
+  }
+
   const results = [];
-  for (const id of ids) {
+  for (const id of ordered) {
     const ref = db.collection(COL).doc(id);
     try {
       const res = await db.runTransaction(async (tx) => {
@@ -326,6 +354,8 @@ const CASHBACK_ADMIN_KEY = defineSecret('NUTRITION_SCRAPER_TRIGGER_KEY');
 const RESOLVER_URL = process.env.CASHBACK_RESOLVER_URL || 'https://europe-west3-markendetektive-895f7.cloudfunctions.net/resolveCashbackReview';
 const RECEIPT_REJECT_REASONS = new Set(['manual_review_rejected', 'duplicate_content_self', 'duplicate_content_cross_user']);
 const RECEIPT_NO_REWARD_REASONS = new Set(['daily_cap_reached', 'weekly_cap_reached', 'per_user_cap_reached']);
+const RECEIPT_STATUSES = new Set(['ocr_pending', 'review', 'approved', 'no_reward', 'rejected', 'paid', 'matched', 'upload_failed', 'uploading']);
+const safeReceiptStatus = (v) => (RECEIPT_STATUSES.has(v) ? v : 'unknown');
 const RECEIPT_LIST_FIELDS = [
   'status', 'userId', 'campaignId', 'merchant', 'store', 'bonDate', 'bonTime', 'bonTotalCents', 'eligibleItemCount', 'cashbackCents',
   'rejectReason', 'rejectDetail', 'reviewReason', 'reviewDecision', 'reviewResolvedAt', 'duplicateOf', 'createdAt', 'updatedAt',
@@ -337,7 +367,7 @@ function receiptRowOf(d) {
   const x = d.data() || {};
   return {
     id: d.id,
-    status: x.status ?? null,
+    status: safeReceiptStatus(x.status),
     userId: x.userId ?? null,
     campaignId: x.campaignId ?? null,
     merchantId: x.merchant?.id ?? null,
@@ -454,13 +484,13 @@ exports.reviewDecideReceipt = onCall({ region: REGION, timeoutSeconds: 90, secre
   if (!valid) throw new HttpsError('invalid-argument', 'decision=approve|reject[&reason]|no_reward&reason=daily_cap_reached|weekly_cap_reached|per_user_cap_reached');
 
   const url = new URL(RESOLVER_URL);
-  url.searchParams.set('key', CASHBACK_ADMIN_KEY.value());
+  // Key NUR im Header — Query-Parameter landen in den Cloud-Run-Request-Logs.
   url.searchParams.set('receiptId', receiptId);
   url.searchParams.set('decision', decision);
   if (reason) url.searchParams.set('reason', reason);
   if (p.duplicateOf) url.searchParams.set('duplicateOf', String(p.duplicateOf));
   if (p.priorStatus) url.searchParams.set('priorStatus', String(p.priorStatus));
-  const res = await fetch(url.toString(), { method: 'POST' });
+  const res = await fetch(url.toString(), { method: 'POST', headers: { 'x-admin-key': CASHBACK_ADMIN_KEY.value() } });
   const text = await res.text();
   let body;
   try { body = JSON.parse(text); } catch { body = { raw: text.slice(0, 400) }; }

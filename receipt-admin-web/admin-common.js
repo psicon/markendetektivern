@@ -55,8 +55,11 @@ const urlCache = new Map();
 export async function imgUrl(path) {
   if (!path) return null;
   if (urlCache.has(path)) return urlCache.get(path);
+  // Fehlschläge NICHT dauerhaft merken: sonst bleibt der Platzhalter bis F5
+  // stehen, auch nach „Neu laden".
   const p = getDownloadURL(storageRef(storage, path)).catch(() => null);
   urlCache.set(path, p);
+  p.then((u) => { if (!u) urlCache.delete(path); });
   return p;
 }
 

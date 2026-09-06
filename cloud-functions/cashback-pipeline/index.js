@@ -2364,7 +2364,10 @@ exports.tremendousWebhook = onRequest(
 exports.resolveCashbackReview = onRequest(
   { region: REGION, timeoutSeconds: 60, memory: '256MiB', cors: false, secrets: [CASHBACK_ADMIN_KEY] },
   async (req, res) => {
-    if (String(req.query.key || '') !== CASHBACK_ADMIN_KEY.value()) {
+    // Key bevorzugt aus dem Header — ein Query-Parameter landet in den
+    // Cloud-Run-Request-Logs. Query bleibt für bestehende Skripte gültig.
+    const providedKey = String(req.get('x-admin-key') || req.query.key || '');
+    if (providedKey !== CASHBACK_ADMIN_KEY.value()) {
       res.status(403).json({ code: 'forbidden' });
       return;
     }

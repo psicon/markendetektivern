@@ -210,6 +210,31 @@ describe('parseAddressLine — echte Bon-Adresszeilen', () => {
     expect(parseAddressLine('Berlin 10719 DE')).toMatchObject({ zip: '10719', city: 'Berlin', country: 'DE' });
   });
 
+  test('Firmensitz vor Filiale OHNE „Filiale"-Marker: die letzte Anschrift ist die Filiale (Drogerie Müller)', () => {
+    expect(parseAddressLine('Mueller GmbH & Co. KG, Albstrasse 92, 89081 Ulm, Zollnerstr. 44-46, 29221 Celle')).toEqual({
+      street: 'Zollnerstr. 44-46', zip: '29221', city: 'Celle', country: 'DE',
+    });
+    expect(parseAddressLine('Müller GmbH & Co. KG, Albstraße 92, 89081 Ulm / Bahnhofstraße 111, 66111 Saarbrücken')).toEqual({
+      street: 'Bahnhofstraße 111', zip: '66111', city: 'Saarbrücken', country: 'DE',
+    });
+  });
+
+  test('Straße und PLZ stammen immer aus demselben Adressblock', () => {
+    // Firmierung voran → letzte Anschrift gewinnt, samt IHRER Straße.
+    expect(parseAddressLine('Muster GmbH, Albstraße 92, 89081 Ulm, Marktplatz 4, 12345 Musterstadt'))
+      .toMatchObject({ street: 'Marktplatz 4', zip: '12345', city: 'Musterstadt' });
+    // Ohne Firmierung gewinnt die erste — dann aber auch deren Straße, nie eine Mischung.
+    expect(parseAddressLine('Zentrale, Albstraße 92, 89081 Ulm, Marktplatz 4, 12345 Musterstadt'))
+      .toMatchObject({ street: 'Albstraße 92', zip: '89081', city: 'Ulm' });
+  });
+
+  test('Ortsname mit Filialnummer ist keine Straße', () => {
+    expect(parseAddressLine('Frankenberg Kaufland (51080)', 'DE')).toBeNull();
+    expect(deriveStoreAddress({ bonCountry: 'DE', merchantSubtitle: 'Frankenberg Kaufland (51080)' })).toBeNull();
+    // Mit echter Hausnummer bleibt es eine Straße.
+    expect(parseAddressLine('Am Marktplatz 7, 35066 Frankenberg')).toMatchObject({ street: 'Am Marktplatz 7', city: 'Frankenberg' });
+  });
+
   test('leer / null', () => {
     expect(parseAddressLine('')).toBeNull();
     expect(parseAddressLine(null)).toBeNull();

@@ -55,8 +55,13 @@ const YEAR_CONTEXT_RE = /^(stand|seit|jahr|©|copyright|est\.?|gegr\.?)$/i;
 // Segment, das eine Straßenangabe ist: enthält ein Straßen-Schlüsselwort ODER
 // endet auf eine Hausnummer (1–3 Ziffern, ohne führende Null, optional
 // Buchstabe, Bereich, Stiege/Stock in römischen Zahlen).
+// STARK: kommt in Ortsnamen praktisch nicht als Endung vor → allein beweisend.
 const STREET_KEYWORD_RE =
-  /(str\.|straße|strasse|stra[sß]e|weg\b|platz|allee|gasse|ring\b|damm\b|ufer\b|chaussee|promenade|steig\b|markt\b|hof\b|zeile\b|berg\b|tor\b|park\b|landstr|hauptstr|bahnhofstr|dorf\b|siedlung|anger\b|wall\b|graben\b|kai\b|lände\b)/i;
+  /(str\.|straße|strasse|stra[sß]e|weg\b|platz|allee|gasse|ring\b|damm\b|ufer\b|chaussee|promenade|steig\b|zeile\b|landstr|hauptstr|bahnhofstr|siedlung|kai\b|lände\b)/i;
+// SCHWACH: auch häufige Ortsnamen-Endungen („Frankenberg", „Bergisch Gladbach")
+// → nur mit echter Hausnummer als Straße werten, sonst wird ein Ort mit
+// Filialnummer zur Straße („Frankenberg Kaufland (51080)").
+const WEAK_STREET_KEYWORD_RE = /(markt\b|hof\b|berg\b|tor\b|park\b|dorf\b|anger\b|wall\b|graben\b)/i;
 // Ein einzelnes WORT, das eine Straße einleitet — für „PLZ Ort Straße Nr" ohne
 // Trenner. Bewusst ohne berg/dorf/hof/park (das sind Ortsnamen-Endungen).
 const STREET_WORD_RE = /(str\.|straße|strasse|stra[sß]e|weg|platz|allee|gasse|ring|damm|ufer|chaussee|promenade|steig|zeile|landstr|hauptstr|bahnhofstr)$/i;
@@ -164,7 +169,9 @@ function looksLikeStreet(segment) {
   if (!/\d/.test(s)) return false;
   if (!/[A-Za-zÄÖÜäöüß]{3,}/.test(s)) return false;
   if (COMPANY_SUFFIX_RE.test(s) && !STREET_KEYWORD_RE.test(s)) return false;
-  return STREET_KEYWORD_RE.test(s) || HOUSE_NUMBER_TAIL_RE.test(s);
+  if (STREET_KEYWORD_RE.test(s)) return true;
+  // Ortsnamen-Endung oder gar kein Schlüsselwort: nur mit Hausnummer am Ende.
+  return HOUSE_NUMBER_TAIL_RE.test(s);
 }
 
 function streetFrom(segment) {
@@ -252,26 +259,49 @@ function parseAddressLine(raw, countryHint = null) {
   }
   let zipHit = null;
   if (hits.length) {
-    // Firmensitz vor Filiale (MPREIS): steht ein „Filiale …"-Marker vor einem
-    // späteren Treffer, ist DER die Filialadresse.
-    const markerIdx = segs.findIndex((s) => STORE_MARKER_RE.test(s));
-    zipHit = (markerIdx >= 0 && hits.find((h) => h.segIdx > markerIdx)) || hits[0];
+    // Firmensitz vor Filiale: steht ein „Filiale …"-Marker vor einem späteren
+    // Treffer, ist DER die Filialadresse (MPREIS). Ohne Marker, aber mit einer
+    // Firmierung vor dem ersten Treffer, ist der erste die Zentrale und der
+    // LETZTE die Filiale (Drogerie Müller: „… GmbH & Co. KG, Albstr. 92,
+    // 89081 Ulm, Zollnerstr. 44-46, 29221 Celle").
+    const markerIdx = segs.findIndex((x) => STORE_MARKER_RE.test(x));
+    const companyBeforeFirst = segs.slice(0, hits[0].segIdx + 1).some((x) => COMPANY_SUFFIX_RE.test(x));
+    zipHit =
+      (markerIdx >= 0 && hits.find((h) => h.segIdx > markerIdx))
+      || (companyBeforeFirst && hits.length > 1 ? hits[hits.length - 1] : null)
+      || hits[0];
   }
   const zipSegIdx = zipHit ? zipHit.segIdx : -1;
+  // Die Straße muss zum SELBEN Adressblock gehören wie die PLZ, sonst entsteht
+  // eine Adresse, die es nicht gibt (Filial-Straße + Zentralen-PLZ). Ein Block
+  // reicht vom Segment NACH dem vorherigen Treffer bis zum Treffer selbst
+  // (deutsche Schreibweise „Straße, PLZ Ort"); nur wenn kein weiterer Treffer
+  // folgt, zählen auch die Segmente dahinter („PLZ Ort, Straße").
+  const prevHitIdx = hits.filter((h) => h.segIdx < zipSegIdx).reduce((a, h) => Math.max(a, h.segIdx), -1);
+  const nextHitIdx = hits.filter((h) => h.segIdx > zipSegIdx).reduce((a, h) => Math.min(a, h.segIdx), Infinity);
+  const blockEnd = nextHitIdx === Infinity ? segs.length - 1 : zipSegIdx;
 
   let street = null;
   if (zipHit && zipHit.before) street = streetFrom(zipHit.before);
   if (!street && zipHit && zipHit.afterStreet) street = zipHit.afterStreet;
   if (!street) {
-    // Erst die Segmente NACH der PLZ (Filialblock), dann die davor (Firmensitz).
-    const idx = segs.map((_, i) => i).filter((i) => i !== zipSegIdx);
-    const ordered = zipSegIdx >= 0 ? [...idx.filter((i) => i > zipSegIdx), ...idx.filter((i) => i < zipSegIdx)] : idx;
+    const inBlock = segs
+      .map((_, i) => i)
+      .filter((i) => i !== zipSegIdx && i > prevHitIdx && i <= blockEnd);
+    // Erst hinter der PLZ (Filialblock „PLZ Ort, Straße"), dann davor.
+    const ordered = zipSegIdx >= 0 ? [...inBlock.filter((i) => i > zipSegIdx), ...inBlock.filter((i) => i < zipSegIdx)] : inBlock;
     for (const i of ordered) {
-      const s = streetFrom(segs[i]);
-      if (s) {
-        street = s;
+      const st = streetFrom(segs[i]);
+      if (st) {
+        street = st;
         break;
       }
+    }
+    // Verschmolzene Zeile „PLZ Ort / Straße Nr, PLZ Ort": die Straße hinter dem
+    // Trenner des VORHERIGEN Treffers leitet den nächsten Adressblock ein.
+    if (!street && prevHitIdx >= 0) {
+      const prev = hits.find((h) => h.segIdx === prevHitIdx);
+      if (prev && prev.afterStreet) street = prev.afterStreet;
     }
   }
 

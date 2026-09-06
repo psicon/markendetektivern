@@ -166,14 +166,17 @@
       const REASON_LABEL = Object.fromEntries(REASONS);
       const PRE_LABEL = { ok: '✓ ok', locked: 'Sperre', hold: 'Halten', incomplete: 'Unvollständig' };
 
+      const dayStart = (v) => { if (!v) return undefined; const [y, m, d] = v.split('-').map(Number); return new Date(y, m - 1, d).getTime(); };
+      const dayEnd = (v) => { if (!v) return undefined; const [y, m, d] = v.split('-').map(Number); return new Date(y, m - 1, d, 23, 59, 59, 999).getTime(); };
+
       const state = { rows: [], total: 0, offset: 0, limit: 100, sel: new Set(), open: null, campaigns: [] };
       let currentUser = null;
 
       const filters = () => ({
         status: $('fStatus').value, precheck: $('fPre').value, campaignId: $('fCampaign').value || undefined,
         holdReason: $('fReason').value || undefined, q: $('fQ').value.trim() || undefined,
-        from: $('fFrom').value ? Date.parse($('fFrom').value) : undefined,
-        to: $('fTo').value ? Date.parse($('fTo').value) + 86399999 : undefined,
+        // Lokale Tagesgrenzen — Date.parse('2026-09-05') wäre UTC (2 h Versatz).
+        from: dayStart($('fFrom').value), to: dayEnd($('fTo').value),
         limit: state.limit, offset: state.offset,
       });
 
@@ -182,6 +185,11 @@
         try {
           const r = await call('reviewListUploads')(filters());
           state.rows = r.data.rows; state.total = r.data.total; state.campaigns = r.data.campaigns || [];
+          // Nach einer Batch-Entscheidung kann die aktuelle Seite leer sein.
+          if (state.total && state.offset >= state.total) {
+            state.offset = Math.floor((state.total - 1) / state.limit) * state.limit;
+            return load();
+          }
           state.sel = new Set([...state.sel].filter((id) => state.rows.some((x) => x.id === id)));
           renderStats(r.data.stats); renderCampaigns(); render();
         } catch (e) { $('rows').innerHTML = `<tr><td colspan="11" class="empty">Fehler: ${esc(e.message)}</td></tr>`; }
@@ -206,16 +214,24 @@
         rs.value = rc;
       }
 
+      // Alle Werte, die aus Firestore kommen, sind potenziell vom Nutzer
+      // gesetzt (crowd_uploads ist client-anlegbar) — jede Interpolation wird
+      // escaped, auch in Klassen- und data-Attributen. Der Server whitelistet
+      // status/verdict zusätzlich auf bekannte Werte.
+      const cls = (v, allowed) => (allowed.includes(v) ? v : '');
+      const FIELD_DE = { price: 'Preis', manufacturer: 'Hersteller', market: 'Markt' };
       function preChip(p) {
         if (!p) return '<span class="chip">—</span>';
-        const extra = p.dup && p.dup.updatedFields && p.dup.updatedFields.length ? ` <span class="chip upd" title="andere Daten als die Referenz">neu: ${p.dup.updatedFields.map((f) => ({ price: 'Preis', manufacturer: 'Hersteller', market: 'Markt' }[f] || f)).join(', ')}</span>` : '';
+        const upd = (p.dup && p.dup.updatedFields) || [];
+        const extra = upd.length ? ` <span class="chip upd" title="andere Daten als die Referenz">neu: ${esc(upd.map((f) => FIELD_DE[f] || f).join(', '))}</span>` : '';
         const title = p.reasons && p.reasons.length ? p.reasons.map((r) => REASON_LABEL[r] || r).join(' · ') : '';
-        return `<span class="chip ${p.verdict}" title="${esc(title)}">${PRE_LABEL[p.verdict] || p.verdict}</span>${extra}`;
+        return `<span class="chip ${cls(p.verdict, ['ok', 'locked', 'hold', 'incomplete'])}" title="${esc(title)}">${esc(PRE_LABEL[p.verdict] || p.verdict)}</span>${extra}`;
       }
       function statusChip(r) {
         const reason = r.rejectReason || (r.holdReasons && r.holdReasons[0]);
         const money = r.status === 'approved' ? (r.rewardCents != null ? `<span class="chip money">${euro(r.rewardCents)}</span>` : r.rewardNotCreditedReason ? `<span class="chip" title="${esc(r.rewardNotCreditedReason)}">ohne Buchung</span>` : '') : '';
-        return `<span class="chip ${r.status}">${r.status === 'pending' ? 'offen' : r.status === 'approved' ? 'freigegeben' : 'abgelehnt'}</span>${reason ? ` <span class="chip" title="${esc(REASON_LABEL[reason] || reason)}">${esc(short(REASON_LABEL[reason] || reason, 26))}</span>` : ''} ${money}`;
+        const label = { pending: 'offen', approved: 'freigegeben', rejected: 'abgelehnt' }[r.status] || esc(r.statusRaw || r.status || '?');
+        return `<span class="chip ${cls(r.status, ['pending', 'approved', 'rejected'])}">${label}</span>${reason ? ` <span class="chip" title="${esc(REASON_LABEL[reason] || reason)}">${esc(short(REASON_LABEL[reason] || reason, 26))}</span>` : ''} ${money}`;
       }
 
       function render() {
@@ -226,7 +242,7 @@
           tr.className = 'row' + (state.sel.has(r.id) ? ' sel' : '');
           tr.dataset.id = r.id;
           tr.innerHTML =
-            `<td><input type="checkbox" class="selbox" data-id="${r.id}" ${state.sel.has(r.id) ? 'checked' : ''} ${r.status !== 'pending' ? 'disabled' : ''}></td>` +
+            `<td><input type="checkbox" class="selbox" data-id="${esc(r.id)}" ${state.sel.has(r.id) ? 'checked' : ''} ${r.status !== 'pending' ? 'disabled' : ''}></td>` +
             `<td><img class="thumb ph" data-path="${esc(r.images && r.images.front || '')}" alt=""></td>` +
             `<td><div class="nm">${esc(r.productName || r.productNameOcr || '(ohne Name)')}</div><div class="sub">${r.productNameOcr && r.productNameOcr !== r.productName ? 'OCR: ' + esc(r.productNameOcr) : ''}${r.campaignId ? ' · ' + esc(r.campaignId) : ' · ohne Aktion'}</div></td>` +
             `<td class="mono">${esc(r.ean || '—')}</td>` +
@@ -237,8 +253,14 @@
             `<td>${statusChip(r)}</td>` +
             `<td title="${esc(fmtDateTime(r.createdAt))}">${ago(r.createdAt)}<div class="sub">${esc(fmtDate(r.createdAt))}</div></td>` +
             `<td class="acts">` +
-              (r.status === 'pending' ? `<button class="sm primary act" data-act="approve" data-id="${r.id}">Freigeben</button><button class="sm bad act" data-act="reject" data-id="${r.id}">Ablehnen</button>` : '') +
-              `<button class="sm ghost act" data-act="detail" data-id="${r.id}">${state.open === r.id ? 'Zu' : 'Details'}</button>` +
+              (r.status === 'pending'
+                ? (r.precheck && r.precheck.verdict !== 'ok'
+                    // Gesperrt/unvollständig: Freigabe nur bewusst, mit Notiz (force).
+                    ? `<button class="sm warn act" data-act="force" data-id="${esc(r.id)}" title="Freigeben trotz Vorprüfung — Notiz ist Pflicht">Freigeben (Notiz)…</button>`
+                    : `<button class="sm primary act" data-act="approve" data-id="${esc(r.id)}" title="Alt+Klick: mit Notiz/force">Freigeben</button>`)
+                  + `<button class="sm bad act" data-act="reject" data-id="${esc(r.id)}">Ablehnen</button>`
+                : '') +
+              `<button class="sm ghost act" data-act="detail" data-id="${esc(r.id)}">${state.open === r.id ? 'Zu' : 'Details'}</button>` +
             `</td>`;
           tb.appendChild(tr);
           if (state.open === r.id) tb.appendChild(detailRow(r));
@@ -276,7 +298,7 @@
                 <div class="k">ID</div><div class="v mono">${esc(row.id)}</div>
                 <div class="k">Nutzer</div><div class="v mono"><span class="link" data-user="${esc(row.userId)}">${esc(row.userId)}</span></div>
                 <div class="k">Aktion</div><div class="v">${esc(row.campaignId || 'ohne Aktion')}</div>
-                <div class="k">Eingereicht</div><div class="v">${esc(fmtDateTime(row.createdAt))} · App ${esc(row.clientVersion && (row.clientVersion.version || row.clientVersion.appVersion) || '?')}</div>
+                <div class="k">Eingereicht</div><div class="v">${esc(fmtDateTime(row.createdAt))} · App ${esc((row.clientVersion && row.clientVersion.app) || '?')}${row.clientVersion && row.clientVersion.build ? ' (' + esc(row.clientVersion.build) + ')' : ''}${row.clientVersion && row.clientVersion.platform ? ' ' + esc(row.clientVersion.platform) : ''}</div>
                 <div class="k">Ort</div><div class="v">${cap.confirmedPlace ? esc(cap.confirmedPlace.name || cap.confirmedPlace.city || JSON.stringify(cap.confirmedPlace)) : cap.hasGps ? 'GPS' : 'keine Angabe'} · GPS: ${esc(cap.gpsStatus || '—')}</div>
                 <div class="k">Vergütung</div><div class="v">${row.rewardResult ? esc(row.rewardResult) + (row.rewardCents != null ? ' · ' + euro(row.rewardCents) : '') + (row.rewardNotCreditedReason ? ' · ' + esc(row.rewardNotCreditedReason) : '') : '—'}</div>
                 <div class="k">Halte-Gründe</div><div class="v">${(row.holdReasons || []).map((h) => esc(REASON_LABEL[h] || h)).join(', ') || '—'}</div>
@@ -285,8 +307,8 @@
               </div></div>
             </div><div>
               ${dupBox}
-              <div class="box"><h4>Gleiche EAN (${d.sameEan.length})</h4>${d.sameEan.length ? d.sameEan.map((x) => `<div><span class="link mono" data-open="${esc(x.id)}">${esc(short(x.id, 10))}</span> · <span class="chip ${x.status}">${esc(x.status)}</span> · ${esc(fmtDate(x.createdAt))} · ${x.userId === row.userId ? 'gleicher Nutzer' : esc(short(x.userId))} · ${euro(x.priceCents)}</div>`).join('') : '<div class="muted">keine</div>'}</div>
-              <div class="box"><h4>Vom selben Nutzer (letzte ${d.sameUser.length})</h4>${d.sameUser.length ? d.sameUser.slice(0, 12).map((x) => `<div><span class="link mono" data-open="${esc(x.id)}">${esc(short(x.id, 10))}</span> · <span class="chip ${x.status}">${esc(x.status)}</span> · ${esc(fmtDate(x.createdAt))} · ${esc(x.productName || x.productNameOcr || '')}</div>`).join('') : '<div class="muted">keine</div>'}</div>
+              <div class="box"><h4>Gleiche EAN (${d.sameEan.length})</h4>${d.sameEan.length ? d.sameEan.map((x) => `<div><span class="link mono" data-open="${esc(x.id)}">${esc(short(x.id, 10))}</span> · <span class="chip ${cls(x.status, ['pending', 'approved', 'rejected'])}">${esc(x.status)}</span> · ${esc(fmtDate(x.createdAt))} · ${x.userId === row.userId ? 'gleicher Nutzer' : esc(short(x.userId))} · ${euro(x.priceCents)}</div>`).join('') : '<div class="muted">keine</div>'}</div>
+              <div class="box"><h4>Vom selben Nutzer (letzte ${d.sameUser.length})</h4>${d.sameUser.length ? d.sameUser.slice(0, 12).map((x) => `<div><span class="link mono" data-open="${esc(x.id)}">${esc(short(x.id, 10))}</span> · <span class="chip ${cls(x.status, ['pending', 'approved', 'rejected'])}">${esc(x.status)}</span> · ${esc(fmtDate(x.createdAt))} · ${esc(x.productName || x.productNameOcr || '')}</div>`).join('') : '<div class="muted">keine</div>'}</div>
             </div></div>`;
         }).catch((e) => { td.innerHTML = `<div class="muted">Fehler: ${esc(e.message)}</div>`; });
         return tr;
@@ -308,7 +330,11 @@
       function openDialog({ title, ids, decision, defaultReason, allowForce }) {
         dlgCtx = { ids, decision };
         $('dlgTitle').textContent = `${title} (${ids.length})`;
-        $('dlgReason').innerHTML = decision === 'approve' ? '' : REASONS.map(([k, l]) => `<option value="${k}" ${k === defaultReason ? 'selected' : ''}>${esc(l)}</option>`).join('');
+        // Kein Sperr-Grund als stiller Default: ohne Vorprüfungs-Befund muss der
+        // Operator aktiv wählen (sonst bekäme der Nutzer eine falsche Aussage).
+        $('dlgReason').innerHTML = decision === 'approve' ? '' :
+          `<option value="" ${defaultReason ? '' : 'selected'}>Grund wählen…</option>` +
+          REASONS.map(([k, l]) => `<option value="${esc(k)}" ${k === defaultReason ? 'selected' : ''}>${esc(l)}</option>`).join('');
         $('dlgReason').classList.toggle('hidden', decision === 'approve');
         $('dlgNote').value = '';
         $('dlgForceWrap').classList.toggle('hidden', !allowForce);
@@ -322,7 +348,8 @@
         if (!dlgCtx) return;
         const { ids, decision } = dlgCtx;
         const payload = { ids, decision, reason: decision === 'approve' ? undefined : $('dlgReason').value, note: $('dlgNote').value.trim() || undefined, force: decision === 'approve' && $('dlgForce').checked };
-        if (payload.force && !payload.note) { toast('force braucht eine Notiz.', 'bad'); return; }
+        if (decision !== 'approve' && !payload.reason) { toast('Bitte einen Grund wählen.', 'bad'); return; }
+        if (payload.force && !payload.note) { toast('Freigabe trotz Vorprüfung braucht eine Notiz.', 'bad'); return; }
         $('dlgOk').disabled = true;
         try {
           const r = await call('reviewDecideUploads')(payload);
@@ -341,9 +368,18 @@
           const t = r.data.tally || {};
           toast(Object.entries(t).map(([k, v]) => `${v} ${k}`).join(', '), t.blocked || t.error ? 'bad' : '');
           if (t.blocked) {
+            // Blockierte nach Grund gruppieren — ein Sammel-Reject mit EINEM
+            // Grund würde falsche Nutzer-Notizen schreiben. Der größte Topf
+            // kommt zuerst in den Dialog, der Rest bleibt in der Liste sichtbar.
             const blocked = r.data.results.filter((x) => x.outcome === 'blocked');
-            openDialog({ title: 'Gesperrt — ablehnen mit Grund', ids: blocked.map((x) => x.id), decision: 'reject', defaultReason: blocked[0].reason });
-            $('dlgResults').innerHTML = blocked.map((x) => `<div><span class="mono">${esc(short(x.id, 10))}</span> · ${esc(REASON_LABEL[x.reason] || x.reason)}</div>`).join('') + '<div class="muted" style="margin-top:6px">Zum Übersteuern: Zeile einzeln öffnen → Freigeben mit force.</div>';
+            const groups = {};
+            blocked.forEach((x) => { (groups[x.reason] = groups[x.reason] || []).push(x.id); });
+            const [reason, gIds] = Object.entries(groups).sort((a, b) => b[1].length - a[1].length)[0];
+            const isHold = reason === 'doppelt_eingereicht';
+            openDialog({ title: isHold ? 'Offene frühere Einreichung — halten' : 'Gesperrt — ablehnen', ids: gIds, decision: isHold ? 'hold' : 'reject', defaultReason: reason });
+            $('dlgResults').innerHTML =
+              Object.entries(groups).map(([rs, list]) => `<div><b>${esc(REASON_LABEL[rs] || rs)}</b>: ${list.length}${rs === reason ? ' (im Dialog)' : ' — danach erneut auswählen'}</div>`).join('') +
+              '<div class="muted" style="margin-top:6px">Trotzdem freigeben: in der Zeile „Freigeben (Notiz)…".</div>';
           }
           state.sel.clear(); load();
         } catch (e) { toast('Fehler: ' + e.message, 'bad'); }
@@ -356,13 +392,17 @@
           const id = act.dataset.id;
           if (act.dataset.act === 'detail') { state.open = state.open === id ? null : id; render(); }
           if (act.dataset.act === 'approve') { if (e.altKey) openDialog({ title: 'Freigeben', ids: [id], decision: 'approve', allowForce: true }); else approveNow([id]); }
+          if (act.dataset.act === 'force') { openDialog({ title: 'Freigeben trotz Vorprüfung', ids: [id], decision: 'approve', allowForce: true }); $('dlgForce').checked = true; }
           if (act.dataset.act === 'reject') { const r = state.rows.find((x) => x.id === id); openDialog({ title: 'Ablehnen', ids: [id], decision: 'reject', defaultReason: r && r.precheck && r.precheck.reasons[0] }); }
           return;
         }
+        // Sprung per ID/Nutzer: alle übrigen Filter zurücksetzen, sonst fällt
+        // das Ziel durch einen noch aktiven Vorprüfungs-/Aktions-/Datumsfilter.
+        const resetFilters = () => { $('fStatus').value = 'all'; $('fPre').value = 'all'; $('fCampaign').value = ''; $('fReason').value = ''; $('fFrom').value = ''; $('fTo').value = ''; state.offset = 0; };
         const u = e.target.closest && e.target.closest('[data-user]');
-        if (u) { $('fQ').value = u.dataset.user; $('fStatus').value = 'all'; state.offset = 0; load(); return; }
+        if (u) { resetFilters(); $('fQ').value = u.dataset.user; load(); return; }
         const o = e.target.closest && e.target.closest('[data-open]');
-        if (o) { $('fQ').value = o.dataset.open; $('fStatus').value = 'all'; state.offset = 0; state.open = o.dataset.open; load(); return; }
+        if (o) { resetFilters(); $('fQ').value = o.dataset.open; state.open = o.dataset.open; load(); return; }
       });
       document.addEventListener('change', (e) => {
         if (e.target.classList && e.target.classList.contains('selbox')) {

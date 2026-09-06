@@ -3,7 +3,17 @@ const { evaluateDuplicate, dataDiffers, manufacturerEqual, completenessCheck, LO
 
 const DAY = 24 * 60 * 60 * 1000;
 const T0 = Date.parse('2026-09-01T10:00:00Z');
-const base = (over) => ({ id: 'x', userId: 'u1', ean: '4006381333931', marketId: 'm1', status: 'pending', createdAt: T0, priceCents: 199, manufacturer: 'Müller GmbH', ...over });
+// Vergleichswerte kommen NUR aus den server-geschriebenen OCR-Feldern
+// (crowd-upload-namer) — Top-Level wäre client-schreibbar.
+const base = (over = {}) => {
+  const { priceCents = 199, manufacturer = 'Müller GmbH', ...rest } = over;
+  return {
+    id: 'x', userId: 'u1', ean: '4006381333931', marketId: 'm1', status: 'pending', createdAt: T0,
+    priceOcr: priceCents == null ? null : { priceCents, source: 'preis' },
+    manufacturerOcr: manufacturer == null ? null : { name: manufacturer, source: 'hersteller' },
+    ...rest,
+  };
+};
 
 describe('evaluateDuplicate', () => {
   test('ohne Referenz → ok', () => {
@@ -58,10 +68,38 @@ describe('evaluateDuplicate', () => {
     expect(evaluateDuplicate(base(), [newer]).verdict).toBe('ok');
   });
 
+  test('identische Wiederholung bleibt gesperrt, auch wenn dazwischen eine Preisänderung freigegeben wurde', () => {
+    // Eigener Upload vom 1., zwischenzeitlich fremde Freigabe mit anderem Preis am 3.
+    const mine = base({ id: 'a', status: 'approved', createdAt: T0 - 10 * DAY });
+    const other = base({ id: 'b', userId: 'u2', status: 'approved', createdAt: T0 - 3 * DAY, priceCents: 249 });
+    const r = evaluateDuplicate(base(), [mine, other]);
+    expect(r.verdict).toBe('locked');
+    expect(r.priorId).toBe('a'); // die sperrende Referenz, nicht die jüngste
+    expect(r.reason).toBe(REASON.SAME_USER);
+  });
+
+  test('eine JÜNGERE Freigabe im Fenster sperrt ebenfalls (Backlog-Reihenfolge)', () => {
+    const younger = base({ id: 'y', userId: 'u2', status: 'approved', createdAt: T0 + 4 * DAY });
+    const r = evaluateDuplicate(base(), [younger]);
+    expect(r).toMatchObject({ verdict: 'locked', reason: REASON.OTHER_USER, priorId: 'y' });
+    expect(r.lockUntil).toBe(younger.createdAt + LOCK_MS);
+  });
+
+  test('jüngere Freigabe mit anderen Daten sperrt nicht', () => {
+    const younger = base({ id: 'y', userId: 'u2', status: 'approved', createdAt: T0 + 4 * DAY, priceCents: 149 });
+    expect(evaluateDuplicate(base(), [younger])).toMatchObject({ verdict: 'ok', priorId: 'y', updatedFields: ['price'] });
+  });
+
+  test('Freigabe außerhalb des Fensters bleibt Information, sperrt nicht', () => {
+    const old = base({ id: 'o', status: 'approved', createdAt: T0 - 40 * DAY });
+    expect(evaluateDuplicate(base(), [old])).toMatchObject({ verdict: 'ok', priorId: 'o' });
+  });
+
   test('die jüngste freigegebene Referenz zählt, nicht die älteste', () => {
     const old = base({ id: 'a', status: 'approved', createdAt: T0 - 60 * DAY });
     const recent = base({ id: 'b', status: 'approved', createdAt: T0 - 3 * DAY });
     expect(evaluateDuplicate(base(), [old, recent])).toMatchObject({ verdict: 'locked', priorId: 'b' });
+    expect(evaluateDuplicate(base(), [old])).toMatchObject({ verdict: 'ok', priorId: 'a' });
   });
 
   test('Bewertung nutzt den Einreich-Zeitpunkt, nicht „jetzt"', () => {
@@ -88,8 +126,10 @@ describe('manufacturerEqual / dataDiffers', () => {
     expect(manufacturerEqual('Dr. Oetker', 'Dr Oetkr')).toBe(true);
     expect(manufacturerEqual('Bauer', 'Zott')).toBe(false);
   });
-  test('Preis aus verschachtelter OCR-Struktur', () => {
-    expect(dataDiffers({ priceOcr: { priceCents: 229 } }, { priceCents: 199 }).price).toBe(true);
+  test('Preis kommt aus priceOcr; ein client-gesetztes Top-Level-Feld zählt NICHT', () => {
+    expect(dataDiffers({ priceOcr: { priceCents: 229 } }, { priceOcr: { priceCents: 199 } }).price).toBe(true);
+    // Angreifer setzt priceCents/manufacturer selbst → keine „anderen Daten"
+    expect(dataDiffers({ priceCents: 999, manufacturer: 'Fake AG' }, { priceOcr: { priceCents: 199 }, manufacturerOcr: { name: 'Müller GmbH' } }).any).toBe(false);
   });
 });
 
