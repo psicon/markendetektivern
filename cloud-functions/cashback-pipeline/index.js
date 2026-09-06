@@ -66,6 +66,7 @@ const { extractReceipt, reconcile, countEligibleItems, tierFor, isPfandItem, DEF
 const { extractReceiptCVHybrid } = require('./lib/ocr_cvhybrid');
 const { extractReceiptRobust } = require('./lib/ocr_robust');
 const { extractReceiptDocAI, isConfigured: isDocAIConfigured } = require('./lib/ocr_docai');
+const { deriveStoreAddress } = require('./lib/storeAddress');
 const { resolveMerchant } = require('./lib/merchant');
 const { sendCashbackReady } = require('./lib/push');
 const {
@@ -394,6 +395,9 @@ const RELIABLE_REJECT_REASONS = new Set(['bon_too_old', 'unknown_merchant', 'bel
 async function writePurchasedProducts(uid, cashbackId, parsed, merchantInfo, meta = {}) {
   if (!parsed || !Array.isArray(parsed.items)) return;
   const col = db.collection(`users/${uid}/purchased_products`);
+  // Filialadresse laut Bon (05.09.2026) — als flache Felder je Artikel, damit
+  // B2B-Auswertungen nach PLZ/Ort direkt über purchased_products laufen.
+  const store = deriveStoreAddress(parsed, merchantInfo?.land || null);
   const writes = [];
   for (const it of parsed.items) {
     if (!it || !Number.isFinite(it.priceCents) || it.priceCents <= 0) continue;
@@ -413,6 +417,9 @@ async function writePurchasedProducts(uid, cashbackId, parsed, merchantInfo, met
           discounterId: merchantInfo?.discounterId || null,
           merchantName: merchantInfo?.name || null,
           merchantLand: merchantInfo?.land || null,
+          storeZip: store?.zip ?? null,
+          storeCity: store?.city ?? null,
+          storeStreet: store?.street ?? null,
           // B2B-Marker (86caf62v6): bonStatus = finaler Bon-Status; rewardEligible
           // = war der Bon angenommen/vergütet. rewardEligible=false markiert
           // valide-aber-abgelehnte Bons → der Matcher auto-matcht/Journey-schließt
@@ -1323,6 +1330,11 @@ exports.processCashback = onMessagePublished(
         ocr.parsed.merchant,
         ocr.parsed.bonCountry,
       );
+      // 5a) Filialadresse (Straße/PLZ/Ort) — Entscheidung 05.09.2026: der
+      //     Einkaufsort kommt vom Bon-Kopf (OCR v1.4 `storeAddress`, sonst
+      //     Parser über `merchantSubtitle`), nicht aus der IP-Journey. Läuft
+      //     auch über den OCR-Cache (Retry/Reprocessing) — kein Gemini-Call.
+      const store = deriveStoreAddress(ocr.parsed, merchantInfo?.land ?? null);
 
       // 5b) Content-based duplicate detection (Layer 1.5).
       //     Catches the case image-forensics can't see: same physical
@@ -1762,6 +1774,9 @@ exports.processCashback = onMessagePublished(
             tierApplied: cashbackCents,
             eligibleItemCount,
             merchantRaw: ocr.parsed.merchant ?? null,
+            // Filiale laut Bon (05.09.2026) — schlank für die App: Ort + PLZ.
+            storeCity: store?.city ?? null,
+            storeZip: store?.zip ?? null,
             merchantId: merchantInfo?.id ?? null,
             discounterId: merchantInfo?.discounterId ?? null, // 86ca0wbg7
             merchantName: merchantInfo?.name ?? null,
@@ -1773,9 +1788,11 @@ exports.processCashback = onMessagePublished(
             bonDate: ocr.parsed.bonDate || null,
             bonAgeDays: ageDays,
             // 86ca0wbg7: angewandte Max-Alter-Grenze (Tage) → die App zeigt die
-            // ECHTE Grenze (z.B. 14) statt einer hardcodierten Zahl. null wenn
-            // kein effektives Limit greift (globaler 9999-Default).
-            maxAgeDays: effectiveMaxAgeDays < MAX_BON_AGE_DAYS ? effectiveMaxAgeDays : null,
+            // ECHTE Grenze statt einer hardcodierten Zahl. Seit dem Go-Live ist
+            // der globale Default 7 (Entscheidung 05.09.2026: 7 Tage, endgültig)
+            // — der frühere Guard „nur wenn strenger als global" ließ die App
+            // bei jedem bon_too_old ohne Zahl dastehen. Immer die Grenze senden.
+            maxAgeDays: effectiveMaxAgeDays,
             bonTotalCents: ocr.parsed.totalCents ?? null,
             items: slimItems,
             storageBucket: receipt.storage?.bucket ?? null,
@@ -1819,6 +1836,10 @@ exports.processCashback = onMessagePublished(
           : null,
         bonDate: ocr.parsed.bonDate || null,
         bonDateCorrection: bonDateCorrection ?? null,
+        // Filialadresse laut Bon-Kopf (05.09.2026): {street, zip, city,
+        // country, source: 'ocr'|'subtitle'|'merchant', complete}. Unabhängig
+        // vom Merchant-Resolver — auch ein unbekannter Markt hat eine Anschrift.
+        store: store ?? null,
         bonTime: ocr.parsed.bonTime || null,
         bonTotalCents: ocr.parsed.totalCents ?? null,
         contentHash: contentHash ?? null,
@@ -2390,6 +2411,11 @@ exports.resolveCashbackReview = onRequest(
       const uid = r.userId;
       const ts = admin.firestore.FieldValue.serverTimestamp();
       const mirrorRef = db.doc(`users/${uid}/cashback_status/${receiptId}`);
+      // Filialadresse (05.09.2026) auch bei Review-Auflösung mitschreiben —
+      // Bons aus dem Catch-Pfad (ledger_precheck_failed/ocr_unavailable) haben
+      // Schritt 6a/7 nie durchlaufen und tragen sonst weder store noch storeCity.
+      const store = r.ocr?.parsed ? deriveStoreAddress(r.ocr.parsed, r.merchant?.land ?? null) : null;
+      const storeMirror = { storeCity: store?.city ?? null, storeZip: store?.zip ?? null };
       const userRef = db.doc(`users/${uid}`);
       // Config STRIKT (kein Fallback auf campaignsEnabled:false) + Kampagne —
       // für alle drei Zweige: approve bucht, reject/no_reward REVERSEN einen
@@ -2417,6 +2443,7 @@ exports.resolveCashbackReview = onRequest(
           rejectReason,
           ...(duplicateOf ? { duplicateOf } : {}),
           reviewDecision: 'reject',
+          store: store ?? null,
           reviewResolvedAt: ts,
           updatedAt: ts,
         });
@@ -2424,6 +2451,7 @@ exports.resolveCashbackReview = onRequest(
           {
             status: 'rejected',
             rejectReason,
+            ...storeMirror,
             ...(duplicateOf
               ? { duplicate: { sameUser, priorReceiptId: sameUser ? duplicateOf.receiptId : null } }
               : {}),
@@ -2445,11 +2473,12 @@ exports.resolveCashbackReview = onRequest(
           cashbackCents: 0,
           rejectReason: reason,
           reviewDecision: 'no_reward',
+          store: store ?? null,
           reviewResolvedAt: ts,
           updatedAt: ts,
         });
         await mirrorRef.set(
-          { status: 'no_reward', cashbackCents: 0, rejectReason: reason, updatedAt: ts },
+          { status: 'no_reward', cashbackCents: 0, rejectReason: reason, ...storeMirror, updatedAt: ts },
           { merge: true },
         );
         if (r.ocr?.parsed) {
@@ -2507,11 +2536,12 @@ exports.resolveCashbackReview = onRequest(
         cashbackCents: credited,
         rejectReason: finalReason,
         reviewDecision: 'approve',
+        store: store ?? null,
         reviewResolvedAt: ts,
         updatedAt: ts,
       });
       await mirrorRef.set(
-        { status: finalStatus, cashbackCents: credited, rejectReason: finalReason, updatedAt: ts },
+        { status: finalStatus, cashbackCents: credited, rejectReason: finalReason, ...storeMirror, updatedAt: ts },
         { merge: true },
       );
       // Spiegel von processCashback 7a): approved UND no_reward gelten als valide

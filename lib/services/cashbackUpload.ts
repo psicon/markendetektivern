@@ -582,6 +582,10 @@ export interface CashbackStatusEntry {
   // 86ca0wbg7: echte discounter-DocID (Markt direkt auflösbar).
   discounterId?: string | null;
   merchantLand?: string | null;
+  /** Filiale laut Bon-Kopf (05.09.2026) — Ort/PLZ aus der OCR, nicht aus
+   *  dem Gerätestandort. null, wenn der Bon keine Anschrift trägt. */
+  storeCity?: string | null;
+  storeZip?: string | null;
   bonTotalCents?: number | null;
   rejectReason?: string | null;
   createdAt?: any;

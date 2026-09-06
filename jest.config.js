@@ -43,6 +43,7 @@ module.exports = {
         '<rootDir>/cloud-functions/external-product-lookup',
         '<rootDir>/cloud-functions/crowd-upload-location',
         '<rootDir>/cloud-functions/crowd-upload-reward',
+        '<rootDir>/cloud-functions/cashback-pipeline',
         '<rootDir>/cloud-functions/receipt-matcher',
       ],
       testMatch: ['**/__tests__/**/*.test.js'],

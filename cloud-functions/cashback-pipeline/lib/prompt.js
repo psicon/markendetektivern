@@ -14,11 +14,16 @@
  *   (z. B. REWE CHORIZO/SERRANO vertauscht, LIDL Pfand gedroppt + Zucchini-
  *   Preisvorteil ignoriert). Neue „Zeilen-/Preis-Zuordnung"-Sektion +
  *   per-Item `raw`-Zeile. An 2 echten Bons validiert (REWE 8/8, LIDL 7/11→11/11).
+ * v1.4 (2026-09-05) — Filialadresse strukturiert (`storeAddress` {street, zip,
+ *   city}). Bisher kam der Bon-Ort nur aus der IP-Journey (61–377 km daneben);
+ *   die Anschrift steht aber auf fast jedem Bon-Kopf. `merchantSubtitle` bleibt
+ *   als wörtliche Zeile erhalten (Bestand + deterministischer Fallback-Parser
+ *   in lib/storeAddress.js). Items/Preise/Datum unverändert.
  */
 
 'use strict';
 
-const VERSION = 'v1.3';
+const VERSION = 'v1.4';
 
 const SYSTEM_PROMPT = `\
 Du bist ein OCR-Spezialist für deutsche Kassenbons (DACH-Raum: DE, AT,
@@ -44,6 +49,15 @@ extrahieren.
    category='Pfand' aufnehmen — die Zuordnung weiter unten gilt auch
    für sie.) Beachte zwingend die Sektion „Zeilen-/Preis-Zuordnung".
 7. **Merchant** = Filialname wie er ganz oben auf dem Bon steht.
+   **merchantSubtitle** = die wörtliche(n) Zusatzzeile(n) direkt unter dem
+   Filialnamen (Anschrift, Filialnummer), unverändert wie gedruckt.
+   **storeAddress** = die Anschrift der FILIALE aus dem Bon-Kopf, aufgeteilt:
+   street = Straße + Hausnummer, zip = Postleitzahl (DE 5-stellig, AT/CH
+   4-stellig), city = Ort OHNE Postleitzahl. Nur übernehmen, was gedruckt
+   ist; fehlt ein Teil → null. Filial-, Markt-, Kassen- oder Bonnummern
+   (z. B. „Filiale 6100", „Markt 8068") sind KEINE Postleitzahl. Steht im
+   Fußbereich zusätzlich ein Firmensitz (GmbH-Anschrift, Impressum), zählt
+   die Filialadresse oben, nicht der Firmensitz.
 8. **Total** = der ENDBETRAG nach Rabatten.
 9. Wenn das Bild kein Kassenbon ist, setze isReceipt=false und gib
    einen Grund in notReceiptReason.
@@ -97,6 +111,17 @@ const RESPONSE_SCHEMA = {
     notReceiptReason: { type: 'string', nullable: true },
     merchant: { type: 'string', nullable: true },
     merchantSubtitle: { type: 'string', nullable: true },
+    // v1.4: Filialadresse strukturiert — Ort/PLZ des Einkaufs kommen vom Bon,
+    // nicht aus der IP-Journey. Alles nullable: nichts erfinden.
+    storeAddress: {
+      type: 'object',
+      nullable: true,
+      properties: {
+        street: { type: 'string', nullable: true },
+        zip: { type: 'string', nullable: true },
+        city: { type: 'string', nullable: true },
+      },
+    },
     bonDate: { type: 'string', nullable: true },
     bonTime: { type: 'string', nullable: true },
     items: {
