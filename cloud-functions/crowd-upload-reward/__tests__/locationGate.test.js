@@ -132,3 +132,23 @@ describe('Die Gnadenfrist ist datumsbasiert (Orts-Audit 05.09.2026)', () => {
     expect(r.grund).toBe('gnadenfrist_alter_client');
   });
 });
+
+describe('Ortsangabe aus dem Kassenbon (06.09.2026)', () => {
+  const basis = { clientVersion: { app: '6.0.15' }, createdAt: new Date('2026-09-06T10:00:00Z'), capture: { gpsStatus: 'denied' } };
+
+  test('vollständige Bon-Adresse erfüllt die Ortspflicht', () => {
+    const r = pruefeOrtsanforderung({ ...basis, priceReceipt: { zip: '46325', city: 'Borken', street: 'Otto-Hahn-Str. 18', complete: true } });
+    expect(r).toEqual({ ok: true, grund: 'ort_aus_kassenbon' });
+  });
+
+  test('unvollständige Bon-Angabe zählt nicht', () => {
+    expect(pruefeOrtsanforderung({ ...basis, priceReceipt: { zip: null, city: 'Borken', complete: false } }).ok).toBe(false);
+    expect(pruefeOrtsanforderung({ ...basis, priceReceipt: { merchant: 'ALDI', complete: false } }).ok).toBe(false);
+    expect(pruefeOrtsanforderung({ ...basis, priceReceipt: null }).ok).toBe(false);
+  });
+
+  test('eine eigene Ortsangabe hat weiter Vorrang', () => {
+    const r = pruefeOrtsanforderung({ ...basis, capture: { confirmedPlace: { city: 'Köln' } }, priceReceipt: { zip: '46325', city: 'Borken', complete: true } });
+    expect(r).toEqual({ ok: true });
+  });
+});

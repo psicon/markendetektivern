@@ -220,6 +220,7 @@
       // status/verdict zusätzlich auf bekannte Werte.
       const cls = (v, allowed) => (allowed.includes(v) ? v : '');
       const FIELD_DE = { price: 'Preis', manufacturer: 'Hersteller', market: 'Markt' };
+      const KIND_DE = { kassenbon: 'Bon statt Preisschild', beides: 'Bon + Preisschild', produktfoto: 'kein Preis im Bild', sonstiges: 'unpassendes Bild', unklar: 'Bild unklar', fehlt: 'kein Preis-Bild' };
       function preChip(p) {
         if (!p) return '<span class="chip">—</span>';
         const upd = (p.dup && p.dup.updatedFields) || [];
@@ -247,7 +248,7 @@
             `<td><div class="nm">${esc(r.productName || r.productNameOcr || '(ohne Name)')}</div><div class="sub">${r.productNameOcr && r.productNameOcr !== r.productName ? 'OCR: ' + esc(r.productNameOcr) : ''}${r.campaignId ? ' · ' + esc(r.campaignId) : ' · ohne Aktion'}</div></td>` +
             `<td class="mono">${esc(r.ean || '—')}</td>` +
             `<td>${esc(r.marketName || r.marketId || '—')}<div class="sub">${esc(r.marketLand || '')}</div></td>` +
-            `<td>${euro(r.priceCents)}<div class="sub">${esc(r.manufacturer || '—')}</div></td>` +
+            `<td>${euro(r.priceCents)}${r.priceImageKind && r.priceImageKind !== 'preisschild' ? ` <span class="chip" title="Was das Preis-Foto zeigt">${esc(KIND_DE[r.priceImageKind] || r.priceImageKind)}</span>` : ''}<div class="sub">${esc(r.manufacturer || '—')}${r.priceReceipt && r.priceReceipt.complete ? ` · Bon: ${esc(r.priceReceipt.zip + ' ' + r.priceReceipt.city)}` : ''}</div></td>` +
             `<td><span class="link mono" data-user="${esc(r.userId)}" title="alle Einreichungen dieses Nutzers">${short(r.userId)}</span></td>` +
             `<td>${preChip(r.precheck)}</td>` +
             `<td>${statusChip(r)}</td>` +
@@ -300,6 +301,8 @@
                 <div class="k">Aktion</div><div class="v">${esc(row.campaignId || 'ohne Aktion')}</div>
                 <div class="k">Eingereicht</div><div class="v">${esc(fmtDateTime(row.createdAt))} · App ${esc((row.clientVersion && row.clientVersion.app) || '?')}${row.clientVersion && row.clientVersion.build ? ' (' + esc(row.clientVersion.build) + ')' : ''}${row.clientVersion && row.clientVersion.platform ? ' ' + esc(row.clientVersion.platform) : ''}</div>
                 <div class="k">Ort</div><div class="v">${cap.confirmedPlace ? esc(cap.confirmedPlace.name || cap.confirmedPlace.city || JSON.stringify(cap.confirmedPlace)) : cap.hasGps ? 'GPS' : 'keine Angabe'} · GPS: ${esc(cap.gpsStatus || '—')}</div>
+                <div class="k">Preis-Bild</div><div class="v">${esc(KIND_DE[row.priceImageKind] || row.priceImageKind || '—')}</div>
+                <div class="k">Bon im Preis-Bild</div><div class="v">${row.priceReceipt ? esc([row.priceReceipt.merchant, row.priceReceipt.street, [row.priceReceipt.zip, row.priceReceipt.city].filter(Boolean).join(' '), row.priceReceipt.bonDate].filter(Boolean).join(' · ')) : '—'}</div>
                 <div class="k">Vergütung</div><div class="v">${row.rewardResult ? esc(row.rewardResult) + (row.rewardCents != null ? ' · ' + euro(row.rewardCents) : '') + (row.rewardNotCreditedReason ? ' · ' + esc(row.rewardNotCreditedReason) : '') : '—'}</div>
                 <div class="k">Halte-Gründe</div><div class="v">${(row.holdReasons || []).map((h) => esc(REASON_LABEL[h] || h)).join(', ') || '—'}</div>
                 <div class="k">Notiz an Nutzer</div><div class="v">${esc(row.reviewNote || '—')}</div>

@@ -114,6 +114,11 @@ function rowOf(d) {
       : null,
     priceCents: Number.isFinite(price) ? price : null,
     manufacturer,
+    // Was das „Preis"-Bild zeigt und — falls Kassenbon — dessen Filialadresse.
+    priceImageKind: typeof x.priceImageKind === 'string' ? x.priceImageKind : null,
+    priceReceipt: x.priceReceipt
+      ? { merchant: x.priceReceipt.merchant ?? null, street: x.priceReceipt.street ?? null, zip: x.priceReceipt.zip ?? null, city: x.priceReceipt.city ?? null, bonDate: x.priceReceipt.bonDate ?? null, complete: !!x.priceReceipt.complete }
+      : null,
     review: x.review ?? null,
     // Für die Doppel-Regel (nicht im UI nötig, aber im Kandidaten-Vergleich)
     _policy: { id: d.id, userId: x.userId ?? null, ean: x.ean ?? null, marketId: x.marketId ?? null, status: safeStatus(x.status), createdAt: ms(x.createdAt), priceOcr: x.priceOcr ?? null, manufacturerOcr: x.manufacturerOcr ?? null },

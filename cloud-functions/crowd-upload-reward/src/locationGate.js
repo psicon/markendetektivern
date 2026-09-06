@@ -76,6 +76,18 @@ function pruefeOrtsanforderung(doc) {
   const hatOrt = Boolean(capture?.confirmedPlace || capture?.gps);
   if (hatOrt) return { ok: true };
 
+  // 06.09.2026: Manche Nutzer fotografieren als „Preis" den KASSENBON statt
+  // des Regal-Etiketts (17,5 % einer Stichprobe von 40). Der Bon-Kopf trägt
+  // die Filialadresse — eine härtere Tatsache als jede Selbstauskunft und
+  // genauer als ein GPS-Raster. `crowd-upload-namer` liest sie im ohnehin
+  // stattfindenden OCR-Aufruf mit und legt sie als `priceReceipt` ab.
+  // Das ist KEINE Lockerung der Ortspflicht, sondern eine zusätzliche Quelle,
+  // die sie erfüllt: der Ort steht belegt im eingereichten Bild.
+  const bon = doc?.priceReceipt;
+  if (bon && bon.complete && bon.zip && bon.city) {
+    return { ok: true, grund: 'ort_aus_kassenbon' };
+  }
+
   // Kein Ort. Konnte diese App überhaupt danach fragen?
   const kanntePflichtSchritt = Boolean(doc?.clientVersion);
   if (!kanntePflichtSchritt && GNADENFRIST_ALTE_CLIENTS) {
