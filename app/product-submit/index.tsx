@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDownloadURL, ref as storageRef } from '@react-native-firebase/storage';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
-import { FilterSheet } from '@/components/design/FilterSheet';
+import { FilterSheet, OptionList } from '@/components/design/FilterSheet';
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { storage } from '@/lib/firebase';
 import { useTokens } from '@/hooks/useTokens';
@@ -44,6 +44,10 @@ import { setChosenProductCampaignId } from '@/lib/services/productCampaignChoice
 import { describeSubmission, type SubmissionStatusCopy } from '@/lib/utils/productSubmissionCopy';
 
 const PURPLE = '#5b4f9c';
+/** Bis hierhin Karten-Raster, darüber eine Auswahl-Zeile mit Sheet.
+ *  Drei Karten passen über zwei Reihen, ohne den Erfassen-Knopf aus dem
+ *  ersten Bildschirm zu drängen. */
+const GRID_MAX = 3;
 
 // 86cbam5ep: Status + Grund kommen aus describeSubmission (eine Quelle für
 // Chip, Zeile und Detail-Karte). Farben je Tönung; kein „Abgelehnt"-Rot mehr —
@@ -131,6 +135,11 @@ export default function ProductSubmitOverview() {
   // Alle laufenden Produktaktionen — bei mehr als einer wählt der Nutzer hier,
   // für welche er erfasst (05.09.2026; vorher gewann stumm die oberste).
   const [campaigns, setCampaigns] = useState<ActiveProductCampaign[]>([]);
+  // Ab GRID_MAX Aktionen wird aus dem Karten-Raster eine Auswahl-Zeile mit
+  // Sheet: zehn Karten würden den „Produkt erfassen"-Knopf aus dem Bild
+  // schieben, und horizontales Scrollen versteckt Optionen, statt sie zu
+  // zeigen. Im Sheet stehen alle untereinander (OptionList, gleicher Haken).
+  const [pickerOpen, setPickerOpen] = useState(false);
   // Tapped submission → detail sheet. URLs are resolved lazily (Storage
   // paths → download URLs) only when a row is opened.
   const [detailRow, setDetailRow] = useState<ProductSubmissionEntry | null>(null);
@@ -172,6 +181,12 @@ export default function ProductSubmitOverview() {
     setCampaign(c);
     void setChosenProductCampaignId(c.campaignId);
   }, []);
+
+  /** „0,16 €" bzw. null, wenn die Aktion keinen Betrag je Datensatz definiert. */
+  const rewardLabel = useCallback(
+    (c: ActiveProductCampaign) => (c.rewardCents > 0 ? `${(c.rewardCents / 100).toFixed(2).replace('.', ',')} €` : null),
+    [],
+  );
 
   // Hard guard (86cagb5gh, Spiegel von cashback/capture.tsx): Läuft gerade
   // eine product_photos-Aktion MIT Reward und der Consent fehlt, zurück in
@@ -266,39 +281,80 @@ export default function ProductSubmitOverview() {
             <Text style={{ fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.semibold as any, fontSize: 12, color: theme.textMuted, letterSpacing: 0.3 }}>
               FÜR WELCHE AKTION ERFASST DU?
             </Text>
-            <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-              {campaigns.map((c) => {
-                const active = campaign?.campaignId === c.campaignId;
-                const eur = c.rewardCents > 0 ? (c.rewardCents / 100).toFixed(2).replace('.', ',') + ' €' : null;
-                return (
-                  <Pressable
-                    key={c.campaignId}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: active }}
-                    onPress={() => chooseCampaign(c)}
-                    style={{
-                      flexGrow: 1,
-                      flexBasis: '45%',
-                      minHeight: 50,
-                      borderRadius: radii.md,
-                      paddingHorizontal: 10,
-                      paddingVertical: 8,
-                      backgroundColor: active ? theme.primaryContainer : theme.surface,
-                      borderWidth: active ? 1.5 : 1,
-                      borderColor: active ? theme.primary : theme.border,
-                      ...(active ? shadows.sm ?? {} : {}),
-                    }}
-                  >
-                    <Text numberOfLines={2} style={{ fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.extraBold as any, fontSize: 13, color: theme.text }}>
-                      {c.title}
-                    </Text>
-                    <Text style={{ fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.medium as any, fontSize: 10, color: theme.textMuted, marginTop: 2 }}>
-                      {eur ? `${eur} pro Datensatz` : 'Ohne Prämie — hilft der Datenbank'}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            {campaigns.length <= GRID_MAX ? (
+              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                {campaigns.map((c) => {
+                  const active = campaign?.campaignId === c.campaignId;
+                  const eur = rewardLabel(c);
+                  return (
+                    <Pressable
+                      key={c.campaignId}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      onPress={() => chooseCampaign(c)}
+                      style={{
+                        flexGrow: 1,
+                        flexBasis: '45%',
+                        minHeight: 50,
+                        borderRadius: radii.md,
+                        paddingHorizontal: 10,
+                        paddingVertical: 8,
+                        backgroundColor: active ? theme.primaryContainer : theme.surface,
+                        borderWidth: active ? 1.5 : 1,
+                        borderColor: active ? theme.primary : theme.border,
+                        ...(active ? shadows.sm ?? {} : {}),
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
+                        <Text numberOfLines={2} style={{ flex: 1, fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.extraBold as any, fontSize: 13, color: theme.text }}>
+                          {c.title}
+                        </Text>
+                        {/* Der Haken macht die Auswahl auch ohne Farbvergleich
+                            erkennbar (Rand allein reicht bei Rot-Grün-Schwäche nicht). */}
+                        {active ? (
+                          <MaterialCommunityIcons name="check-circle" size={18} color={theme.primary} style={{ marginTop: -1 }} />
+                        ) : null}
+                      </View>
+                      <Text style={{ fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.medium as any, fontSize: 10, color: theme.textMuted, marginTop: 2 }}>
+                        {eur ? `${eur} pro Datensatz` : 'Ohne Prämie — hilft der Datenbank'}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityHint="Öffnet die Liste aller laufenden Aktionen"
+                onPress={() => setPickerOpen(true)}
+                style={{
+                  minHeight: 50,
+                  borderRadius: radii.md,
+                  paddingHorizontal: 12,
+                  paddingVertical: 9,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 10,
+                  backgroundColor: theme.primaryContainer,
+                  borderWidth: 1.5,
+                  borderColor: theme.primary,
+                  ...(shadows.sm ?? {}),
+                }}
+              >
+                <MaterialCommunityIcons name="check-circle" size={20} color={theme.primary} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text numberOfLines={1} style={{ fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.extraBold as any, fontSize: 13, color: theme.text }}>
+                    {campaign?.title ?? 'Aktion wählen'}
+                  </Text>
+                  <Text style={{ fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.medium as any, fontSize: 10, color: theme.textMuted, marginTop: 2 }}>
+                    {campaign
+                      ? `${rewardLabel(campaign) ? rewardLabel(campaign) + ' pro Datensatz' : 'Ohne Prämie'} · ${campaigns.length} Aktionen zur Auswahl`
+                      : `${campaigns.length} Aktionen zur Auswahl`}
+                  </Text>
+                </View>
+                <MaterialCommunityIcons name="chevron-down" size={20} color={theme.textMuted} />
+              </Pressable>
+            )}
           </View>
         ) : null}
 
@@ -510,6 +566,25 @@ export default function ProductSubmitOverview() {
       </ScrollView>
 
       {/* Submission detail sheet (tap a row) */}
+      <FilterSheet
+        visible={pickerOpen}
+        title="Für welche Aktion erfasst du?"
+        onClose={() => setPickerOpen(false)}
+      >
+        <OptionList
+          value={campaign?.campaignId ?? ''}
+          options={campaigns.map((c) => {
+            const eur = rewardLabel(c);
+            return [c.campaignId, eur ? `${c.title} · ${eur}` : c.title] as const;
+          })}
+          onChange={(id) => {
+            const next = campaigns.find((c) => c.campaignId === id);
+            if (next) chooseCampaign(next);
+            setPickerOpen(false);
+          }}
+        />
+      </FilterSheet>
+
       <FilterSheet
         visible={!!detailRow}
         title={detailRow ? detailRow.productName || `Produkt ${detailRow.productIndex ?? ''}`.trim() : ''}
