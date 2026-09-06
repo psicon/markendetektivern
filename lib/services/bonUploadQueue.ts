@@ -185,6 +185,9 @@ function humanError(e: any): string {
   if (code === 'upload_timeout' || code === 'enqueue_timeout' || code === 'network_failed')
     return 'Der Upload braucht zu lange. Prüfe deine Verbindung und versuch es erneut.';
   if (code === 'rate_limited') return 'Du hast heute schon einen Bon eingereicht. Morgen geht es weiter.';
+  // Server-Alters-Gate beim Einreichen (EXIF-Aufnahmedatum): nicht heilbar durch
+  // Wiederholen — dasselbe Foto bleibt gleich alt. Frist positiv nennen.
+  if (code === 'bon_too_old') return 'Dieser Bon liegt außerhalb der Frist — wir nehmen Bons der letzten 7 Tage an. Beim nächsten Einkauf lohnt sich das Foto direkt an der Kasse.';
   if (code === 'consent_missing') return 'Bitte bestätige zuerst die Cashback-Einwilligung.';
   if (code === 'unauthenticated' || code === 'not_authenticated')
     return 'Bitte melde dich an, um Bons einzureichen.';
@@ -440,7 +443,7 @@ async function runJob(job: BonJob) {
     // Nutzers, rate_limited löst sich erst am Folgetag). Manueller Retry
     // (retryBonJob / retryAllFailedBons) setzt terminal zurück.
     const code = e?.code as string | undefined;
-    const terminal = code === 'consent_missing' || code === 'rate_limited';
+    const terminal = code === 'consent_missing' || code === 'rate_limited' || code === 'bon_too_old';
     const prevAttempts = getJob(job.id)?.attempts ?? job.attempts;
     const attempts = terminal ? prevAttempts : prevAttempts + 1;
     const human = humanError(e);

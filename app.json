@@ -49,7 +49,7 @@
           "UIInterfaceOrientationPortrait"
         ],
         "NSCameraUsageDescription": "Diese App benötigt Zugriff auf die Kamera, um Barcodes von Produkten zu scannen und Preise zu vergleichen.",
-        "NSLocationWhenInUseUsageDescription": "Beim Einreichen von Bons, Produktfotos und Umfragen wird dein Standort erfasst und dem Datensatz zugeordnet — nur so ist nachvollziehbar, wo ein Produkt oder Preis zu finden war. Die Standortfreigabe ist Voraussetzung für die Teilnahme am Cashback-Programm.",
+        "NSLocationWhenInUseUsageDescription": "Bei Produktfotos wird dein Standort erfasst und dem Datensatz zugeordnet — so ist nachvollziehbar, wo ein Produkt zu finden war. Bei Bons lesen wir die Filialadresse direkt vom Bon ab. Die Standortfreigabe ist Voraussetzung für die Teilnahme am Cashback-Programm.",
         "NSPhotoLibraryUsageDescription": "Diese App benötigt Zugriff auf deine Fotos, um dein Profilbild aus der Galerie auszuwählen."
       }
     },
@@ -106,7 +106,9 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Diese App benötigt Zugriff auf deinen Standort, um dir lokale Angebote zu zeigen."
+          "locationWhenInUsePermission": "Bei Produktfotos wird dein Standort erfasst und dem Datensatz zugeordnet — so ist nachvollziehbar, wo ein Produkt zu finden war. Bei Bons lesen wir die Filialadresse direkt vom Bon ab. Die Standortfreigabe ist Voraussetzung für die Teilnahme am Cashback-Programm.",
+          "locationAlwaysAndWhenInUsePermission": false,
+          "locationAlwaysPermission": false
         }
       ],
       "@react-native-firebase/app",

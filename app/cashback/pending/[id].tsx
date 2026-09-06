@@ -411,7 +411,7 @@ export default function CashbackPendingScreen() {
           : reason === 'unknown_merchant'
           ? `Diesen Markt unterstützen wir aktuell noch nicht für Cashback.${doc?.merchantRaw ? ` Erkannt als: „${doc.merchantRaw}".` : ''}`
           : reason === 'bon_too_old'
-          ? `${typeof (doc as any)?.maxAgeDays === 'number' ? `Dieser Bon ist zu alt — wir nehmen nur Bons der letzten ${(doc as any).maxAgeDays} Tage an.` : 'Dieser Bon ist zu alt.'}${typeof doc?.bonAgeDays === 'number' ? ` Dieser Bon ist ${doc.bonAgeDays} Tage alt.` : ''}`
+          ? `${typeof doc?.bonAgeDays === 'number' ? `Dieser Bon ist ${doc.bonAgeDays} Tage alt` : 'Dieser Bon ist zu alt'}${typeof (doc as any)?.maxAgeDays === 'number' ? ` — wir nehmen Bons der letzten ${(doc as any).maxAgeDays} Tage an.` : '.'} Beim nächsten Einkauf lohnt sich das Foto direkt an der Kasse.`
           : reason === 'not_a_receipt'
           ? 'Das Foto sieht nicht nach einem Kassenbon aus. Bitte versuche es nochmal mit einem klar lesbaren Bon.'
           : reason === 'no_bon_date'

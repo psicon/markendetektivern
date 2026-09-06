@@ -428,6 +428,26 @@ function RewardsMarquee({
 // löst der Knopf einen Standort-Dialog aus, von dem vorher nie die Rede
 // war, und die Bedingung wäre weder informiert noch durchsetzbar.
 //
+// Was der Ort je Verdien-Weg konkret ist (Entscheidung 05.09.2026, damit die
+// Zusage zur Datenwirkung passt): Bei BONS liest die Pipeline die Filial-
+// adresse (Straße/PLZ/Ort) direkt vom Bon-Kopf ab — GPS fließt dort NICHT in
+// den Datensatz (die IP-basierte Journey-Ortung, ~5-km-Raster, bleibt wie
+// bisher als receipts.journey.location gespeichert; die Datenschutzerklärung
+// nennt die IP-Ortung). Bei PRODUKTFOTOS gehört der präzise Aufnahmeort zum
+// Datensatz (Wizard + crowd-upload-reward). Die Standortfreigabe bleibt
+// programmweite Bedingung (nicht gelockert). `LOCATION_NOTE_BY_VARIANT`
+// sagt das dem Nutzer je Variante. Reine Wortlaut-Präzisierung, keine neue
+// Datenkategorie (die Anschrift steht auf dem ohnehin verarbeiteten Bon und
+// wurde seit Prompt v1.0 als merchantSubtitle gespeichert) → consentVersion
+// bewusst NICHT gebumpt.
+// OFFEN FÜR DEN ANWALT (Stand 05.09.2026, verlinkte Datenschutzerklärung
+// „Stand 10. Juni 2026"): (1) Sie sagt zweimal „kein Zugriff auf den genauen
+// Gerätestandort (GPS)" — Produktfotos speichern aber präzises GPS und dieser
+// Screen macht die Freigabe zur Bedingung. (2) Die Aufzählung der erkannten
+// Bon-Daten („Markt, Datum, Artikel, Preise, Gesamtbetrag") muss um die
+// Filialadresse laut Bon ergänzt werden, beim Zweck Markt-Statistiken die
+// Auswertung nach PLZ/Ort. Beides sind Doc-Änderungen, kein App-Code.
+//
 // „Jederzeit widerrufbar" ist bewusst raus: Es wäre irreführend neben
 // einer Bedingung, deren Wegfall die Teilnahme beendet. Der Widerruf
 // bleibt selbstverständlich möglich — er beendet dann eben die Teilnahme,
@@ -437,6 +457,20 @@ const TRUST: { icon: string; label: string }[] = [
   { icon: 'chart-box-outline', label: 'Anonyme Marktdaten' },
   { icon: 'map-marker-outline', label: 'Standort erforderlich' },
 ];
+
+// Was „Standort" je Verdien-Weg bedeutet — eine Zeile unter den Trust-Badges.
+// Bons: Filiale vom Bon. Produktfotos: Aufnahmeort. Immer positiv formuliert.
+const LOCATION_NOTE_BY_VARIANT: Record<ConsentVariant, string> = {
+  receipt:
+    'Bei Bons lesen wir die Filialadresse (Straße, PLZ, Ort) direkt vom Bon ab. ' +
+    'Die Standortfreigabe gilt fürs ganze Reward-Programm — bei Produktfotos gehört dein Aufnahmeort zum Datensatz.',
+  product:
+    'Dein Aufnahmeort gehört zu jedem Produkt-Datensatz — so ist nachvollziehbar, wo ein Produkt wirklich zu finden war. ' +
+    'Bei Bons lesen wir die Filialadresse direkt vom Bon ab.',
+  survey:
+    'Die Standortfreigabe gilt fürs ganze Reward-Programm: Bei Produktfotos gehört dein Aufnahmeort zum Datensatz, ' +
+    'bei Bons lesen wir die Filialadresse direkt vom Bon ab.',
+};
 
 export default function CashbackConsentScreen() {
   const { theme } = useTokens();
@@ -607,8 +641,8 @@ export default function CashbackConsentScreen() {
     }
     Alert.alert(
       'Standort wird benötigt',
-      'Der Ort gehört zu jedem Datensatz, den wir vergüten — nur so ist nachvollziehbar, ' +
-        'wo ein Produkt oder Preis wirklich zu finden war. Gib den Standort frei, dann kann es losgehen.',
+      'Die Standortfreigabe gehört zum Reward-Programm — bei Produktfotos dein Aufnahmeort, ' +
+        'bei Bons die Filialadresse vom Bon. Gib den Standort frei, dann kann es losgehen.',
       [
         { text: 'Später', style: 'cancel' as const },
         { text: 'Standort freigeben', onPress: erneutVersuchen },
@@ -852,6 +886,16 @@ export default function CashbackConsentScreen() {
         fontFamily,
         textAlign: 'center' as const,
       },
+      locationNote: {
+        fontFamily,
+        fontWeight: fontWeight.medium as any,
+        fontSize: 11,
+        lineHeight: 15,
+        color: theme.textSub,
+        textAlign: 'center' as const,
+        paddingHorizontal: 6,
+        marginBottom: compact ? 4 : 6,
+      },
       legalLink: {
         color: accent,
         textDecorationLine: 'underline' as const,
@@ -1067,8 +1111,8 @@ export default function CashbackConsentScreen() {
               <Text style={styles.locHintTitle}>Standort noch freigeben</Text>
             </View>
             <Text style={styles.locHintBody}>
-              Der Ort gehört zu jedem Datensatz, den wir vergüten. Ohne ihn ist keine
-              Teilnahme möglich — freigeben kannst du ihn jederzeit:
+              Die Standortfreigabe gehört zum Reward-Programm — bei Produktfotos dein
+              Aufnahmeort, bei Bons die Filialadresse vom Bon. So gibst du sie frei:
             </Text>
             {(Platform.OS === 'ios'
               ? [
@@ -1138,6 +1182,10 @@ export default function CashbackConsentScreen() {
             </View>
           ))}
         </View>
+        {/* Was „Standort" hier konkret heißt — je Verdien-Weg (05.09.2026).
+            Die Zusage muss zur Datenwirkung passen: Bons → Filiale vom Bon,
+            Produktfotos → Aufnahmeort. */}
+        <Text style={styles.locationNote}>{LOCATION_NOTE_BY_VARIANT[variant]}</Text>
 
         {/* Legal-Zeile ganz unten, klein unter "Jetzt nicht"
             (User-Vorgabe 2026-06-10). */}
