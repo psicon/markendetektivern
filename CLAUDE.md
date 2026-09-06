@@ -2683,6 +2683,41 @@ nur geloggt — ein still ausbleibender Betrag ist genau das Muster, das zu
 Bon-Einreichungen. Eine Nachzahlung für UNSER Versäumnis darf dem Nutzer
 nicht seine aktuelle Woche oder seinen Monat wegnehmen.
 
+## Review-Konsole (Web-Back-Office) — md-receipt-admin.web.app (seit 05.09.2026)
+
+Produktfotos (`crowd_uploads`) und Bons (`receipts`) sichten, filtern, suchen,
+freigeben — einzeln und Batch. Design: `docs/REVIEW_CONSOLE_DESIGN.md`.
+- **Eine Site, ein Login:** Hosting-Site `md-receipt-admin` (`receipt-admin-web/`),
+  Seiten `index.html` (Bon-Matching), `produktfotos.html`, `bons.html`, gemeinsame
+  `admin-common.js`. Firebase-Auth E-Mail/Passwort + Custom-Claim `admin:true`.
+  Kein Build-Schritt. Deploy: `firebase deploy --only hosting:md-receipt-admin`.
+- **Backend `cloud-functions/review-console`** (europe-west1, onCall, admin-only,
+  Admin-SDK — Firestore-Rules bleiben zu): `reviewListUploads`, `reviewGetUpload`,
+  `reviewDecideUploads` (Batch ≤100, Transaktion je Doc, Ergebnis je ID),
+  `reviewListReceipts`, `reviewGetReceipt`, `reviewDecideReceipt` (ruft
+  `resolveCashbackReview` server-seitig mit `NUTRITION_SCRAPER_TRIGGER_KEY`).
+  Listen: EINE Gleichheits-Query serverseitig, Rest im Speicher — bewusst
+  kein Composite-Index. Storage-Rules: Lesen für `admin:true`.
+- **Geld bucht die Konsole NIE selbst:** Foto-Freigabe = Status-Flip
+  `pending→approved`, den `crowd-upload-reward` bucht; Bon-Entscheidungen laufen
+  über den bestehenden Resolver (Caps, Ledger-Reverse).
+- **Doppel-Regel** (`src/duplicatePolicy.js`, Produktentscheidung 05.09.): Referenz
+  = jüngste FREIGEGEBENE Einreichung derselben EAN; innerhalb 30 Tagen nur mit
+  anderen Daten (Preis, Hersteller, Markt) freigabefähig, sonst Sperre
+  (`sperre_30_tage_gleicher_nutzer` / `_anderer_nutzer`); ältere offene → hold.
+  Fehlende Vergleichswerte = gleich (fail-closed). Bei JEDER Freigabe frisch
+  berechnet; `force` + Notiz übersteuert (am Doc `review.forced`).
+  Vergleichsdaten liefert `crowd-upload-namer` (`priceOcr`, `manufacturerOcr`).
+- **Neu erstellte Callables brauchen `allUsers` als `roles/run.invoker`** — der
+  CLI-Deploy setzte das bei den drei Bon-Callables nicht (HTML-403 statt
+  JSON-PERMISSION_DENIED = Cloud-Run-IAM, nicht unser Auth-Check). Fix:
+  `gcloud run services add-iam-policy-binding <fn> --member=allUsers --role=roles/run.invoker`.
+- **E2E ohne Admin-Passwort:** Functions-Emulator mit Mini-Config
+  (`--config firebase.emu.json` mit nur dieser Codebase; `--only functions:<codebase>`
+  filtert NICHT) + selbstgebautem JWT (`alg: none`, Claim `admin:true`) gegen die
+  Prod-Firestore — nur Lese-Aufrufe. Custom-Token-Minting scheitert lokal an
+  fehlendem `signBlob`.
+
 ## Cashback-Pipeline — Architektur-Map + Learnings (Task 86ca0wbg7)
 
 Flow: `enqueueCashback` (https.onRequest; billige Pre-OCR-Dedups: Byte-Hash
