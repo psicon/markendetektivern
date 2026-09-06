@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MarkenDetektive — Bons prüfen</title>
+    <style>
+      :root {
+        --bg: #0f1214; --card: #1a1f23; --card2: #20262b; --line: #2c343a;
+        --text: #e7edf1; --muted: #9aa7b0; --brand: #0d8575; --brand2: #14b8a6;
+        --warn: #e0a106; --bad: #e0524b; --good: #2bb673; --purple: #7c6fd1;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--text); font: 13.5px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+      header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 14px; padding: 10px 18px; background: rgba(15,18,20,.94); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+      header h1 { font-size: 15px; margin: 0; font-weight: 800; letter-spacing: -.2px; }
+      header nav a { color: var(--muted); text-decoration: none; margin-right: 10px; font-size: 12px; }
+      header nav a.active { color: var(--text); font-weight: 700; }
+      .stats { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+      .stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 4px 10px; font-size: 12px; }
+      .stat b { color: var(--brand2); font-size: 14px; }
+      button { font: inherit; cursor: pointer; border: 1px solid var(--line); border-radius: 9px; padding: 7px 12px; background: var(--card2); color: var(--text); }
+      button:hover { border-color: var(--brand); } button:disabled { opacity: .45; cursor: default; }
+      button.primary { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 700; }
+      button.bad { background: transparent; border-color: var(--bad); color: var(--bad); }
+      button.warn { background: transparent; border-color: var(--warn); color: var(--warn); }
+      button.ghost { background: transparent; } button.sm { padding: 4px 9px; font-size: 12px; border-radius: 7px; }
+      main { padding: 12px 18px 60px; max-width: 1400px; margin: 0 auto; }
+      .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; align-items: end; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+      .filters label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+      .filters input, .filters select { width: 100%; background: var(--card2); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 6px 9px; font: inherit; }
+      .filters .grow { grid-column: span 2; }
+      table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+      th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+      th { font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: .3px; text-transform: uppercase; position: sticky; top: 53px; background: var(--bg); z-index: 2; }
+      tr.row:hover td { background: rgba(255,255,255,.025); }
+      .thumb { width: 36px; height: 48px; border-radius: 6px; object-fit: cover; background: #fff; display: block; cursor: zoom-in; }
+      .thumb.ph { background: var(--card2); border: 1px dashed var(--line); }
+      .nm { font-weight: 700; } .sub { font-size: 11px; color: var(--muted); }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+      .chip { display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 7px; background: var(--card2); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+      .chip.approved { color: var(--good); } .chip.no_reward { color: var(--purple); } .chip.rejected { color: var(--bad); } .chip.review { color: var(--warn); border-color: var(--warn); } .chip.ocr_pending { color: var(--muted); }
+      .chip.high { color: var(--good); } .chip.medium { color: var(--brand2); } .chip.low, .chip.none { color: var(--bad); }
+      .link { color: var(--brand2); cursor: pointer; text-decoration: underline dotted; }
+      tr.detail td { background: var(--card); padding: 12px 14px; }
+      .detail-grid { display: grid; grid-template-columns: 300px 1fr 1fr; gap: 14px; }
+      .bonimg { width: 100%; border-radius: 10px; background: #fff; cursor: zoom-in; }
+      .kv { display: grid; grid-template-columns: 140px 1fr; gap: 3px 10px; font-size: 12.5px; }
+      .kv .k { color: var(--muted); } .kv .v { word-break: break-word; }
+      .box { background: var(--card2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+      .box h4 { margin: 0 0 6px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .3px; }
+      .items { font-size: 12px; max-height: 260px; overflow: auto; }
+      .items div { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; border-bottom: 1px dashed var(--line); }
+      .items .pf { color: var(--muted); }
+      .pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 10px; color: var(--muted); font-size: 12px; }
+      .muted { color: var(--muted); } .empty { color: var(--muted); padding: 40px; text-align: center; }
+      #login { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 80px 20px; }
+      #login input { background: var(--card2); border: 1px solid var(--line); color: var(--text); border-radius: 9px; padding: 9px 12px; width: 280px; font: inherit; }
+      .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--card2); border: 1px solid var(--brand); border-radius: 12px; padding: 10px 16px; opacity: 0; transition: opacity .2s; z-index: 50; pointer-events: none; }
+      .toast.show { opacity: 1; } .toast.bad { border-color: var(--bad); }
+      .hidden { display: none !important; }
+      #zoom { display: none; position: fixed; z-index: 60; pointer-events: none; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 8px; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+      #zoom img { display: block; width: 420px; height: 560px; object-fit: contain; }
+      #zoom .zname { position: absolute; bottom: 8px; left: 8px; right: 8px; font-size: 12px; font-weight: 700; color: #191c1d; background: rgba(255,255,255,.85); padding: 4px 8px; border-radius: 8px; }
+      dialog { background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 14px; padding: 18px; width: 460px; max-width: 92vw; }
+      dialog::backdrop { background: rgba(0,0,0,.55); }
+      dialog h3 { margin: 0 0 10px; font-size: 15px; }
+      dialog select, dialog input { width: 100%; background: var(--card2); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 7px 9px; font: inherit; margin-bottom: 8px; }
+      dialog .row { display: flex; gap: 8px; justify-content: flex-end; }
+      .result { margin-top: 8px; font-size: 12px; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <div id="login">
+      <h1>🧾 Bons prüfen</h1>
+      <p class="muted">Admin-Login</p>
+      <input id="loginEmail" type="email" placeholder="E-Mail" autocomplete="username" />
+      <input id="loginPw" type="password" placeholder="Passwort" autocomplete="current-password" />
+      <button id="loginBtn" class="primary">Anmelden</button>
+      <div id="loginMsg" class="muted"></div>
+    </div>
+
+    <div id="app" class="hidden">
+      <header>
+        <h1>MarkenDetektive Review</h1>
+        <nav><a href="index.html">Bon-Matching</a><a href="produktfotos.html">Produktfotos</a><a class="active" href="bons.html">Bons</a></nav>
+        <div class="stats" id="stats"></div>
+        <button id="refreshBtn" class="ghost">Neu laden</button>
+        <button id="logoutBtn" class="ghost">Abmelden</button>
+      </header>
+      <main>
+        <div class="filters">
+          <div><label>Status</label><select id="fStatus"><option value="review">Prüfung (review)</option><option value="ocr_pending">In Verarbeitung</option><option value="approved">Vergütet</option><option value="no_reward">Ohne Prämie</option><option value="rejected">Abgelehnt</option><option value="all">Alle (letzte 30 Tage)</option></select></div>
+          <div><label>Grund (reject/review)</label><input id="fReason" placeholder="z. B. duplicate_content_self" /></div>
+          <div><label>Markt-ID</label><input id="fMerchant" placeholder="z. B. lidl" /></div>
+          <div><label>Von</label><input id="fFrom" type="date" /></div>
+          <div><label>Bis</label><input id="fTo" type="date" /></div>
+          <div class="grow"><label>Suche (Bon-ID, Nutzer, Markt, Ort, PLZ, Bon-Datum, Grund)</label><input id="fQ" type="search" placeholder="z. B. 51103 oder 2026-09-04" /></div>
+          <div><label>&nbsp;</label><button id="applyBtn" class="primary" style="width:100%">Filtern</button></div>
+        </div>
+
+        <table>
+          <thead><tr><th style="width:44px">Bon</th><th>Markt · Filiale</th><th>Bon-Datum</th><th>Summe</th><th>Artikel</th><th>OCR</th><th>Status · Grund</th><th>Nutzer</th><th>Eingereicht</th><th>Aktionen</th></tr></thead>
+          <tbody id="rows"><tr><td colspan="10" class="empty">Lade…</td></tr></tbody>
+        </table>
+        <div class="pager" id="pager"></div>
+      </main>
+    </div>
+
+    <dialog id="dlg">
+      <h3 id="dlgTitle">Bon entscheiden</h3>
+      <select id="dlgDecision">
+        <option value="approve">Freigeben (Vergütung buchen)</option>
+        <option value="reject|manual_review_rejected">Ablehnen — manuell abgelehnt</option>
+        <option value="reject|duplicate_content_self">Ablehnen — Doppel (gleicher Nutzer)</option>
+        <option value="reject|duplicate_content_cross_user">Ablehnen — Doppel (anderer Nutzer)</option>
+        <option value="no_reward|daily_cap_reached">Ohne Prämie — Tageslimit</option>
+        <option value="no_reward|weekly_cap_reached">Ohne Prämie — Wochenlimit</option>
+        <option value="no_reward|per_user_cap_reached">Ohne Prämie — Nutzerlimit</option>
+      </select>
+      <input id="dlgDupOf" placeholder="duplicateOf: Bon-ID des Originals (nur bei Doppel)" class="hidden" />
+      <div class="row"><button id="dlgCancel" class="ghost">Abbrechen</button><button id="dlgOk" class="primary">Bestätigen</button></div>
+      <div class="result" id="dlgResult"></div>
+    </dialog>
+
+    <div id="zoom"><img alt=""><div class="zname"></div></div>
+    <div id="toast" class="toast"></div>
+
+    <script type="module">
+      import { $, call, esc, euro, fmtDate, fmtDateTime, ago, short, toast, imgUrl, initAdmin, installZoom } from './admin-common.js';
+
+      const state = { rows: [], total: 0, offset: 0, limit: 100, open: null };
+      const STATUS_DE = { review: 'Prüfung', ocr_pending: 'in Verarbeitung', approved: 'vergütet', no_reward: 'ohne Prämie', rejected: 'abgelehnt' };
+
+      const filters = () => ({
+        status: $('fStatus').value, reason: $('fReason').value.trim() || undefined, merchantId: $('fMerchant').value.trim() || undefined,
+        q: $('fQ').value.trim() || undefined,
+        from: $('fFrom').value ? Date.parse($('fFrom').value) : undefined,
+        to: $('fTo').value ? Date.parse($('fTo').value) + 86399999 : undefined,
+        limit: state.limit, offset: state.offset,
+      });
+
+      async function load() {
+        $('rows').innerHTML = '<tr><td colspan="10" class="empty">Lade…</td></tr>';
+        try {
+          const r = await call('reviewListReceipts')(filters());
+          state.rows = r.data.rows; state.total = r.data.total;
+          renderStats(r.data.stats); render();
+        } catch (e) { $('rows').innerHTML = `<tr><td colspan="10" class="empty">Fehler: ${esc(e.message)}</td></tr>`; }
+      }
+      function renderStats(s) {
+        s = s || {};
+        $('stats').innerHTML = ['review', 'ocr_pending', 'approved', 'no_reward', 'rejected'].map((k) => `<div class="stat">${STATUS_DE[k]} <b>${s[k] ?? '–'}</b></div>`).join('');
+      }
+      const storeLabel = (r) => r.store ? [r.store.zip, r.store.city].filter(Boolean).join(' ') : '';
+
+      function render() {
+        const tb = $('rows'); tb.innerHTML = '';
+        if (!state.rows.length) { tb.innerHTML = '<tr><td colspan="10" class="empty">Nichts hier 🎉</td></tr>'; renderPager(); return; }
+        for (const r of state.rows) {
+          const tr = document.createElement('tr'); tr.className = 'row'; tr.dataset.id = r.id;
+          const reason = r.rejectReason || r.reviewReason;
+          tr.innerHTML =
+            `<td><img class="thumb ph" data-path="${esc(r.storagePath || '')}" alt=""></td>` +
+            `<td><div class="nm">${esc(r.merchantName || r.merchantId || '—')}</div><div class="sub">${esc(storeLabel(r) || (r.merchantLand || ''))}</div></td>` +
+            `<td class="mono">${esc(r.bonDate || '—')}<div class="sub">${esc(r.bonTime || '')}${r.bonDateCorrection ? ' · korrigiert' : ''}</div></td>` +
+            `<td>${euro(r.bonTotalCents)}<div class="sub">${r.cashbackCents ? 'Cashback ' + euro(r.cashbackCents) : ''}</div></td>` +
+            `<td>${r.eligibleItemCount ?? '—'}<div class="sub">${r.itemCount != null ? r.itemCount + ' Zeilen' : ''}</div></td>` +
+            `<td><span class="chip ${esc(r.ocrConfidence || '')}">${esc(r.ocrConfidence || '—')}</span><div class="sub">${r.reconOk === false ? 'Σ≠Total ' + (r.reconDeltaCents ?? '') + ' ct' : r.reconOk ? 'Σ ok' : ''}</div></td>` +
+            `<td><span class="chip ${esc(r.status)}">${esc(STATUS_DE[r.status] || r.status)}</span>${reason ? `<div class="sub" title="${esc(r.rejectDetail || '')}">${esc(reason)}${r.duplicateOf && r.duplicateOf.receiptId ? ' → <span class="link mono" data-open="' + esc(r.duplicateOf.receiptId) + '">' + esc(short(r.duplicateOf.receiptId, 8)) + '</span>' : ''}</div>` : ''}</td>` +
+            `<td><span class="link mono" data-user="${esc(r.userId)}">${short(r.userId)}</span></td>` +
+            `<td title="${esc(fmtDateTime(r.createdAt))}">${ago(r.createdAt)}<div class="sub">${esc(fmtDate(r.createdAt))}</div></td>` +
+            `<td>${r.status === 'review' ? `<button class="sm primary act" data-act="decide" data-id="${r.id}">Entscheiden…</button> ` : ''}<button class="sm ghost act" data-act="detail" data-id="${r.id}">${state.open === r.id ? 'Zu' : 'Details'}</button></td>`;
+          tb.appendChild(tr);
+          if (state.open === r.id) tb.appendChild(detailRow(r));
+        }
+        tb.querySelectorAll('img.thumb[data-path]').forEach(async (img) => {
+          const url = await imgUrl(img.dataset.path);
+          if (url) { img.src = url; img.classList.remove('ph'); img.setAttribute('data-full', url); img.setAttribute('data-label', img.closest('tr').querySelector('.nm')?.textContent || ''); }
+        });
+        renderPager();
+      }
+
+      function detailRow(r) {
+        const tr = document.createElement('tr'); tr.className = 'detail';
+        const td = document.createElement('td'); td.colSpan = 10; td.innerHTML = '<div class="muted">Lade Details…</div>'; tr.appendChild(td);
+        call('reviewGetReceipt')({ id: r.id }).then(async (res) => {
+          const d = res.data; const row = d.row; const p = d.ocr.parsed || {};
+          const url = await imgUrl(row.storagePath);
+          const items = (p.items || []).map((it) => `<div><span>${esc(it.name)}${it.qty && it.qty !== 1 ? ' ×' + it.qty : ''}${it.category === 'Pfand' ? ' <span class="pf">Pfand</span>' : ''}</span><span class="mono">${euro(it.priceCents)}</span></div>`).join('');
+          td.innerHTML = `<div class="detail-grid">
+            <div>${url ? `<img class="bonimg" src="${url}" data-full="${url}" data-label="Bon" alt="Bon">` : '<div class="muted">kein Bild</div>'}</div>
+            <div>
+              <div class="box"><h4>Bon</h4><div class="kv">
+                <div class="k">ID</div><div class="v mono">${esc(row.id)}</div>
+                <div class="k">Nutzer</div><div class="v mono"><span class="link" data-user="${esc(row.userId)}">${esc(row.userId)}</span></div>
+                <div class="k">Aktion</div><div class="v">${esc(row.campaignId || 'ohne Aktion')}</div>
+                <div class="k">Markt</div><div class="v">${esc(row.merchantName || '—')} (${esc(row.merchantId || '?')}) · ${esc(row.merchantLand || '')}</div>
+                <div class="k">Filiale (Bon)</div><div class="v">${row.store ? esc([row.store.street, [row.store.zip, row.store.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')) : '—'}</div>
+                <div class="k">Bon-Datum</div><div class="v">${esc(row.bonDate || '—')} ${esc(row.bonTime || '')}${row.bonDateCorrection ? ' · korrigiert von ' + esc(row.bonDateCorrection.from || '?') : ''}</div>
+                <div class="k">Summe</div><div class="v">${euro(row.bonTotalCents)} · ${row.eligibleItemCount ?? '—'} anrechenbar</div>
+                <div class="k">OCR</div><div class="v">${esc(row.ocrConfidence || '—')} · ${esc(row.ocrMethod || '')} · ${d.ocr.promptVersion || ''} · ${row.reconOk === false ? 'Σ weicht ab (' + (row.reconDeltaCents ?? '?') + ' ct)' : 'Σ passt'}</div>
+                <div class="k">Status</div><div class="v"><span class="chip ${esc(row.status)}">${esc(STATUS_DE[row.status] || row.status)}</span> ${esc(row.rejectReason || row.reviewReason || '')} ${row.rejectDetail ? '· ' + esc(row.rejectDetail) : ''}</div>
+                <div class="k">Doppel</div><div class="v">${d.duplicate ? `<span class="link mono" data-open="${esc(d.duplicate.id)}">${esc(short(d.duplicate.id, 10))}</span> · ${esc(STATUS_DE[d.duplicate.status] || d.duplicate.status)} · ${esc(d.duplicate.bonDate || '')} · ${row.duplicateOf && row.duplicateOf.sameUser ? 'gleicher Nutzer' : 'anderer Nutzer'}` : '—'}</div>
+                <div class="k">Versuche</div><div class="v">${row.attempts ?? 0}${row.lastError ? ' · ' + esc(String(row.lastError).slice(0, 120)) : ''}</div>
+                <div class="k">Entschieden</div><div class="v">${row.reviewDecision ? esc(row.reviewDecision) + ' · ' + esc(fmtDateTime(row.reviewResolvedAt)) : '—'}</div>
+                <div class="k">Ledger</div><div class="v">${d.ledger.length ? d.ledger.map((l) => `${esc(l.type)} ${euro(l.cents)} ${esc(fmtDate(l.createdAt))}`).join(' · ') : '—'}</div>
+              </div></div>
+              <div class="box"><h4>Vom selben Nutzer (letzte ${d.sameUser.length})</h4>${d.sameUser.slice(0, 10).map((x) => `<div><span class="link mono" data-open="${esc(x.id)}">${esc(short(x.id, 10))}</span> · <span class="chip ${esc(x.status)}">${esc(STATUS_DE[x.status] || x.status)}</span> · ${esc(x.bonDate || '')} · ${esc(x.merchantName || '')} · ${euro(x.bonTotalCents)}</div>`).join('') || '<div class="muted">keine</div>'}</div>
+            </div>
+            <div><div class="box"><h4>Positionen (OCR)</h4><div class="items">${items || '<div class="muted">keine</div>'}</div></div></div>
+          </div>`;
+        }).catch((e) => { td.innerHTML = `<div class="muted">Fehler: ${esc(e.message)}</div>`; });
+        return tr;
+      }
+
+      function renderPager() {
+        const from = state.total ? state.offset + 1 : 0, to = Math.min(state.total, state.offset + state.rows.length);
+        $('pager').innerHTML = `${from}–${to} von ${state.total} <button class="sm ghost" id="pPrev" ${state.offset === 0 ? 'disabled' : ''}>‹</button><button class="sm ghost" id="pNext" ${to >= state.total ? 'disabled' : ''}>›</button>`;
+        $('pPrev').onclick = () => { state.offset = Math.max(0, state.offset - state.limit); load(); };
+        $('pNext').onclick = () => { state.offset += state.limit; load(); };
+      }
+
+      let dlgId = null;
+      $('dlgDecision').onchange = () => $('dlgDupOf').classList.toggle('hidden', !$('dlgDecision').value.includes('duplicate'));
+      $('dlgCancel').onclick = () => $('dlg').close();
+      $('dlgOk').onclick = async () => {
+        const [decision, reason] = $('dlgDecision').value.split('|');
+        const payload = { receiptId: dlgId, decision, reason: reason || undefined, duplicateOf: $('dlgDupOf').value.trim() || undefined };
+        $('dlgOk').disabled = true;
+        try {
+          const r = await call('reviewDecideReceipt')(payload);
+          $('dlgResult').textContent = JSON.stringify(r.data, null, 1).slice(0, 900);
+          toast(r.data.ok ? 'Entschieden.' : 'Nicht ausgeführt: ' + (r.data.code || r.data.http), r.data.ok ? '' : 'bad');
+          if (r.data.ok) setTimeout(() => { $('dlg').close(); load(); }, 900);
+          else $('dlgOk').disabled = false;
+        } catch (e) { $('dlgOk').disabled = false; toast('Fehler: ' + e.message, 'bad'); }
+      };
+
+      document.addEventListener('click', (e) => {
+        const act = e.target.closest && e.target.closest('.act');
+        if (act) {
+          const id = act.dataset.id;
+          if (act.dataset.act === 'detail') { state.open = state.open === id ? null : id; render(); }
+          if (act.dataset.act === 'decide') { dlgId = id; $('dlgTitle').textContent = `Bon ${short(id, 10)} entscheiden`; $('dlgResult').textContent = ''; $('dlgDupOf').value = ''; $('dlgDecision').value = 'approve'; $('dlgDupOf').classList.add('hidden'); $('dlgOk').disabled = false; $('dlg').showModal(); }
+          return;
+        }
+        const u = e.target.closest && e.target.closest('[data-user]');
+        if (u) { $('fQ').value = u.dataset.user; $('fStatus').value = 'all'; state.offset = 0; load(); return; }
+        const o = e.target.closest && e.target.closest('[data-open]');
+        if (o) { $('fQ').value = o.dataset.open; $('fStatus').value = 'all'; state.offset = 0; state.open = o.dataset.open; load(); return; }
+      });
+      $('applyBtn').onclick = () => { state.offset = 0; load(); };
+      $('fQ').onkeydown = (e) => { if (e.key === 'Enter') { state.offset = 0; load(); } };
+      $('fStatus').onchange = () => { state.offset = 0; load(); };
+      $('refreshBtn').onclick = load;
+
+      installZoom();
+      initAdmin(() => load());
+    </script>
+  </body>
+</html>

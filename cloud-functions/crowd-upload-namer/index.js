@@ -56,8 +56,11 @@ const REGION = 'europe-west1';
 const MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
 
 // Views that carry the product name best: front first, price tag as a
-// cross-check (shop shelf labels usually print the name too).
-const NAME_STEPS = ['front', 'preis'];
+// cross-check (shop shelf labels usually print the name too). Seit 05.09.2026
+// zusätzlich das Hersteller-Foto: Preis (Preisschild) und Hersteller sind die
+// Vergleichsdaten der Doppel-Regel der Review-Konsole (review-console/
+// src/duplicatePolicy.js) — „andere Daten" = Preis, Hersteller oder Markt.
+const NAME_STEPS = ['front', 'preis', 'hersteller'];
 // Below this we keep the OCR as a suggestion but don't auto-fill the name.
 const MIN_CONFIDENCE = 0.45;
 
@@ -66,8 +69,12 @@ const RESPONSE_SCHEMA = {
   properties: {
     productName: { type: Type.STRING },
     confidence: { type: Type.NUMBER },
+    // Preis vom Preisschild in Cent (z.B. 1,99 € → 199); 0 = nicht lesbar.
+    priceCents: { type: Type.INTEGER },
+    // Hersteller/Inverkehrbringer laut Verpackung (Firma, ohne Adresse); leer = nicht lesbar.
+    manufacturer: { type: Type.STRING },
   },
-  required: ['productName', 'confidence'],
+  required: ['productName', 'confidence', 'priceCents', 'manufacturer'],
 };
 
 const PROMPT = [
@@ -77,7 +84,9 @@ const PROMPT = [
   '- KEINE Mengenangaben (g, ml, Stück), KEINE Preise, KEINE Werbe-Claims ("NEU", "Aktion", "%").',
   '- Marke und Bezeichnung zusammen, z.B. "Gut & Günstig Vollmilch 3,5%".',
   '- Wenn der Name nicht zuverlässig lesbar ist: leerer String und confidence 0.',
-  'Antworte als JSON {productName, confidence} mit confidence zwischen 0 und 1.',
+  'Zusätzlich, falls ein Preisschild sichtbar ist: der PREIS des Produkts in Cent als Ganzzahl (1,99 € → 199); Grundpreise (€/kg, €/l) NICHT verwenden; kein Preisschild oder unlesbar → 0.',
+  'Zusätzlich, falls eine Herstellerangabe sichtbar ist: der HERSTELLER bzw. Inverkehrbringer als Firmenname ohne Adresse (z.B. "Molkerei Weihenstephan GmbH"); nicht lesbar → leerer String.',
+  'Antworte als JSON {productName, confidence, priceCents, manufacturer} mit confidence zwischen 0 und 1.',
 ].join('\n');
 
 async function downloadAsInlineData(path) {
@@ -144,6 +153,8 @@ exports.onCrowdUploadNameOcr = onDocumentCreated(
 
     let name = '';
     let confidence = 0;
+    let priceCents = null;
+    let manufacturer = null;
     try {
       const ai = getGenAIClient();
       const response = await ai.models.generateContent({
@@ -154,7 +165,7 @@ exports.onCrowdUploadNameOcr = onDocumentCreated(
           responseSchema: RESPONSE_SCHEMA,
           temperature: 0.1,
           thinkingConfig: { thinkingBudget: 0 },
-          maxOutputTokens: 256,
+          maxOutputTokens: 384,
         },
       });
       const rawText = extractText(response);
@@ -162,6 +173,9 @@ exports.onCrowdUploadNameOcr = onDocumentCreated(
       const parsed = JSON.parse(rawText);
       name = String(parsed.productName || '').trim();
       confidence = Number(parsed.confidence) || 0;
+      const pc = Number(parsed.priceCents);
+      priceCents = Number.isFinite(pc) && pc > 0 && pc < 100000 ? Math.round(pc) : null;
+      manufacturer = String(parsed.manufacturer || '').trim().slice(0, 120) || null;
     } catch (e) {
       logger.error('gemini name ocr failed', { id, err: e.message });
       // Mark attempted so the trigger doesn't loop; leave suggestion null.
@@ -173,6 +187,10 @@ exports.onCrowdUploadNameOcr = onDocumentCreated(
       productNameOcr: name || null,
       productNameOcrConfidence: confidence,
       productNameOcrAt: stamp(),
+      // Vergleichsdaten der Doppel-Regel (Review-Konsole). Nur OCR-Vorschläge,
+      // nie Nutzer-Eingaben überschreibend; fehlend = null (fail-closed dort).
+      priceOcr: priceCents != null ? { priceCents, source: 'preis' } : null,
+      manufacturerOcr: manufacturer ? { name: manufacturer, source: 'hersteller' } : null,
     };
 
     // User input always wins: only fill the displayed name when the user left

@@ -25,7 +25,9 @@ service firebase.storage {
                     && request.auth.uid == userId
                     && request.resource.size < 8 * 1024 * 1024
                     && request.resource.contentType.matches('image/.*|application/pdf');
-      allow read: if request.auth != null && request.auth.uid == userId;
+      // Review-Konsole (Web, Custom-Claim admin:true) darf Bon-Bilder sehen.
+      allow read: if request.auth != null
+                   && (request.auth.uid == userId || request.auth.token.admin == true);
     }
 
     // Product-photo crowd uploads ("voller Datensatz" wizard) — user can
@@ -36,7 +38,9 @@ service firebase.storage {
                     && request.auth.uid == userId
                     && request.resource.size < 8 * 1024 * 1024
                     && request.resource.contentType.matches('image/.*');
-      allow read: if request.auth != null && request.auth.uid == userId;
+      // Review-Konsole (Web, Custom-Claim admin:true) darf Produktfotos sehen.
+      allow read: if request.auth != null
+                   && (request.auth.uid == userId || request.auth.token.admin == true);
     }
 
     // Default fallback — public-read, no client write (preserves

@@ -313,6 +313,18 @@ Recent-Sessions.
   byte-identische Objekte über Slots/Sessions scannen; identische Bytes =
   reused File/Frame, nie zwei echte Aufnahmen.
 
+- **Ein `firebase deploy` im selben Tool-Batch wie Datei-Edits derselben
+  Codebase starten (05.09.2026, review-console).** Der Deploy zippt den Ordner
+  SOFORT beim Start; ein parallel laufendes `cat >> index.js` landet halb
+  geschrieben im Paket → alle Functions der Codebase failen mit „Function 'X'
+  is not defined in the provided module" (Container-Healthcheck), obwohl
+  `node --check` lokal grün ist. Regel: Deploy erst starten, wenn ALLE Edits
+  der Codebase abgeschlossen sind (eigener, späterer Tool-Aufruf), und vor dem
+  Deploy `node -e "console.log(Object.keys(require('./index.js')))"` im
+  Codebase-Ordner laufen lassen. Diagnose: `gcloud logging read
+  'resource.labels.service_name="<fn-lowercase>"'` zeigt die echte Ursache,
+  der Deploy-Output nur den Healthcheck.
+
 - **Legacy-Storage-Function `optimizeImage` war die ECHTE Ursache der
   „vertauschten Produktfotos" — nicht die Kamera (2026-07-03).** Der onCameraReady-
   Fix oben war ein berechtigtes Hardening, aber die cross-DEVICE-/cross-ACCOUNT-

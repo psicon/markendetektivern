@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MarkenDetektive — Produktfotos prüfen</title>
+    <style>
+      :root {
+        --bg: #0f1214; --card: #1a1f23; --card2: #20262b; --line: #2c343a;
+        --text: #e7edf1; --muted: #9aa7b0; --brand: #0d8575; --brand2: #14b8a6;
+        --warn: #e0a106; --bad: #e0524b; --good: #2bb673; --purple: #7c6fd1;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--text); font: 13.5px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+      header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 14px; padding: 10px 18px; background: rgba(15,18,20,.94); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+      header h1 { font-size: 15px; margin: 0; font-weight: 800; letter-spacing: -.2px; }
+      header nav a { color: var(--muted); text-decoration: none; margin-right: 10px; font-size: 12px; }
+      header nav a.active { color: var(--text); font-weight: 700; }
+      .stats { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+      .stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 4px 10px; font-size: 12px; }
+      .stat b { color: var(--brand2); font-size: 14px; }
+      button { font: inherit; cursor: pointer; border: 1px solid var(--line); border-radius: 9px; padding: 7px 12px; background: var(--card2); color: var(--text); }
+      button:hover { border-color: var(--brand); }
+      button:disabled { opacity: .45; cursor: default; }
+      button.primary { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 700; }
+      button.bad { background: transparent; border-color: var(--bad); color: var(--bad); }
+      button.warn { background: transparent; border-color: var(--warn); color: var(--warn); }
+      button.ghost { background: transparent; }
+      button.sm { padding: 4px 9px; font-size: 12px; border-radius: 7px; }
+      main { padding: 12px 18px 90px; max-width: 1400px; margin: 0 auto; }
+      .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; align-items: end; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+      .filters label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+      .filters input, .filters select { width: 100%; background: var(--card2); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 6px 9px; font: inherit; }
+      .filters .grow { grid-column: span 2; }
+      table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+      th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+      th { font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: .3px; text-transform: uppercase; position: sticky; top: 53px; background: var(--bg); z-index: 2; }
+      tr.row:hover td { background: rgba(255,255,255,.025); }
+      tr.row.sel td { background: rgba(20,184,166,.08); }
+      .thumb { width: 44px; height: 44px; border-radius: 7px; object-fit: cover; background: #fff; display: block; cursor: zoom-in; }
+      .thumb.ph { background: var(--card2); border: 1px dashed var(--line); }
+      .nm { font-weight: 700; }
+      .sub { font-size: 11px; color: var(--muted); }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+      .chip { display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 7px; background: var(--card2); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+      .chip.ok { color: var(--good); border-color: var(--good); }
+      .chip.locked { color: var(--bad); border-color: var(--bad); }
+      .chip.hold { color: var(--warn); border-color: var(--warn); }
+      .chip.incomplete { color: var(--warn); border-color: var(--warn); }
+      .chip.approved { color: var(--good); } .chip.rejected { color: var(--bad); } .chip.pending { color: var(--warn); }
+      .chip.money { color: var(--brand2); border-color: var(--brand2); }
+      .chip.upd { color: var(--purple); border-color: var(--purple); }
+      .acts { display: flex; gap: 5px; white-space: nowrap; }
+      .link { color: var(--brand2); cursor: pointer; text-decoration: underline dotted; }
+      tr.detail td { background: var(--card); padding: 12px 14px; }
+      .detail-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; }
+      .photos { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+      .photos figure { margin: 0; }
+      .photos img { width: 100%; aspect-ratio: 3/4; object-fit: cover; border-radius: 8px; background: #fff; cursor: zoom-in; }
+      .photos figcaption { font-size: 10px; color: var(--muted); text-align: center; margin-top: 2px; }
+      .kv { display: grid; grid-template-columns: 130px 1fr; gap: 3px 10px; font-size: 12.5px; }
+      .kv .k { color: var(--muted); } .kv .v { word-break: break-word; }
+      .box { background: var(--card2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+      .box h4 { margin: 0 0 6px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .3px; }
+      .batchbar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; gap: 8px; align-items: center; background: var(--card); border: 1px solid var(--brand); border-radius: 14px; padding: 10px 14px; box-shadow: 0 10px 30px rgba(0,0,0,.45); z-index: 20; }
+      .batchbar.hidden { display: none; }
+      .batchbar select, .batchbar input { background: var(--card2); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 6px 8px; font: inherit; }
+      .pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 10px; color: var(--muted); font-size: 12px; }
+      .muted { color: var(--muted); } .empty { color: var(--muted); padding: 40px; text-align: center; }
+      #login { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 80px 20px; }
+      #login input { background: var(--card2); border: 1px solid var(--line); color: var(--text); border-radius: 9px; padding: 9px 12px; width: 280px; font: inherit; }
+      .toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: var(--card2); border: 1px solid var(--brand); border-radius: 12px; padding: 10px 16px; opacity: 0; transition: opacity .2s; z-index: 50; pointer-events: none; }
+      .toast.show { opacity: 1; } .toast.bad { border-color: var(--bad); }
+      .hidden { display: none !important; }
+      #zoom { display: none; position: fixed; z-index: 60; pointer-events: none; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 8px; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+      #zoom img { display: block; width: 420px; height: 420px; object-fit: contain; }
+      #zoom .zname { position: absolute; bottom: 8px; left: 8px; right: 8px; font-size: 12px; font-weight: 700; color: #191c1d; background: rgba(255,255,255,.85); padding: 4px 8px; border-radius: 8px; }
+      dialog { background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 14px; padding: 18px; width: 460px; max-width: 92vw; }
+      dialog::backdrop { background: rgba(0,0,0,.55); }
+      dialog h3 { margin: 0 0 10px; font-size: 15px; }
+      dialog select, dialog textarea { width: 100%; background: var(--card2); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 7px 9px; font: inherit; margin-bottom: 8px; }
+      dialog .row { display: flex; gap: 8px; justify-content: flex-end; }
+      .results { margin-top: 8px; font-size: 12px; max-height: 220px; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <div id="login">
+      <h1>📦 Produktfotos prüfen</h1>
+      <p class="muted">Admin-Login</p>
+      <input id="loginEmail" type="email" placeholder="E-Mail" autocomplete="username" />
+      <input id="loginPw" type="password" placeholder="Passwort" autocomplete="current-password" />
+      <button id="loginBtn" class="primary">Anmelden</button>
+      <div id="loginMsg" class="muted"></div>
+    </div>
+
+    <div id="app" class="hidden">
+      <header>
+        <h1>MarkenDetektive Review</h1>
+        <nav><a href="index.html">Bon-Matching</a><a class="active" href="produktfotos.html">Produktfotos</a><a href="bons.html">Bons</a></nav>
+        <div class="stats" id="stats"></div>
+        <button id="refreshBtn" class="ghost">Neu laden</button>
+        <button id="logoutBtn" class="ghost">Abmelden</button>
+      </header>
+      <main>
+        <div class="filters">
+          <div><label>Status</label><select id="fStatus"><option value="pending">Offen</option><option value="approved">Freigegeben</option><option value="rejected">Abgelehnt</option><option value="all">Alle</option></select></div>
+          <div><label>Vorprüfung</label><select id="fPre"><option value="all">Alle</option><option value="ok">✓ ok</option><option value="locked">Sperre</option><option value="hold">Halten (Doppel offen)</option><option value="incomplete">Unvollständig</option></select></div>
+          <div><label>Aktion</label><select id="fCampaign"><option value="">Alle</option></select></div>
+          <div><label>Halte-/Ablehngrund</label><select id="fReason"><option value="">Alle</option></select></div>
+          <div><label>Von</label><input id="fFrom" type="date" /></div>
+          <div><label>Bis</label><input id="fTo" type="date" /></div>
+          <div class="grow"><label>Suche (Name, EAN, Nutzer, Markt, Hersteller, ID)</label><input id="fQ" type="search" placeholder="z. B. 4006381 oder Joghurt" /></div>
+          <div><label>&nbsp;</label><button id="applyBtn" class="primary" style="width:100%">Filtern</button></div>
+        </div>
+
+        <table>
+          <thead><tr>
+            <th style="width:28px"><input id="selAll" type="checkbox" title="Seite auswählen" /></th>
+            <th style="width:52px">Foto</th><th>Produkt</th><th>EAN</th><th>Markt</th><th>Preis · Hersteller</th><th>Nutzer</th><th>Vorprüfung</th><th>Status</th><th>Alter</th><th>Aktionen</th>
+          </tr></thead>
+          <tbody id="rows"><tr><td colspan="11" class="empty">Lade…</td></tr></tbody>
+        </table>
+        <div class="pager" id="pager"></div>
+      </main>
+
+      <div class="batchbar hidden" id="batchbar">
+        <b id="selCount">0 ausgewählt</b>
+        <button id="bApprove" class="primary">Freigeben</button>
+        <button id="bReject" class="bad">Ablehnen…</button>
+        <button id="bHold" class="warn">Halten…</button>
+        <button id="bSelOk" class="ghost sm">Nur „Vorprüfung ok" wählen</button>
+        <button id="bSelLocked" class="ghost sm">Nur „Sperre" wählen</button>
+        <button id="bClear" class="ghost sm">Auswahl leeren</button>
+      </div>
+    </div>
+
+    <dialog id="dlg">
+      <h3 id="dlgTitle">Ablehnen</h3>
+      <select id="dlgReason"></select>
+      <textarea id="dlgNote" rows="3" placeholder="Notiz an den Nutzer (optional — sonst Standardtext, positiv formuliert)"></textarea>
+      <label id="dlgForceWrap" class="hidden muted" style="display:block;margin-bottom:8px"><input id="dlgForce" type="checkbox" /> Vorprüfung übersteuern (force) — Notiz ist dann Pflicht</label>
+      <div class="row"><button id="dlgCancel" class="ghost">Abbrechen</button><button id="dlgOk" class="primary">Bestätigen</button></div>
+      <div class="results" id="dlgResults"></div>
+    </dialog>
+
+    <div id="zoom"><img alt=""><div class="zname"></div></div>
+    <div id="toast" class="toast"></div>
+
+    <script type="module">
+      import { $, call, esc, euro, fmtDate, fmtDateTime, ago, short, toast, imgUrl, initAdmin, installZoom } from './admin-common.js';
+
+      const STEPS = [['front','Front'],['rueckseite','Rückseite'],['hersteller','Hersteller'],['ean','EAN'],['naehrwerte','Nährwerte'],['zutaten','Zutaten'],['preis','Preis']];
+      const REASONS = [
+        ['sperre_30_tage_gleicher_nutzer', 'Sperre 30 Tage — gleicher Nutzer'],
+        ['sperre_30_tage_anderer_nutzer', 'Sperre 30 Tage — anderer Nutzer'],
+        ['doppelt_eingereicht', 'Doppelt eingereicht (frühere zählt)'],
+        ['produkt_bereits_verguetet', 'Produkt bereits vergütet'],
+        ['unvollstaendig', 'Unvollständig (Fotos fehlen)'],
+        ['ean_fehlt', 'EAN fehlt / unlesbar'],
+        ['kein_produktname', 'Kein Produktname erkennbar'],
+        ['bilder_wiederverwendet', 'Bilder wiederverwendet'],
+        ['fotos_unpassend', 'Fotos passen nicht zum Produkt'],
+        ['bild_defekt', 'Foto nicht lesbar'],
+        ['sonstiges', 'Sonstiges (Notiz)'],
+      ];
+      const REASON_LABEL = Object.fromEntries(REASONS);
+      const PRE_LABEL = { ok: '✓ ok', locked: 'Sperre', hold: 'Halten', incomplete: 'Unvollständig' };
+
+      const state = { rows: [], total: 0, offset: 0, limit: 100, sel: new Set(), open: null, campaigns: [] };
+      let currentUser = null;
+
+      const filters = () => ({
+        status: $('fStatus').value, precheck: $('fPre').value, campaignId: $('fCampaign').value || undefined,
+        holdReason: $('fReason').value || undefined, q: $('fQ').value.trim() || undefined,
+        from: $('fFrom').value ? Date.parse($('fFrom').value) : undefined,
+        to: $('fTo').value ? Date.parse($('fTo').value) + 86399999 : undefined,
+        limit: state.limit, offset: state.offset,
+      });
+
+      async function load() {
+        $('rows').innerHTML = '<tr><td colspan="11" class="empty">Lade…</td></tr>';
+        try {
+          const r = await call('reviewListUploads')(filters());
+          state.rows = r.data.rows; state.total = r.data.total; state.campaigns = r.data.campaigns || [];
+          state.sel = new Set([...state.sel].filter((id) => state.rows.some((x) => x.id === id)));
+          renderStats(r.data.stats); renderCampaigns(); render();
+        } catch (e) { $('rows').innerHTML = `<tr><td colspan="11" class="empty">Fehler: ${esc(e.message)}</td></tr>`; }
+      }
+
+      function renderStats(s) {
+        s = s || {};
+        $('stats').innerHTML =
+          `<div class="stat">Offen <b>${s.pending ?? '–'}</b></div>` +
+          `<div class="stat">davon Sperre <b>${s.lockedPending ?? '–'}</b></div>` +
+          `<div class="stat">Freigegeben <b>${s.approved ?? '–'}</b></div>` +
+          `<div class="stat">Abgelehnt <b>${s.rejected ?? '–'}</b></div>` +
+          `<div class="stat">Heute entschieden <b>${s.reviewedToday ?? '–'}</b></div>`;
+      }
+      function renderCampaigns() {
+        const sel = $('fCampaign'); const cur = sel.value;
+        sel.innerHTML = '<option value="">Alle Aktionen</option><option value="none">Ohne Aktion</option>' +
+          state.campaigns.map((c) => `<option value="${esc(c.id)}">${esc(c.title)}${c.active ? '' : ' (beendet)'}</option>`).join('');
+        sel.value = cur;
+        const rs = $('fReason'); const rc = rs.value;
+        rs.innerHTML = '<option value="">Alle</option>' + REASONS.map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('');
+        rs.value = rc;
+      }
+
+      function preChip(p) {
+        if (!p) return '<span class="chip">—</span>';
+        const extra = p.dup && p.dup.updatedFields && p.dup.updatedFields.length ? ` <span class="chip upd" title="andere Daten als die Referenz">neu: ${p.dup.updatedFields.map((f) => ({ price: 'Preis', manufacturer: 'Hersteller', market: 'Markt' }[f] || f)).join(', ')}</span>` : '';
+        const title = p.reasons && p.reasons.length ? p.reasons.map((r) => REASON_LABEL[r] || r).join(' · ') : '';
+        return `<span class="chip ${p.verdict}" title="${esc(title)}">${PRE_LABEL[p.verdict] || p.verdict}</span>${extra}`;
+      }
+      function statusChip(r) {
+        const reason = r.rejectReason || (r.holdReasons && r.holdReasons[0]);
+        const money = r.status === 'approved' ? (r.rewardCents != null ? `<span class="chip money">${euro(r.rewardCents)}</span>` : r.rewardNotCreditedReason ? `<span class="chip" title="${esc(r.rewardNotCreditedReason)}">ohne Buchung</span>` : '') : '';
+        return `<span class="chip ${r.status}">${r.status === 'pending' ? 'offen' : r.status === 'approved' ? 'freigegeben' : 'abgelehnt'}</span>${reason ? ` <span class="chip" title="${esc(REASON_LABEL[reason] || reason)}">${esc(short(REASON_LABEL[reason] || reason, 26))}</span>` : ''} ${money}`;
+      }
+
+      function render() {
+        const tb = $('rows'); tb.innerHTML = '';
+        if (!state.rows.length) { tb.innerHTML = '<tr><td colspan="11" class="empty">Nichts hier 🎉</td></tr>'; renderPager(); renderBatch(); return; }
+        for (const r of state.rows) {
+          const tr = document.createElement('tr');
+          tr.className = 'row' + (state.sel.has(r.id) ? ' sel' : '');
+          tr.dataset.id = r.id;
+          tr.innerHTML =
+            `<td><input type="checkbox" class="selbox" data-id="${r.id}" ${state.sel.has(r.id) ? 'checked' : ''} ${r.status !== 'pending' ? 'disabled' : ''}></td>` +
+            `<td><img class="thumb ph" data-path="${esc(r.images && r.images.front || '')}" alt=""></td>` +
+            `<td><div class="nm">${esc(r.productName || r.productNameOcr || '(ohne Name)')}</div><div class="sub">${r.productNameOcr && r.productNameOcr !== r.productName ? 'OCR: ' + esc(r.productNameOcr) : ''}${r.campaignId ? ' · ' + esc(r.campaignId) : ' · ohne Aktion'}</div></td>` +
+            `<td class="mono">${esc(r.ean || '—')}</td>` +
+            `<td>${esc(r.marketName || r.marketId || '—')}<div class="sub">${esc(r.marketLand || '')}</div></td>` +
+            `<td>${euro(r.priceCents)}<div class="sub">${esc(r.manufacturer || '—')}</div></td>` +
+            `<td><span class="link mono" data-user="${esc(r.userId)}" title="alle Einreichungen dieses Nutzers">${short(r.userId)}</span></td>` +
+            `<td>${preChip(r.precheck)}</td>` +
+            `<td>${statusChip(r)}</td>` +
+            `<td title="${esc(fmtDateTime(r.createdAt))}">${ago(r.createdAt)}<div class="sub">${esc(fmtDate(r.createdAt))}</div></td>` +
+            `<td class="acts">` +
+              (r.status === 'pending' ? `<button class="sm primary act" data-act="approve" data-id="${r.id}">Freigeben</button><button class="sm bad act" data-act="reject" data-id="${r.id}">Ablehnen</button>` : '') +
+              `<button class="sm ghost act" data-act="detail" data-id="${r.id}">${state.open === r.id ? 'Zu' : 'Details'}</button>` +
+            `</td>`;
+          tb.appendChild(tr);
+          if (state.open === r.id) tb.appendChild(detailRow(r));
+        }
+        // Thumbnails lazy auflösen
+        tb.querySelectorAll('img.thumb[data-path]').forEach(async (img) => {
+          const url = await imgUrl(img.dataset.path);
+          if (url) { img.src = url; img.classList.remove('ph'); img.setAttribute('data-full', url); img.setAttribute('data-label', img.closest('tr').querySelector('.nm')?.textContent || ''); }
+        });
+        renderPager(); renderBatch();
+      }
+
+      function detailRow(r) {
+        const tr = document.createElement('tr'); tr.className = 'detail';
+        const td = document.createElement('td'); td.colSpan = 11;
+        td.innerHTML = '<div class="muted">Lade Details…</div>';
+        tr.appendChild(td);
+        call('reviewGetUpload')({ id: r.id }).then(async (res) => {
+          const d = res.data; const row = d.row; const p = d.precheck; const prior = d.prior;
+          const photos = await Promise.all(STEPS.map(async ([k, l]) => { const path = row.images && row.images[k]; const url = path ? await imgUrl(path) : null; return { k, l, url }; }));
+          const cap = row.capture || {};
+          const dupBox = p && p.dup && p.dup.priorId
+            ? `<div class="box"><h4>Doppel-Regel</h4><div class="kv">
+                <div class="k">Ergebnis</div><div class="v">${preChip(p)}</div>
+                <div class="k">Referenz</div><div class="v"><span class="link" data-open="${esc(p.dup.priorId)}">${esc(short(p.dup.priorId, 10))}</span> · ${prior ? esc(prior.status) + ' · ' + esc(fmtDate(prior.createdAt)) : ''} · ${p.dup.sameUser ? 'gleicher Nutzer' : 'anderer Nutzer'}</div>
+                <div class="k">Sperre bis</div><div class="v">${p.dup.lockUntil ? esc(fmtDate(p.dup.lockUntil)) : '—'}</div>
+                <div class="k">Preis (Ref → neu)</div><div class="v">${p.dup.diff ? euro(p.dup.diff.price[0]) + ' → ' + euro(p.dup.diff.price[1]) : '—'}</div>
+                <div class="k">Hersteller</div><div class="v">${p.dup.diff ? esc(p.dup.diff.manufacturer[0] || '—') + ' → ' + esc(p.dup.diff.manufacturer[1] || '—') : '—'}</div>
+                <div class="k">Markt</div><div class="v">${p.dup.diff ? esc(p.dup.diff.market[0] || '—') + ' → ' + esc(p.dup.diff.market[1] || '—') : '—'}</div>
+              </div></div>`
+            : `<div class="box"><h4>Doppel-Regel</h4><div class="muted">${p && p.reasons && p.reasons.length ? esc(p.reasons.map((x) => REASON_LABEL[x] || x).join(' · ')) : 'Keine frühere Einreichung dieses Produkts.'}</div></div>`;
+          td.innerHTML = `<div class="detail-grid"><div>
+              <div class="photos">${photos.map((ph) => `<figure>${ph.url ? `<img class="thumb" src="${ph.url}" data-full="${ph.url}" data-label="${esc(ph.l)}" alt="${esc(ph.l)}">` : '<div class="thumb ph" style="width:100%;aspect-ratio:3/4"></div>'}<figcaption>${esc(ph.l)}</figcaption></figure>`).join('')}</div>
+              <div class="box" style="margin-top:10px"><h4>Einreichung</h4><div class="kv">
+                <div class="k">ID</div><div class="v mono">${esc(row.id)}</div>
+                <div class="k">Nutzer</div><div class="v mono"><span class="link" data-user="${esc(row.userId)}">${esc(row.userId)}</span></div>
+                <div class="k">Aktion</div><div class="v">${esc(row.campaignId || 'ohne Aktion')}</div>
+                <div class="k">Eingereicht</div><div class="v">${esc(fmtDateTime(row.createdAt))} · App ${esc(row.clientVersion && (row.clientVersion.version || row.clientVersion.appVersion) || '?')}</div>
+                <div class="k">Ort</div><div class="v">${cap.confirmedPlace ? esc(cap.confirmedPlace.name || cap.confirmedPlace.city || JSON.stringify(cap.confirmedPlace)) : cap.hasGps ? 'GPS' : 'keine Angabe'} · GPS: ${esc(cap.gpsStatus || '—')}</div>
+                <div class="k">Vergütung</div><div class="v">${row.rewardResult ? esc(row.rewardResult) + (row.rewardCents != null ? ' · ' + euro(row.rewardCents) : '') + (row.rewardNotCreditedReason ? ' · ' + esc(row.rewardNotCreditedReason) : '') : '—'}</div>
+                <div class="k">Halte-Gründe</div><div class="v">${(row.holdReasons || []).map((h) => esc(REASON_LABEL[h] || h)).join(', ') || '—'}</div>
+                <div class="k">Notiz an Nutzer</div><div class="v">${esc(row.reviewNote || '—')}</div>
+                <div class="k">Entschieden</div><div class="v">${row.reviewedAt ? esc(fmtDateTime(row.reviewedAt)) + ' · ' + esc(short(row.reviewedBy, 10)) : '—'}</div>
+              </div></div>
+            </div><div>
+              ${dupBox}
+              <div class="box"><h4>Gleiche EAN (${d.sameEan.length})</h4>${d.sameEan.length ? d.sameEan.map((x) => `<div><span class="link mono" data-open="${esc(x.id)}">${esc(short(x.id, 10))}</span> · <span class="chip ${x.status}">${esc(x.status)}</span> · ${esc(fmtDate(x.createdAt))} · ${x.userId === row.userId ? 'gleicher Nutzer' : esc(short(x.userId))} · ${euro(x.priceCents)}</div>`).join('') : '<div class="muted">keine</div>'}</div>
+              <div class="box"><h4>Vom selben Nutzer (letzte ${d.sameUser.length})</h4>${d.sameUser.length ? d.sameUser.slice(0, 12).map((x) => `<div><span class="link mono" data-open="${esc(x.id)}">${esc(short(x.id, 10))}</span> · <span class="chip ${x.status}">${esc(x.status)}</span> · ${esc(fmtDate(x.createdAt))} · ${esc(x.productName || x.productNameOcr || '')}</div>`).join('') : '<div class="muted">keine</div>'}</div>
+            </div></div>`;
+        }).catch((e) => { td.innerHTML = `<div class="muted">Fehler: ${esc(e.message)}</div>`; });
+        return tr;
+      }
+
+      function renderPager() {
+        const from = state.total ? state.offset + 1 : 0, to = Math.min(state.total, state.offset + state.rows.length);
+        $('pager').innerHTML = `${from}–${to} von ${state.total} <button class="sm ghost" id="pPrev" ${state.offset === 0 ? 'disabled' : ''}>‹</button><button class="sm ghost" id="pNext" ${to >= state.total ? 'disabled' : ''}>›</button>`;
+        $('pPrev').onclick = () => { state.offset = Math.max(0, state.offset - state.limit); load(); };
+        $('pNext').onclick = () => { state.offset += state.limit; load(); };
+      }
+      function renderBatch() {
+        const n = state.sel.size; $('batchbar').classList.toggle('hidden', n === 0); $('selCount').textContent = `${n} ausgewählt`;
+        $('selAll').checked = n > 0 && state.rows.filter((r) => r.status === 'pending').every((r) => state.sel.has(r.id));
+      }
+
+      // ── Entscheidungen ────────────────────────────────────────────
+      let dlgCtx = null;
+      function openDialog({ title, ids, decision, defaultReason, allowForce }) {
+        dlgCtx = { ids, decision };
+        $('dlgTitle').textContent = `${title} (${ids.length})`;
+        $('dlgReason').innerHTML = decision === 'approve' ? '' : REASONS.map(([k, l]) => `<option value="${k}" ${k === defaultReason ? 'selected' : ''}>${esc(l)}</option>`).join('');
+        $('dlgReason').classList.toggle('hidden', decision === 'approve');
+        $('dlgNote').value = '';
+        $('dlgForceWrap').classList.toggle('hidden', !allowForce);
+        $('dlgForce').checked = false;
+        $('dlgResults').innerHTML = '';
+        $('dlgOk').disabled = false;
+        $('dlg').showModal();
+      }
+      $('dlgCancel').onclick = () => $('dlg').close();
+      $('dlgOk').onclick = async () => {
+        if (!dlgCtx) return;
+        const { ids, decision } = dlgCtx;
+        const payload = { ids, decision, reason: decision === 'approve' ? undefined : $('dlgReason').value, note: $('dlgNote').value.trim() || undefined, force: decision === 'approve' && $('dlgForce').checked };
+        if (payload.force && !payload.note) { toast('force braucht eine Notiz.', 'bad'); return; }
+        $('dlgOk').disabled = true;
+        try {
+          const r = await call('reviewDecideUploads')(payload);
+          const t = r.data.tally || {};
+          $('dlgResults').innerHTML = r.data.results.map((x) => `<div><span class="mono">${esc(short(x.id, 10))}</span> · <b>${esc(x.outcome)}</b>${x.reason ? ' · ' + esc(REASON_LABEL[x.reason] || x.reason) : ''}${x.precheck && x.precheck.dup && x.precheck.dup.lockUntil ? ' · bis ' + esc(fmtDate(x.precheck.dup.lockUntil)) : ''}</div>`).join('');
+          toast(Object.entries(t).map(([k, v]) => `${v} ${k}`).join(', '));
+          state.sel.clear();
+          setTimeout(() => { $('dlg').close(); load(); }, t.blocked || t.error ? 2500 : 700);
+        } catch (e) { $('dlgOk').disabled = false; toast('Fehler: ' + e.message, 'bad'); }
+      };
+
+      async function approveNow(ids) {
+        // Freigabe direkt (ohne Dialog); gesperrte Zeilen meldet der Server als blocked.
+        try {
+          const r = await call('reviewDecideUploads')({ ids, decision: 'approve' });
+          const t = r.data.tally || {};
+          toast(Object.entries(t).map(([k, v]) => `${v} ${k}`).join(', '), t.blocked || t.error ? 'bad' : '');
+          if (t.blocked) {
+            const blocked = r.data.results.filter((x) => x.outcome === 'blocked');
+            openDialog({ title: 'Gesperrt — ablehnen mit Grund', ids: blocked.map((x) => x.id), decision: 'reject', defaultReason: blocked[0].reason });
+            $('dlgResults').innerHTML = blocked.map((x) => `<div><span class="mono">${esc(short(x.id, 10))}</span> · ${esc(REASON_LABEL[x.reason] || x.reason)}</div>`).join('') + '<div class="muted" style="margin-top:6px">Zum Übersteuern: Zeile einzeln öffnen → Freigeben mit force.</div>';
+          }
+          state.sel.clear(); load();
+        } catch (e) { toast('Fehler: ' + e.message, 'bad'); }
+      }
+
+      // ── Events ─────────────────────────────────────────────────────
+      document.addEventListener('click', (e) => {
+        const act = e.target.closest && e.target.closest('.act');
+        if (act) {
+          const id = act.dataset.id;
+          if (act.dataset.act === 'detail') { state.open = state.open === id ? null : id; render(); }
+          if (act.dataset.act === 'approve') { if (e.altKey) openDialog({ title: 'Freigeben', ids: [id], decision: 'approve', allowForce: true }); else approveNow([id]); }
+          if (act.dataset.act === 'reject') { const r = state.rows.find((x) => x.id === id); openDialog({ title: 'Ablehnen', ids: [id], decision: 'reject', defaultReason: r && r.precheck && r.precheck.reasons[0] }); }
+          return;
+        }
+        const u = e.target.closest && e.target.closest('[data-user]');
+        if (u) { $('fQ').value = u.dataset.user; $('fStatus').value = 'all'; state.offset = 0; load(); return; }
+        const o = e.target.closest && e.target.closest('[data-open]');
+        if (o) { $('fQ').value = o.dataset.open; $('fStatus').value = 'all'; state.offset = 0; state.open = o.dataset.open; load(); return; }
+      });
+      document.addEventListener('change', (e) => {
+        if (e.target.classList && e.target.classList.contains('selbox')) {
+          const id = e.target.dataset.id; if (e.target.checked) state.sel.add(id); else state.sel.delete(id);
+          e.target.closest('tr').classList.toggle('sel', e.target.checked); renderBatch();
+        }
+      });
+      $('selAll').onchange = (e) => { state.rows.filter((r) => r.status === 'pending').forEach((r) => (e.target.checked ? state.sel.add(r.id) : state.sel.delete(r.id))); render(); };
+      $('bClear').onclick = () => { state.sel.clear(); render(); };
+      $('bSelOk').onclick = () => { state.sel = new Set(state.rows.filter((r) => r.status === 'pending' && r.precheck && r.precheck.verdict === 'ok').map((r) => r.id)); render(); };
+      $('bSelLocked').onclick = () => { state.sel = new Set(state.rows.filter((r) => r.status === 'pending' && r.precheck && r.precheck.verdict === 'locked').map((r) => r.id)); render(); };
+      $('bApprove').onclick = () => approveNow([...state.sel]);
+      $('bReject').onclick = () => { const first = state.rows.find((r) => state.sel.has(r.id)); openDialog({ title: 'Ablehnen', ids: [...state.sel], decision: 'reject', defaultReason: first && first.precheck && first.precheck.reasons[0] }); };
+      $('bHold').onclick = () => openDialog({ title: 'Halten', ids: [...state.sel], decision: 'hold', defaultReason: 'doppelt_eingereicht' });
+      $('applyBtn').onclick = () => { state.offset = 0; load(); };
+      $('fQ').onkeydown = (e) => { if (e.key === 'Enter') { state.offset = 0; load(); } };
+      ['fStatus', 'fPre', 'fCampaign', 'fReason'].forEach((id) => { $(id).onchange = () => { state.offset = 0; load(); }; });
+      $('refreshBtn').onclick = load;
+
+      installZoom();
+      initAdmin((user) => { currentUser = user; load(); });
+    </script>
+  </body>
+</html>
