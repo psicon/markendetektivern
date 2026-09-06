@@ -2514,6 +2514,31 @@ Regeln:
 - Uploads, die im Loch eingingen, per `campaignId`-Backfill dem Nachfolger
   zuordnen (Zeitraum des Nachfolgers dafür rückdatieren).
 
+## Produktentscheidungen 05.09.2026 (endgültig, nicht neu aufmachen)
+
+- **Bon-Alter: 7 Tage.** `MAX_BON_AGE_DAYS = 7` ist die Wahrheit, Kampagnen-
+  `maxAgeDays` darf großzügiger sein. Die App zeigt die Zahl aus dem Mirror.
+- **Orts-Pflicht im Produktfoto-Wizard bleibt.** Nicht lockern; der Fallback
+  (Orts-Schritt bei ausbleibendem GPS-Fix, ec63e08) nimmt die Reibung, das
+  Gate `crowd-upload-reward/src/locationGate.js` bleibt scharf.
+- **Algolia bleibt** (86c9jqmja rejected). Synonyme werden gepflegt, keine
+  Ablöse-Diskussion mehr.
+- **Bons: Einkaufsort = Filialadresse vom Bon-Kopf**, nicht Gerätestandort.
+  OCR-Prompt v1.4 liefert `storeAddress {street, zip, city}`; für den Bestand
+  parst `lib/storeAddress.js` die seit v1.0 mitgelieferte `merchantSubtitle`
+  (6.044/6.193 Bons haben sie). Landet in `receipts.store`, Mirror
+  `storeCity/storeZip`, `purchased_products.storeZip/storeCity/storeStreet`.
+  Der Consent-Text + der iOS-Purpose-String sagen je Verdien-Weg, was
+  „Standort" konkret ist (Bons: Filialadresse vom Bon; Fotos: Aufnahmeort);
+  consentVersion NICHT gebumpt (Wortlaut-Präzisierung, keine neue Daten-
+  kategorie). Präzise: bei Bons fließt kein GPS in den Datensatz, die IP-
+  Journey-Ortung (~5-km-Raster) bleibt als `receipts.journey.location`.
+  **Anwalt (Doc-Änderungen, kein Code):** Datenschutzerklärung sagt „kein
+  GPS-Zugriff" (Produktfotos speichern präzises GPS, Freigabe ist Bedingung)
+  und zählt die Bon-Daten ohne Filialadresse auf — beides nachziehen.
+- **Die 51 auffälligen Foto-Einreichungen vom 29.08. werden NICHT gesichtet**
+  (User-Entscheidung; alle bereits vergütet).
+
 ## Bons nachverarbeiten / Review auflösen — Regeln (Money-Ops 02.09.2026)
 
 Am 02.09. wurden 163 Review-Bons (seit Juli gehalten, „meistens innerhalb eines
@@ -2680,7 +2705,9 @@ Docs/Collections:
   `cashback_lifetime_cents`; Counter `cashback_monthly`/`cashback_campaign_weekly`/
   `cashback_campaign_totals`.
 - `cashback_campaigns/{slug}` = Aktionen. Feld `maxAgeDays` (Bon-Alter-Limit,
-  global Default `MAX_BON_AGE_DAYS=9999`), `budgetRemainingCents`/`budgetTotalCents`,
+  global Default `MAX_BON_AGE_DAYS=7` — Entscheidung 05.09.2026, endgültig; der
+  Mirror trägt IMMER die angewandte Grenze in `maxAgeDays`, damit die App die
+  Zahl zeigt), `budgetRemainingCents`/`budgetTotalCents`,
   `cashbackPerBonCents`/`tiers`/`weeklyBonCap`/`maxPerUserCents`.
 
 Gotchas:
