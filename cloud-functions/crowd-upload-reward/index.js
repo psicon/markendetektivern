@@ -39,6 +39,7 @@ const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
 
 const { pruefeOrtsanforderung } = require('./src/locationGate');
+const { resolveRegion, matchesTargeting } = require('./src/targeting');
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -100,8 +101,53 @@ exports.onCrowdUploadApproved = onDocumentUpdated(
     // ist genau das Muster, das niemand merkt.
     const rewardLocationRule = ort.grund || 'ort_vorhanden';
 
+    // Regionale Aktionen (06.09.2026). Produktfotos liefern selbst keine PLZ:
+    // die Ortsbestätigung trägt nur einen Ortsnamen, GPS nur Koordinaten.
+    // Belegte Quellen sind deshalb (1) ein Kassenbon, den der Nutzer als
+    // Preisbild eingereicht hat, und (2) die aus den eigenen Bons abgeleitete
+    // Nutzer-Region. Ist beides unbekannt, entscheidet die Aktion selbst
+    // (onUnknown, Standard: vergüten — niemand wird für eine fehlende Angabe
+    // bestraft).
+    let region = resolveRegion({
+      bonFotoZip: after.priceReceipt?.zip ?? null,
+      country: after.priceReceipt?.country ?? after.marketLand ?? null,
+    });
+    if (!region.zip) {
+      try {
+        const uSnap = await db.doc(`users/${uid}`).get();
+        const r = uSnap.exists ? uSnap.data().region : null;
+        if (r && r.zip) region = resolveRegion({ profilZip: r.zip, country: r.country ?? null });
+      } catch (e) {
+        logger.warn('[crowd-reward] Nutzer-Region nicht lesbar', { uploadId, err: e.message });
+      }
+    }
+
     const userRef = db.collection('users').doc(uid);
     const ledgerRef = userRef.collection('cashback_ledger').doc(`crowd_${uploadId}`);
+    // Aktion + Region prüfen, bevor gebucht wird. Passt das Gebiet nicht,
+    // wird NICHT gebucht — und der Grund steht am Dokument, nie nur im Log.
+    try {
+      const campSnap = await db.collection(CAMPAIGNS_COL).doc(cid).get();
+      const camp = campSnap.exists ? { id: campSnap.id, ...campSnap.data() } : null;
+      const treffer = matchesTargeting(camp || {}, region);
+      if (!treffer.ok) {
+        logger.warn('[crowd-reward] ausserhalb des Aktionsgebiets — keine Vergütung', { uploadId, uid, cid, zip: region.zip, grund: treffer.grund });
+        await event.data.after.ref.set(
+          {
+            rewardSkipped: true,
+            rewardSkippedReason: 'ausserhalb_aktionsgebiet',
+            rewardRegion: { zip: region.zip, source: region.source, grund: treffer.grund },
+          },
+          { merge: true },
+        );
+        return;
+      }
+    } catch (e) {
+      // Ein Fehler beim Prüfen ist keine Aussage über die Einreichung:
+      // weiterlaufen (fail-open) statt jemanden ohne Grund leer ausgehen lassen.
+      logger.warn('[crowd-reward] Regionsprüfung fehlgeschlagen — wird vergütet', { uploadId, err: e.message });
+    }
+
     const campRef = db.collection(CAMPAIGNS_COL).doc(cid);
 
     try {

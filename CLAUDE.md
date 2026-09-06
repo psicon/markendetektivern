@@ -2684,6 +2684,52 @@ nur geloggt — ein still ausbleibender Betrag ist genau das Muster, das zu
 Bon-Einreichungen. Eine Nachzahlung für UNSER Versäumnis darf dem Nutzer
 nicht seine aktuelle Woche oder seinen Monat wegnehmen.
 
+## Regionale Aktionen — PLZ-Präfixe, EINE Regel für alle drei Verdien-Wege (06.09.2026)
+
+Eine Aktion kann auf ein Gebiet beschränkt werden. Feld am Kampagnen-Dokument
+(`cashback_campaigns/{id}`), alle Teile optional:
+```
+targeting: {
+  zipPrefixes: ['0','1'],      // PLZ-PRÄFIX, beliebig fein: '3' = Gebiet 3,
+                               // '30' = Raum Hannover, '30159' = eine PLZ
+  countries: ['DE'],           // optional, zusätzlich
+  onUnknown: 'allow' | 'deny', // Standard allow
+}
+```
+Fehlt `targeting` (oder ist leer), gilt die Aktion überall — Bestandskampagnen
+ändern ihr Verhalten nicht.
+
+- **Modul:** `cloud-functions/cashback-pipeline/lib/targeting.js` (+ 21 Tests).
+  **Kopie** in `cloud-functions/crowd-upload-reward/src/targeting.js` — Codebases
+  teilen keinen Code; bei Änderungen BEIDE nachziehen (Drift wie bei `extractEans`).
+- **Woher die Region kommt** (Reihenfolge = Verlässlichkeit): `bon`
+  (receipts.store.zip, 84 % der Bons) → `bonfoto` (crowd_uploads.priceReceipt.zip,
+  wenn das Preisbild ein Kassenbon ist) → `profil` (users/{uid}.region, aus den
+  eigenen Bons abgeleitet) → `ort` (Ortsname über eine aus Bons gelernte Tabelle).
+  Datenlage 06.09.: Profile haben zu 4 % eine Ortsangabe und zu 0 % eine PLZ —
+  deshalb ist die aus Bons abgeleitete Nutzer-Region die einzige Quelle, mit der
+  sich Produktfotos und Umfragen überhaupt regional steuern lassen.
+- **`users/{uid}.region`** schreibt die Bon-Pipeline bei jedem Bon mit Filial-PLZ
+  fort (fire-and-forget, `{zip, city, country, source:'bon', receiptId, at}`).
+- **Bons:** Der Server korrigiert die Wahl der App. Die App wählt die Aktion,
+  bevor die Filialadresse bekannt ist (die steht erst nach der OCR fest) — passt
+  sie nicht zum Gebiet, nimmt `pickCampaignForRegion` die nächstbeste passende
+  Aktion (engstes Gebiet zuerst, dann früheres Ende). Gibt es keine:
+  `rejectReason = 'ausserhalb_aktionsgebiet'` statt `no_active_campaign`. Die
+  Entscheidung steht als `receipts.targeting` am Doc, der Mirror trägt
+  `campaignRegionSwitched`.
+- **Produktfotos:** `crowd-upload-reward` prüft vor der Buchung; passt das Gebiet
+  nicht, wird NICHT gebucht und `rewardSkipped/rewardSkippedReason:
+  'ausserhalb_aktionsgebiet'` + `rewardRegion` ans Doc geschrieben. Fehler beim
+  Prüfen sind fail-open (ein Infrastrukturfehler ist keine Aussage über die
+  Einreichung).
+- **Umfragen:** noch nicht angeschlossen — `survey-reward` läuft auf einem Stand
+  von Juni (der Fix 7d8e91b vom 28.06. ist nie deployt worden). Erst deployen,
+  dann targeting einhängen.
+- **Unbekannte Region ist standardmäßig erlaubt.** Wer einen Bon ohne lesbare
+  Anschrift einreicht, hat nichts falsch gemacht; `onUnknown:'deny'` ist die
+  bewusste Ausnahme für Aktionen, die ein Gebiet strikt einhalten müssen.
+
 ## Review-Konsole (Web-Back-Office) — md-receipt-admin.web.app (seit 05.09.2026)
 
 Produktfotos (`crowd_uploads`) und Bons (`receipts`) sichten, filtern, suchen,

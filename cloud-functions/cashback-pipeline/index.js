@@ -67,6 +67,7 @@ const { extractReceiptCVHybrid } = require('./lib/ocr_cvhybrid');
 const { extractReceiptRobust } = require('./lib/ocr_robust');
 const { extractReceiptDocAI, isConfigured: isDocAIConfigured } = require('./lib/ocr_docai');
 const { deriveStoreAddress } = require('./lib/storeAddress');
+const { resolveRegion, pickCampaignForRegion, matchesTargeting, targetingStamp } = require('./lib/targeting');
 const { resolveMerchant } = require('./lib/merchant');
 const { sendCashbackReady } = require('./lib/push');
 const {
@@ -253,6 +254,25 @@ const CAMPAIGNS_COL = 'cashback_campaigns';
 // Aktuell laufende Aktion laden (active==true UND now in [startAt, endAt]).
 // Bei mehreren: die mit dem frühesten Ende (läuft zuerst aus). null = keine.
 /** Lade EINE Aktion per Doc-ID (die vom User gewählte). */
+/**
+ * Alle laufenden Aktionen einer Art (Default: Bons). Wird für die regionale
+ * Auswahl gebraucht: passt die vom Client gewählte Aktion nicht zur Region des
+ * Bons, muss der Server eine passende Alternative kennen.
+ */
+async function loadActiveCampaigns(kind = 'receipt') {
+  try {
+    const snap = await db.collection(CAMPAIGNS_COL).where('active', '==', true).get();
+    const now = Date.now();
+    return snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((c) => (c.kind ?? 'receipt') === kind)
+      .filter((c) => now >= toMs(c.startAt) && now <= toMs(c.endAt));
+  } catch (e) {
+    logger.warn('active-campaigns-failed', { err: e.message });
+    return [];
+  }
+}
+
 async function loadCampaignById(id) {
   if (!id) return null;
   try {
@@ -1469,6 +1489,32 @@ exports.processCashback = onMessagePublished(
       // Alters-Gate greift (Config aus cashback_campaigns). 86ca0wbg7.
       const cid = config.campaignsEnabled ? (receipt.campaignId || null) : null;
       let selectedCampaign = cid ? await loadCampaignById(cid) : null;
+
+      // 5c) Regionale Aktionen (06.09.2026). Die App wählt die Aktion, BEVOR
+      //     irgendjemand die Filialadresse kennt — die steht erst nach der
+      //     Texterkennung fest. Passt die gewählte Aktion nicht zum Gebiet des
+      //     Bons, korrigiert der Server auf eine passende; gibt es keine, wird
+      //     der Bon ohne Prämie erfasst (Grund am Doc, kein stiller Ausfall).
+      let targeting = null;
+      if (config.campaignsEnabled) {
+        const region = resolveRegion({
+          bonZip: store?.zip ?? null,
+          country: store?.country ?? merchantInfo?.land ?? ocr.parsed.bonCountry ?? null,
+        });
+        const aktive = await loadActiveCampaigns('receipt');
+        const hatTargeting = aktive.some((c) => c.targeting && (c.targeting.zipPrefixes?.length || c.targeting.countries?.length));
+        if (hatTargeting) {
+          const pick = pickCampaignForRegion(aktive, region, cid);
+          targeting = { ...targetingStamp(pick.campaign || selectedCampaign, region, matchesTargeting(pick.campaign || selectedCampaign || {}, region)), korrigiert: pick.korrigiert, gewaehlt: cid || null, angewandt: pick.campaign ? pick.campaign.id : null };
+          if (!pick.campaign) {
+            selectedCampaign = null;
+            targeting.grund = pick.grund;
+          } else if (pick.campaign.id !== (selectedCampaign && selectedCampaign.id)) {
+            logger.info('campaign-region-korrigiert', { cashbackId, von: cid, nach: pick.campaign.id, zip: region.zip });
+            selectedCampaign = pick.campaign;
+          }
+        }
+      }
       // Effektives Max-Bon-Alter in TAGEN (bezogen aufs Bon-Datum): der Aktions-
       // Wert überschreibt den globalen Default; 0/undefined → globaler Default
       // (kein Aktions-Limit).
@@ -1532,7 +1578,12 @@ exports.processCashback = onMessagePublished(
           cashbackCents = 0; // harter Gate (Merchant/recon/dup/alt) → Section 7
         } else if (!cid || !selectedCampaign || !inWindow) {
           cashbackCents = 0;
-          zeroReason = 'no_active_campaign';
+          // Regionale Aktion: der Bon kommt aus einem Gebiet, für das gerade
+          // keine Aktion läuft. Eigener Grund, damit die App das erklären kann
+          // und die Auswertung es von „gar keine Aktion" unterscheidet.
+          zeroReason = targeting && (targeting.grund === 'region_ausserhalb' || targeting.grund === 'keine_passende_aktion')
+            ? 'ausserhalb_aktionsgebiet'
+            : 'no_active_campaign';
         } else {
           let reward = campaignRewardCents(eligibleItemCount, selectedCampaign, config);
           if (reward <= 0) {
@@ -1777,6 +1828,8 @@ exports.processCashback = onMessagePublished(
             // Filiale laut Bon (05.09.2026) — schlank für die App: Ort + PLZ.
             storeCity: store?.city ?? null,
             storeZip: store?.zip ?? null,
+            // Nur was die App zeigen muss: wurde die Aktion regional gewechselt.
+            campaignRegionSwitched: targeting?.korrigiert === true ? true : null,
             merchantId: merchantInfo?.id ?? null,
             discounterId: merchantInfo?.discounterId ?? null, // 86ca0wbg7
             merchantName: merchantInfo?.name ?? null,
@@ -1836,6 +1889,9 @@ exports.processCashback = onMessagePublished(
           : null,
         bonDate: ocr.parsed.bonDate || null,
         bonDateCorrection: bonDateCorrection ?? null,
+        // Welche Aktion galt regional und warum (06.09.2026). null, solange
+        // keine laufende Aktion ein Gebiet einschränkt.
+        targeting: targeting ?? null,
         // Filialadresse laut Bon-Kopf (05.09.2026): {street, zip, city,
         // country, source: 'ocr'|'subtitle'|'merchant', complete}. Unabhängig
         // vom Merchant-Resolver — auch ein unbekannter Markt hat eine Anschrift.
@@ -1868,6 +1924,25 @@ exports.processCashback = onMessagePublished(
       // für die spätere B2B-Produktauswertung verfügbar sind. Geld/Ledger bleibt
       // unberührt (nur approved bekommt Cashback); der Matcher überspringt
       // rewardEligible=false beim Auto-Match (keine Journey-/Geld-Side-Effects).
+      // Nutzer-Region fortschreiben (06.09.2026): Die Filialadresse eines Bons
+      // ist die einzige belegte Regionsangabe, die wir von einem Nutzer haben —
+      // 84 % der Bons tragen sie, aber nur 4 % der Profile eine Ortsangabe und
+      // kein einziges eine PLZ. Aus ihr steuern sich später auch Produktfoto-
+      // und Umfrage-Aktionen, die selbst keine PLZ liefern. Fire-and-forget:
+      // ein Fehler hier darf einen Bon nie aufhalten.
+      if (store?.zip && uid) {
+        void db.doc(`users/${uid}`).set({
+          region: {
+            zip: store.zip,
+            city: store.city ?? null,
+            country: store.country ?? null,
+            source: 'bon',
+            receiptId: cashbackId,
+            at: now,
+          },
+        }, { merge: true }).catch((e) => logger.warn('user-region-write-failed', { uid, err: e.message }));
+      }
+
       const rewardEligible = status === 'approved' || status === 'no_reward';
       const captureProducts =
         rewardEligible || (status === 'rejected' && RELIABLE_REJECT_REASONS.has(rejectReason));
