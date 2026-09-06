@@ -313,17 +313,18 @@ Recent-Sessions.
   byte-identische Objekte über Slots/Sessions scannen; identische Bytes =
   reused File/Frame, nie zwei echte Aufnahmen.
 
-- **Ein `firebase deploy` im selben Tool-Batch wie Datei-Edits derselben
-  Codebase starten (05.09.2026, review-console).** Der Deploy zippt den Ordner
-  SOFORT beim Start; ein parallel laufendes `cat >> index.js` landet halb
-  geschrieben im Paket → alle Functions der Codebase failen mit „Function 'X'
-  is not defined in the provided module" (Container-Healthcheck), obwohl
-  `node --check` lokal grün ist. Regel: Deploy erst starten, wenn ALLE Edits
-  der Codebase abgeschlossen sind (eigener, späterer Tool-Aufruf), und vor dem
-  Deploy `node -e "console.log(Object.keys(require('./index.js')))"` im
-  Codebase-Ordner laufen lassen. Diagnose: `gcloud logging read
-  'resource.labels.service_name="<fn-lowercase>"'` zeigt die echte Ursache,
-  der Deploy-Output nur den Healthcheck.
+- **Mehrere Codebases in EINEM `firebase deploy` (05.09.2026, review-console).**
+  Symptom: alle Functions der einen Codebase failen mit Container-Healthcheck
+  und `Function 'X' is not defined in the provided module`, obwohl das Modul
+  lokal sauber lädt (`node -e "console.log(Object.keys(require('./index.js')))"`
+  zeigt alle Exporte). Zweimal reproduziert (mit crowd-upload-namer, mit
+  cashback-pipeline+hosting), beide Male ging derselbe Stand **solo** sofort
+  durch — das ist die schon dokumentierte Multi-Codebase-Flake, nur in der
+  Gen2-Variante. Regel: **jede Codebase einzeln deployen.** Die echte Ursache
+  steht NUR in den Cloud-Run-Logs (`gcloud logging read
+  'resource.labels.service_name="<fn-lowercase>"'`), der Deploy-Output zeigt
+  nur den Healthcheck. Zusätzlich gilt: Deploy erst starten, wenn alle Edits
+  der Codebase geschrieben sind — ein laufendes Append landet halb im Paket.
 
 - **Legacy-Storage-Function `optimizeImage` war die ECHTE Ursache der
   „vertauschten Produktfotos" — nicht die Kamera (2026-07-03).** Der onCameraReady-
