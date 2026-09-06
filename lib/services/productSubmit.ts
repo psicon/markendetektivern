@@ -14,6 +14,8 @@
 
 import { auth, db, storage } from '@/lib/firebase';
 import { getActiveCashbackCampaigns, getCashbackConfig } from '@/lib/services/cashbackService';
+import { pickProductCampaign, type ActiveProductCampaign } from '@/lib/services/productCampaignPick';
+import { getChosenProductCampaignId } from '@/lib/services/productCampaignChoice';
 import {
   addDoc,
   collection,
@@ -124,33 +126,42 @@ export function productImagePath(
 
 // ─── Campaign gating ────────────────────────────────────────────────
 
-export interface ActiveProductCampaign {
-  campaignId: string;
-  rewardCents: number;
+export type { ActiveProductCampaign } from './productCampaignPick';
+
+/**
+ * ALLE laufenden Produktfoto-Aktionen (Reihenfolge: frühestes Enddatum zuerst,
+ * wie `getActiveCashbackCampaigns`). Leer, wenn keine läuft oder Aktionen
+ * global aus sind. Der Reward kommt NUR aus der Aktion — kein Hardcode;
+ * 0 ist erlaubt (Aktion läuft, definiert aber keinen Betrag pro Datensatz).
+ */
+export async function getActiveProductCampaigns(): Promise<ActiveProductCampaign[]> {
+  try {
+    const cfg = await getCashbackConfig();
+    if (!cfg.campaignsEnabled) return [];
+    const all = await getActiveCashbackCampaigns();
+    return all
+      .filter((x) => (x.kind ?? 'receipt') === 'product_photos')
+      .map((c) => ({
+        campaignId: c.id,
+        rewardCents:
+          typeof c.cashbackPerBonCents === 'number' && c.cashbackPerBonCents > 0 ? c.cashbackPerBonCents : 0,
+        title: (typeof c.title === 'string' && c.title.trim()) || c.id,
+      }));
+  } catch {
+    return [];
+  }
 }
 
 /**
- * The currently running product-photo campaign, or null. Cashback for
- * product datasets is ONLY given while such a campaign runs (analogous to
- * receipts in campaign mode) — otherwise data is collected without reward.
+ * Die Aktion, für die JETZT erfasst wird: die vom Nutzer gewählte (Übersicht
+ * `/product-submit`), sofern sie noch läuft — sonst die erste. Cashback für
+ * Produktdatensätze gibt es nur, während eine Aktion läuft; ohne Aktion wird
+ * ohne Vergütung gesammelt (null).
  */
 export async function getActiveProductCampaign(): Promise<ActiveProductCampaign | null> {
-  try {
-    const cfg = await getCashbackConfig();
-    if (!cfg.campaignsEnabled) return null;
-    const all = await getActiveCashbackCampaigns();
-    const c = all.find((x) => (x.kind ?? 'receipt') === 'product_photos');
-    if (!c) return null;
-    // Reward comes ONLY from the campaign config — no hardcoded amount.
-    // rewardCents may be 0 (campaign runs but defines no per-dataset reward).
-    const rewardCents =
-      typeof c.cashbackPerBonCents === 'number' && c.cashbackPerBonCents > 0
-        ? c.cashbackPerBonCents
-        : 0;
-    return { campaignId: c.id, rewardCents };
-  } catch {
-    return null;
-  }
+  const list = await getActiveProductCampaigns();
+  if (!list.length) return null;
+  return pickProductCampaign(list, await getChosenProductCampaignId());
 }
 
 function codeErr(code: string, message?: string): Error {

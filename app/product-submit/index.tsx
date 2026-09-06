@@ -10,7 +10,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Image as ExpoImage } from 'expo-image';
 import { router, useNavigation } from 'expo-router';
 import { safePush } from '@/lib/utils/safeNav';
-import React, { useEffect, useLayoutEffect, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDownloadURL, ref as storageRef } from '@react-native-firebase/storage';
@@ -25,6 +25,7 @@ import { hasValidCashbackConsent } from '@/lib/services/cashbackService';
 import {
   PRODUCT_PHOTO_STEPS,
   getActiveProductCampaign,
+  getActiveProductCampaigns,
   subscribeUserProductSubmissions,
   type ActiveProductCampaign,
   type ProductPhotoStep,
@@ -39,6 +40,7 @@ import {
   type UploadJob,
 } from '@/lib/services/uploadQueue';
 import { useNetworkStatus } from '@/lib/services/network';
+import { setChosenProductCampaignId } from '@/lib/services/productCampaignChoice';
 import { describeSubmission, type SubmissionStatusCopy } from '@/lib/utils/productSubmissionCopy';
 
 const PURPLE = '#5b4f9c';
@@ -126,6 +128,9 @@ export default function ProductSubmitOverview() {
   const net = useNetworkStatus();
   const [loaded, setLoaded] = useState(false);
   const [campaign, setCampaign] = useState<ActiveProductCampaign | null>(null);
+  // Alle laufenden Produktaktionen — bei mehr als einer wählt der Nutzer hier,
+  // für welche er erfasst (05.09.2026; vorher gewann stumm die oberste).
+  const [campaigns, setCampaigns] = useState<ActiveProductCampaign[]>([]);
   // Tapped submission → detail sheet. URLs are resolved lazily (Storage
   // paths → download URLs) only when a row is opened.
   const [detailRow, setDetailRow] = useState<ProductSubmissionEntry | null>(null);
@@ -153,12 +158,19 @@ export default function ProductSubmitOverview() {
 
   useEffect(() => {
     let alive = true;
-    getActiveProductCampaign().then((c) => {
-      if (alive) setCampaign(c);
+    Promise.all([getActiveProductCampaigns(), getActiveProductCampaign()]).then(([list, c]) => {
+      if (!alive) return;
+      setCampaigns(list);
+      setCampaign(c);
     });
     return () => {
       alive = false;
     };
+  }, []);
+
+  const chooseCampaign = useCallback((c: ActiveProductCampaign) => {
+    setCampaign(c);
+    void setChosenProductCampaignId(c.campaignId);
   }, []);
 
   // Hard guard (86cagb5gh, Spiegel von cashback/capture.tsx): Läuft gerade
@@ -244,6 +256,51 @@ export default function ProductSubmitOverview() {
             ) : null}
           </View>
         </View>
+
+        {/* Aktions-Auswahl — nur wenn mehrere Produktaktionen laufen. Gleiches
+            Muster wie ScopeCard (Belohnungen): aktive Karte = primaryContainer
+            + 1.5px Primary-Rand. Die Wahl gilt für den Wizard (Single Source:
+            productCampaignChoice) und bleibt über App-Starts erhalten. */}
+        {campaigns.length > 1 ? (
+          <View style={{ marginHorizontal: 16, marginTop: 12, gap: 8 }}>
+            <Text style={{ fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.semibold as any, fontSize: 12, color: theme.textMuted, letterSpacing: 0.3 }}>
+              FÜR WELCHE AKTION ERFASST DU?
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+              {campaigns.map((c) => {
+                const active = campaign?.campaignId === c.campaignId;
+                const eur = c.rewardCents > 0 ? (c.rewardCents / 100).toFixed(2).replace('.', ',') + ' €' : null;
+                return (
+                  <Pressable
+                    key={c.campaignId}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    onPress={() => chooseCampaign(c)}
+                    style={{
+                      flexGrow: 1,
+                      flexBasis: '45%',
+                      minHeight: 50,
+                      borderRadius: radii.md,
+                      paddingHorizontal: 10,
+                      paddingVertical: 8,
+                      backgroundColor: active ? theme.primaryContainer : theme.surface,
+                      borderWidth: active ? 1.5 : 1,
+                      borderColor: active ? theme.primary : theme.border,
+                      ...(active ? shadows.sm ?? {} : {}),
+                    }}
+                  >
+                    <Text numberOfLines={2} style={{ fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.extraBold as any, fontSize: 13, color: theme.text }}>
+                      {c.title}
+                    </Text>
+                    <Text style={{ fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.medium as any, fontSize: 10, color: theme.textMuted, marginTop: 2 }}>
+                      {eur ? `${eur} pro Datensatz` : 'Ohne Prämie — hilft der Datenbank'}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
 
         {/* CTA */}
         <View style={{ marginHorizontal: 16, marginTop: 12 }}>
