@@ -205,7 +205,14 @@
         no_location: 'ohne Ortsangabe eingereicht',
         ausserhalb_aktionsgebiet: 'außerhalb des Aktionsgebiets',
       };
-      const REASON_DE = Object.fromEntries([...REASONS_PHOTO, ...REASONS_RECEIPT, ...NO_REWARD]);
+      const REASON_DE = Object.fromEntries([...REASONS_PHOTO, ...REASONS_RECEIPT, ...NO_REWARD, ...[
+        // Antworten des Servers, die keine Ablehngründe sind, aber erscheinen
+        // können — etwa wenn nach einem Netzabriss erneut gedrückt wird.
+        ['status_approved', 'war schon freigegeben'],
+        ['status_rejected', 'war schon abgelehnt'],
+        ['not_found', 'nicht gefunden'],
+        ['already_booked', 'war bereits gebucht'],
+      ]]);
 
       // Der Ort als ANTWORT, nicht als Quellenkürzel. Vorher stand hier das
       // Wort „GPS" — das sagt, woher die Angabe kommt, aber nicht, wo jemand war.
@@ -239,7 +246,9 @@
 
       const FOLGE_DE = {
         keine_aktion: 'zu dieser Einreichung gehört keine Aktion',
-        ort_fehlt: 'ohne Ortsangabe zahlt die Aktion nicht — der Trigger prüft das vor der Buchung',
+        ort_fehlt: 'ohne Ortsangabe zahlt die Aktion nicht',
+        no_location: 'ohne Ortsangabe zahlt die Aktion nicht',
+        kein_ort_angegeben: 'ohne Ortsangabe zahlt die Aktion nicht',
         nutzer_am_limit: 'dieser Nutzer hat das Maximum der Aktion erreicht',
         budget_leer: 'das Budget der Aktion ist aufgebraucht',
         kein_betrag: 'die Aktion zahlt keinen Betrag je Einreichung',
@@ -554,13 +563,13 @@
        * bevor er auf dem Bildschirm stand — zweimal F gab also einen Fall frei,
        * den niemand gesehen hat.
        */
-      async function advance() {
-        const c = cur();
-        if (!c) return;
-        S.done.add(c.id);
-        const i = S.idx;
-        S.queue = S.queue.filter((x) => x.id !== c.id);
-        S.idx = Math.min(i, Math.max(0, S.queue.length - 1));
+      async function advance(fallId) {
+        const id = fallId ?? cur()?.id;
+        if (!id) return;
+        S.done.add(id);
+        const i = S.queue.findIndex((x) => x.id === id);
+        S.queue = S.queue.filter((x) => x.id !== id);
+        S.idx = Math.min(i < 0 ? S.idx : i, Math.max(0, S.queue.length - 1));
         $(S.type === 'photos' ? 'cPhotos' : 'cReceipts').textContent = S.queue.length;
         await showCurrent();
       }
@@ -602,6 +611,11 @@
         const c = cur();
         // Nur über einen Fall entscheiden, der auch auf dem Bildschirm steht.
         if (!c || S.busy || S.zeigt !== c.id) return;
+        // Die ID JETZT festhalten: `S.zeigt` sichert nur den Start. Während die
+        // Anfrage läuft, kann ein Pfeiltaster oder ein Reiterwechsel den
+        // angezeigten Fall wechseln — die Antwort gehört trotzdem zu diesem
+        // hier, nicht zu dem, der inzwischen auf dem Schirm steht.
+        const fallId = c.id;
         setBusy(true);
         try {
           const daten = { ids: [c.id], decision, reason };
@@ -610,17 +624,21 @@
           const res = (r.data.results || [])[0] || {};
           if (res.outcome === 'blocked') {
             // Kein stiller Schalter mehr: die Begründung wird hier und jetzt erfragt.
-            frageNachBegruendung(res.reason, (begruendung) => decidePhoto('approve', undefined, begruendung));
+            // Die Begründung gilt für DIESEN Fall — auch wenn inzwischen ein
+            // anderer angezeigt wird, wird sie dann nicht angewandt.
+            frageNachBegruendung(res.reason, (begruendung) => {
+              if (S.zeigt !== fallId) { toast('Der Fall hat gewechselt — bitte erneut entscheiden.', 'bad'); return; }
+              decidePhoto('approve', undefined, begruendung);
+            });
           } else if (res.outcome === 'approved') {
             toast(note ? 'Trotz Sperre freigegeben ✓' : 'Freigegeben ✓', 'good');
-            await advance();
+            await advance(fallId);
           } else if (res.outcome === 'rejected') {
-            const id = c.id;
-            toast(`Abgelehnt: ${REASON_DE[reason] || reason}`, 'bad', () => reopen(id));
-            await advance();
+            toast(`Abgelehnt: ${REASON_DE[reason] || reason}`, 'bad', () => reopen(fallId));
+            await advance(fallId);
           } else {
             toast(`Nicht ausgeführt: ${esc(REASON_DE[res.reason] || res.reason || res.outcome)}`, 'bad');
-            await advance();
+            await advance(fallId);
           }
         } catch (e) { toast('Fehler: ' + e.message, 'bad'); }
         setBusy(false);
@@ -638,6 +656,7 @@
       async function decideReceipt(decision, reason) {
         const c = cur();
         if (!c || S.busy || S.zeigt !== c.id) return;
+        const fallId = c.id;
         setBusy(true);
         try {
           const r = await call('reviewDecideReceipt')({ receiptId: c.id, decision, reason });
@@ -666,7 +685,7 @@
                 ? 'Angenommen, ohne Prämie erfasst'
                 : 'Abgelehnt — bei Bons endgültig, kein Zurückholen', 'bad');
             }
-            await advance();
+            await advance(fallId);
           } else {
             const code = r.data.code || r.data.http;
             toast(`Nicht ausgeführt: ${esc(RESOLVER_DE[code] || code)}`, 'bad');
@@ -727,10 +746,16 @@
         else if (e.key === 'a' || e.key === 'A') $('bNo').click();
         else if ((e.key === 'o' || e.key === 'O') && S.type === 'receipts') $('bNoReward').click();
         else if (e.key === 'ArrowRight') $('bSkip').click();
-        else if (e.key === 'ArrowLeft') { if (S.idx > 0) { S.idx--; showCurrent(); } }
+        // Nicht blättern, solange eine Entscheidung unterwegs ist — sonst
+        // landet ihre Antwort auf einem anderen Fall.
+        else if (e.key === 'ArrowLeft') { if (!S.busy && S.idx > 0) { S.idx--; showCurrent(); } }
       });
 
-      $('qlist').onclick = (e) => { const i = e.target.closest('.qi'); if (!i) return; S.idx = Number(i.dataset.i); hideReasons(); showCurrent(); };
+      $('qlist').onclick = (e) => {
+        if (S.busy) return; // laufende Entscheidung nicht überholen
+        const i = e.target.closest('.qi'); if (!i) return;
+        S.idx = Number(i.dataset.i); hideReasons(); showCurrent();
+      };
       $('stage').onclick = (e) => {
         const img = e.target.closest('img[data-cap]'); if (!img) return;
         $('light').querySelector('img').src = img.dataset.full || img.src;
@@ -739,6 +764,7 @@
       };
       $('light').onclick = () => $('light').classList.remove('on');
       document.querySelectorAll('.tab').forEach((t) => { t.onclick = () => {
+        if (S.busy) return; // nicht mitten in einer Entscheidung wechseln
         document.querySelectorAll('.tab').forEach((x) => x.classList.remove('on'));
         t.classList.add('on'); S.type = t.dataset.type; S.done.clear(); S.cache.clear();
         S.queue = []; S.idx = 0; leisteAus(); filterOptionen();
@@ -795,6 +821,7 @@
       }
       initAdmin(async () => {
         $('app').classList.add('on');
+        filterOptionen(); // gilt auch beim Direkteinstieg über ?tab=receipts
         await loadQueue();
         const id = parameter.get('id');
         if (id) await oeffneEinzelfall(id);

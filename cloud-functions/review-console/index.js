@@ -22,6 +22,7 @@ const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const logger = require('firebase-functions/logger');
 const { evaluateDuplicate, completenessCheck, REASON, ms } = require('./src/duplicatePolicy');
 const { ortVonEinreichung, ortVonBon, ortsverzeichnisAusBons } = require('./src/ort');
+const { pruefeOrtsanforderung } = require('./src/locationGate');
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -805,14 +806,12 @@ exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
     const aktion = row.campaignId ? aktionInfo.get(row.campaignId) || null : null;
     // Was eine Freigabe auslöst — in Cent, mit Grund, wenn es nichts wird.
     let folge = { buchtCent: 0, grund: 'keine_aktion' };
-    // Der Vergütungs-Trigger prüft VOR der Buchung auch die Ortsangabe
-    // (crowd-upload-reward/src/locationGate.js). Ohne diesen Hinweis verspräche
-    // die Vorschau „bucht 0,16 €" für eine Einreichung, bei der nie etwas
-    // fließt — dieselbe Klasse wie ein still ausbleibender Betrag, nur vorher.
-    const ortFehlt = !(row.capture && (row.capture.confirmedPlace || row.capture.hasGps))
-      && !(row.priceReceipt && row.priceReceipt.complete);
-    if (ortFehlt) {
-      folge = { buchtCent: 0, grund: 'ort_fehlt' };
+    // Dieselbe Funktion, die der Trigger vor der Buchung anwendet — als Kopie
+    // in src/locationGate.js, nicht nacherzählt. Eine zweite, halbe Fassung
+    // dieser Regel sagte bei einer von elf Einreichungen das Falsche.
+    const ort = pruefeOrtsanforderung(s.data());
+    if (!ort.ok) {
+      folge = { buchtCent: 0, grund: ort.grund || 'ort_fehlt' };
     } else if (aktion) {
       const bisher = (nutzer?.proAktion || {})[row.campaignId] || 0;
       const rest = aktion.maxProNutzerCent > 0 ? Math.max(0, aktion.maxProNutzerCent - bisher) : Infinity;
