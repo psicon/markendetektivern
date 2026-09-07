@@ -24,7 +24,7 @@
 
 'use strict';
 
-const { extractReceipt, reconcile, DEFAULT_MODEL } = require('./ocr');
+const { extractReceipt, reconcile, countEligibleItems, DEFAULT_MODEL } = require('./ocr');
 const { enhanceForOcr } = require('./imageEnhance');
 
 const PRO_MODEL = process.env.CASHBACK_OCR_PRO_MODEL || 'gemini-2.5-pro';
@@ -57,6 +57,35 @@ function findAgreement(reads) {
   return null;
 }
 
+/**
+ * Fingerabdruck EINER Lesung über die prämienrelevanten Größen (86cbet2w1).
+ *
+ * Bis hierher wurden alle nicht gewählten Lesungen in pack() verworfen — die
+ * einzige Aussage über die Stabilität der Erkennung war damit die SEQUENZ-
+ * Übereinstimmung (name#priceCents über ALLE Positionen). Bei 30 bis 70
+ * Positionen kippt die schon eine abweichend gelesene Artikelbezeichnung,
+ * obwohl an Markt, Datum, Endsumme und Betrag nichts wackelt.
+ *
+ * Bewusst ROHWERTE statt eines fertigen Urteils: so bleibt der Vergleich am
+ * Dokument nachvollziehbar und auf dem Cache-/Wiederholungspfad neu
+ * berechenbar, ohne das Bild noch einmal zu lesen.
+ */
+function readFingerprint(r) {
+  const p = (r && r.parsed) || {};
+  return {
+    isReceipt: p.isReceipt !== false,
+    merchant: p.merchant == null ? null : String(p.merchant).slice(0, 120),
+    bonCountry: p.bonCountry == null ? null : String(p.bonCountry).slice(0, 8),
+    bonDate: typeof p.bonDate === 'string' ? p.bonDate.slice(0, 10) : null,
+    bonTime: typeof p.bonTime === 'string' ? p.bonTime.slice(0, 5) : null,
+    totalCents: Number.isFinite(p.totalCents) ? p.totalCents : null,
+    itemCount: Array.isArray(p.items) ? p.items.length : 0,
+    eligibleItems: countEligibleItems(p),
+    reconOk: reconciles(r),
+    model: r && r.__pro ? 'pro' : r && r.__enh ? 'flash-enhanced' : 'flash',
+  };
+}
+
 function pack(chosen, confidence, method, reads, failedAttempts = 0) {
   const proAttempts = reads.filter((r) => r && r.__pro).length;
   const usedEnhanced = reads.some((r) => r && r.__enh);
@@ -72,6 +101,9 @@ function pack(chosen, confidence, method, reads, failedAttempts = 0) {
     proAttempts,
     enhanced: usedEnhanced,
     agreement: confidence === 'high' || confidence === 'medium',
+    // Alle Lesungen als Fingerabdruck — Grundlage der feldweisen Prüfung im
+    // Freigabe-Gate. Kostet keinen zusätzlichen Modell-Aufruf.
+    reads: reads.map(readFingerprint),
   };
   return out;
 }

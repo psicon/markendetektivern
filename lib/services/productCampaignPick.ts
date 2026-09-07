@@ -29,3 +29,41 @@ export function pickProductCampaign(
   }
   return list[0];
 }
+
+/**
+ * Woher das Aktionskennzeichen einer Einreichung stammt (86cbet2nw).
+ *
+ * Der entscheidende Unterschied ist der zwischen `null` und `undefined`:
+ *  - `null`        = der Server wurde erreicht, es läuft wirklich keine Aktion.
+ *  - `undefined`   = wir konnten nicht nachsehen (offline, Timeout, Lesefehler).
+ *
+ * Bis September 2026 waren beide Fälle im Client dasselbe: jede Fehlerbehandlung
+ * endete in `[]` und damit in `campaignId: null` am Dokument. Der Server bricht
+ * dann still ab, und niemandem fällt der ausbleibende Betrag auf. Genau daran
+ * hingen 58 unvergütete Einreichungen aus Juli und August.
+ */
+export type CampaignResolveState = 'live' | 'gemerkt' | 'keine_aktion' | 'nicht_ermittelbar';
+
+export interface SubmitCampaignResolution {
+  campaign: ActiveProductCampaign | null;
+  state: CampaignResolveState;
+}
+
+/**
+ * Entscheidet, mit welcher Aktion eingereicht wird.
+ *
+ * @param live    frisch aufgelöst: Aktion, `null` (keine läuft) oder
+ *                `undefined` (konnte nicht nachsehen).
+ * @param gemerkt der beim Öffnen des Wizards aufgelöste Stand, als Rückfall.
+ */
+export function resolveSubmitCampaign(
+  live: ActiveProductCampaign | null | undefined,
+  gemerkt: ActiveProductCampaign | null | undefined,
+): SubmitCampaignResolution {
+  if (live) return { campaign: live, state: 'live' };
+  // Eine frische Auskunft „es läuft keine" gewinnt gegen einen alten Stand:
+  // sonst würde für eine ausgelaufene Aktion eingereicht.
+  if (live === null) return { campaign: null, state: 'keine_aktion' };
+  if (gemerkt) return { campaign: gemerkt, state: 'gemerkt' };
+  return { campaign: null, state: 'nicht_ermittelbar' };
+}

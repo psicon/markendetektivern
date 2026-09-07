@@ -74,6 +74,12 @@
       .v-locked{background:var(--no-bg);border-color:var(--no);color:var(--no)}
       .v-hold,.v-incomplete{background:var(--warn-bg);border-color:var(--warn);color:var(--warn)}
       .verdict small{display:block;font-weight:600;margin-top:3px;color:var(--fg2)}
+      /* Was die Freigabe auslöst — die Frage, die vor jedem Tastendruck steht. */
+      .folge{margin-top:10px;padding:9px 12px;border-radius:10px;font-size:13.5px;border:1px solid}
+      .folge.zahlt{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}
+      .folge.zahlt b{font-size:16px;font-weight:800}
+      .folge.zahlt-nicht{background:var(--panel2);border-color:var(--line2);color:var(--fg2)}
+      .nutzer{margin-top:10px;padding:8px 11px;border-radius:9px;background:var(--panel2);border:1px solid var(--line);font-size:12.5px}
       .items{margin-top:12px;font-size:12.5px;max-height:38vh;overflow:auto}
       .items div{display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px dashed var(--line)}
 
@@ -123,6 +129,7 @@
         </div>
         <div class="grow"></div>
         <div class="prog" id="prog"></div>
+        <a href="karte.html" style="color:var(--fg3);font-size:12.5px;text-decoration:none">Karte</a>
         <a href="index.html" style="color:var(--fg3);font-size:12.5px;text-decoration:none">Bon-Matching</a>
         <button id="logoutBtn" style="padding:6px 12px;font-size:13px">Abmelden</button>
       </header>
@@ -183,7 +190,67 @@
         ['per_user_cap_reached', 'Nutzerlimit'],
       ];
       const VERDICT_DE = { ok: 'Vorprüfung ok', locked: 'Gesperrt', hold: 'Zurückhalten', incomplete: 'Unvollständig' };
+      // Warum bei einer Freigabe kein Geld floss. Ohne diese Zeile ist das nur
+      // über einen Abgleich gegen das Ledger zu sehen — und genau deshalb fiel
+      // monatelang niemandem auf, dass 58 Einreichungen unvergütet blieben.
+      const REWARD_DE = {
+        per_user_cap_reached: 'Nutzer hat das Maximum dieser Aktion erreicht',
+        campaign_budget_exhausted: 'Budget der Aktion ausgeschöpft',
+        campaign_missing: 'Aktion existiert nicht mehr',
+        no_reward_configured: 'Aktion zahlt keinen Betrag je Datensatz',
+        keine_aktion_zur_aufnahmezeit: 'zur Einreichungszeit lief keine Aktion',
+        kein_einreichungsdatum: 'kein Einreichungsdatum am Datensatz',
+        ohne_user_id: 'kein Nutzer am Datensatz',
+        storniert: 'Buchung wurde storniert',
+        no_location: 'ohne Ortsangabe eingereicht',
+        ausserhalb_aktionsgebiet: 'außerhalb des Aktionsgebiets',
+      };
       const REASON_DE = Object.fromEntries([...REASONS_PHOTO, ...REASONS_RECEIPT, ...NO_REWARD]);
+
+      // Der Ort als ANTWORT, nicht als Quellenkürzel. Vorher stand hier das
+      // Wort „GPS" — das sagt, woher die Angabe kommt, aber nicht, wo jemand war.
+      const ORT_QUELLE = {
+        geraet: ['Standort des Geräts', 'var(--ok)'],
+        filiale: ['Adresse vom Kassenbon', 'var(--ok)'],
+        nutzerangabe: ['Angabe des Nutzers', 'var(--warn)'],
+      };
+      const FOLGE_DE = {
+        keine_aktion: 'zu dieser Einreichung gehört keine Aktion',
+        nutzer_am_limit: 'dieser Nutzer hat das Maximum der Aktion erreicht',
+        budget_leer: 'das Budget der Aktion ist aufgebraucht',
+        kein_betrag: 'die Aktion zahlt keinen Betrag je Einreichung',
+      };
+      const PREISBILD_DE = {
+        preisschild: 'vom Preisschild',
+        kassenbon: 'vom Kassenbon',
+        beides: 'Preisschild und Bon',
+        produktfoto: '⚠ Bild zeigt das Produkt, keinen Preis',
+        sonstiges: '⚠ Bild zeigt keinen erkennbaren Preis',
+      };
+
+      /** Wer reicht hier ein? Die wichtigste Angabe zur Vertrauenswürdigkeit. */
+      function nutzerZeile(n) {
+        if (!n) return '';
+        const quote = n.einreichungen > 0 ? Math.round((n.abgelehnt / n.einreichungen) * 100) : 0;
+        const ton = n.abgelehnt === 0 ? 'var(--ok)' : quote >= 30 ? 'var(--no)' : 'var(--warn)';
+        const dabei = n.seit ? ` · dabei seit ${fmtDate(n.seit)}` : '';
+        return `<div class="nutzer">
+          <b style="color:${ton}">${n.einreichungen} Einreichungen</b> · ${n.angenommen} angenommen, ${n.abgelehnt} abgelehnt${dabei}
+          <div style="color:var(--fg3);font-size:11.5px;margin-top:2px">Guthaben ${euro(n.guthabenCent)}</div>
+        </div>`;
+      }
+
+      function ortZeile(o) {
+        if (!o || !o.quelle) return '<span style="color:var(--no)">kein Ort erfasst</span>';
+        const [wort, farbe] = ORT_QUELLE[o.quelle] || ['—', 'var(--fg3)'];
+        const genau = o.genauigkeitM == null ? ''
+          : o.genauigkeitM <= 100 ? `± ${o.genauigkeitM} m`
+          : `± ${Math.round(o.genauigkeitM / 1000)} km`;
+        const andere = (o.alternativen || []).length
+          ? `<div style="color:var(--fg3);font-size:11.5px;margin-top:2px">auch: ${esc(o.alternativen.map((a) => a.label).join(' · '))}</div>`
+          : '';
+        return `${esc(o.label)}<div style="color:${farbe};font-size:11.5px">${esc(wort)}${genau ? ` · ${genau}` : ''}</div>${andere}`;
+      }
 
       const S = { type: 'photos', queue: [], idx: 0, cache: new Map(), done: new Set(), busy: false, counts: {}, mode: null };
 
@@ -276,15 +343,25 @@
             <h2>${esc(r.productName || r.productNameOcr || '(ohne Name)')}</h2>
             <div class="verdict v-${esc(p.verdict || 'ok')}">${esc(VERDICT_DE[p.verdict] || p.verdict || '')}
               ${(p.reasons || []).length ? `<small>${esc((p.reasons || []).map((x) => REASON_DE[x] || x).join(' · '))}</small>` : '<small>Alle Prüfungen bestanden</small>'}</div>
+            <div class="folge ${c.folge && c.folge.buchtCent > 0 ? 'zahlt' : 'zahlt-nicht'}">
+              ${c.folge && c.folge.buchtCent > 0
+                ? `Freigabe bucht <b>${euro(c.folge.buchtCent)}</b>`
+                : `Freigabe bucht nichts — ${esc(FOLGE_DE[c.folge && c.folge.grund] || 'kein Betrag hinterlegt')}`}
+            </div>
+            ${nutzerZeile(c.nutzer)}
             <div class="kv">
               <div class="k">Barcode</div><div class="v">${esc(r.ean || '—')}</div>
               <div class="k">Markt</div><div class="v">${esc(r.marketName || r.marketId || '—')}</div>
-              <div class="k">Preis</div><div class="v">${euro(r.priceCents)}${r.priceImageKind && r.priceImageKind !== 'preisschild' ? ` <span style="color:var(--fg3)">(${esc(r.priceImageKind)})</span>` : ''}</div>
+              <div class="k">Preis</div><div class="v">${euro(r.priceCents)} <span style="color:var(--fg3)">${esc(PREISBILD_DE[r.priceImageKind] || 'Herkunft unklar')}</span></div>
               <div class="k">Hersteller</div><div class="v">${esc(r.manufacturer || '—')}</div>
-              <div class="k">Ort</div><div class="v">${r.capture && r.capture.confirmedPlace ? esc(r.capture.confirmedPlace.city || r.capture.confirmedPlace.name || 'bestätigt') : r.capture && r.capture.hasGps ? 'GPS' : r.priceReceipt && r.priceReceipt.complete ? `Bon: ${esc(r.priceReceipt.city || '')}` : '<span style="color:var(--no)">keine Angabe</span>'}</div>
+              <div class="k">Ort</div><div class="v">${ortZeile(c.ort)}</div>
               <div class="k">Eingereicht</div><div class="v">${esc(fmtDateTime(r.createdAt))}</div>
-              <div class="k">Nutzer</div><div class="v" style="font-family:ui-monospace,monospace;font-size:12px">${esc(short(r.userId, 12))}</div>
-              <div class="k">Aktion</div><div class="v">${esc(r.campaignId || 'ohne Aktion')}</div>
+              <div class="k">Aktion</div><div class="v">${c.aktion ? esc(c.aktion.titel) : '<span style="color:var(--warn)">keine Aktion zugeordnet</span>'}${r.campaignQuelle ? ' <span style="color:var(--fg3)">(vom Server ergänzt)</span>' : ''}</div>
+              ${r.rewardResult ? `<div class="k">Bisher</div><div class="v">${
+                (r.rewardCents || 0) > 0
+                  ? `<span style="color:var(--ok)">${euro(r.rewardCents)} gebucht</span>`
+                  : `<span style="color:var(--warn)">nicht gebucht — ${esc(REWARD_DE[r.rewardNotCreditedReason || r.rewardSkippedReason] || r.rewardNotCreditedReason || r.rewardSkippedReason || 'Grund unbekannt')}</span>`
+              }</div>` : ''}
             </div>
             ${dup}
           </div>
@@ -303,7 +380,7 @@
             <div class="verdict v-${r.ocrConfidence === 'high' ? 'ok' : 'hold'}">${esc(r.reviewReason || 'zur Prüfung')}
               <small>Texterkennung: ${esc(r.ocrConfidence || '?')}${r.reconOk === false ? ` · Summe weicht ab (${r.reconDeltaCents} ct)` : ' · Summe passt'}</small></div>
             <div class="kv">
-              <div class="k">Filiale</div><div class="v">${r.store ? esc([r.store.street, [r.store.zip, r.store.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')) : '—'}</div>
+              <div class="k">Filiale</div><div class="v">${ortZeile(c.ort)}</div>
               <div class="k">Bon-Datum</div><div class="v">${esc(r.bonDate || '—')} ${esc(r.bonTime || '')}</div>
               <div class="k">Summe</div><div class="v">${euro(r.bonTotalCents)} · Positionen ${euro(sum)}</div>
               <div class="k">Anrechenbar</div><div class="v">${r.eligibleItemCount ?? '—'} von ${(c.items || []).length}</div>

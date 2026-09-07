@@ -21,6 +21,7 @@ const { FieldValue } = require('firebase-admin/firestore');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const logger = require('firebase-functions/logger');
 const { evaluateDuplicate, completenessCheck, REASON, ms } = require('./src/duplicatePolicy');
+const { ortVonEinreichung, ortVonBon, ortsverzeichnisAusBons } = require('./src/ort');
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -105,6 +106,11 @@ function rowOf(d) {
     rewardCents: x.rewardCents ?? null,
     rewardResult: x.rewardResult ?? null,
     rewardNotCreditedReason: x.rewardNotCreditedReason ?? null,
+    // Woher das Aktionskennzeichen stammt und worauf der Client es stützte
+    // (86cbet2nw) — im Prüf-Werkzeug sichtbar, damit ein fehlender Betrag
+    // beim Fall selbst auffällt statt erst bei einem Ledger-Abgleich.
+    campaignQuelle: x.campaignQuelle ?? null,
+    campaignResolve: x.campaignResolve ?? null,
     rewardSkipped: x.rewardSkipped ?? null,
     rewardSkippedReason: x.rewardSkippedReason ?? null,
     rewardLocationRule: x.rewardLocationRule ?? null,
@@ -655,6 +661,7 @@ exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
       ]);
       return {
         id: s.id, kind: 'receipt', row: { ...row, items: undefined },
+        ort: ortVonBon(x),
         imageUrl: thumbUrl(row.storagePath, 1100), fullUrl: full,
         items: Array.isArray(x.items) ? x.items : [],
         ocr: { parsed: x.ocr?.parsed ?? null, robust: x.ocr?.robust ?? null, reconciliation: x.ocr?.reconciliation ?? null },
@@ -666,6 +673,44 @@ exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
 
   const snaps = await db.getAll(...ids.map((id) => db.collection(COL).doc(id)));
   const present = snaps.filter((s) => s.exists);
+
+  // Was beim Prüfen wirklich zählt und bisher fehlte: Wer reicht da ein, und
+  // was löst eine Freigabe aus? Ohne das steht der Prüfer vor einer Feldliste
+  // und muss raten, ob der Fall harmlos ist und ob Geld fließt.
+  const nutzerInfo = new Map();
+  const aktionInfo = new Map();
+  await Promise.all([...new Set(present.map((s) => s.data().userId).filter(Boolean))].map(async (uid) => {
+    const [eigene, user] = await Promise.all([
+      db.collection(COL).where('userId', '==', uid).select('status', 'createdAt').get(),
+      db.doc(`users/${uid}`).get(),
+    ]);
+    let angenommen = 0; let abgelehnt = 0; let erste = null;
+    eigene.docs.forEach((d) => {
+      const st = safeStatus(d.data().status);
+      if (st === 'approved') angenommen++;
+      else if (st === 'rejected') abgelehnt++;
+      const t = ms(d.data().createdAt);
+      if (t && (erste == null || t < erste)) erste = t;
+    });
+    const u = user.exists ? user.data() : {};
+    nutzerInfo.set(uid, {
+      einreichungen: eigene.size, angenommen, abgelehnt, seit: erste,
+      guthabenCent: u.cashback_balance_cents ?? 0,
+      proAktion: u.cashback_campaign_totals ?? {},
+    });
+  }));
+  await Promise.all([...new Set(present.map((s) => s.data().campaignId).filter(Boolean))].map(async (cid) => {
+    const c = await db.collection('cashback_campaigns').doc(cid).get();
+    if (c.exists) {
+      const x = c.data();
+      aktionInfo.set(cid, {
+        titel: x.title || cid,
+        proEinreichungCent: Number(x.cashbackPerBonCents) || 0,
+        maxProNutzerCent: Number(x.maxPerUserCents) || 0,
+        restbudgetCent: Number(x.budgetRemainingCents) || 0,
+      });
+    }
+  }));
   // EAN-Nachbarn für die Doppel-Regel: nur die betroffenen EANs.
   const eans = [...new Set(present.map((s) => s.data().ean).filter(Boolean))];
   const byEan = eans.length ? await loadByEans(eans) : new Map();
@@ -683,7 +728,85 @@ exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
     }));
     const prior = pre.dup && pre.dup.priorId ? (byEan.get(row.ean) || []).find((r) => r.id === pre.dup.priorId) : null;
     const eigene = (byEan.get(row.ean) || []).filter((r) => r.id !== row.id).length;
-    return { id: s.id, kind: 'photo', row: stripPolicy(row), bilder, precheck: pre, prior: prior ? stripPolicy(prior) : null, gleicheEan: eigene };
+    const nutzer = nutzerInfo.get(row.userId) || null;
+    const aktion = row.campaignId ? aktionInfo.get(row.campaignId) || null : null;
+    // Was eine Freigabe auslöst — in Cent, mit Grund, wenn es nichts wird.
+    let folge = { buchtCent: 0, grund: 'keine_aktion' };
+    if (aktion) {
+      const bisher = (nutzer?.proAktion || {})[row.campaignId] || 0;
+      const rest = aktion.maxProNutzerCent > 0 ? Math.max(0, aktion.maxProNutzerCent - bisher) : Infinity;
+      const zahlbar = Math.min(aktion.proEinreichungCent, rest, aktion.restbudgetCent);
+      folge = zahlbar > 0
+        ? { buchtCent: zahlbar, grund: null }
+        : { buchtCent: 0, grund: rest <= 0 ? 'nutzer_am_limit' : aktion.restbudgetCent <= 0 ? 'budget_leer' : 'kein_betrag' };
+    }
+    return {
+      id: s.id, kind: 'photo', row: stripPolicy(row), bilder, precheck: pre,
+      prior: prior ? stripPolicy(prior) : null, gleicheEan: eigene,
+      // EINE Ortsangabe statt vier Rohfeldern — siehe src/ort.js.
+      ort: ortVonEinreichung(s.data()),
+      nutzer, aktion, folge,
+    };
   }));
   return { cases };
+});
+
+
+/**
+ * Alle Einreichungen und Bons als Kartenpunkte (86cbet2nw / Ortsfrage 07.09.2026).
+ *
+ * Kompakt als Arrays statt Objekte: 8.000 Punkte wären als Objektliste rund
+ * 900 KB, so sind es unter 300 KB. Gefiltert wird im Browser — die Daten sind
+ * einmal geladen, jeder Filterwechsel ist dann sofort und kostet keinen Read.
+ *
+ * Punkt = [typ, lat, lon, zeit, quelle, markt, land, plz, ort, status, id]
+ *   typ 0 = Produktfoto, 1 = Bon
+ *   quelle 0 = Gerätestandort, 1 = Filiale laut Bon, 2 = Angabe des Nutzers
+ */
+exports.reviewMapPoints = onCall({ region: REGION, memory: '1GiB', timeoutSeconds: 120 }, async (req) => {
+  assertAdmin(req);
+  const QUELLE = { geraet: 0, filiale: 1, nutzerangabe: 2 };
+  const punkte = [];
+  const ohneOrt = { fotos: 0, bons: 0 };
+
+  const [uploads, receipts] = await Promise.all([
+    db.collection(COL).select('capture', 'priceReceipt', 'marketName', 'marketLand', 'status', 'createdAt', 'productName', 'campaignId').get(),
+    db.collection('receipts').select('store', 'merchant', 'bonDate', 'status', 'createdAt', 'totalCents', 'campaignId').get(),
+  ]);
+
+  // Ortsverzeichnis aus den eigenen Bon-Adressen: das öffentliche Verzeichnis
+  // kennt nur Hauptgemeinden, die Bons auch kleine Orte (siehe src/ort.js).
+  const verzeichnis = ortsverzeichnisAusBons(
+    receipts.docs.map((d) => d.data().store).filter((st) => st && st.city && st.zip),
+  );
+
+  for (const d of uploads.docs) {
+    const x = d.data();
+    const o = ortVonEinreichung(x, verzeichnis);
+    if (o.lat == null || o.lon == null) { ohneOrt.fotos++; continue; }
+    punkte.push([
+      0, Math.round(o.lat * 1e4) / 1e4, Math.round(o.lon * 1e4) / 1e4,
+      ms(x.createdAt), QUELLE[o.quelle] ?? null,
+      x.marketName || null, o.land || null, o.plz || null, o.ort || null,
+      safeStatus(x.status), d.id,
+    ]);
+  }
+  for (const d of receipts.docs) {
+    const x = d.data();
+    const o = ortVonBon(x, verzeichnis);
+    if (o.lat == null || o.lon == null) { ohneOrt.bons++; continue; }
+    punkte.push([
+      1, Math.round(o.lat * 1e4) / 1e4, Math.round(o.lon * 1e4) / 1e4,
+      ms(x.createdAt), QUELLE[o.quelle] ?? null,
+      (x.merchant && x.merchant.name) || null, o.land || null, o.plz || null, o.ort || null,
+      String(x.status || 'unbekannt'), d.id,
+    ]);
+  }
+
+  return {
+    punkte,
+    ohneOrt,
+    gesamt: { fotos: uploads.size, bons: receipts.size },
+    stand: Date.now(),
+  };
 });

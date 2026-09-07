@@ -65,6 +65,7 @@ const CASHBACK_ADMIN_KEY = defineSecret('NUTRITION_SCRAPER_TRIGGER_KEY');
 const { extractReceipt, reconcile, countEligibleItems, tierFor, isPfandItem, DEFAULT_MODEL } = require('./lib/ocr');
 const { extractReceiptCVHybrid } = require('./lib/ocr_cvhybrid');
 const { extractReceiptRobust } = require('./lib/ocr_robust');
+const { moneyFieldAgreement } = require('./lib/fieldAgreement');
 const { extractReceiptDocAI, isConfigured: isDocAIConfigured } = require('./lib/ocr_docai');
 const { deriveStoreAddress } = require('./lib/storeAddress');
 const { resolveRegion, pickCampaignForRegion, matchesTargeting, targetingStamp } = require('./lib/targeting');
@@ -219,6 +220,12 @@ const pubsub = new PubSub();
 // ─── Helpers ────────────────────────────────────────────────────────
 
 const DEFAULT_CONFIG = {
+  // Sicherer Rückfall: kommt die Konfiguration nicht durch, gilt das ALTE
+  // Verhalten. `loadConfig()` fällt bei jedem Lesefehler hierher zurück — ohne
+  // diesen Eintrag wäre ausgerechnet die neue Lockerung dann aktiv (86cbet2w1).
+  // Scharfschalten geschieht ausdrücklich in `cashback_config/v1`, wo auch
+  // `'shadow'` möglich ist: rechnen und protokollieren, aber nicht wirken.
+  ocrFieldGate: false,
   tiers: [
     { minItems: 4, cents: 5 },
     { minItems: 8, cents: 8 },
@@ -1749,18 +1756,115 @@ exports.processCashback = onMessagePublished(
       // (→ approved + Gutschrift) oder lehnt ab. Rejected/no_reward bleiben
       // unverändert — durch DIESES Gate wird KEIN Bon abgelehnt.
       let reviewReason = null;
+      // Ergebnis der feldweisen Prüfung — landet am Bon, damit die Wirkung des
+      // Gates messbar ist und eine Stichprobe nachvollziehen kann, worauf die
+      // Freigabe beruhte.
+      let ocrFieldAgreement = null;
       if (status === 'review' && bonDateFuture) reviewReason = 'bon_date_future';
       // Money-Ops-Review 02.09.: das Gate darf einen bereits gutgeschriebenen
       // oder per Resolver freigegebenen Bon NIE wieder halten — sonst würde eine
       // PubSub-Redelivery (Cache-Pfad trägt jetzt robust) die Gutschrift über
       // syncLedgerForReceipt(status='review') stornieren (Selbststorno-Klasse).
+      // Eine ABLEHNUNG durch einen Menschen wird nie automatisch überstimmt.
+      // Sie wirkt VOR dem Halte-Block, nicht als Übersprung: wer den Block
+      // überspringt, umgeht auch die Forensik-Bremse darin — dann führte eine
+      // erneute Zustellung eines von Hand abgelehnten Bons zu Status
+      // 'approved' und `syncLedgerForReceipt` bucht erneut (der stornierte
+      // Earn steht auf netto 0, der Zweig legt einen neuen an).
+      if (status === 'approved' && (receipt.reviewDecision === 'reject' || receipt.reviewDecision === 'no_reward')) {
+        status = 'review';
+        reviewReason = 'mensch_hat_entschieden';
+        cashbackCents = 0;
+      }
       if (status === 'approved' && !alreadyCredited && receipt.reviewDecision !== 'approve') {
         const conf = ocr.robust?.confidence || null;
-        const lowConfidence = conf === 'medium' || conf === 'low' || conf === 'none';
         const editedImage = receipt.capture?.forensicFlags?.suspiciousSoftware === true;
-        if (lowConfidence || editedImage) {
+
+        // 86cbet2w1 — die Bewertung der Robust-OCR entsteht aus dem Vergleich
+        // der ARTIKELSEQUENZ. Bei 30 bis 70 Positionen kippt sie schon eine
+        // abweichend gelesene Bezeichnung, obwohl an Markt, Datum, Endsumme und
+        // Betrag nichts wackelt. Gemessen über 30 Tage: 137 Bons gehalten, 120
+        // davon später von Hand freigegeben, 2 abgelehnt — beide wegen
+        // Doppeleinreichung, die die Dedup-Prüfung ohnehin fängt.
+        //
+        // Deshalb: bei `low`/`medium` zusätzlich feldweise nachsehen. Stimmen
+        // Markt, Datum, Endsumme und Betrag über mindestens zwei in sich
+        // stimmige Lesungen überein, wird freigegeben. `none` hält IMMER — dort
+        // besteht keine einzige Lesung ihre eigene Summenprobe, und ein
+        // fehlendes `robust` heißt, die Erkennung ist gar nicht gelaufen.
+        //
+        // Notaus ohne Deploy: `cashback_config/v1.ocrFieldGate`. Steht es auf
+        // `false`, gilt bitgenau das alte Verhalten. `loadConfig()` läuft
+        // ohnehin bei jedem Bon, das kostet keinen zusätzlichen Read.
+        // Drei Zustände: false = altes Verhalten, 'shadow' = rechnen und ans
+        // Dokument schreiben, aber die Entscheidung NICHT ändern, true = wirksam.
+        // Der Beobachtungs-Modus ist der einzige Weg, die Wirkung an echten Bons
+        // zu sehen, bevor Geld daran hängt — `robust.reads` entsteht erst mit
+        // diesem Stand, an historischen Bons lässt sich nichts messen.
+        const gateSchalter = config.ocrFieldGate;
+        const feldGateAn = gateSchalter === true || gateSchalter === 'shadow';
+        const feldGateWirkt = gateSchalter === true;
+        let felder = null;
+        if (feldGateAn && (conf === 'low' || conf === 'medium') && Array.isArray(ocr.robust?.reads)) {
+          // Marktnamen ÜBER DEN RESOLVER vergleichen, nicht über den Rohtext:
+          // „REWE" und „REWE Markt GmbH" sind derselbe Markt. Die Auflösung ist
+          // asynchron, deshalb hier vorab je eindeutigem Namen einmal — bei
+          // zwei bis drei Lesungen sind das ein bis zwei Aufrufe gegen den
+          // modulweit zwischengespeicherten Discounter-Index.
+          const namen = [...new Set(ocr.robust.reads.map((r) => r.merchant ?? null))];
+          const schluessel = new Map();
+          for (const nm of namen) {
+            let key = `roh:${String(nm || '').toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+            try {
+              const t = await resolveMerchant(nm, ocr.parsed?.bonCountry ?? null);
+              if (t && t.id) key = `id:${t.id}`;
+            } catch (e) {
+              logger.warn('field-agreement-merchant-failed', { cashbackId, err: e.message });
+            }
+            schluessel.set(nm, key);
+          }
+          felder = moneyFieldAgreement(ocr.robust.reads, {
+            merchantKey: (m) => schluessel.get(m ?? null) ?? null,
+            // Derselbe Betragsweg wie oben — ein Unterschied in der Artikelzahl
+            // zählt nur, wenn er den Betrag verändert (Pfand wird über den
+            // NAMEN erkannt, eine andere Lesung kann die Zahl also verschieben).
+            betragFuer: (n) => (selectedCampaign ? campaignRewardCents(n, selectedCampaign, config) : n),
+          });
+        }
+
+        const felderTragen = felder != null && felder.ok === true;
+        // Fehlt die Bewertung ganz, hängt es an der Engine: `gemini-robust`
+        // liefert sie immer — fehlt sie dort, ist die Erkennung nicht gelaufen
+        // und der Bon gehört geprüft. Die Rückfall-Engine `cv-hybrid` kennt
+        // dagegen konstruktionsbedingt gar keine Bewertung; würde ein fehlendes
+        // Feld dort als Verlust gelten, hielte ein Engine-Rollback SÄMTLICHE
+        // Bons zurück.
+        // Auf den GELAUFENEN Pfad prüfen, nicht auf die Engine des Endergebnisses:
+        // die DocAI-Eskalation ersetzt `ocr` komplett (engine 'docai', `robust`
+        // verschwindet), und die Rückfall-Engine 'cv-hybrid' kennt gar keine
+        // Bewertung. Beides darf nicht als „Bewertung fehlt" gelten.
+        const engineLiefertBewertung = OCR_ENGINE !== 'cv-hybrid' && (ocr.engine || OCR_ENGINE) !== 'docai';
+        // Auch diese Verschärfung hängt am Schalter: steht `ocrFieldGate` auf
+        // `false`, verhält sich der Block bitgenau wie vor dem Umbau. Ein
+        // Notaus, der nur die Hälfte zurücknimmt, ist keiner.
+        const bewertungFehlt = feldGateWirkt && conf == null && engineLiefertBewertung;
+        const haltenWegenLesung = conf === 'none' || bewertungFehlt
+          ? true
+          : conf === 'high' || conf == null
+            ? false
+            : feldGateWirkt
+              ? !felderTragen
+              : true; // Beobachtungs-Modus: rechnen, aber wie bisher halten
+
+        if (haltenWegenLesung || editedImage) {
           status = 'review';
           reviewReason = editedImage ? 'forensics_software' : `ocr_confidence_${conf}`;
+        }
+        if (felder) {
+          ocrFieldAgreement = {
+            ok: felder.ok, zeugen: felder.zeugen, konflikte: felder.konflikte,
+            confidence: conf, modus: feldGateWirkt ? 'wirksam' : 'beobachtung',
+          };
         }
       }
 
@@ -1872,6 +1976,10 @@ exports.processCashback = onMessagePublished(
         rejectReason,
         rejectDetail: rejectDetail ?? null,
         reviewReason,
+        // Worauf die Freigabe-Entscheidung beruhte, wenn die Sequenz-Bewertung
+        // allein nicht gereicht hätte (86cbet2w1). Null, solange das Gate nicht
+        // greifen musste — dann entschied die Bewertung wie bisher.
+        ocrFieldAgreement,
         ocr: buildOcrField(ocr, recon, escalation),
         merchant: merchantInfo
           ? {

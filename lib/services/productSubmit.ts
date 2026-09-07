@@ -13,8 +13,19 @@
  */
 
 import { auth, db, storage } from '@/lib/firebase';
-import { getActiveCashbackCampaigns, getCashbackConfig } from '@/lib/services/cashbackService';
-import { pickProductCampaign, type ActiveProductCampaign } from '@/lib/services/productCampaignPick';
+import {
+  getActiveCashbackCampaigns,
+  getActiveCashbackCampaignsStrict,
+  getCashbackConfig,
+  getCashbackConfigStrict,
+} from '@/lib/services/cashbackService';
+import {
+  pickProductCampaign,
+  resolveSubmitCampaign,
+  type ActiveProductCampaign,
+  type CampaignResolveState,
+  type SubmitCampaignResolution,
+} from '@/lib/services/productCampaignPick';
 import { getChosenProductCampaignId } from '@/lib/services/productCampaignChoice';
 import {
   addDoc,
@@ -126,7 +137,7 @@ export function productImagePath(
 
 // ─── Campaign gating ────────────────────────────────────────────────
 
-export type { ActiveProductCampaign } from './productCampaignPick';
+export type { ActiveProductCampaign, CampaignResolveState } from './productCampaignPick';
 
 /**
  * ALLE laufenden Produktfoto-Aktionen (Reihenfolge: frühestes Enddatum zuerst,
@@ -136,20 +147,61 @@ export type { ActiveProductCampaign } from './productCampaignPick';
  */
 export async function getActiveProductCampaigns(): Promise<ActiveProductCampaign[]> {
   try {
-    const cfg = await getCashbackConfig();
-    if (!cfg.campaignsEnabled) return [];
-    const all = await getActiveCashbackCampaigns();
-    return all
-      .filter((x) => (x.kind ?? 'receipt') === 'product_photos')
-      .map((c) => ({
-        campaignId: c.id,
-        rewardCents:
-          typeof c.cashbackPerBonCents === 'number' && c.cashbackPerBonCents > 0 ? c.cashbackPerBonCents : 0,
-        title: (typeof c.title === 'string' && c.title.trim()) || c.id,
-      }));
+    return await getActiveProductCampaignsStrict();
   } catch {
     return [];
   }
+}
+
+/**
+ * Wie {@link getActiveProductCampaigns}, WIRFT aber bei jedem Lesefehler.
+ *
+ * Nötig, weil die duldsame Variante „konnte nicht nachsehen" und „es läuft
+ * keine Aktion" auf dasselbe leere Array abbildet — und `campaignId: null` im
+ * Dokument bedeutet für den Server bis heute „nichts versprochen, nichts
+ * gebucht". Verschärfend: `DEFAULT_CASHBACK_CONFIG.campaignsEnabled` ist
+ * `false`, live steht `true` — ein Config-Lesefehler kehrt die Wahrheit also um
+ * und schaltet die Aktion für diese Sitzung stumm ab (86cbet2nw).
+ */
+export async function getActiveProductCampaignsStrict(): Promise<ActiveProductCampaign[]> {
+  const cfg = await getCashbackConfigStrict();
+  if (!cfg.campaignsEnabled) return [];
+  const all = await getActiveCashbackCampaignsStrict();
+  return all
+    .filter((x) => (x.kind ?? 'receipt') === 'product_photos')
+    .map((c) => ({
+      campaignId: c.id,
+      rewardCents:
+        typeof c.cashbackPerBonCents === 'number' && c.cashbackPerBonCents > 0 ? c.cashbackPerBonCents : 0,
+      title: (typeof c.title === 'string' && c.title.trim()) || c.id,
+    }));
+}
+
+/**
+ * Löst die Aktion im MOMENT DES ABSENDENS auf, statt den beim Öffnen des
+ * Wizards geladenen Stand zu verwenden.
+ *
+ * Zeitlich gedeckelt wie der GPS-Fix: ein Firestore-Read ohne Netz löst auf
+ * Android nicht ab (die App läuft dort bewusst ohne Disk-Cache), der
+ * Absende-Knopf wäre sonst offline tot. Läuft die Frist ab, gilt der beim
+ * Öffnen gemerkte Stand — und `state` hält fest, worauf die Entscheidung beruht.
+ */
+export async function resolveProductCampaignForSubmit(
+  gemerkt: ActiveProductCampaign | null | undefined,
+  timeoutMs = 4000,
+): Promise<SubmitCampaignResolution> {
+  let live: ActiveProductCampaign | null | undefined;
+  try {
+    const liste = await Promise.race([
+      getActiveProductCampaignsStrict(),
+      new Promise<undefined>((res) => setTimeout(() => res(undefined), timeoutMs)),
+    ]);
+    // undefined = Frist abgelaufen, [] = Server sagt „es läuft keine".
+    live = liste === undefined ? undefined : pickProductCampaign(liste, await getChosenProductCampaignId());
+  } catch {
+    live = undefined; // nicht nachsehen können ist nicht dasselbe wie „keine"
+  }
+  return resolveSubmitCampaign(live, gemerkt);
 }
 
 /**
@@ -241,6 +293,8 @@ export interface ProductSubmissionInput {
   /** Active product-photo campaign this dataset counts toward (null =
    *  collected without cashback). Server is authoritative for the reward. */
   campaignId?: string | null;
+  /** Worauf `campaignId` beruht — siehe CampaignResolveState. Fehlt bei Altaufträgen. */
+  campaignResolve?: CampaignResolveState | null;
   /** step → storage path */
   images: Partial<Record<ProductPhotoStep, string>>;
   /**
@@ -393,6 +447,7 @@ export async function submitProduct(
     productName: input.productName ?? null,
     ean: input.ean ?? null,
     campaignId: input.campaignId ?? null,
+    ...(input.campaignResolve ? { campaignResolve: input.campaignResolve } : {}),
     images: input.images,
     stepCount: Object.keys(input.images).length,
     status: 'pending',

@@ -51,6 +51,7 @@ import { useAuth } from '@/lib/contexts/AuthContext';
 import {
   PRODUCT_PHOTO_STEPS,
   getActiveProductCampaign,
+  resolveProductCampaignForSubmit,
   newImageBatchId,
   newSessionId,
   sanitizeForFilename,
@@ -113,6 +114,12 @@ export default function ProductWizardScreen() {
   const [photos, setPhotos] = useState<Partial<Record<ProductPhotoStep, string>>>({});
   /** Wann das erste Foto dieser Einreichung entstand (siehe onCaptured). */
   const firstCaptureAtRef = useRef<number | null>(null);
+  // Sperre gegen den Doppeltipp: Ref, damit sie sofort greift (State wirkt erst
+  // nach dem nächsten Render), plus ein State für den sichtbaren Zustand am
+  // Knopf — ein stummer, sekundenlang wirkungsloser Knopf lädt zum zweiten
+  // Tippen geradezu ein.
+  const submitLaeuftRef = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
   /** Der im `place`-Schritt bestätigte Ort — gilt für die ganze Sitzung. */
   const [confirmedPlace, setConfirmedPlace] = useState<ConfirmedPlace | null>(null);
   // Submit-Gate (Orts-Audit 05.09.2026): scheitert der stille GPS-Fix beim
@@ -489,6 +496,15 @@ export default function ProductWizardScreen() {
   // ─── Submit ───────────────────────────────────────────────────────
   const doSubmit = useCallback(async () => {
     if (!user?.uid || !allCaptured) return;
+    // Wiedereintritts-Schutz: zwischen Tippen und Einreihen liegen bis zu vier
+    // Sekunden (Standort + Aktion), in denen der Knopf weiter reagiert. Ein
+    // zweiter Tipp erzeugte sonst einen ZWEITEN Auftrag mit denselben Fotos —
+    // also zwei Einreichungen, zwei Freigaben, zwei Buchungen. Ref statt State,
+    // damit die Sperre sofort greift und nicht erst nach dem nächsten Render.
+    if (submitLaeuftRef.current) return;
+    submitLaeuftRef.current = true;
+    setSubmitting(true);
+    try {
     // Hand the captured set to the background upload queue. Enqueue is
     // near-instant (copies images to a persistent dir + writes the queue,
     // no network), so we never block on a foreground "uploading" screen.
@@ -515,10 +531,19 @@ export default function ProductWizardScreen() {
     // läuft erst, wenn die Warteschlange flusht — unter Umständen Tage
     // später und an einem anderen Ort. Blockiert nie länger als ein paar
     // Sekunden und wirft nie.
-    const capture = await erfasseCaptureContext({
-      capturedAt: firstCaptureAtRef.current ?? Date.now(),
-      confirmedPlace,
-    });
+    // Standort UND Aktion parallel: beide sind zeitlich gedeckelt, nacheinander
+    // würde die Wartezeit sich verdoppeln. Die Aktion wird bewusst JETZT frisch
+    // aufgelöst statt beim Öffnen des Wizards — ein einziger fehlgeschlagener
+    // Versuch beim Mounten vergiftete sonst die ganze Sitzung, weil „konnte
+    // nicht nachsehen" von „es läuft keine Aktion" nicht zu unterscheiden war
+    // (86cbet2nw: 58 unvergütete Einreichungen aus Juli und August).
+    const [capture, aktion] = await Promise.all([
+      erfasseCaptureContext({
+        capturedAt: firstCaptureAtRef.current ?? Date.now(),
+        confirmedPlace,
+      }),
+      resolveProductCampaignForSubmit(campaign),
+    ]);
 
     // Kein Ort auf beiden Wegen → einmal nachfragen, Fotos bleiben erhalten.
     // Nach der Ortsangabe reicht der Effekt unten automatisch ein.
@@ -543,7 +568,8 @@ export default function ProductWizardScreen() {
         marketLand,
         productName: productName.trim() || null,
         ean: eanCode,
-        campaignId: campaign?.campaignId ?? null,
+        campaignId: aktion.campaign?.campaignId ?? null,
+        campaignResolve: aktion.state,
         steps,
         capture,
         clientVersion: clientVersion(),
@@ -598,12 +624,19 @@ export default function ProductWizardScreen() {
         },
       },
     ]);
+    } finally {
+      // Läuft auf JEDEM Weg hier heraus — auch beim Rückweg über den
+      // Orts-Schritt, der doSubmit gleich erneut aufruft. Ohne das bliebe der
+      // Knopf danach für immer gesperrt.
+      submitLaeuftRef.current = false;
+      setSubmitting(false);
+    }
     // `confirmedPlace` MUSS in den Abhängigkeiten stehen: ohne ihn hielte
     // doSubmit die Closure eines früheren Renders fest und schriebe den
     // Ort, der beim letzten Deps-Wechsel galt — bei einem korrigierten Ort
     // also den alten. Genau diese Klasse von Fehler ist unsichtbar, weil
     // das Feld gefüllt aussieht.
-  }, [user?.uid, allCaptured, photos, sessionId, productIndex, marketId, marketName, marketLand, productName, eanCode, campaign?.campaignId, confirmedPlace]);
+  }, [user?.uid, allCaptured, photos, sessionId, productIndex, marketId, marketName, marketLand, productName, eanCode, campaign, confirmedPlace]);
 
   // Orts-Schritt aus dem Submit-Gate abgeschlossen → Einreichung fortsetzen.
   useEffect(() => {
@@ -1045,9 +1078,27 @@ export default function ProductWizardScreen() {
           </View>
         </ScrollView>
         <View style={[styles.footer, { paddingBottom: insets.bottom + 12, backgroundColor: theme.bg, borderColor: theme.border }]}>
-          <Pressable onPress={doSubmit} disabled={!allCaptured} style={[styles.cta, { backgroundColor: allCaptured ? PURPLE : theme.borderStrong ?? '#ccc', flex: 1 }]}>
-            <MaterialCommunityIcons name="cloud-upload-outline" size={18} color="#fff" />
-            <Text style={styles.ctaText}>{allCaptured ? 'Produkt einreichen' : `Noch ${PRODUCT_PHOTO_STEPS.length - capturedCount}`}</Text>
+          {/* Zwischen Tippen und Einreihen liegen bis zu vier Sekunden für
+              Standort und Aktion. Ohne sichtbaren Zustand wirkt der Knopf tot
+              und wird ein zweites Mal getippt — das erzeugte bis dahin eine
+              zweite Einreichung mit denselben Fotos. */}
+          <Pressable
+            onPress={doSubmit}
+            disabled={!allCaptured || submitting}
+            style={[styles.cta, { backgroundColor: allCaptured && !submitting ? PURPLE : theme.borderStrong ?? '#ccc', flex: 1 }]}
+          >
+            {submitting ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <MaterialCommunityIcons name="cloud-upload-outline" size={18} color="#fff" />
+            )}
+            <Text style={styles.ctaText}>
+              {submitting
+                ? 'Wird eingereicht …'
+                : allCaptured
+                  ? 'Produkt einreichen'
+                  : `Noch ${PRODUCT_PHOTO_STEPS.length - capturedCount}`}
+            </Text>
           </Pressable>
         </View>
       </View>

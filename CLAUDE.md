@@ -2759,6 +2759,64 @@ Fehlt `targeting` (oder ist leer), gilt die Aktion überall — Bestandskampagne
   Anschrift einreicht, hat nichts falsch gemacht; `onUnknown:'deny'` ist die
   bewusste Ausnahme für Aktionen, die ein Gebiet strikt einhalten müssen.
 
+## Welcher Ort gilt? — Rangfolge, an den eigenen Daten gemessen (07.09.2026)
+
+Frage des Users: „Ort: GPS — was bringt mir das? Welchen Ort nehmen wir jetzt?"
+Antwort als Rangfolge, jede Stufe mit Messwert. Umgesetzt in
+`cloud-functions/review-console/src/ort.js`; die Zahlen stammen aus 1.613
+Produktfoto-Einreichungen und 6.478 Bons.
+
+| Rang | Quelle | Feld | Verfügbar | Genauigkeit |
+|---|---|---|---|---|
+| 1 | **Gerätestandort zur Aufnahme** | `capture.gps` | 458 Fotos, 0 Bons | 246× < 20 m, 433 von 458 < 100 m |
+| 2 | **Filialadresse vom Kassenbon** | `store` (Bons), `priceReceipt` (Fotos) | 5.419 Bons, 286 Fotos | Median 2,0 km, p90 7,8 km |
+| 3 | **Angabe des Nutzers** | `capture.confirmedPlace.city` | 132 Fotos | stadtgenau, meint oft den Wohnort |
+| — | **IP-Ortung** | `journeyLocation` | 1.397 Fotos, 6.387 Bons | **als Ort verworfen** |
+
+Begründungen, die man nicht neu diskutieren muss:
+
+- **Rang 2 vor Rang 3**, obwohl die Nutzerangabe „direkter" wirkt: bei 25
+  Einreichungen mit beidem stimmten nur 9 überein, und die Abweichungen sind
+  Wohnort gegen Einkaufsort (Kotzenbüll/Tönning) oder Schreibweisen
+  (Nettersheim/Nettersheim-Zingsheim). Der Bon sagt, wo gekauft wurde; die
+  Angabe sagt, wo jemand wohnt.
+- **Die IP-Ortung ist als Ort unbrauchbar** — gegen 440 echte GPS-Fixes
+  gemessen: Median 59,8 km, p90 293 km, Extremwert 9.628 km. Sie erscheint auf
+  keiner Karte und in keiner Ortsangabe. Für „welches Land" bleibt sie gültig
+  (siehe den älteren Abschnitt zur IP-Ortung).
+- **Der Marktname ist kein Ort.** Er steht an 1.613 von 1.613 Einreichungen und
+  benennt die Kette, nicht die Filiale.
+- **Die Genauigkeit wird immer mit angezeigt** („± 16 m", „± 2 km"), und
+  widersprechende Quellen stehen als Zusatz daneben — eine Ortsangabe ohne
+  Angabe ihrer Herkunft ist beim Prüfen wertlos.
+
+**Postleitzahl → Koordinate:** `cloud-functions/review-console/data/plz.json`,
+13.314 Einträge für DE und AT aus GeoNames (Herkunft und Neuerzeugung stehen in
+`data/QUELLE.md`). Deckt 5.383 von 5.419 real vorkommenden Bon-Postleitzahlen ab.
+Ergänzt wird sie zur Laufzeit aus den **eigenen Bon-Adressen**: das öffentliche
+Verzeichnis führt nur Hauptgemeinden, kennt also weder Schleusingen noch
+Kotzenbüll — die Kassenbons kennen beide (`ortsverzeichnisAusBons`).
+
+**Kein Präfix-Abgleich bei Ortsnamen.** Der Versuch kostete beim Bauen zwei
+Fehltreffer: „Kotzenbüll" (Schleswig-Holstein) landete auf „Kotzen"
+(Brandenburg, 300 km), „Neustadt" auf einem beliebigen von zwanzig. Ein falscher
+Punkt auf einer Karte, nach der jemand entscheidet, ist schlimmer als gar keiner
+— lieber ein Fall ohne Ort als einer am falschen Ort.
+
+## Karte — md-receipt-admin.web.app/karte.html (seit 07.09.2026)
+
+Alle Produktfotos und Bons als Punkte, Filter nach Art, Zeitraum, Ortsquelle,
+Markt und Zustand; drei Darstellungen (gruppiert, einzeln, Dichte je Ort).
+Backend: Callable `reviewMapPoints` (review-console) liefert 6.066 Punkte in
+rund 4 Sekunden als **Array-Tupel statt Objekten** — als Objektliste wären es
+900 KB, so sind es 684 KB. Gefiltert wird im Browser: einmal laden, danach ist
+jeder Filterwechsel sofort und kostet keinen Firestore-Read.
+
+Ohne verwertbaren Ort und deshalb nicht auf der Karte: 935 von 1.614 Fotos und
+1.091 von 6.478 Bons. Das sind Altfälle (Fotos vor der Ortspflicht, Bons vor
+OCR v1.4 ohne Filialadresse) — die Zahl steht in der Seitenleiste, damit
+niemand die Karte für vollständig hält.
+
 ## Review-Konsole (Web-Back-Office) — md-receipt-admin.web.app (seit 05.09.2026)
 
 Produktfotos (`crowd_uploads`) und Bons (`receipts`) sichten, filtern, suchen,

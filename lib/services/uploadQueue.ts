@@ -27,7 +27,12 @@ import { AppState } from 'react-native';
 
 import type { CaptureContext, ClientVersion } from './captureContext';
 import { isOnline, refreshNetwork, subscribeNetwork } from './network';
-import { submitProduct, uploadProductImage, type ProductPhotoStep } from './productSubmit';
+import {
+  submitProduct,
+  uploadProductImage,
+  type CampaignResolveState,
+  type ProductPhotoStep,
+} from './productSubmit';
 import { showInfoToast } from './ui/toast';
 
 const STORAGE_KEY = 'product_upload_queue_v1';
@@ -59,6 +64,8 @@ export interface UploadJob {
   productName: string | null;
   ean: string | null;
   campaignId: string | null;
+  /** Worauf `campaignId` beruht (86cbet2nw). Fehlt bei Aufträgen aus alten App-Ständen. */
+  campaignResolve?: CampaignResolveState | null;
   steps: UploadJobStep[];
   status: UploadJobStatus;
   /** 0..100, overall across all steps of this job. */
@@ -90,6 +97,8 @@ export interface EnqueueInput {
   productName: string | null;
   ean: string | null;
   campaignId: string | null;
+  /** Worauf `campaignId` beruht (86cbet2nw). Fehlt bei Aufträgen aus alten App-Ständen. */
+  campaignResolve?: CampaignResolveState | null;
   steps: { key: ProductPhotoStep; uri: string; fileName?: string }[];
   capture?: CaptureContext | null;
   clientVersion?: ClientVersion | null;
@@ -240,6 +249,7 @@ export async function enqueueProductUpload(input: EnqueueInput): Promise<string>
     productName: input.productName,
     ean: input.ean,
     campaignId: input.campaignId,
+    campaignResolve: input.campaignResolve ?? null,
     steps,
     status: 'queued',
     progress: 0,
@@ -364,6 +374,7 @@ async function runJob(job: UploadJob) {
       productName: job.productName,
       ean: job.ean,
       campaignId: job.campaignId,
+      campaignResolve: job.campaignResolve ?? null,
       images: uploaded,
       capture: job.capture ?? null,
       clientVersion: job.clientVersion ?? null,
