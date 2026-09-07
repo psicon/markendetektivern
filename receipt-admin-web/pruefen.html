@@ -232,12 +232,14 @@
         not_in_review: 'dieser Bon steht nicht mehr in der Prüfung — vermutlich hat ihn jemand anderes gerade entschieden',
         campaign_missing: 'die Aktion zu diesem Bon existiert nicht mehr',
         no_cashback_computed: 'für diesen Bon wurde kein Betrag berechnet',
+        not_found: 'der Bon wurde nicht gefunden',
         receipt_missing: 'der Bon wurde nicht gefunden',
         forbidden: 'der Zugang zum Resolver wurde abgelehnt',
       };
 
       const FOLGE_DE = {
         keine_aktion: 'zu dieser Einreichung gehört keine Aktion',
+        ort_fehlt: 'ohne Ortsangabe zahlt die Aktion nicht — der Trigger prüft das vor der Buchung',
         nutzer_am_limit: 'dieser Nutzer hat das Maximum der Aktion erreicht',
         budget_leer: 'das Budget der Aktion ist aufgebraucht',
         kein_betrag: 'die Aktion zahlt keinen Betrag je Einreichung',
@@ -247,6 +249,7 @@
         daily_cap_reached: 'für diesen Tag ist bereits ein Bon vergütet',
         weekly_cap_reached: 'das Wochenlimit dieses Nutzers ist erreicht',
         per_user_cap_reached: 'dieser Nutzer hat das Maximum der Aktion erreicht',
+        monthly_cap_reached: 'das Monatslimit dieses Nutzers ist erreicht',
         campaign_budget_exhausted: 'das Budget der Aktion ist aufgebraucht',
       };
       const PREISBILD_DE = {
@@ -292,9 +295,35 @@
       const S = { type: 'photos', queue: [], idx: 0, cache: new Map(), done: new Set(), busy: false, counts: {}, mode: null, zeigt: null, gesucht: '' };
 
       const cur = () => S.queue[S.idx] || null;
-      const setBusy = (b) => { S.busy = b; ['bOk', 'bNo', 'bNoReward', 'bSkip'].forEach((id) => { $(id).disabled = b; }); };
+      // Nach dem Entsperren nur dann wieder freigeben, wenn ein Fall steht.
+      const setBusy = (b) => {
+        S.busy = b;
+        const aus = b || !S.zeigt;
+        ['bOk', 'bNo', 'bNoReward', 'bSkip'].forEach((id) => { $(id).disabled = aus; });
+      };
 
       // ── Warteschlange ───────────────────────────────────────
+      /**
+       * Entscheidungsleiste stilllegen — Zustand UND Bedienelemente zusammen.
+       *
+       * Die Sichtbarkeit allein reichte nicht: `$('bOk').click()` läuft auch
+       * auf einem unsichtbaren Knopf, und der Tastatur-Zweig ruft genau das.
+       * Nach dem Öffnen eines Falls über die Karte war die Leiste zwar weg,
+       * aber F gab den ersten Fall der Warteschlange frei — einen, den niemand
+       * gesehen hatte, samt Buchung. Darum eine Funktion, die beides tut, und
+       * jeder Weg, der die Bühne wechselt, ruft sie zuerst.
+       */
+      function leisteAus() {
+        S.zeigt = null;
+        $('bar').style.visibility = 'hidden';
+        ['bOk', 'bNo', 'bNoReward', 'bSkip'].forEach((id) => { $(id).disabled = true; });
+        hideReasons();
+      }
+      function leisteAn() {
+        $('bar').style.visibility = 'visible';
+        ['bOk', 'bNo', 'bNoReward', 'bSkip'].forEach((id) => { $(id).disabled = false; });
+      }
+
       /** Ein Fehler ist ein Zustand mit Ausweg, kein ewiges „Lade …". */
       function zeigeFehler(text, nochmal) {
         $('stage').innerHTML = `<div class="empty">
@@ -302,10 +331,11 @@
           <button id="nochmal" class="big" style="border-color:var(--acc);color:var(--acc)">Erneut versuchen</button>
         </div>`;
         $('nochmal').onclick = nochmal;
-        $('bar').style.visibility = 'hidden';
+        leisteAus();
       }
 
       async function loadQueue(keepIdx) {
+        leisteAus();
         $('stage').innerHTML = '<div class="empty">Lade …</div>';
         let r;
         try {
@@ -377,9 +407,8 @@
        */
       async function showCurrent() {
         const c = cur();
-        S.zeigt = null;
-        if (!c) { $('stage').innerHTML = '<div class="empty">Nichts offen 🎉</div>'; $('bar').style.visibility = 'hidden'; return; }
-        $('bar').style.visibility = 'hidden';
+        leisteAus();
+        if (!c) { $('stage').innerHTML = '<div class="empty">Nichts offen 🎉</div>'; return; }
         if (!S.cache.has(c.id)) {
           $('stage').innerHTML = '<div class="empty">Lade Fall …</div>';
           try {
@@ -393,7 +422,7 @@
         if (!fall) { zeigeFehler('Der Fall kam leer zurück.', () => { S.cache.delete(c.id); showCurrent(); }); return; }
         render(fall);
         S.zeigt = c.id;
-        $('bar').style.visibility = 'visible';
+        leisteAn();
         // Die nächsten drei still vorladen.
         const next = S.queue.slice(S.idx + 1, S.idx + 4).map((x) => x.id);
         if (next.length) fetchCases(next).catch(() => {});
@@ -453,10 +482,10 @@
         const items = (c.items || []).map((it) => `<div><span>${esc(it.raw || it.name || '')}</span><span>${euro(it.priceCents)}</span></div>`).join('');
         const sum = (c.items || []).reduce((a, it) => a + (it.priceCents || 0), 0);
         const grund = PRUEFGRUND_DE[r.reviewReason] || null;
-        // Die Farbe folgt dem RISIKO, nicht der Texterkennung: fast jeder Bon in
-        // der Prüfung trägt „Texterkennung unsicher" — färbt man den gelb, ist
-        // der ganze Bildschirm dauerhaft gelb und die Farbe sagt nichts mehr.
-        const ton = ['forensics_software', 'duplicate_content_self', 'duplicate_content_cross_user'].includes(r.reviewReason) ? 'locked' : 'hold';
+        // Das Urteil kommt vom Server (bonUrteil), damit Warteschlange und
+        // Fallkarte dasselbe sagen — vorher stand derselbe Bon links grün und
+        // rechts gelb, weil beide Seiten getrennt rechneten.
+        const ton = r.verdict === 'ok' ? 'ok' : r.verdict || 'hold';
         return `<div class="case">
           <div class="bon">${c.imageUrl ? `<img src="${c.imageUrl}" data-full="${c.fullUrl || c.imageUrl}" data-cap="Bon — klicken für Vollbild" alt="Bon">` : '<div class="empty">Bild nicht ladbar</div>'}</div>
           <div class="facts">
@@ -657,7 +686,13 @@
             '<span style="color:var(--warn);font-weight:700;font-size:12px;white-space:nowrap;align-self:center">endgültig ·</span>');
         }
       };
-      $('bNoReward').onclick = () => { if (S.mode) return hideReasons(); showReasons(NO_REWARD, (k) => decideReceipt('no_reward', k)); };
+      $('bNoReward').onclick = () => {
+        if (S.mode) return hideReasons();
+        showReasons(NO_REWARD, (k) => decideReceipt('no_reward', k));
+        // Genauso endgültig wie eine Ablehnung — der Resolver kennt keinen Weg zurück.
+        $('reasons').insertAdjacentHTML('afterbegin',
+          '<span style="color:var(--warn);font-weight:700;font-size:12px;white-space:nowrap;align-self:center">endgültig ·</span>');
+      };
       $('bSkip').onclick = () => { hideReasons(); if (S.idx < S.queue.length - 1) { S.idx++; showCurrent(); } };
 
       $('reasons').onclick = (e) => {
@@ -705,7 +740,8 @@
       $('light').onclick = () => $('light').classList.remove('on');
       document.querySelectorAll('.tab').forEach((t) => { t.onclick = () => {
         document.querySelectorAll('.tab').forEach((x) => x.classList.remove('on'));
-        t.classList.add('on'); S.type = t.dataset.type; S.done.clear(); S.cache.clear(); hideReasons();
+        t.classList.add('on'); S.type = t.dataset.type; S.done.clear(); S.cache.clear();
+        S.queue = []; S.idx = 0; leisteAus(); filterOptionen();
         $('fVerdict').classList.remove('hidden'); // gilt jetzt für beide Arten
         loadQueue();
       }; });
@@ -714,6 +750,12 @@
       // die gefilterte Liste stehen, obwohl das Feld leer aussieht.
       $('q').addEventListener('search', () => { if (!$('q').value.trim()) loadQueue(); });
       $('fVerdict').onchange = () => loadQueue();
+      /** „unvollständig" gibt es nur bei Fotos — bei Bons wäre die Option tot. */
+      function filterOptionen() {
+        const opt = [...$('fVerdict').options].find((o) => o.value === 'incomplete');
+        if (opt) opt.hidden = S.type !== 'photos';
+        if (S.type !== 'photos' && $('fVerdict').value === 'incomplete') $('fVerdict').value = 'all';
+      }
 
       /**
        * Ein Fall, der über die Karte aufgerufen wurde (`?id=…`).
@@ -725,6 +767,7 @@
        * den Fall einzeln laden und ohne Entscheidungsleiste zeigen.
        */
       async function oeffneEinzelfall(id) {
+        leisteAus();
         const treffer = S.queue.findIndex((x) => x.id === id);
         if (treffer >= 0) { S.idx = treffer; await showCurrent(); return; }
         $('stage').innerHTML = '<div class="empty">Lade Fall …</div>';
@@ -733,7 +776,7 @@
           const c = S.cache.get(id);
           if (!c) { zeigeFehler('Diesen Fall gibt es nicht (mehr).', () => loadQueue()); return; }
           render(c);
-          $('bar').style.visibility = 'hidden';
+          leisteAus();
           const zustand = c.row && c.row.status ? c.row.status : 'unbekannt';
           const wort = { approved: 'angenommen', rejected: 'abgelehnt', no_reward: 'angenommen, ohne Prämie', review: 'in Prüfung', pending: 'wartet' }[zustand] || zustand;
           $('stage').insertAdjacentHTML('afterbegin',

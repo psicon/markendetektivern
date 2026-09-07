@@ -2873,6 +2873,31 @@ freigeben — einzeln und Batch. Design: `docs/REVIEW_CONSOLE_DESIGN.md`.
   Callables dafür: `reviewQueue` (schlanke Liste + Vorprüfungs-Urteil je Zeile)
   und `reviewCases` (bis 6 Fälle komplett MIT fertigen Bild-URLs). Die nächsten
   drei Fälle werden immer vorgeladen, dadurch ist der Wechsel sofort.
+- **Keine Entscheidung über einen Fall, den man nicht sieht.** `S.zeigt` hält die
+  ID des Falls, der WIRKLICH gerendert ist; `decidePhoto`/`decideReceipt`
+  steigen aus, wenn sie nicht passt. Drei Wege führten vorher an dieser Regel
+  vorbei: die Entscheidungsleiste wurde vor dem Laden sichtbar geschaltet
+  (bei „Lade Fall …" war F scharf), `advance()` lief ohne `await` (zweimal F
+  entschied über den nächsten, ungesehenen Fall), und `keydown` prüfte keine
+  Modifikatoren (Cmd+F löste eine Freigabe aus). Bei jedem neuen Bedienelement
+  auf dem Geldpfad: erst der Zustand, dann die Sichtbarkeit.
+- **Der Bon-Resolver antwortet mit `creditedCents`, nicht `cents`** — und er
+  rechnet die Deckel beim Freigeben NEU. Ein Bon, der Tage in der Prüfung lag,
+  kommt mit `status: 'no_reward'` und 0 Cent zurück. Wer nur auf `ok: true`
+  schaut, meldet „Freigegeben ✓" für eine Freigabe ohne Geld — dieselbe Klasse
+  wie „144 freigegeben, 0 Cent". Immer den Betrag UND den Status auswerten.
+- **GeoNames führt Großkunden-Postleitzahlen mit dem FIRMENNAMEN im Ortsfeld.**
+  Ungefiltert wurde aus einem Gerätestandort „Finanzamt Köln-Porz, 51139" statt
+  „Köln" — bei 150 von 463 Standorten. `data/plz.json` markiert solche Einträge
+  (fünftes Feld = 1, 1.641 Stück); die Rückwärts-Suche überspringt sie, ihre
+  Koordinate bleibt für Bon-Adressen nutzbar. Beim Neuerzeugen der Tabelle das
+  Muster in `data/QUELLE.md` mitziehen — und KEIN `\b` ans Musterende setzen,
+  sonst rutscht „Universität" durch (ä ist in Python ein Wortzeichen).
+- **Warnschwellen an der Wirklichkeit messen.** Die Auffälligkeit „Standort zu
+  ungenau" stand zuerst bei einem Kilometer und erzeugte damit zehn von zwölf
+  Warnungen für Fälle, an denen nichts zu beanstanden war (bei 2 km stimmt der
+  Ortsname). Jetzt fünf Kilometer → zwei Warnungen, beide echt. Eine Warnung,
+  die zu oft kommt, wird überlesen.
 - **Zwei Fallen, die die Abnahme gefunden hat (07.09.2026):**
   (1) Ein Schalter für „Freigabe trotz Sperre", der den FALL ÜBERLEBT, legt nach
   dem ersten Fehlschlag die ganze Sitzung lahm — der Server verlangt zu `force`

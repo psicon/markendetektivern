@@ -147,6 +147,26 @@ async function loadByEans(eans) {
   return out;
 }
 
+/**
+ * Urteil eines Bons — EINE Stelle, damit Warteschlange und Fallkarte dasselbe
+ * sagen. Vorher berechnete die Liste hier und die Karte im Browser noch einmal
+ * selbst; derselbe Bon stand links grün und rechts gelb.
+ *
+ * Die Zuordnung folgt dem RISIKO, nicht der Texterkennung: `ocr_confidence_low`
+ * trägt fast jeder Bon in der Prüfung — färbte man den, wäre alles gelb und die
+ * Farbe sagte nichts mehr.
+ */
+const BON_URTEIL = {
+  forensics_software: 'locked',
+  duplicate_content_self: 'locked',
+  duplicate_content_cross_user: 'locked',
+  bon_date_future: 'hold',
+  ocr_unavailable: 'hold',
+  ocr_confidence_none: 'hold',
+  mensch_hat_entschieden: 'hold',
+};
+const bonUrteil = (row) => BON_URTEIL[row.reviewReason] || (row.reconOk === false ? 'hold' : 'ok');
+
 /** Vorprüfung eines Kandidaten gegen die Einreichungen derselben EAN. */
 function precheckOf(row, sameEanRows) {
   const completeness = completenessCheck({ images: row.images, ean: row.ean, productName: row.productName, productNameOcr: row.productNameOcr }, REQUIRED_STEPS);
@@ -606,22 +626,11 @@ exports.reviewQueue = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
 
   if (type === 'receipts') {
     const snap = await db.collection('receipts').where('status', '==', 'review').select(...RECEIPT_LIST_FIELDS).get();
-    // Auch Bons brauchen ein Urteil in der Warteschlange — ohne das war dort
-    // jeder Punkt grün, egal ob Doppel-Verdacht oder Bildbearbeitung.
-    const BON_URTEIL = {
-      forensics_software: 'locked',
-      duplicate_content_self: 'locked',
-      duplicate_content_cross_user: 'locked',
-      bon_date_future: 'hold',
-      ocr_unavailable: 'hold',
-      ocr_confidence_none: 'hold',
-      mensch_hat_entschieden: 'hold',
-    };
     let rows = snap.docs.map(receiptRowOf).map(({ items, ...r }) => ({
       id: r.id, userId: r.userId, merchantName: r.merchantName, store: r.store, bonDate: r.bonDate,
       bonTotalCents: r.bonTotalCents, eligibleItemCount: r.eligibleItemCount, reviewReason: r.reviewReason,
       ocrConfidence: r.ocrConfidence, reconOk: r.reconOk, createdAt: r.createdAt,
-      verdict: BON_URTEIL[r.reviewReason] || (r.reconOk === false ? 'hold' : 'ok'),
+      verdict: bonUrteil(r),
     }));
     if (q) rows = rows.filter((r) => [r.id, r.userId, r.merchantName, r.store && r.store.city, r.bonDate].some((v) => v && String(v).toLowerCase().includes(q)));
     if (p.verdict && p.verdict !== 'all') rows = rows.filter((r) => r.verdict === p.verdict);
@@ -716,7 +725,7 @@ exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
           : [],
       ]);
       return {
-        id: s.id, kind: 'receipt', row: { ...row, items: undefined },
+        id: s.id, kind: 'receipt', row: { ...row, items: undefined, verdict: bonUrteil(row) },
         ort: ortVonBon(x),
         nutzer: bonNutzer.get(row.userId) || null,
         // Der Betrag steht bereits am Bon — die Pipeline hat ihn mit allen
@@ -796,7 +805,15 @@ exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
     const aktion = row.campaignId ? aktionInfo.get(row.campaignId) || null : null;
     // Was eine Freigabe auslöst — in Cent, mit Grund, wenn es nichts wird.
     let folge = { buchtCent: 0, grund: 'keine_aktion' };
-    if (aktion) {
+    // Der Vergütungs-Trigger prüft VOR der Buchung auch die Ortsangabe
+    // (crowd-upload-reward/src/locationGate.js). Ohne diesen Hinweis verspräche
+    // die Vorschau „bucht 0,16 €" für eine Einreichung, bei der nie etwas
+    // fließt — dieselbe Klasse wie ein still ausbleibender Betrag, nur vorher.
+    const ortFehlt = !(row.capture && (row.capture.confirmedPlace || row.capture.hasGps))
+      && !(row.priceReceipt && row.priceReceipt.complete);
+    if (ortFehlt) {
+      folge = { buchtCent: 0, grund: 'ort_fehlt' };
+    } else if (aktion) {
       const bisher = (nutzer?.proAktion || {})[row.campaignId] || 0;
       const rest = aktion.maxProNutzerCent > 0 ? Math.max(0, aktion.maxProNutzerCent - bisher) : Infinity;
       const zahlbar = Math.min(aktion.proEinreichungCent, rest, aktion.restbudgetCent);

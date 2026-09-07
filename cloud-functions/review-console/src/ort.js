@@ -87,7 +87,7 @@ let ortIndex = null;
 function bauOrtIndex() {
   ortIndex = new Map();
   for (const [schluessel, e] of Object.entries(PLZ)) {
-    if (e[4] === 1) continue; // ein Firmenname ist kein Ortsname
+    if (e[4] === 1 || istFirmenname(e[2])) continue; // ein Firmenname ist kein Ortsname
     const land = schluessel.slice(0, 2);
     const k = `${land}|${normOrt(e[2])}`;
     if (!ortIndex.has(k)) ortIndex.set(k, []);
@@ -234,8 +234,12 @@ function auffaelligkeiten({ lat, lon, genauigkeitM, erwartetesLand, quelle }) {
       }
     }
   }
-  if (quelle === 'geraet' && Number.isFinite(genauigkeitM) && genauigkeitM > 1000) {
-    raus.push({ art: 'ungenau', text: `Der Standort ist nur auf ${Math.round(genauigkeitM / 1000)} km genau — als Ortsangabe kaum brauchbar` });
+  // Erst ab fünf Kilometern ist die Stadt nicht mehr sicher — bei ein bis zwei
+  // Kilometern steht der Ortsname korrekt da. Die Schwelle lag zuerst bei einem
+  // Kilometer und erzeugte damit zehn von zwölf Warnungen für Fälle, an denen
+  // nichts zu beanstanden war; eine Warnung, die zu oft kommt, wird überlesen.
+  if (quelle === 'geraet' && Number.isFinite(genauigkeitM) && genauigkeitM > 5000) {
+    raus.push({ art: 'ungenau', text: `Der Standort ist nur auf ${Math.round(genauigkeitM / 1000)} km genau — der Ort darüber ist geraten` });
   }
   return raus;
 }
@@ -423,6 +427,18 @@ function weitereQuellen(doc, ausser) {
  * GPS-Punkt einen lesbaren Namen, ohne einen fremden Dienst zu fragen.
  * Der Index wird beim ersten Aufruf gebaut (13.314 Einträge, einmalig ~20 ms).
  */
+/**
+ * Firmen- und Behördennamen, die GeoNames im Ortsfeld führt.
+ *
+ * Die Markierung in `plz.json` (fünftes Feld) fängt die eindeutigen Fälle. Sie
+ * ist aber Datenpflege und veraltet mit der nächsten Tabelle — deshalb steht
+ * dieselbe Regel zusätzlich hier im Code. Gemessen: über die Markierung allein
+ * blieben rund 490 Einträge mit Namen wie „Kassenärztliche Vereinigung" oder
+ * „Deutsche Rentenversicherung" als Ortsnamen stehen.
+ */
+const FIRMENNAME = /(GmbH|\bAG\b|\bKG\b|mbH|\bSE\b|OHG|e\.\s?V|\bCo\b|Stiftung|Finanzamt|Postfach|Versicherung|Rentenversicherung|\bBank\b|Sparkasse|Verlag|Zentrale|Holding|Institut|Universit|Hochschul|Klinik|Amtsgericht|Bundesamt|Ministerium|Vereinigung|Kammer|Verband|Genossenschaft|Gesellschaft|Krankenkasse|Versand|Rundfunk|Zeitung)/i;
+const istFirmenname = (name) => FIRMENNAME.test(String(name || ''));
+
 let raster = null;
 function bauRaster() {
   raster = new Map();

@@ -122,8 +122,8 @@
               <button data-f="quelle" data-v="2">Angabe</button>
             </div>
             <div class="hint">
-              <b>Gerät</b> — Standort zur Aufnahme, meist auf 20 m genau.<br />
-              <b>Bon</b> — Filialadresse vom Kassenzettel, im Mittel 2 km genau.<br />
+              <b>Gerät</b> — Standort zur Aufnahme, 452 von 464 besser als 200 m.<br />
+              <b>Bon</b> — Postleitzahl der Filiale, im Median 2 km genau.<br />
               <b>Angabe</b> — vom Nutzer genannter Ort, stadtgenau.<br />
               Die IP-Ortung erscheint hier bewusst nicht: sie liegt im Mittel
               60 km daneben und taugt nur für die Frage, welches Land.
@@ -182,7 +182,9 @@
       // Punkt = [typ, lat, lon, zeit, quelle, markt, land, plz, ort, status, id]
       const T = 0, LAT = 1, LON = 2, ZEIT = 3, QUELLE = 4, MARKT = 5, PLZ = 7, ORT = 8, STATUS = 9, ID = 10, AUFF = 11;
       const QUELLE_DE = ['Gerätestandort', 'Filialadresse vom Bon', 'Angabe des Nutzers'];
-      const GENAU_DE = ['meist auf 20 m genau', 'im Mittel 2 km genau', 'stadtgenau'];
+      // Gemessen an den eigenen Daten: 452 von 464 Gerätestandorten sind besser
+      // als 200 m; die Postleitzahl trifft die Filiale im Median auf 2,0 km.
+      const GENAU_DE = ['meist besser als 200 m', 'im Median 2 km genau', 'stadtgenau'];
 
       const S = { punkte: [], filter: { typ: 'alle', zeit: 'alle', quelle: 'alle', modus: 'cluster', markt: 'alle', status: 'alle', auff: 'alle' } };
       let karte, ebene;
@@ -290,7 +292,7 @@
         $('ohneOrt').innerHTML =
           `<b>Nicht auf der Karte:</b> ${(o.fotos ?? 0)} von ${(g.fotos ?? 0)} Fotos, ` +
           `${(o.bons ?? 0)} von ${(g.bons ?? 0)} Bons.` +
-          (aktuell ? `<br><b style="color:var(--warn)">${aktuellOhne} davon sind aktuelle Fotos</b> (${anteil} % der Einreichungen seit dem 15.08.) — bei ihnen fehlt Standort und Kassenbon, das ist kein Altbestand.` : '') +
+          (aktuell ? `<br><b style="color:var(--warn)">${aktuellOhne} davon sind aktuelle Fotos</b> (${anteil} % der Einreichungen seit dem 15.08., seit der Ortsschätzer läuft) — also kein reiner Altbestand.` : '') +
           (zeilen.length ? `<br>Im Einzelnen: ${zeilen.join(', ')}.` : '') +
           `<br>Alle diese Einreichungen sind gültig; es fehlt nur die Angabe für einen Punkt.`;
 
