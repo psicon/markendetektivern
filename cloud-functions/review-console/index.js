@@ -249,7 +249,10 @@ exports.reviewGetUpload = onCall({ region: REGION }, async (req) => {
 
 // ─── Entscheidungen (einzeln + Batch) ───────────────────────────────
 
-const DECISIONS = new Set(['approve', 'reject', 'hold', 'unhold']);
+// 'reopen' holt eine ABGELEHNTE Einreichung zurück in die Warteschlange —
+// die Rücknahme im Prüf-Werkzeug. Bewusst nur aus 'rejected': eine Freigabe
+// hat bereits gebucht, die nimmt man nicht per Klick zurück.
+const DECISIONS = new Set(['approve', 'reject', 'hold', 'unhold', 'reopen']);
 
 exports.reviewDecideUploads = onCall({ region: REGION, timeoutSeconds: 120 }, async (req) => {
   const adminUid = assertAdmin(req);
@@ -263,6 +266,7 @@ exports.reviewDecideUploads = onCall({ region: REGION, timeoutSeconds: 120 }, as
   if (ids.length > MAX_BATCH) throw new HttpsError('invalid-argument', `Maximal ${MAX_BATCH} IDs pro Aufruf.`);
   if (!DECISIONS.has(decision)) throw new HttpsError('invalid-argument', 'decision muss approve|reject|hold|unhold sein.');
   if ((decision === 'reject' || decision === 'hold') && !reason) throw new HttpsError('invalid-argument', 'reason fehlt.');
+  if (decision === 'reopen' && ids.length > 20) throw new HttpsError('invalid-argument', 'Rücknahme nur für einzelne Einreichungen.');
   if (decision === 'approve' && force && !note) throw new HttpsError('invalid-argument', 'force braucht eine Notiz.');
 
   // Chronologisch verarbeiten (älteste zuerst): sonst sieht bei zwei offenen
@@ -327,6 +331,21 @@ exports.reviewDecideUploads = onCall({ region: REGION, timeoutSeconds: 120 }, as
           if (row.status !== 'pending') return { id, outcome: 'skipped', reason: `status_${row.status}` };
           tx.update(ref, { holdReasons: [...new Set([...(row.holdReasons || []), reason])], reviewNote: note || noteFor(reason, { note }), reviewedAt: ts, reviewedBy: adminUid, updatedAt: ts });
           return { id, outcome: 'held', reason };
+        }
+
+        if (decision === 'reopen') {
+          if (row.status !== 'rejected') return { id, outcome: 'skipped', reason: `status_${row.status}` };
+          tx.update(ref, {
+            status: 'pending',
+            rejectReason: FieldValue.delete(),
+            holdReasons: FieldValue.delete(),
+            reviewNote: FieldValue.delete(),
+            reviewedAt: FieldValue.delete(),
+            updatedAt: ts,
+            reviewedBy: adminUid,
+            review: { reopenedBy: adminUid, at: ts },
+          });
+          return { id, outcome: 'reopened' };
         }
 
         // unhold
@@ -506,4 +525,165 @@ exports.reviewDecideReceipt = onCall({ region: REGION, timeoutSeconds: 90, secre
   }
   await db.collection('receipts').doc(receiptId).set({ reviewConsole: { decidedBy: adminUid, decision, reason: reason || null, at: FieldValue.serverTimestamp() } }, { merge: true }).catch(() => {});
   return { ok: true, http: res.status, ...body };
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Prüf-Werkzeug (Fokus-Modus) — ein Fall groß, Bilder sofort sichtbar
+// ═══════════════════════════════════════════════════════════════════
+//
+// Warum eigene Callables statt der Listen oben: Prüfen heißt Bilder ansehen,
+// nicht Tabellen lesen. Der Prüfer braucht EINEN Fall vollständig und den
+// nächsten schon geladen — nicht 200 Zeilen mit Platzhaltern.
+//
+// Bild-URLs entstehen HIER, nicht im Browser. Firebase-Storage-Objekte tragen
+// in ihren Metadaten ein Download-Token; daraus lässt sich die öffentliche
+// URL direkt bauen. Das spart pro Bild einen SDK-Aufruf mit Rules-Prüfung im
+// Client — bei sieben Fotos je Fall war genau das der Grund, warum die alte
+// Ansicht langsam war und Bilder oft gar nicht erschienen.
+
+const REQUIRED_STEPS_ORDER = ['front', 'rueckseite', 'hersteller', 'ean', 'naehrwerte', 'zutaten', 'preis'];
+const STEP_LABEL_DE = {
+  front: 'Vorderseite', rueckseite: 'Rückseite', hersteller: 'Hersteller',
+  ean: 'Barcode', naehrwerte: 'Nährwerte', zutaten: 'Zutaten', preis: 'Preis',
+};
+let _bucket = null;
+function storageBucket() {
+  if (!_bucket) _bucket = admin.storage().bucket('markendetektive-895f7.appspot.com');
+  return _bucket;
+}
+
+/** Storage-Pfad → direkt ladbare URL (Download-Token aus den Metadaten). */
+async function imageUrl(path) {
+  if (!path) return null;
+  try {
+    const file = storageBucket().file(path);
+    const [md] = await file.getMetadata();
+    const token = md.metadata && md.metadata.firebaseStorageDownloadTokens;
+    if (!token) return null;
+    const t = String(token).split(',')[0];
+    return `https://firebasestorage.googleapis.com/v0/b/${storageBucket().name}/o/${encodeURIComponent(path)}?alt=media&token=${t}`;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Warteschlange: alles, was zu entscheiden ist — schlank, für die Seitenleiste. */
+/**
+ * Verkleinerte Ansicht über die installierte Bild-Extension (invertase/
+ * image-processing-api). Die Originale sind ~5 MB — sieben davon je Fall
+ * wären 34 MB und genau der Grund, warum die alte Konsole unbenutzbar war.
+ * Die Extension liefert ~90 KB und setzt ein Jahr Cache-Control, der zweite
+ * Abruf kommt aus dem Browser-Cache. Das Original bleibt für die Lupe.
+ */
+const IMG_API = 'https://us-central1-markendetektive-895f7.cloudfunctions.net/ext-image-processing-api-handler/process';
+function thumbUrl(path, width) {
+  if (!path) return null;
+  const ops = [
+    { operation: 'input', type: 'gcs', source: path },
+    { operation: 'resize', width },
+    { operation: 'output', format: 'jpeg', quality: 72 },
+  ];
+  return `${IMG_API}?operations=${encodeURIComponent(JSON.stringify(ops))}`;
+}
+
+exports.reviewQueue = onCall({ region: REGION, memory: '512MiB', timeoutSeconds: 60 }, async (req) => {
+  assertAdmin(req);
+  const p = req.data || {};
+  const type = p.type === 'receipts' ? 'receipts' : 'photos';
+  const q = String(p.q || '').trim().toLowerCase();
+
+  if (type === 'receipts') {
+    const snap = await db.collection('receipts').where('status', '==', 'review').select(...RECEIPT_LIST_FIELDS).get();
+    let rows = snap.docs.map(receiptRowOf).map(({ items, ...r }) => ({
+      id: r.id, userId: r.userId, merchantName: r.merchantName, store: r.store, bonDate: r.bonDate,
+      bonTotalCents: r.bonTotalCents, eligibleItemCount: r.eligibleItemCount, reviewReason: r.reviewReason,
+      ocrConfidence: r.ocrConfidence, reconOk: r.reconOk, createdAt: r.createdAt,
+    }));
+    if (q) rows = rows.filter((r) => [r.id, r.userId, r.merchantName, r.store && r.store.city, r.bonDate].some((v) => v && String(v).toLowerCase().includes(q)));
+    rows.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0)); // ältester zuerst — er wartet am längsten
+    return { type, rows, total: rows.length };
+  }
+
+  // Produktfotos: die Vorprüfung braucht alle Einreichungen derselben EAN.
+  // EIN Bestands-Query mit wenigen Feldern ist schneller als viele `in`-Chunks.
+  const [openSnap, allSnap] = await Promise.all([
+    db.collection(COL).where('status', '==', 'pending').get(),
+    db.collection(COL).select('userId', 'ean', 'marketId', 'status', 'createdAt', 'priceOcr', 'manufacturerOcr').get(),
+  ]);
+  const byEan = new Map();
+  for (const d of allSnap.docs) {
+    const x = d.data();
+    if (!x.ean) continue;
+    if (!byEan.has(x.ean)) byEan.set(x.ean, []);
+    byEan.get(x.ean).push({ id: d.id, userId: x.userId ?? null, ean: x.ean, marketId: x.marketId ?? null, status: safeStatus(x.status), createdAt: ms(x.createdAt), priceOcr: x.priceOcr ?? null, manufacturerOcr: x.manufacturerOcr ?? null });
+  }
+  let rows = openSnap.docs.map((d) => {
+    const r = rowOf(d);
+    const pre = precheckOf(r, byEan.get(r.ean) || []);
+    return {
+      id: r.id, userId: r.userId, productName: r.productName || r.productNameOcr, ean: r.ean,
+      marketName: r.marketName || r.marketId, createdAt: r.createdAt, campaignId: r.campaignId,
+      priceCents: r.priceCents, manufacturer: r.manufacturer, priceImageKind: r.priceImageKind,
+      stepCount: r.stepCount, verdict: pre.verdict, reasons: pre.reasons,
+    };
+  });
+  if (q) rows = rows.filter((r) => [r.id, r.userId, r.productName, r.ean, r.marketName].some((v) => v && String(v).toLowerCase().includes(q)));
+  if (p.verdict && p.verdict !== 'all') rows = rows.filter((r) => r.verdict === p.verdict);
+  rows.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+  const counts = rows.reduce((acc, r) => ((acc[r.verdict] = (acc[r.verdict] || 0) + 1), acc), {});
+  return { type, rows, total: rows.length, counts };
+});
+
+/** Bis 6 Fälle vollständig — mit fertigen Bild-URLs, für Anzeige + Vorladen. */
+exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds: 60 }, async (req) => {
+  assertAdmin(req);
+  const p = req.data || {};
+  const type = p.type === 'receipts' ? 'receipts' : 'photos';
+  const ids = (Array.isArray(p.ids) ? p.ids : []).slice(0, 6).map(String);
+  if (!ids.length) return { cases: [] };
+
+  if (type === 'receipts') {
+    const snaps = await db.getAll(...ids.map((id) => db.collection('receipts').doc(id)));
+    const cases = await Promise.all(snaps.filter((s) => s.exists).map(async (s) => {
+      const row = receiptRowOf(s);
+      const x = s.data();
+      const [full, ledger] = await Promise.all([
+        imageUrl(row.storagePath),
+        row.userId
+          ? db.collection(`users/${row.userId}/cashback_ledger`).where('receiptId', '==', s.id).get().then((l) => l.docs.map((d) => ({ type: d.data().type, cents: d.data().cents })))
+          : [],
+      ]);
+      return {
+        id: s.id, kind: 'receipt', row: { ...row, items: undefined },
+        imageUrl: thumbUrl(row.storagePath, 1100), fullUrl: full,
+        items: Array.isArray(x.items) ? x.items : [],
+        ocr: { parsed: x.ocr?.parsed ?? null, robust: x.ocr?.robust ?? null, reconciliation: x.ocr?.reconciliation ?? null },
+        duplicateOf: row.duplicateOf, ledger,
+      };
+    }));
+    return { cases };
+  }
+
+  const snaps = await db.getAll(...ids.map((id) => db.collection(COL).doc(id)));
+  const present = snaps.filter((s) => s.exists);
+  // EAN-Nachbarn für die Doppel-Regel: nur die betroffenen EANs.
+  const eans = [...new Set(present.map((s) => s.data().ean).filter(Boolean))];
+  const byEan = eans.length ? await loadByEans(eans) : new Map();
+  const cases = await Promise.all(present.map(async (s) => {
+    const row = rowOf(s);
+    const pre = precheckOf(row, byEan.get(row.ean) || []);
+    const bilder = await Promise.all(REQUIRED_STEPS_ORDER.map(async (step) => {
+      const path = row.images && row.images[step];
+      return {
+        step, label: STEP_LABEL_DE[step] || step,
+        url: thumbUrl(path, 520),          // Kachel
+        full: await imageUrl(path),        // Lupe
+        fehlt: !path,
+      };
+    }));
+    const prior = pre.dup && pre.dup.priorId ? (byEan.get(row.ean) || []).find((r) => r.id === pre.dup.priorId) : null;
+    const eigene = (byEan.get(row.ean) || []).filter((r) => r.id !== row.id).length;
+    return { id: s.id, kind: 'photo', row: stripPolicy(row), bilder, precheck: pre, prior: prior ? stripPolicy(prior) : null, gleicheEan: eigene };
+  }));
+  return { cases };
 });

@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MarkenDetektive — Prüfen</title>
+    <style>
+      /* Prüf-Werkzeug: ein Fall füllt den Bildschirm, Bilder dominieren,
+         Entscheidung per Taste. Dunkler Grund, damit Verpackungsfotos und
+         Bons kontrastreich wirken. */
+      :root{
+        --bg:#0e1113; --panel:#171c1f; --panel2:#1e2528; --line:#2b3438; --line2:#3a4549;
+        --fg:#e9eff1; --fg2:#9fadb2; --fg3:#6f7d82;
+        --ok:#19b98a; --ok-bg:#10352c; --no:#e2604a; --no-bg:#3a1d17; --warn:#e0a520; --warn-bg:#3a2c0e;
+        --acc:#3ba0e8;
+      }
+      *{box-sizing:border-box}
+      html,body{height:100%}
+      body{margin:0;background:var(--bg);color:var(--fg);font:14.5px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow:hidden}
+      button{font:inherit;cursor:pointer;border:1px solid var(--line2);border-radius:10px;padding:8px 14px;background:var(--panel2);color:var(--fg)}
+      button:hover{border-color:var(--fg3)} button:disabled{opacity:.4;cursor:default}
+      input,select{font:inherit;background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:9px;padding:7px 11px}
+      .kbd{display:inline-block;min-width:18px;padding:1px 5px;border:1px solid var(--line2);border-bottom-width:2px;border-radius:5px;font-size:11px;font-weight:700;color:var(--fg2);background:var(--bg);margin-left:6px}
+
+      /* ── Gerüst ───────────────────────────────────────────── */
+      #app{display:none;grid-template-rows:52px 1fr 68px;height:100vh}
+      #app.on{display:grid}
+      header{display:flex;align-items:center;gap:14px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+      header h1{font-size:14px;font-weight:800;margin:0;letter-spacing:-.2px;white-space:nowrap}
+      .tabs{display:flex;gap:6px}
+      .tab{padding:6px 13px;border-radius:9px;border:1px solid var(--line);background:transparent;color:var(--fg2);font-weight:700;font-size:13px}
+      .tab.on{background:var(--panel2);color:var(--fg);border-color:var(--acc)}
+      .tab b{font-variant-numeric:tabular-nums;margin-left:6px;color:var(--acc)}
+      .grow{flex:1}
+      .prog{font-size:13px;color:var(--fg2);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+      main{display:grid;grid-template-columns:270px 1fr;min-height:0}
+      /* Warteschlange */
+      aside{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+      .qhead{padding:9px 12px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center}
+      .qhead input{flex:1;padding:6px 9px;font-size:13px}
+      .qlist{overflow-y:auto;flex:1}
+      .qi{display:flex;gap:9px;padding:9px 12px;border-bottom:1px solid var(--line);cursor:pointer;align-items:flex-start}
+      .qi:hover{background:var(--panel2)}
+      .qi.on{background:var(--panel2);box-shadow:inset 3px 0 0 var(--acc)}
+      .qi .dot{flex:none;width:8px;height:8px;border-radius:50%;margin-top:5px}
+      .d-ok{background:var(--ok)} .d-locked{background:var(--no)} .d-hold{background:var(--warn)} .d-incomplete{background:var(--warn)}
+      .qi .t{min-width:0;flex:1}
+      .qi .t b{display:block;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .qi .t span{font-size:11.5px;color:var(--fg3)}
+      .qi.done{opacity:.45}
+
+      /* Fall */
+      section{min-width:0;min-height:0;overflow-y:auto;padding:16px 18px}
+      .case{display:grid;grid-template-columns:1fr 330px;gap:18px;align-items:start}
+      @media(max-width:1180px){.case{grid-template-columns:1fr}}
+      .shots{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+      @media(max-width:1500px){.shots{grid-template-columns:repeat(3,1fr)}}
+      figure{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+      figure img{display:block;width:100%;aspect-ratio:3/4;object-fit:cover;background:#fff;cursor:zoom-in}
+      figure .ph{display:flex;align-items:center;justify-content:center;width:100%;aspect-ratio:3/4;color:var(--no);font-size:12px;font-weight:700;background:var(--panel2)}
+      figcaption{padding:6px 9px;font-size:11.5px;font-weight:700;color:var(--fg2);display:flex;justify-content:space-between}
+      /* Bon: hohes Bild */
+      .bon{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;text-align:center}
+      .bon img{max-width:100%;max-height:74vh;border-radius:8px;background:#fff;cursor:zoom-in}
+
+      .facts{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;position:sticky;top:0}
+      .facts h2{margin:0 0 2px;font-size:17px;font-weight:800;letter-spacing:-.2px;line-height:1.25}
+      .facts .eyebrow{font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--fg3);margin-bottom:8px}
+      .kv{display:grid;grid-template-columns:88px 1fr;gap:5px 10px;font-size:13px;margin-top:10px}
+      .kv .k{color:var(--fg3)} .kv .v{word-break:break-word}
+      .verdict{margin-top:12px;padding:10px 12px;border-radius:10px;font-size:13px;font-weight:700;border:1px solid}
+      .v-ok{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}
+      .v-locked{background:var(--no-bg);border-color:var(--no);color:var(--no)}
+      .v-hold,.v-incomplete{background:var(--warn-bg);border-color:var(--warn);color:var(--warn)}
+      .verdict small{display:block;font-weight:600;margin-top:3px;color:var(--fg2)}
+      .items{margin-top:12px;font-size:12.5px;max-height:38vh;overflow:auto}
+      .items div{display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px dashed var(--line)}
+
+      /* Entscheidungsleiste */
+      footer{display:flex;align-items:center;gap:10px;padding:0 16px;background:var(--panel);border-top:1px solid var(--line)}
+      .big{padding:11px 20px;border-radius:11px;font-weight:800;font-size:15px;border-width:1.5px}
+      .b-ok{background:var(--ok);border-color:var(--ok);color:#04150f}
+      .b-ok:hover{filter:brightness(1.08)}
+      .b-no{background:transparent;border-color:var(--no);color:var(--no)}
+      .b-no:hover{background:var(--no-bg)}
+      .b-warn{background:transparent;border-color:var(--warn);color:var(--warn)}
+      .reasons{display:none;gap:6px;flex-wrap:wrap;flex:1}
+      .reasons.on{display:flex}
+      .rchip{padding:7px 11px;border-radius:9px;border:1px solid var(--line2);background:var(--panel2);font-size:12.5px;font-weight:700;color:var(--fg)}
+      .rchip:hover{border-color:var(--no);color:var(--no)}
+      .toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line2);border-radius:12px;padding:10px 16px;display:flex;gap:12px;align-items:center;opacity:0;pointer-events:none;transition:opacity .18s;z-index:40;font-size:13.5px}
+      .toast.on{opacity:1;pointer-events:auto}
+      .toast.good{border-color:var(--ok)} .toast.bad{border-color:var(--no)}
+      .empty{padding:70px 20px;text-align:center;color:var(--fg3)}
+      /* Vollbild */
+      #light{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;align-items:center;justify-content:center;z-index:60;cursor:zoom-out}
+      #light.on{display:flex}
+      #light img{max-width:96vw;max-height:96vh;object-fit:contain}
+      #light .cap{position:absolute;top:14px;left:50%;transform:translateX(-50%);color:#fff;font-weight:700;font-size:14px;background:rgba(0,0,0,.5);padding:5px 12px;border-radius:8px}
+      /* Login */
+      #login{display:flex;flex-direction:column;align-items:center;gap:14px;padding:90px 20px}
+      #login input{width:290px}
+      .hidden{display:none!important}
+    </style>
+  </head>
+  <body>
+    <div id="login">
+      <h1 style="margin:0;font-size:19px">Prüfen</h1>
+      <p style="color:var(--fg3);margin:0">Admin-Login</p>
+      <input id="loginEmail" type="email" placeholder="E-Mail" autocomplete="username" />
+      <input id="loginPw" type="password" placeholder="Passwort" autocomplete="current-password" />
+      <button id="loginBtn" class="big b-ok">Anmelden</button>
+      <div id="loginMsg" style="color:var(--fg3)"></div>
+    </div>
+
+    <div id="app">
+      <header>
+        <h1>Prüfen</h1>
+        <div class="tabs">
+          <button class="tab on" id="tabPhotos" data-type="photos">Produktfotos <b id="cPhotos">–</b></button>
+          <button class="tab" id="tabReceipts" data-type="receipts">Bons <b id="cReceipts">–</b></button>
+        </div>
+        <div class="grow"></div>
+        <div class="prog" id="prog"></div>
+        <a href="index.html" style="color:var(--fg3);font-size:12.5px;text-decoration:none">Bon-Matching</a>
+        <button id="logoutBtn" style="padding:6px 12px;font-size:13px">Abmelden</button>
+      </header>
+
+      <main>
+        <aside>
+          <div class="qhead">
+            <input id="q" type="search" placeholder="Suchen …" />
+            <select id="fVerdict" style="width:104px;padding:6px 8px;font-size:12.5px">
+              <option value="all">alle</option>
+              <option value="ok">geprüft ok</option>
+              <option value="locked">Sperre</option>
+              <option value="hold">halten</option>
+              <option value="incomplete">unvollständig</option>
+            </select>
+          </div>
+          <div class="qlist" id="qlist"></div>
+        </aside>
+        <section id="stage"><div class="empty">Lade …</div></section>
+      </main>
+
+      <footer id="bar">
+        <button class="big b-ok" id="bOk">Freigeben <span class="kbd">F</span></button>
+        <button class="big b-no" id="bNo">Ablehnen <span class="kbd">A</span></button>
+        <button class="big b-warn hidden" id="bNoReward">Ohne Prämie <span class="kbd">O</span></button>
+        <div class="reasons" id="reasons"></div>
+        <div class="grow" id="spacer"></div>
+        <button id="bSkip" style="padding:9px 14px">Später <span class="kbd">→</span></button>
+      </footer>
+    </div>
+
+    <div class="toast" id="toast"><span id="toastText"></span><button id="undo" class="hidden" style="padding:5px 11px;font-size:13px">Rückgängig</button></div>
+    <div id="light"><div class="cap" id="lightCap"></div><img alt=""></div>
+
+    <script type="module">
+      import { $, call, esc, euro, fmtDate, fmtDateTime, ago, short, initAdmin } from './admin-common.js';
+
+      // Ablehngründe: Zahl = Tastenkürzel. Reihenfolge nach Häufigkeit.
+      const REASONS_PHOTO = [
+        ['unvollstaendig', 'Fotos fehlen'],
+        ['fotos_unpassend', 'Fotos passen nicht'],
+        ['ean_fehlt', 'Barcode fehlt'],
+        ['kein_produktname', 'Kein Name erkennbar'],
+        ['bilder_wiederverwendet', 'Bilder wiederverwendet'],
+        ['bild_defekt', 'Foto unlesbar'],
+        ['sperre_30_tage_gleicher_nutzer', 'Doppelt (selber Nutzer)'],
+        ['sperre_30_tage_anderer_nutzer', 'Doppelt (anderer Nutzer)'],
+        ['doppelt_eingereicht', 'Frühere Einreichung offen'],
+      ];
+      const REASONS_RECEIPT = [
+        ['manual_review_rejected', 'Nicht verwertbar'],
+        ['duplicate_content_self', 'Doppelt (selber Nutzer)'],
+        ['duplicate_content_cross_user', 'Doppelt (anderer Nutzer)'],
+      ];
+      const NO_REWARD = [
+        ['daily_cap_reached', 'Tageslimit'],
+        ['weekly_cap_reached', 'Wochenlimit'],
+        ['per_user_cap_reached', 'Nutzerlimit'],
+      ];
+      const VERDICT_DE = { ok: 'Vorprüfung ok', locked: 'Gesperrt', hold: 'Zurückhalten', incomplete: 'Unvollständig' };
+      const REASON_DE = Object.fromEntries([...REASONS_PHOTO, ...REASONS_RECEIPT, ...NO_REWARD]);
+
+      const S = { type: 'photos', queue: [], idx: 0, cache: new Map(), done: new Set(), busy: false, counts: {}, mode: null };
+
+      const cur = () => S.queue[S.idx] || null;
+      const setBusy = (b) => { S.busy = b; ['bOk', 'bNo', 'bNoReward', 'bSkip'].forEach((id) => { $(id).disabled = b; }); };
+
+      // ── Warteschlange ───────────────────────────────────────
+      async function loadQueue(keepIdx) {
+        $('stage').innerHTML = '<div class="empty">Lade …</div>';
+        const r = await call('reviewQueue')({ type: S.type, q: $('q').value.trim() || undefined, verdict: S.type === 'photos' ? $('fVerdict').value : undefined });
+        S.queue = r.data.rows || [];
+        S.counts = r.data.counts || {};
+        if (!keepIdx) S.idx = 0;
+        if (S.idx >= S.queue.length) S.idx = Math.max(0, S.queue.length - 1);
+        $(S.type === 'photos' ? 'cPhotos' : 'cReceipts').textContent = S.queue.length;
+        renderQueue();
+        await showCurrent();
+        // Gegenzähler still nachladen, damit beide Reiter Zahlen zeigen.
+        const other = S.type === 'photos' ? 'receipts' : 'photos';
+        call('reviewQueue')({ type: other }).then((x) => { $(other === 'photos' ? 'cPhotos' : 'cReceipts').textContent = x.data.total; }).catch(() => {});
+      }
+
+      function renderQueue() {
+        const l = $('qlist');
+        l.innerHTML = S.queue.map((r, i) => {
+          const done = S.done.has(r.id);
+          const v = r.verdict || 'ok';
+          const titel = S.type === 'photos' ? (r.productName || '(ohne Name)') : (r.merchantName || 'Unbekannter Markt');
+          const zeile2 = S.type === 'photos'
+            ? `${r.ean || 'keine EAN'} · ${ago(r.createdAt)}`
+            : `${euro(r.bonTotalCents)} · ${r.bonDate || '?'} · ${ago(r.createdAt)}`;
+          return `<div class="qi ${i === S.idx ? 'on' : ''} ${done ? 'done' : ''}" data-i="${i}">
+            <span class="dot d-${esc(v)}"></span>
+            <span class="t"><b>${esc(titel)}</b><span>${esc(zeile2)}</span></span>
+          </div>`;
+        }).join('') || '<div class="empty">Nichts offen 🎉</div>';
+        $('prog').textContent = S.queue.length ? `${Math.min(S.idx + 1, S.queue.length)} von ${S.queue.length}` : '';
+        const on = l.querySelector('.qi.on');
+        if (on) on.scrollIntoView({ block: 'nearest' });
+      }
+
+      // ── Fälle laden (mit Vorladen der nächsten) ─────────────
+      async function fetchCases(ids) {
+        const fehlen = ids.filter((id) => id && !S.cache.has(id));
+        if (!fehlen.length) return;
+        const r = await call('reviewCases')({ type: S.type, ids: fehlen });
+        (r.data.cases || []).forEach((c) => {
+          S.cache.set(c.id, c);
+          // Bilder in den Browser-Cache holen, damit der nächste Fall sofort steht.
+          const urls = c.kind === 'photo' ? (c.bilder || []).map((b) => b.url) : [c.imageUrl];
+          urls.filter(Boolean).forEach((u) => { const im = new Image(); im.src = u; });
+        });
+      }
+
+      async function showCurrent() {
+        const c = cur();
+        if (!c) { $('stage').innerHTML = '<div class="empty">Nichts offen 🎉</div>'; $('bar').style.visibility = 'hidden'; return; }
+        $('bar').style.visibility = 'visible';
+        if (!S.cache.has(c.id)) {
+          $('stage').innerHTML = '<div class="empty">Lade Fall …</div>';
+          await fetchCases([c.id]);
+        }
+        render(S.cache.get(c.id));
+        // Die nächsten drei still vorladen.
+        const next = S.queue.slice(S.idx + 1, S.idx + 4).map((x) => x.id);
+        if (next.length) fetchCases(next).catch(() => {});
+      }
+
+      function render(c) {
+        if (!c) { $('stage').innerHTML = '<div class="empty">Fall nicht ladbar</div>'; return; }
+        $('stage').innerHTML = c.kind === 'photo' ? renderPhoto(c) : renderReceipt(c);
+        $('bNoReward').classList.toggle('hidden', c.kind !== 'receipt');
+        renderQueue();
+      }
+
+      function renderPhoto(c) {
+        const r = c.row, p = c.precheck || {};
+        const shots = (c.bilder || []).map((b) => `<figure>
+            ${b.url ? `<img src="${b.url}" data-full="${b.full || b.url}" data-cap="${esc(b.label)}" alt="${esc(b.label)}" loading="lazy">` : `<div class="ph">${b.fehlt ? 'fehlt' : 'nicht ladbar'}</div>`}
+            <figcaption><span>${esc(b.label)}</span>${b.fehlt ? '<span style="color:var(--no)">fehlt</span>' : ''}</figcaption>
+          </figure>`).join('');
+        const dup = p.dup && p.dup.priorId
+          ? `<div class="kv"><div class="k">Früher</div><div class="v">${c.prior ? `${esc(c.prior.status)} · ${esc(fmtDate(c.prior.createdAt))} · ${p.dup.sameUser ? 'selber Nutzer' : 'anderer Nutzer'}` : esc(short(p.dup.priorId, 10))}</div>
+             <div class="k">Anders</div><div class="v">${(p.dup.updatedFields || []).length ? esc((p.dup.updatedFields || []).map((f) => ({ price: 'Preis', manufacturer: 'Hersteller', market: 'Markt' }[f] || f)).join(', ')) : '— nichts'}</div></div>`
+          : '';
+        return `<div class="case">
+          <div class="shots">${shots}</div>
+          <div class="facts">
+            <div class="eyebrow">Produktfoto-Einreichung</div>
+            <h2>${esc(r.productName || r.productNameOcr || '(ohne Name)')}</h2>
+            <div class="verdict v-${esc(p.verdict || 'ok')}">${esc(VERDICT_DE[p.verdict] || p.verdict || '')}
+              ${(p.reasons || []).length ? `<small>${esc((p.reasons || []).map((x) => REASON_DE[x] || x).join(' · '))}</small>` : '<small>Alle Prüfungen bestanden</small>'}</div>
+            <div class="kv">
+              <div class="k">Barcode</div><div class="v">${esc(r.ean || '—')}</div>
+              <div class="k">Markt</div><div class="v">${esc(r.marketName || r.marketId || '—')}</div>
+              <div class="k">Preis</div><div class="v">${euro(r.priceCents)}${r.priceImageKind && r.priceImageKind !== 'preisschild' ? ` <span style="color:var(--fg3)">(${esc(r.priceImageKind)})</span>` : ''}</div>
+              <div class="k">Hersteller</div><div class="v">${esc(r.manufacturer || '—')}</div>
+              <div class="k">Ort</div><div class="v">${r.capture && r.capture.confirmedPlace ? esc(r.capture.confirmedPlace.city || r.capture.confirmedPlace.name || 'bestätigt') : r.capture && r.capture.hasGps ? 'GPS' : r.priceReceipt && r.priceReceipt.complete ? `Bon: ${esc(r.priceReceipt.city || '')}` : '<span style="color:var(--no)">keine Angabe</span>'}</div>
+              <div class="k">Eingereicht</div><div class="v">${esc(fmtDateTime(r.createdAt))}</div>
+              <div class="k">Nutzer</div><div class="v" style="font-family:ui-monospace,monospace;font-size:12px">${esc(short(r.userId, 12))}</div>
+              <div class="k">Aktion</div><div class="v">${esc(r.campaignId || 'ohne Aktion')}</div>
+            </div>
+            ${dup}
+          </div>
+        </div>`;
+      }
+
+      function renderReceipt(c) {
+        const r = c.row, o = c.ocr || {};
+        const items = (c.items || []).map((it) => `<div><span>${esc(it.raw || it.name || '')}</span><span>${euro(it.priceCents)}</span></div>`).join('');
+        const sum = (c.items || []).reduce((a, it) => a + (it.priceCents || 0), 0);
+        return `<div class="case">
+          <div class="bon">${c.imageUrl ? `<img src="${c.imageUrl}" data-full="${c.fullUrl || c.imageUrl}" data-cap="Bon — klicken für Vollbild" alt="Bon">` : '<div class="empty">Bild nicht ladbar</div>'}</div>
+          <div class="facts">
+            <div class="eyebrow">Kassenbon in Prüfung</div>
+            <h2>${esc(r.merchantName || 'Unbekannter Markt')}</h2>
+            <div class="verdict v-${r.ocrConfidence === 'high' ? 'ok' : 'hold'}">${esc(r.reviewReason || 'zur Prüfung')}
+              <small>Texterkennung: ${esc(r.ocrConfidence || '?')}${r.reconOk === false ? ` · Summe weicht ab (${r.reconDeltaCents} ct)` : ' · Summe passt'}</small></div>
+            <div class="kv">
+              <div class="k">Filiale</div><div class="v">${r.store ? esc([r.store.street, [r.store.zip, r.store.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')) : '—'}</div>
+              <div class="k">Bon-Datum</div><div class="v">${esc(r.bonDate || '—')} ${esc(r.bonTime || '')}</div>
+              <div class="k">Summe</div><div class="v">${euro(r.bonTotalCents)} · Positionen ${euro(sum)}</div>
+              <div class="k">Anrechenbar</div><div class="v">${r.eligibleItemCount ?? '—'} von ${(c.items || []).length}</div>
+              <div class="k">Eingereicht</div><div class="v">${esc(fmtDateTime(r.createdAt))}</div>
+              <div class="k">Nutzer</div><div class="v" style="font-family:ui-monospace,monospace;font-size:12px">${esc(short(r.userId, 12))}</div>
+              <div class="k">Gebucht</div><div class="v">${(c.ledger || []).length ? esc(c.ledger.map((l) => `${l.type} ${euro(l.cents)}`).join(', ')) : 'nichts'}</div>
+            </div>
+            <div class="items">${items || '<div style="color:var(--fg3)">keine Positionen erkannt</div>'}</div>
+          </div>
+        </div>`;
+      }
+
+      // ── Entscheiden ─────────────────────────────────────────
+      function showReasons(list, onPick) {
+        const box = $('reasons');
+        box.innerHTML = list.map(([k, l], i) => `<button class="rchip" data-r="${esc(k)}">${esc(l)}<span class="kbd">${i + 1}</span></button>`).join('')
+          + '<button class="rchip" data-r="" style="border-style:dashed">Abbrechen<span class="kbd">Esc</span></button>';
+        box.classList.add('on');
+        $('spacer').classList.add('hidden');
+        S.mode = { list, onPick };
+      }
+      function hideReasons() { $('reasons').classList.remove('on'); $('spacer').classList.remove('hidden'); S.mode = null; }
+
+      let undoTimer = null;
+      function toast(text, kind, undoFn) {
+        $('toastText').textContent = text;
+        $('toast').className = 'toast on ' + (kind || '');
+        $('undo').classList.toggle('hidden', !undoFn);
+        $('undo').onclick = undoFn ? () => { $('toast').className = 'toast'; undoFn(); } : null;
+        clearTimeout(undoTimer);
+        undoTimer = setTimeout(() => { $('toast').className = 'toast'; }, undoFn ? 7000 : 2600);
+      }
+
+      /** Entschiedenen Fall aus der Schlange nehmen; der nächste rückt nach. */
+      function advance() {
+        const c = cur();
+        if (!c) return;
+        S.done.add(c.id);
+        const i = S.idx;
+        S.queue = S.queue.filter((x) => x.id !== c.id);
+        S.idx = Math.min(i, Math.max(0, S.queue.length - 1));
+        $(S.type === 'photos' ? 'cPhotos' : 'cReceipts').textContent = S.queue.length;
+        showCurrent();
+      }
+
+      async function decidePhoto(decision, reason) {
+        const c = cur(); if (!c || S.busy) return;
+        setBusy(true);
+        try {
+          const r = await call('reviewDecideUploads')({ ids: [c.id], decision, reason, force: decision === 'approve' && !!S.forceNext });
+          const res = (r.data.results || [])[0] || {};
+          if (res.outcome === 'blocked') {
+            toast(`Gesperrt: ${REASON_DE[res.reason] || res.reason} — mit Ablehnen entscheiden oder erneut F für Freigabe trotz Sperre`, 'bad');
+            S.forceNext = true;
+          } else if (res.outcome === 'approved') {
+            S.forceNext = false;
+            toast('Freigegeben ✓', 'good');
+            advance();
+          } else if (res.outcome === 'rejected') {
+            S.forceNext = false;
+            const id = c.id;
+            toast(`Abgelehnt: ${REASON_DE[reason] || reason}`, 'bad', () => reopen(id));
+            advance();
+          } else {
+            toast(`${res.outcome}: ${res.reason || ''}`, 'bad');
+            advance();
+          }
+        } catch (e) { toast('Fehler: ' + e.message, 'bad'); }
+        setBusy(false);
+      }
+
+      async function reopen(id) {
+        try {
+          await call('reviewDecideUploads')({ ids: [id], decision: 'reopen' });
+          S.done.delete(id); S.cache.delete(id);
+          toast('Zurückgeholt', 'good');
+          loadQueue(true);
+        } catch (e) { toast('Rückgängig fehlgeschlagen: ' + e.message, 'bad'); }
+      }
+
+      async function decideReceipt(decision, reason) {
+        const c = cur(); if (!c || S.busy) return;
+        setBusy(true);
+        try {
+          const r = await call('reviewDecideReceipt')({ receiptId: c.id, decision, reason });
+          if (r.data.ok) {
+            toast(decision === 'approve' ? `Freigegeben ✓ ${r.data.cents != null ? euro(r.data.cents) : ''}` : decision === 'no_reward' ? 'Ohne Prämie erfasst' : 'Abgelehnt', decision === 'approve' ? 'good' : 'bad');
+            advance();
+          } else {
+            toast(`Nicht ausgeführt: ${r.data.code || r.data.http}`, 'bad');
+          }
+        } catch (e) { toast('Fehler: ' + e.message, 'bad'); }
+        setBusy(false);
+      }
+
+      // ── Bedienung ───────────────────────────────────────────
+      $('bOk').onclick = () => { hideReasons(); S.type === 'photos' ? decidePhoto('approve') : decideReceipt('approve'); };
+      $('bNo').onclick = () => {
+        if (S.mode) return hideReasons();
+        const list = S.type === 'photos' ? REASONS_PHOTO : REASONS_RECEIPT;
+        showReasons(list, (k) => (S.type === 'photos' ? decidePhoto('reject', k) : decideReceipt('reject', k)));
+      };
+      $('bNoReward').onclick = () => { if (S.mode) return hideReasons(); showReasons(NO_REWARD, (k) => decideReceipt('no_reward', k)); };
+      $('bSkip').onclick = () => { hideReasons(); if (S.idx < S.queue.length - 1) { S.idx++; showCurrent(); } };
+
+      $('reasons').onclick = (e) => {
+        const b = e.target.closest('.rchip'); if (!b) return;
+        const k = b.dataset.r;
+        const pick = S.mode && S.mode.onPick;
+        hideReasons();
+        if (k && pick) pick(k);
+      };
+
+      document.addEventListener('keydown', (e) => {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+        if ($('light').classList.contains('on')) { $('light').classList.remove('on'); return; }
+        if (S.mode) {
+          if (e.key === 'Escape') return hideReasons();
+          const n = Number(e.key);
+          if (n >= 1 && n <= S.mode.list.length) {
+            const k = S.mode.list[n - 1][0];
+            const pick = S.mode.onPick;
+            hideReasons();
+            pick(k);
+          }
+          return;
+        }
+        if (e.key === 'f' || e.key === 'F') $('bOk').click();
+        else if (e.key === 'a' || e.key === 'A') $('bNo').click();
+        else if ((e.key === 'o' || e.key === 'O') && S.type === 'receipts') $('bNoReward').click();
+        else if (e.key === 'ArrowRight') $('bSkip').click();
+        else if (e.key === 'ArrowLeft') { if (S.idx > 0) { S.idx--; showCurrent(); } }
+      });
+
+      $('qlist').onclick = (e) => { const i = e.target.closest('.qi'); if (!i) return; S.idx = Number(i.dataset.i); hideReasons(); showCurrent(); };
+      $('stage').onclick = (e) => {
+        const img = e.target.closest('img[data-cap]'); if (!img) return;
+        $('light').querySelector('img').src = img.dataset.full || img.src;
+        $('lightCap').textContent = img.dataset.cap;
+        $('light').classList.add('on');
+      };
+      $('light').onclick = () => $('light').classList.remove('on');
+      document.querySelectorAll('.tab').forEach((t) => { t.onclick = () => {
+        document.querySelectorAll('.tab').forEach((x) => x.classList.remove('on'));
+        t.classList.add('on'); S.type = t.dataset.type; S.done.clear(); S.cache.clear(); hideReasons();
+        $('fVerdict').classList.toggle('hidden', S.type !== 'photos');
+        loadQueue();
+      }; });
+      $('q').onkeydown = (e) => { if (e.key === 'Enter') loadQueue(); };
+      $('fVerdict').onchange = () => loadQueue();
+
+      if (new URLSearchParams(location.search).get('tab') === 'receipts') {
+        S.type = 'receipts';
+        document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x.dataset.type === 'receipts'));
+        $('fVerdict').classList.add('hidden');
+      }
+      initAdmin(() => { $('app').classList.add('on'); loadQueue(); });
+    </script>
+  </body>
+</html>

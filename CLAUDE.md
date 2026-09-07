@@ -2379,8 +2379,12 @@ werden muss (mehrfach durchexerziert, sonst 1 h verloren):
 
 ## Admin-SDK / Firestore lokal + CF-Deploy
 
-- Firestore-Admin lokal: `/tmp/sa.json` (Firestore-berechtigter Service-
-  Account). Skripte aus einem CF-Ordner MIT `firebase-admin` laufen lassen
+- Firestore-Admin lokal: **ADC des Nutzerkontos reicht** — `admin.initializeApp
+  ({ projectId: 'markendetektive-895f7' })` ohne `GOOGLE_APPLICATION_CREDENTIALS`
+  greift auf `~/.config/gcloud/application_default_credentials.json` zu. Das
+  früher genutzte `/tmp/sa.json` liegt in `/tmp` und wird von macOS aufgeräumt —
+  ist regelmäßig weg; nicht darauf aufbauen, sondern ADC nehmen (Service-Account-
+  Datei nur, wenn ein Skript Rechte braucht, die das Nutzerkonto nicht hat). Skripte aus einem CF-Ordner MIT `firebase-admin` laufen lassen
   (z.B. `cloud-functions/preference-profile-cf`), `node --check` vorher.
   Die Play-Store-SA `markendetektive-895f7-ee3923910ddd.json` hat KEINE
   Firestore-Rechte.
@@ -2551,6 +2555,31 @@ Regeln:
   und zählt die Bon-Daten ohne Filialadresse auf — beides nachziehen.
 - **Die 51 auffälligen Foto-Einreichungen vom 29.08. werden NICHT gesichtet**
   (User-Entscheidung; alle bereits vergütet).
+
+## `ocr_confidence_low` staut Bons — und sagt nichts über die Prämie (07.09.2026)
+
+Am 07.09. lagen ALLE 23 offenen Review-Bons auf demselben Grund
+`ocr_confidence_low`, jeder mit sauberer Rekonziliation (Σ Positionen = Endsumme),
+bekanntem Markt und gültigem Bon-Datum (0–6 Tage). Das ist kein Zufall: die
+Robust-OCR verlangt Übereinstimmung auf SEQUENZ-Ebene (`name#priceCents`) über
+unabhängige Lesungen — bei 30–70 Positionen kippt eine einzige abweichend
+gelesene Artikelbezeichnung die Confidence auf `low`, obwohl kein für Geld
+relevanter Wert wackelt.
+
+Wichtig für jede Review-Entscheidung: die Prämie hängt an Markt, Bon-Datum,
+Endsumme und der Zahl anrechenbarer Artikel — NICHT an der Schreibweise
+einzelner Artikelnamen (die fließen ins Matching, nicht ins Ledger). Ein Bon mit
+`confidence: low`, aber `reconciliation.ok`, bekanntem Markt und Datum im Fenster
+ist freizugeben. Beim Nachprüfen eine unabhängige Zweitlesung des Bildes machen
+(Markt / Datum / Endsumme / ist es überhaupt ein Bon / Manipulationsspuren) und
+NUR bei Widerspruch in diesen vier Punkten ablehnen — nicht wegen der Confidence
+selbst. Skript-Muster: `cloud-functions/cashback-pipeline/.pruefe-bons.js`
+(schreibt nichts, urteilt nur).
+
+Offen (Follow-up): das Review-Gate erzeugt so einen Dauerstau, den nur jemand
+von Hand auflöst. Sinnvolle Verschärfung wäre, `low` nur dann in Review zu
+schicken, wenn zusätzlich ein für Geld relevantes Feld unsicher ist
+(Markt unbekannt, Datum fehlt, Rekonziliation schief) — sonst durchlaufen lassen.
 
 ## Bons nachverarbeiten / Review auflösen — Regeln (Money-Ops 02.09.2026)
 
@@ -2735,9 +2764,32 @@ Fehlt `targeting` (oder ist leer), gilt die Aktion überall — Bestandskampagne
 Produktfotos (`crowd_uploads`) und Bons (`receipts`) sichten, filtern, suchen,
 freigeben — einzeln und Batch. Design: `docs/REVIEW_CONSOLE_DESIGN.md`.
 - **Eine Site, ein Login:** Hosting-Site `md-receipt-admin` (`receipt-admin-web/`),
-  Seiten `index.html` (Bon-Matching), `produktfotos.html`, `bons.html`, gemeinsame
-  `admin-common.js`. Firebase-Auth E-Mail/Passwort + Custom-Claim `admin:true`.
+  Seiten `pruefen.html` (DAS Prüf-Werkzeug) und `index.html` (Bon-Matching),
+  gemeinsame `admin-common.js`. `produktfotos.html`/`bons.html` sind seit dem
+  Rework nur noch Weiterleitungen — die alten Tabellen sind weg, nicht
+  wiederbeleben. Firebase-Auth E-Mail/Passwort + Custom-Claim `admin:true`.
   Kein Build-Schritt. Deploy: `firebase deploy --only hosting:md-receipt-admin`.
+- **Prüf-Werkzeug `pruefen.html` (Rework 07.09.2026, User: „Die Performance ist
+  schrecklich, ich sehe die Fotos nicht"):** ein Fall füllt den Bildschirm, alle
+  7 Fotos sofort sichtbar, Entscheidung per Taste (F freigeben, A ablehnen +
+  Ziffer für den Grund, O ohne Prämie bei Bons, → später, ← zurück), Klick aufs
+  Bild = Vollbild mit dem ORIGINAL. Warteschlange links, ältester zuerst.
+  Rücknahme (`decision: 'reopen'`) gibt es NUR aus `rejected` zurück nach
+  `pending` — eine Freigabe hat schon gebucht und wird nie per Klick
+  zurückgenommen; das Werkzeug bietet Undo darum bewusst nur bei Ablehnungen.
+  Callables dafür: `reviewQueue` (schlanke Liste + Vorprüfungs-Urteil je Zeile)
+  und `reviewCases` (bis 6 Fälle komplett MIT fertigen Bild-URLs). Die nächsten
+  drei Fälle werden immer vorgeladen, dadurch ist der Wechsel sofort.
+- **Bilder NIE im Browser über `getDownloadURL` holen** (das war die alte
+  Konsole): 7 rules-geprüfte Abrufe je Fall, und die Originale sind ~5 MB —
+  34 MB pro Fall. Serverseitig zwei URLs liefern: die Kachel über die im Projekt
+  installierte Extension `invertase/image-processing-api`
+  (`https://us-central1-…cloudfunctions.net/ext-image-processing-api-handler/process
+  ?operations=<URL-kodiertes JSON>`, Operationen input(type gcs)/resize/output)
+  → ~90 KB je Bild, `cache-control: public, max-age=31536000`, zweiter Abruf
+  0,15 s; das Original nur für die Lupe, per Storage-Download-Token
+  (`metadata.firebaseStorageDownloadTokens`, kein signBlob nötig). Gemessen:
+  516 KB statt 34 MB je Fall.
 - **Backend `cloud-functions/review-console`** (europe-west1, onCall, admin-only,
   Admin-SDK — Firestore-Rules bleiben zu): `reviewListUploads`, `reviewGetUpload`,
   `reviewDecideUploads` (Batch ≤100, Transaktion je Doc, Ergebnis je ID),
