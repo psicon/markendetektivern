@@ -2759,6 +2759,41 @@ Fehlt `targeting` (oder ist leer), gilt die Aktion überall — Bestandskampagne
   Anschrift einreicht, hat nichts falsch gemacht; `onUnknown:'deny'` ist die
   bewusste Ausnahme für Aktionen, die ein Gebiet strikt einhalten müssen.
 
+## Der Ortsschätzer entscheidet — nicht ein zweites Modul (07.09.2026)
+
+**`probableLocation` ist die Autorität für „welcher Ort gilt".** Geschrieben von
+`cloud-functions/crowd-upload-location/src/scorer.js` (seit August 2026, an 1.202
+von 1.619 Einreichungen), mit Quelle, Konfidenz, Granularität, den
+mitbewertenden Signalen und `usableFor` als Missbrauchsschutz.
+
+Beim Bau des Prüfwerkzeugs wurde diese Rangfolge versehentlich ein zweites Mal
+aufgestellt — zwei Entscheider über dieselbe Frage, die im Betrieb auseinander
+laufen. Korrigiert: `cloud-functions/review-console/src/ort.js` liest
+`probableLocation` und steuert nur bei, was dort fehlt:
+- **Koordinaten zu Ortsnamen** — `granularity: 'city'` trägt einen Ortsnamen,
+  aber in 224 von 234 Fällen keine Koordinate.
+- **Bons** — für `receipts` gibt es kein `probableLocation`; dort ist die
+  Filialadresse vom Bonkopf die Quelle.
+- **Auffälligkeiten** (siehe unten).
+
+Wer eine neue Ortsfrage beantworten will: erst prüfen, ob `scorer.js` sie schon
+beantwortet. `granularity` sagt WAS behauptet wird (point/store/city/country),
+`confidence` WIE SICHER, `usableFor` WOFÜR der Wert taugt.
+
+**Auffälligkeiten benennen, nicht stillschweigend zeichnen** (`auffaelligkeiten()`):
+Aufnahmeort außerhalb DACH (2 Fälle), Standardstandort eines Entwickler-
+Simulators (1 — San Francisco, exakt der iOS-Default), Genauigkeit gröber als
+ein Kilometer (10). Anlass: eine Einreichung stand mit ± 4 m in Belgien bei
+einem deutschen Markt. Der Punkt war richtig — das Werkzeug sagte nur nicht,
+dass daran etwas bemerkenswert ist. Im Prüfwerkzeug über der Ortsangabe, auf
+der Karte rot und als eigener Filter.
+
+**Was NICHT auf die Karte kommt:** die IP-Ortung (Median 60 km daneben), der aus
+früheren Bons abgeleitete Wohnort (`user_profile_region`, 144 Fälle — sagt
+nichts über DIESE Einreichung; das wäre derselbe Fehler wie die IP-Ortung, nur
+subtiler) und die reine Landesangabe (`market_country`, 515). Statt einer
+Sammelzahl „ohne Ort" steht in der Seitenleiste, WARUM ein Fall fehlt.
+
 ## Welcher Ort gilt? — Rangfolge, an den eigenen Daten gemessen (07.09.2026)
 
 Frage des Users: „Ort: GPS — was bringt mir das? Welchen Ort nehmen wir jetzt?"
@@ -2838,6 +2873,16 @@ freigeben — einzeln und Batch. Design: `docs/REVIEW_CONSOLE_DESIGN.md`.
   Callables dafür: `reviewQueue` (schlanke Liste + Vorprüfungs-Urteil je Zeile)
   und `reviewCases` (bis 6 Fälle komplett MIT fertigen Bild-URLs). Die nächsten
   drei Fälle werden immer vorgeladen, dadurch ist der Wechsel sofort.
+- **Zwei Fallen, die die Abnahme gefunden hat (07.09.2026):**
+  (1) Ein Schalter für „Freigabe trotz Sperre", der den FALL ÜBERLEBT, legt nach
+  dem ersten Fehlschlag die ganze Sitzung lahm — der Server verlangt zu `force`
+  eine Notiz, und ohne Rücksetzen scheiterte danach jede weitere Freigabe. Ein
+  Zustand auf dem Geldpfad gehört an den Fall, nie ans Werkzeug; und eine
+  Aufforderung, die garantiert scheitert, darf gar nicht erst dastehen.
+  (2) `precheckOf` liest `_policy` — wer ihm flache Objekte ohne dieses Feld
+  gibt, bekommt „alles unauffällig" zurück. So meldete die Warteschlange 83
+  gesperrte Fälle als 0, während dasselbe Urteil im geöffneten Fall korrekt
+  stand. Beim Bauen verkürzter Listen IMMER `_policy` mitgeben.
 - **Bilder NIE im Browser über `getDownloadURL` holen** (das war die alte
   Konsole): 7 rules-geprüfte Abrufe je Fall, und die Originale sind ~5 MB —
   34 MB pro Fall. Serverseitig zwei URLs liefern: die Kachel über die im Projekt

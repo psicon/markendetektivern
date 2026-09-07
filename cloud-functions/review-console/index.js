@@ -813,8 +813,24 @@ exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
  *   typ 0 = Produktfoto, 1 = Bon
  *   quelle 0 = Gerätestandort, 1 = Filiale laut Bon, 2 = Angabe des Nutzers
  */
+/**
+ * Zwischenspeicher für die Kartenpunkte.
+ *
+ * Jeder Aufruf liest sonst ALLE Einreichungen und Bons — Stand heute rund 8.100
+ * Dokumente. Firestore-Reads sind der größte Serverposten des Projekts; die
+ * Karte ist ein Werkzeug, das man am Tag mehrfach öffnet und dessen Bild sich
+ * dabei kaum ändert. Fünf Minuten Aufbewahrung im Funktionsspeicher fangen die
+ * Wiederholungen ab, ohne dass jemand veraltete Punkte zu sehen bekommt. Der
+ * Aufrufer kann mit `frisch: true` erzwingen, dass neu gelesen wird.
+ */
+let kartenCache = null;
+const KARTE_TTL_MS = 5 * 60 * 1000;
+
 exports.reviewMapPoints = onCall({ region: REGION, memory: '1GiB', timeoutSeconds: 120 }, async (req) => {
   assertAdmin(req);
+  if (!req.data?.frisch && kartenCache && Date.now() - kartenCache.stand < KARTE_TTL_MS) {
+    return { ...kartenCache, ausCache: true };
+  }
   // Auf die Karte kommen nur BEOBACHTETE Orte. `user_profile_region` (der aus
   // früheren Bons abgeleitete Wohnort) und `market_country` (nur das Land)
   // sagen nichts darüber, wo DIESE Einreichung entstanden ist — ein Wohnort
@@ -869,10 +885,11 @@ exports.reviewMapPoints = onCall({ region: REGION, memory: '1GiB', timeoutSecond
     ]);
   }
 
-  return {
+  kartenCache = {
     punkte,
     ohneOrt,
     gesamt: { fotos: uploads.size, bons: receipts.size },
     stand: Date.now(),
   };
+  return { ...kartenCache, ausCache: false };
 });

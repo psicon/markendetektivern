@@ -77,6 +77,7 @@
       <header>
         <h1>Karte</h1>
         <div class="grow"></div>
+        <span id="stand" style="font-size:12px;color:var(--fg3)"></span>
         <a href="pruefen.html">Prüfen</a>
         <a href="index.html">Bon-Matching</a>
         <button id="logoutBtn" style="padding:6px 12px;font-size:13px">Abmelden</button>
@@ -268,8 +269,8 @@
         ebene.addTo(karte);
       }
 
-      async function laden() {
-        const r = await call('reviewMapPoints')({});
+      async function laden(frisch) {
+        const r = await call('reviewMapPoints')(frisch ? { frisch: true } : {});
         S.punkte = r.data.punkte || [];
         const o = r.data.ohneOrt || {};
         const g = r.data.gesamt || {};
@@ -290,6 +291,12 @@
           maerkte.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
 
         $('lade').classList.add('weg');
+        const alter = r.data.ausCache ? Math.round((Date.now() - r.data.stand) / 60000) : 0;
+        $('stand').innerHTML = r.data.ausCache && alter >= 1
+          ? `Stand vor ${alter} min · <a href="#" id="neuLaden" style="color:var(--acc)">neu laden</a>`
+          : 'Stand: gerade eben';
+        const neu = $('neuLaden');
+        if (neu) neu.onclick = (e) => { e.preventDefault(); $('lade').classList.remove('weg'); $('lade').textContent = 'Lade neu …'; laden(true); };
         zeichne();
         // Auf die eigenen Daten zoomen, nicht auf ein Standard-Rechteck.
         const mit = S.punkte.filter((p) => Number.isFinite(p[LAT]));
@@ -310,7 +317,11 @@
       initAdmin(() => {
         $('app').classList.add('on');
         baueKarte();
-        laden().catch((e) => { $('lade').textContent = 'Karte nicht ladbar: ' + e.message; });
+        laden().catch((e) => {
+          $('lade').innerHTML = `<div style="text-align:center">Karte nicht ladbar: ${esc(e.message)}<br>
+            <button id="nochmal" style="margin-top:12px;border-color:var(--acc);color:var(--acc)">Erneut versuchen</button></div>`;
+          $('nochmal').onclick = () => { $('lade').textContent = 'Lade Karte …'; laden(true).catch(() => {}); };
+        });
       });
     </script>
   </body>

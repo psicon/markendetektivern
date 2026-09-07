@@ -208,7 +208,10 @@ function auffaelligkeiten({ lat, lon, genauigkeitM, erwartetesLand, quelle }) {
   const raus = [];
   if (Number.isFinite(lat) && Number.isFinite(lon)) {
     for (const [name, sLat, sLon] of SIMULATOR_ORTE) {
-      if (Math.abs(lat - sLat) < 0.05 && Math.abs(lon - sLon) < 0.05) {
+      // Eng: der Simulator liefert exakt dieselben Koordinaten. 0,01 Grad sind
+      // rund einen Kilometer — weit genug für Rundungen, eng genug, um einen
+      // echten Aufenthalt in derselben Stadt nicht fälschlich zu beschuldigen.
+      if (Math.abs(lat - sLat) < 0.01 && Math.abs(lon - sLon) < 0.01) {
         return [{ art: 'simulator', text: `Standardstandort eines Entwickler-Simulators (${name}) — das ist keine echte Aufnahme` }];
       }
     }
