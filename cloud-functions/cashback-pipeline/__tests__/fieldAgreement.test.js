@@ -108,9 +108,20 @@ describe('moneyFieldAgreement — Artikelnamen dürfen keine Freigabe kosten', (
     expect(r.zeugen).toBe(3);
   });
 
-  test('Uhrzeit-Abweichungen sind bewusst kein Konflikt', () => {
-    // Die Uhrzeit trägt nur zur Doppel-Erkennung bei, nicht zur Prämie.
+  test('abweichende Uhrzeit hält den Bon zurück', () => {
+    // Die Uhrzeit ist der einzige Teil des kontenübergreifenden Doppel-
+    // Schlüssels, den die vier Geldfelder nicht abdecken. Lesen zwei Zeugen
+    // sie verschieden, könnten zwei Konten denselben Bon einreichen.
     const r = moneyFieldAgreement([lesung({ bonTime: '14:32' }), lesung({ bonTime: '14:33' })], { betragFuer: () => 8 });
+    expect(r.ok).toBe(false);
+    expect(r.konflikte).toContain('bonTime');
+  });
+
+  test('eine FEHLENDE Uhrzeit ist kein Widerspruch', () => {
+    // Ohne Uhrzeit verzichtet der Doppel-Schlüssel ohnehin auf sie.
+    const r = moneyFieldAgreement([lesung({ bonTime: null }), lesung({ bonTime: null })], { betragFuer: () => 8 });
     expect(r.ok).toBe(true);
+    const gemischt = moneyFieldAgreement([lesung({ bonTime: '14:32' }), lesung({ bonTime: null })], { betragFuer: () => 8 });
+    expect(gemischt.ok).toBe(true);
   });
 });

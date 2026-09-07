@@ -391,12 +391,18 @@ const RECEIPT_LIST_FIELDS = [
   'rejectReason', 'rejectDetail', 'reviewReason', 'reviewDecision', 'reviewResolvedAt', 'duplicateOf', 'createdAt', 'updatedAt',
   'storage.path', 'ocr.robust.confidence', 'ocr.robust.method', 'ocr.reconciliation.ok', 'ocr.reconciliation.signedDeltaCents',
   'ocr.parsed.merchant', 'bonDateCorrection', 'attempts', 'lastError', 'alreadyCredited',
+  // Ergebnis der feldweisen Prüfung — ohne das ist der Beobachtungs-Modus
+  // blind: er schriebe ein Feld, das niemand liest.
+  'ocrFieldAgreement',
 ];
 
 function receiptRowOf(d) {
   const x = d.data() || {};
   return {
     id: d.id,
+    // Ergebnis der feldweisen Prüfung (86cbet2w1). Im Beobachtungs-Modus steht
+    // hier, was das Gate im Dauer-Modus entschieden hätte.
+    ocrFieldAgreement: x.ocrFieldAgreement ?? null,
     status: safeReceiptStatus(x.status),
     userId: x.userId ?? null,
     campaignId: x.campaignId ?? null,
@@ -621,7 +627,16 @@ exports.reviewQueue = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
     const x = d.data();
     if (!x.ean) continue;
     if (!byEan.has(x.ean)) byEan.set(x.ean, []);
-    byEan.get(x.ean).push({ id: d.id, userId: x.userId ?? null, ean: x.ean, marketId: x.marketId ?? null, status: safeStatus(x.status), createdAt: ms(x.createdAt), priceOcr: x.priceOcr ?? null, manufacturerOcr: x.manufacturerOcr ?? null });
+    // WICHTIG: dieselbe Form wie `rowOf` sie liefert, also mit `_policy`.
+    // Vorher standen hier flache Objekte ohne dieses Feld — `precheckOf` liest
+    // aber genau `_policy`, bekam also eine Liste aus lauter `undefined` und
+    // meldete jede Einreichung als unauffällig. Folge: 83 Fälle, die die
+    // Doppel-Regel sperrt oder zurückhält, erschienen in der Warteschlange als
+    // grün, und der Filter „Sperre" lieferte immer eine leere Liste — während
+    // dasselbe Urteil im geöffneten Fall korrekt stand. Zwei Bildschirme, die
+    // sich widersprechen.
+    const policy = { id: d.id, userId: x.userId ?? null, ean: x.ean ?? null, marketId: x.marketId ?? null, status: safeStatus(x.status), createdAt: ms(x.createdAt), priceOcr: x.priceOcr ?? null, manufacturerOcr: x.manufacturerOcr ?? null };
+    byEan.get(x.ean).push({ ...policy, _policy: policy });
   }
   let rows = openSnap.docs.map((d) => {
     const r = rowOf(d);
@@ -650,7 +665,34 @@ exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
 
   if (type === 'receipts') {
     const snaps = await db.getAll(...ids.map((id) => db.collection('receipts').doc(id)));
-    const cases = await Promise.all(snaps.filter((s) => s.exists).map(async (s) => {
+    const vorhanden = snaps.filter((s) => s.exists);
+
+    // Dieselben zwei Angaben, die der Foto-Bildschirm hat und die beim Bon
+    // bisher fehlten: wer reicht ein, und was löst die Freigabe aus. Ohne sie
+    // drückt man bei einem Bon F, ohne zu wissen, ob acht Cent fließen und ob
+    // der Mensch dahinter zum dritten Mal auffällt.
+    const bonNutzer = new Map();
+    await Promise.all([...new Set(vorhanden.map((s) => s.data().userId).filter(Boolean))].map(async (uid) => {
+      const [eigene, user] = await Promise.all([
+        db.collection('receipts').where('userId', '==', uid).select('status', 'createdAt').get(),
+        db.doc(`users/${uid}`).get(),
+      ]);
+      let angenommen = 0; let abgelehnt = 0; let erste = null;
+      eigene.docs.forEach((d) => {
+        const st = String(d.data().status || '');
+        if (st === 'approved') angenommen++;
+        else if (st === 'rejected') abgelehnt++;
+        const t = ms(d.data().createdAt);
+        if (t && (erste == null || t < erste)) erste = t;
+      });
+      const u = user.exists ? user.data() : {};
+      bonNutzer.set(uid, {
+        einreichungen: eigene.size, angenommen, abgelehnt, seit: erste,
+        guthabenCent: u.cashback_balance_cents ?? 0, proAktion: u.cashback_campaign_totals ?? {},
+      });
+    }));
+
+    const cases = await Promise.all(vorhanden.map(async (s) => {
       const row = receiptRowOf(s);
       const x = s.data();
       const [full, ledger] = await Promise.all([
@@ -662,6 +704,14 @@ exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
       return {
         id: s.id, kind: 'receipt', row: { ...row, items: undefined },
         ort: ortVonBon(x),
+        nutzer: bonNutzer.get(row.userId) || null,
+        // Der Betrag steht bereits am Bon — die Pipeline hat ihn mit allen
+        // Deckeln gerechnet. Ihn hier ein zweites Mal herzuleiten wäre eine
+        // Nachbildung, die auseinanderläuft.
+        folge: {
+          buchtCent: Number(x.cashbackCents) || 0,
+          grund: (Number(x.cashbackCents) || 0) > 0 ? null : (x.zeroReason || x.rejectReason || 'kein_betrag'),
+        },
         imageUrl: thumbUrl(row.storagePath, 1100), fullUrl: full,
         items: Array.isArray(x.items) ? x.items : [],
         ocr: { parsed: x.ocr?.parsed ?? null, robust: x.ocr?.robust ?? null, reconciliation: x.ocr?.reconciliation ?? null },
@@ -759,18 +809,25 @@ exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
  * 900 KB, so sind es unter 300 KB. Gefiltert wird im Browser — die Daten sind
  * einmal geladen, jeder Filterwechsel ist dann sofort und kostet keinen Read.
  *
- * Punkt = [typ, lat, lon, zeit, quelle, markt, land, plz, ort, status, id]
+ * Punkt = [typ, lat, lon, zeit, quelle, markt, land, plz, ort, status, id, auffaellig[]]
  *   typ 0 = Produktfoto, 1 = Bon
  *   quelle 0 = Gerätestandort, 1 = Filiale laut Bon, 2 = Angabe des Nutzers
  */
 exports.reviewMapPoints = onCall({ region: REGION, memory: '1GiB', timeoutSeconds: 120 }, async (req) => {
   assertAdmin(req);
+  // Auf die Karte kommen nur BEOBACHTETE Orte. `user_profile_region` (der aus
+  // früheren Bons abgeleitete Wohnort) und `market_country` (nur das Land)
+  // sagen nichts darüber, wo DIESE Einreichung entstanden ist — ein Wohnort
+  // als Einkaufspunkt wäre derselbe Fehler wie die IP-Ortung, nur subtiler.
   const QUELLE = { geraet: 0, filiale: 1, nutzerangabe: 2 };
   const punkte = [];
-  const ohneOrt = { fotos: 0, bons: 0 };
+  // „Ohne Ort" ist keine Erklärung — die Gründe sind verschieden und führen zu
+  // verschiedenen Schlüssen: ein Altfall ohne jede Angabe ist etwas anderes als
+  // einer, bei dem nur das Land des Marktes bekannt ist.
+  const ohneOrt = { fotos: 0, bons: 0, nurLand: 0, wohnort: 0, garNichts: 0, ortNichtAufloesbar: 0 };
 
   const [uploads, receipts] = await Promise.all([
-    db.collection(COL).select('capture', 'priceReceipt', 'marketName', 'marketLand', 'status', 'createdAt', 'productName', 'campaignId').get(),
+    db.collection(COL).select('capture', 'priceReceipt', 'probableLocation', 'marketName', 'marketLand', 'status', 'createdAt', 'productName', 'campaignId').get(),
     db.collection('receipts').select('store', 'merchant', 'bonDate', 'status', 'createdAt', 'totalCents', 'campaignId').get(),
   ]);
 
@@ -783,12 +840,20 @@ exports.reviewMapPoints = onCall({ region: REGION, memory: '1GiB', timeoutSecond
   for (const d of uploads.docs) {
     const x = d.data();
     const o = ortVonEinreichung(x, verzeichnis);
-    if (o.lat == null || o.lon == null) { ohneOrt.fotos++; continue; }
+    if (o.lat == null || o.lon == null || QUELLE[o.quelle] === undefined) {
+      ohneOrt.fotos++;
+      if (o.quelle === 'land') ohneOrt.nurLand++;
+      else if (o.quelle === 'profil') ohneOrt.wohnort++;
+      else if (o.quelle == null) ohneOrt.garNichts++;
+      else ohneOrt.ortNichtAufloesbar++;
+      continue;
+    }
     punkte.push([
       0, Math.round(o.lat * 1e4) / 1e4, Math.round(o.lon * 1e4) / 1e4,
       ms(x.createdAt), QUELLE[o.quelle] ?? null,
       x.marketName || null, o.land || null, o.plz || null, o.ort || null,
       safeStatus(x.status), d.id,
+      (o.auffaellig || []).map((a) => a.text),
     ]);
   }
   for (const d of receipts.docs) {
@@ -800,6 +865,7 @@ exports.reviewMapPoints = onCall({ region: REGION, memory: '1GiB', timeoutSecond
       ms(x.createdAt), QUELLE[o.quelle] ?? null,
       (x.merchant && x.merchant.name) || null, o.land || null, o.plz || null, o.ort || null,
       String(x.status || 'unbekannt'), d.id,
+      (o.auffaellig || []).map((a) => a.text),
     ]);
   }
 

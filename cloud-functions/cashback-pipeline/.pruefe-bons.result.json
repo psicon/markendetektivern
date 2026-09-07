@@ -1,0 +1,728 @@
+[
+ {
+  "id": "bon_mtms355lhxh5ik",
+  "uid": "5cCg2ScJ8NeT3WYtY4vSndw9n2l2",
+  "markt": "REWE",
+  "bonDate": "2026-09-04",
+  "total": 7723,
+  "items": 37,
+  "eligible": 34,
+  "conf": "low",
+  "attempts": 5,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "alterTage": 3,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "REWE",
+   "datum": "2026-09-04",
+   "endsummeCent": 7723,
+   "anzahlPositionen": 35,
+   "manipuliert": false,
+   "grund": "Echter Kassenbon, gut lesbar, keine Manipulation erkennbar."
+  },
+  "abgleich": {
+   "datumGleich": true,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mtmx2e9nmto72a",
+  "uid": "rPzKAsREFZMHUInjXC1t3VB7v0E3",
+  "markt": "Netto Markendiscount",
+  "bonDate": "2026-09-01",
+  "total": 1273,
+  "items": 12,
+  "eligible": 11,
+  "conf": "low",
+  "attempts": 7,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [
+   "nachgeprueft_2026-09-07"
+  ],
+  "alterTage": 6,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "Netto Marken-Discount",
+   "datum": "2026-09-01",
+   "endsummeCent": 1273,
+   "anzahlPositionen": 12,
+   "manipuliert": true,
+   "grund": "Das Kaufdatum liegt in der Zukunft (01.09.2026)."
+  },
+  "abgleich": {
+   "datumGleich": true,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mtn6e97cml9lv6",
+  "uid": "nLe05D4TtAaw9sLTZQA7L6mic6a2",
+  "markt": "Kaufland",
+  "bonDate": "2026-09-04",
+  "total": 11989,
+  "items": 64,
+  "eligible": 58,
+  "conf": "low",
+  "attempts": 6,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [
+   "nachgeprueft_2026-09-07"
+  ],
+  "alterTage": 3,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "Kaufland",
+   "datum": "2023-09-04",
+   "endsummeCent": 11989,
+   "anzahlPositionen": 64,
+   "manipuliert": false,
+   "grund": "Echter Kassenbon von Kaufland ohne Anzeichen von Manipulation."
+  },
+  "abgleich": {
+   "datumGleich": false,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mtn6veayokyvtw",
+  "uid": "JBsFkl94XpP1PYAD0itWbVJpblj1",
+  "markt": "GLOBUS",
+  "bonDate": "2026-09-03",
+  "total": 1410,
+  "items": 9,
+  "eligible": 8,
+  "conf": "low",
+  "attempts": 7,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "alterTage": 4,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "GLOBUS",
+   "datum": "2026-09-03",
+   "endsummeCent": 1410,
+   "anzahlPositionen": 9,
+   "manipuliert": false,
+   "grund": "Echter Kassenbon von Globus ohne Hinweise auf Manipulation."
+  },
+  "abgleich": {
+   "datumGleich": true,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mtnbq72ng3kp4i",
+  "uid": "ZaVPkLcz2BT8prb2RlzYWHM0bJo2",
+  "markt": "EDEKA",
+  "bonDate": "2026-09-01",
+  "total": 2649,
+  "items": 16,
+  "eligible": 16,
+  "conf": "low",
+  "attempts": 7,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [
+   "nachgeprueft_2026-09-07",
+   "summe_zweitlesung_abweichend_positionssumme_stimmt"
+  ],
+  "alterTage": 6,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "EDEKA",
+   "datum": "2026-09-01",
+   "endsummeCent": 2943,
+   "anzahlPositionen": 16,
+   "manipuliert": false,
+   "grund": "Echter Kassenbon ohne Bearbeitungsspuren, auffälliges Datum 2026 passend zum Flyer im Hintergrund."
+  },
+  "abgleich": {
+   "datumGleich": true,
+   "deltaSummeCent": 294,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mtnc4vijvq1jcu",
+  "uid": "Q4IdRAMjpuURWNXuZJlcskeAqAr2",
+  "markt": "Netto Markendiscount",
+  "bonDate": "2026-09-04",
+  "total": 1187,
+  "items": 7,
+  "eligible": 6,
+  "conf": "low",
+  "attempts": 7,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "alterTage": 3,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "Netto Marken-Discount",
+   "datum": "2026-09-04",
+   "endsummeCent": 1187,
+   "anzahlPositionen": 7,
+   "manipuliert": false,
+   "grund": "Echter Kassenbon ohne sichtbare Bildmanipulationen, jedoch mit zukünftigem Datum."
+  },
+  "abgleich": {
+   "datumGleich": true,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mto5af29qcn8jm",
+  "uid": "DXz6eXTRcJXnfBe98OJb9ovaODS2",
+  "markt": "HOFER",
+  "bonDate": "2026-09-05",
+  "total": 14453,
+  "items": 70,
+  "eligible": 67,
+  "conf": "low",
+  "attempts": 7,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "alterTage": 2,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "HOFER KG",
+   "datum": "2026-09-05",
+   "endsummeCent": 14453,
+   "anzahlPositionen": 70,
+   "manipuliert": false,
+   "grund": "Echter Kassenbon ohne sichtbare Bildmanipulationen, jedoch mit zukünftigem Datum."
+  },
+  "abgleich": {
+   "datumGleich": true,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mto6htox4tognj",
+  "uid": "gx1eAEYafDYzQ4TeA58Y9vWiNHn2",
+  "markt": "Billa",
+  "bonDate": "2026-09-05",
+  "total": 5368,
+  "items": 25,
+  "eligible": 20,
+  "conf": "low",
+  "attempts": 7,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [
+   "ermessen_digitaler_beleg"
+  ],
+  "alterTage": 2,
+  "zweit": {
+   "istKassenbon": false,
+   "markt": "Billa",
+   "datum": "2026-09-05",
+   "endsummeCent": 5368,
+   "anzahlPositionen": 25,
+   "manipuliert": true,
+   "grund": "Es handelt sich um einen Screenshot einer digitalen Rechnung."
+  },
+  "abgleich": {
+   "datumGleich": true,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "offen_lassen"
+ },
+ {
+  "id": "bon_mto6k3wr4ifcm0",
+  "uid": "WRRlSEDc73PYSSY9JN9cPBs2htp1",
+  "markt": "Norma",
+  "bonDate": "2026-09-05",
+  "total": 2974,
+  "items": 13,
+  "eligible": 12,
+  "conf": "low",
+  "attempts": 6,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "alterTage": 2,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "NORMA",
+   "datum": "2026-09-05",
+   "endsummeCent": 2974,
+   "anzahlPositionen": 13,
+   "manipuliert": false,
+   "grund": "Echter Kassenbon von Norma mit ungewöhnlichem Zukunftsdatum (2026)."
+  },
+  "abgleich": {
+   "datumGleich": true,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mto8uheoinx8g5",
+  "uid": "u8aM0H2U0HYD6yMX7pc1GZY1uPq2",
+  "markt": "Netto Markendiscount",
+  "bonDate": "2026-09-05",
+  "total": 3403,
+  "items": 16,
+  "eligible": 7,
+  "conf": "low",
+  "attempts": 7,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "alterTage": 2,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "Netto Marken-Discount",
+   "datum": "2026-09-05",
+   "endsummeCent": 3403,
+   "anzahlPositionen": 15,
+   "manipuliert": false,
+   "grund": "Echter Kassenbon auf gemustertem Untergrund ohne Anzeichen von Manipulation."
+  },
+  "abgleich": {
+   "datumGleich": true,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mtob2focb48apb",
+  "uid": "W3sl3UXjQ7bynDkJtk2twm7QIoh2",
+  "markt": "dm",
+  "bonDate": "2026-09-05",
+  "total": 1025,
+  "items": 7,
+  "eligible": 7,
+  "conf": "low",
+  "attempts": 7,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "alterTage": 2,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "dm-drogerie markt",
+   "datum": "2026-09-05",
+   "endsummeCent": 1025,
+   "anzahlPositionen": 7,
+   "manipuliert": false,
+   "grund": "Echter Beleg mit ungewöhnlichem Zukunftsdatum (2026), keine sichtbaren Bildmanipulationen."
+  },
+  "abgleich": {
+   "datumGleich": true,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mtoc0055i91zuo",
+  "uid": "AtqKtuhG97UK9U9qEoMZmusPVgz1",
+  "markt": "Billa",
+  "bonDate": "2026-09-05",
+  "total": 5384,
+  "items": 27,
+  "eligible": 23,
+  "conf": "low",
+  "attempts": 7,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "alterTage": 2,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "BILLA",
+   "datum": "2026-09-05",
+   "endsummeCent": 5384,
+   "anzahlPositionen": 27,
+   "manipuliert": false,
+   "grund": "Echter Kassenbon ohne Bearbeitungsspuren, jedoch mit zukünftigem Datum."
+  },
+  "abgleich": {
+   "datumGleich": true,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mtofubbkj37acg",
+  "uid": "723CliiLpBSHrZlc8V5u3YpoPCE2",
+  "markt": "dm",
+  "bonDate": "2026-09-05",
+  "total": 1095,
+  "items": 8,
+  "eligible": 7,
+  "conf": "low",
+  "attempts": 3,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [
+   "nachgeprueft_2026-09-07"
+  ],
+  "alterTage": 2,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "dm-drogerie markt",
+   "datum": "2020-09-05",
+   "endsummeCent": 1095,
+   "anzahlPositionen": 8,
+   "manipuliert": false,
+   "grund": "Echter Kassenbon ohne Anzeichen von Manipulation."
+  },
+  "abgleich": {
+   "datumGleich": false,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mtogp1def0yq9h",
+  "uid": "nrHfvgUdMWWPWFC3m5FIW2s5d7t2",
+  "markt": "Netto Markendiscount",
+  "bonDate": "2026-09-04",
+  "total": 5771,
+  "items": 33,
+  "eligible": 24,
+  "conf": "low",
+  "attempts": 4,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [
+   "nachgeprueft_2026-09-07"
+  ],
+  "alterTage": 3,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "Netto Marken-Discount",
+   "datum": "2020-09-04",
+   "endsummeCent": 5771,
+   "anzahlPositionen": 33,
+   "manipuliert": false,
+   "grund": "Echter Kassenbon von Netto, gut lesbar und unmanipuliert."
+  },
+  "abgleich": {
+   "datumGleich": false,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mtogtsn3128lky",
+  "uid": "nrHfvgUdMWWPWFC3m5FIW2s5d7t2",
+  "markt": "EDEKA",
+  "bonDate": "2026-09-04",
+  "total": 4335,
+  "items": 18,
+  "eligible": 13,
+  "conf": "low",
+  "attempts": 7,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "alterTage": 3,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "EDEKA Lustig-Gehweiler",
+   "datum": "2026-09-04",
+   "endsummeCent": 4335,
+   "anzahlPositionen": 16,
+   "manipuliert": false,
+   "grund": "Echter Kassenbon ohne Anzeichen von Manipulation."
+  },
+  "abgleich": {
+   "datumGleich": true,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mtojagyudhjto7",
+  "uid": "ZaVPkLcz2BT8prb2RlzYWHM0bJo2",
+  "markt": "EDEKA",
+  "bonDate": "2026-09-05",
+  "total": 7376,
+  "items": 29,
+  "eligible": 28,
+  "conf": "low",
+  "attempts": 5,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "alterTage": 2,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "EDEKA",
+   "datum": "2026-09-05",
+   "endsummeCent": 7376,
+   "anzahlPositionen": 29,
+   "manipuliert": false,
+   "grund": "Echter Kassenbon ohne Anzeichen von Manipulation."
+  },
+  "abgleich": {
+   "datumGleich": true,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mtokf545y3rs8n",
+  "uid": "3zSbe14ivrNYFRv0d6g0QolP3LB2",
+  "markt": "Netto Markendiscount",
+  "bonDate": "2026-09-05",
+  "total": 3275,
+  "items": 20,
+  "eligible": 15,
+  "conf": "low",
+  "attempts": 6,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "alterTage": 2,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "Netto Marken-Discount",
+   "datum": "2026-09-05",
+   "endsummeCent": 3275,
+   "anzahlPositionen": 17,
+   "manipuliert": false,
+   "grund": "Echter Kassenbon von Netto Marken-Discount ohne Anzeichen von Manipulation."
+  },
+  "abgleich": {
+   "datumGleich": true,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mtowluxh4ud5n6",
+  "uid": "C4ANfeKyCNWsKJvWohXh5wknUTF3",
+  "markt": "Netto Markendiscount",
+  "bonDate": "2026-09-05",
+  "total": 768,
+  "items": 7,
+  "eligible": 6,
+  "conf": "low",
+  "attempts": 7,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "alterTage": 2,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "Netto Marken-Discount",
+   "datum": "2026-09-05",
+   "endsummeCent": 768,
+   "anzahlPositionen": 6,
+   "manipuliert": false,
+   "grund": "Echter Kassenbon mit zukünftigem Datum durch falsche Druckereinstellung, keine Bildmanipulation."
+  },
+  "abgleich": {
+   "datumGleich": true,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mtpohy1upqvayj",
+  "uid": "TNXzvAw2R3am3090sj1IlGN0wsr2",
+  "markt": "Netto Markendiscount",
+  "bonDate": "2026-09-05",
+  "total": 4256,
+  "items": 16,
+  "eligible": 12,
+  "conf": "low",
+  "attempts": 7,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "alterTage": 2,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "Netto Marken-Discount",
+   "datum": "2026-09-05",
+   "endsummeCent": 4256,
+   "anzahlPositionen": 14,
+   "manipuliert": false,
+   "grund": "Echter Kassenbon ohne Anzeichen von Manipulation."
+  },
+  "abgleich": {
+   "datumGleich": true,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mtpvip5rbfc8rj",
+  "uid": "Zk10DPLtaUNDAXtc13gdRAG39Fh1",
+  "markt": "Netto Markendiscount",
+  "bonDate": "2026-09-03",
+  "total": 4751,
+  "items": 31,
+  "eligible": 24,
+  "conf": "low",
+  "attempts": 3,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "alterTage": 4,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "Netto Marken-Discount",
+   "datum": "2026-09-03",
+   "endsummeCent": 4751,
+   "anzahlPositionen": 27,
+   "manipuliert": false,
+   "grund": "Echter Kassenbon ohne Manipulationsspuren, vermutlich falsches Systemdatum der Kasse."
+  },
+  "abgleich": {
+   "datumGleich": true,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mtpxv85hsynmj2",
+  "uid": "OdwhSuVaBYMYvZDZSDjE6ND8lGQ2",
+  "markt": "Penny",
+  "bonDate": "2026-09-05",
+  "total": 3114,
+  "items": 15,
+  "eligible": 14,
+  "conf": "low",
+  "attempts": 7,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "alterTage": 2,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "PENNY",
+   "datum": "2026-09-05",
+   "endsummeCent": 3114,
+   "anzahlPositionen": 15,
+   "manipuliert": false,
+   "grund": "Echter Kassenbon von Penny, keine Manipulation erkennbar."
+  },
+  "abgleich": {
+   "datumGleich": true,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mtr0vw7xg3piev",
+  "uid": "5o12vuCcitW7Is7xmHbEMPQCb653",
+  "markt": "Aldi Süd",
+  "bonDate": "2026-09-07",
+  "total": 6851,
+  "items": 47,
+  "eligible": 45,
+  "conf": "low",
+  "attempts": 7,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "alterTage": 0,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "ALDI SÜD",
+   "datum": "2026-09-07",
+   "endsummeCent": 6851,
+   "anzahlPositionen": 47,
+   "manipuliert": false,
+   "grund": "Echter Kassenbon von Aldi Süd ohne Anzeichen von Manipulation."
+  },
+  "abgleich": {
+   "datumGleich": true,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bon_mtr0wupt2g2ouj",
+  "uid": "YXrf25t8MeezyizL3L8HU3UvDMi2",
+  "markt": "LiDL",
+  "bonDate": "2026-09-07",
+  "total": 1696,
+  "items": 12,
+  "eligible": 10,
+  "conf": "low",
+  "attempts": 7,
+  "reconOk": true,
+  "campaign": "september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "alterTage": 0,
+  "zweit": {
+   "istKassenbon": true,
+   "markt": "Lidl",
+   "datum": "2026-09-07",
+   "endsummeCent": 1696,
+   "anzahlPositionen": 12,
+   "manipuliert": false,
+   "grund": "Echter Kassenbon ohne Anzeichen von Bildmanipulation, Datum in der Zukunft."
+  },
+  "abgleich": {
+   "datumGleich": true,
+   "deltaSummeCent": 0,
+   "marktAehnlich": true
+  },
+  "urteil": "freigeben"
+ }
+]

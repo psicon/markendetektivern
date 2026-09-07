@@ -89,6 +89,7 @@
             <div class="zahl"><span><span class="swatch" style="background:var(--foto)"></span>Produktfotos</span><b id="nFotos">–</b></div>
             <div class="zahl"><span><span class="swatch" style="background:var(--bon)"></span>Kassenbons</span><b id="nBons">–</b></div>
             <div class="zahl"><span>Orte</span><b id="nOrte">–</b></div>
+            <div class="zahl"><span><span class="swatch" style="background:#e2604a"></span>auffällig</span><b id="nAuff">–</b></div>
             <div class="hint" id="ohneOrt"></div>
           </div>
 
@@ -125,6 +126,18 @@
               <b>Angabe</b> — vom Nutzer genannter Ort, stadtgenau.<br />
               Die IP-Ortung erscheint hier bewusst nicht: sie liegt im Mittel
               60 km daneben und taugt nur für die Frage, welches Land.
+            </div>
+          </div>
+
+          <div class="grp">
+            <h3>Auffällig</h3>
+            <div class="row">
+              <button data-f="auff" data-v="alle" class="on">Alle</button>
+              <button data-f="auff" data-v="ja">nur auffällige</button>
+            </div>
+            <div class="hint">
+              Aufnahmeort außerhalb DACH, Standardstandort eines
+              Entwickler-Simulators, oder gröber als ein Kilometer.
             </div>
           </div>
 
@@ -166,11 +179,11 @@
       import { $, call, esc, euro, fmtDate, initAdmin } from './admin-common.js';
 
       // Punkt = [typ, lat, lon, zeit, quelle, markt, land, plz, ort, status, id]
-      const T = 0, LAT = 1, LON = 2, ZEIT = 3, QUELLE = 4, MARKT = 5, PLZ = 7, ORT = 8, STATUS = 9, ID = 10;
+      const T = 0, LAT = 1, LON = 2, ZEIT = 3, QUELLE = 4, MARKT = 5, PLZ = 7, ORT = 8, STATUS = 9, ID = 10, AUFF = 11;
       const QUELLE_DE = ['Gerätestandort', 'Filialadresse vom Bon', 'Angabe des Nutzers'];
       const GENAU_DE = ['meist auf 20 m genau', 'im Mittel 2 km genau', 'stadtgenau'];
 
-      const S = { punkte: [], filter: { typ: 'alle', zeit: 'alle', quelle: 'alle', modus: 'cluster', markt: 'alle', status: 'alle' } };
+      const S = { punkte: [], filter: { typ: 'alle', zeit: 'alle', quelle: 'alle', modus: 'cluster', markt: 'alle', status: 'alle', auff: 'alle' } };
       let karte, ebene;
 
       function baueKarte() {
@@ -186,6 +199,7 @@
         if (f.typ !== 'alle' && p[T] !== Number(f.typ)) return false;
         if (f.quelle !== 'alle' && p[QUELLE] !== Number(f.quelle)) return false;
         if (f.markt !== 'alle' && p[MARKT] !== f.markt) return false;
+        if (f.auff === 'ja' && !(p[AUFF] && p[AUFF].length)) return false;
         if (f.zeit !== 'alle') {
           const grenze = Date.now() - Number(f.zeit) * 86400000;
           if (!p[ZEIT] || p[ZEIT] < grenze) return false;
@@ -207,6 +221,7 @@
         $('nFotos').textContent = fotos.toLocaleString('de-DE');
         $('nBons').textContent = (sichtbar.length - fotos).toLocaleString('de-DE');
         $('nOrte').textContent = new Set(sichtbar.map((p) => p[ORT]).filter(Boolean)).size.toLocaleString('de-DE');
+        $('nAuff').textContent = sichtbar.filter((p) => p[AUFF] && p[AUFF].length).length.toLocaleString('de-DE');
 
         if (S.filter.modus === 'hitze') {
           // Dichte ohne Zusatz-Bibliothek: ein Kreis je Ort, Fläche nach Menge.
@@ -229,15 +244,18 @@
         }
 
         const marker = sichtbar.map((p) => {
-          const farbe = p[T] === 0 ? '#5b4f9c' : '#0d8575';
+          const auffaellig = p[AUFF] && p[AUFF].length;
+          const farbe = auffaellig ? '#e2604a' : p[T] === 0 ? '#5b4f9c' : '#0d8575';
           return L.circleMarker([p[LAT], p[LON]], {
-            radius: 5, color: farbe, weight: 1.5, fillColor: farbe, fillOpacity: 0.75,
+            radius: auffaellig ? 7 : 5, color: farbe, weight: auffaellig ? 2.5 : 1.5,
+            fillColor: farbe, fillOpacity: auffaellig ? 0.9 : 0.75,
           }).bindPopup(
             `<b>${p[T] === 0 ? 'Produktfoto' : 'Kassenbon'}</b> · ${esc(p[MARKT] || 'Markt unbekannt')}<br>` +
             `<span class="kv">Ort</span> ${esc(p[ORT] || '—')}${p[PLZ] ? ` (${esc(p[PLZ])})` : ''}<br>` +
             `<span class="kv">Quelle</span> ${esc(QUELLE_DE[p[QUELLE]] ?? '—')}, ${esc(GENAU_DE[p[QUELLE]] ?? '')}<br>` +
             `<span class="kv">Eingereicht</span> ${fmtDate(p[ZEIT])} · ${esc(p[STATUS])}<br>` +
-            `<a href="pruefen.html?id=${encodeURIComponent(p[ID])}" style="color:#3ba0e8">im Prüfen öffnen</a>`,
+            ((p[AUFF] || []).map((t) => `<span style="color:#e2604a">⚠ ${esc(t)}</span><br>`).join('')) +
+            `<a href="pruefen.html?id=${encodeURIComponent(p[ID])}${p[T] === 1 ? '&tab=receipts' : ''}" style="color:#3ba0e8">im Prüfen öffnen</a>`,
           );
         });
 
@@ -255,10 +273,17 @@
         S.punkte = r.data.punkte || [];
         const o = r.data.ohneOrt || {};
         const g = r.data.gesamt || {};
+        // Warum ein Fall keinen Punkt hat — jede Zahl mit ihrem Grund.
+        const zeilen = [];
+        if (o.nurLand) zeilen.push(`${o.nurLand} nur mit Landesangabe`);
+        if (o.garNichts) zeilen.push(`${o.garNichts} ganz ohne Ortsangabe`);
+        if (o.wohnort) zeilen.push(`${o.wohnort} nur mit Wohnort — der sagt nichts über den Einkaufsort`);
+        if (o.ortNichtAufloesbar) zeilen.push(`${o.ortNichtAufloesbar} mit einem Ortsnamen, der sich nicht auflösen ließ`);
         $('ohneOrt').innerHTML =
-          `Ohne verwertbaren Ort: ${(o.fotos ?? 0)} von ${(g.fotos ?? 0)} Fotos, ` +
-          `${(o.bons ?? 0)} von ${(g.bons ?? 0)} Bons. Diese Einreichungen sind gültig — ` +
-          `es fehlt nur die Angabe, aus der sich ein Punkt setzen ließe.`;
+          `Nicht auf der Karte: ${(o.fotos ?? 0)} von ${(g.fotos ?? 0)} Fotos und ` +
+          `${(o.bons ?? 0)} von ${(g.bons ?? 0)} Bons — überwiegend Altfälle.` +
+          (zeilen.length ? `<br>Bei den Fotos: ${zeilen.join(', ')}.` : '') +
+          `<br>Diese Einreichungen sind gültig; es fehlt nur die Angabe, aus der sich ein Punkt setzen ließe.`;
 
         const maerkte = [...new Set(S.punkte.map((p) => p[MARKT]).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
         $('fMarkt').innerHTML = '<option value="alle">alle Märkte</option>' +

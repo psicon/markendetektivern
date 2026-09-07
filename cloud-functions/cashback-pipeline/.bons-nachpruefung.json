@@ -1,0 +1,122 @@
+[
+ {
+  "id": "bon_mtmx2e9nmto72a",
+  "markt": "Netto Markendiscount",
+  "gespeichert": {
+   "datum": "2026-09-01",
+   "total": 1273,
+   "recon": true
+  },
+  "gelesen": {
+   "belegtyp": "papierbon",
+   "tag": 1,
+   "monat": 9,
+   "jahrText": "26",
+   "endsummeCent": 1273,
+   "bearbeitungsspuren": false,
+   "spurenBeschreibung": "keine"
+  },
+  "tagMonatGleich": true,
+  "summeGleich": true
+ },
+ {
+  "id": "bon_mtn6e97cml9lv6",
+  "markt": "Kaufland",
+  "gespeichert": {
+   "datum": "2026-09-04",
+   "total": 11989,
+   "recon": true
+  },
+  "gelesen": {
+   "belegtyp": "papierbon",
+   "tag": 4,
+   "monat": 9,
+   "jahrText": "26",
+   "endsummeCent": 11989,
+   "bearbeitungsspuren": false,
+   "spurenBeschreibung": "keine"
+  },
+  "tagMonatGleich": true,
+  "summeGleich": true
+ },
+ {
+  "id": "bon_mtnbq72ng3kp4i",
+  "markt": "EDEKA",
+  "gespeichert": {
+   "datum": "2026-09-01",
+   "total": 2649,
+   "recon": true
+  },
+  "gelesen": {
+   "belegtyp": "papierbon",
+   "tag": 1,
+   "monat": 9,
+   "jahrText": "2026",
+   "endsummeCent": 2943,
+   "bearbeitungsspuren": false,
+   "spurenBeschreibung": ""
+  },
+  "tagMonatGleich": true,
+  "summeGleich": false
+ },
+ {
+  "id": "bon_mto6htox4tognj",
+  "markt": "Billa",
+  "gespeichert": {
+   "datum": "2026-09-05",
+   "total": 5368,
+   "recon": true
+  },
+  "gelesen": {
+   "belegtyp": "digitaler_beleg_screenshot",
+   "tag": 5,
+   "monat": 9,
+   "jahrText": "2026",
+   "endsummeCent": 5368,
+   "bearbeitungsspuren": false,
+   "spurenBeschreibung": ""
+  },
+  "tagMonatGleich": true,
+  "summeGleich": true
+ },
+ {
+  "id": "bon_mtofubbkj37acg",
+  "markt": "dm",
+  "gespeichert": {
+   "datum": "2026-09-05",
+   "total": 1095,
+   "recon": true
+  },
+  "gelesen": {
+   "belegtyp": "papierbon",
+   "tag": 5,
+   "monat": 9,
+   "jahrText": "2020",
+   "endsummeCent": 1095,
+   "bearbeitungsspuren": false,
+   "spurenBeschreibung": ""
+  },
+  "tagMonatGleich": true,
+  "summeGleich": true
+ },
+ {
+  "id": "bon_mtogp1def0yq9h",
+  "markt": "Netto Markendiscount",
+  "gespeichert": {
+   "datum": "2026-09-04",
+   "total": 5771,
+   "recon": true
+  },
+  "gelesen": {
+   "belegtyp": "papierbon",
+   "tag": 4,
+   "monat": 9,
+   "jahrText": "26",
+   "endsummeCent": 5771,
+   "bearbeitungsspuren": false,
+   "spurenBeschreibung": ""
+  },
+  "tagMonatGleich": true,
+  "summeGleich": true
+ }
+]

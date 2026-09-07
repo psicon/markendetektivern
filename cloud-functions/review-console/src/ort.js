@@ -1,7 +1,20 @@
 'use strict';
 
 /**
- * Wo wurde eingekauft? — EINE Antwort aus mehreren Quellen (07.09.2026).
+ * Wo wurde eingekauft? — die Antwort für Prüfwerkzeug und Karte (07.09.2026).
+ *
+ * ═══ Dieses Modul entscheidet die Rangfolge NICHT ═══
+ *
+ * Das tut seit August 2026 `cloud-functions/crowd-upload-location/src/scorer.js`
+ * und schreibt das Ergebnis als `probableLocation` ans Dokument — mit Quelle,
+ * Konfidenz, Granularität, den mitbewertenden Signalen und `usableFor` als
+ * Missbrauchsschutz. Beim ersten Bau stand die Rangfolge hier ein zweites Mal;
+ * zwei Entscheider über dieselbe Frage laufen im Betrieb auseinander. Also:
+ * `probableLocation` ist die Autorität, hier steht nur, was dort fehlt —
+ * Koordinaten zu Ortsnamen (224 von 234 Stadt-Angaben tragen keine), die
+ * Filialadresse bei Bons (dort gibt es kein `probableLocation`) und die
+ * Auffälligkeiten.
+ *
  *
  * Bis hierher zeigte das Prüf-Werkzeug als Ort das Wort „GPS" an. Das ist die
  * Herkunft der Angabe, nicht der Ort — und beantwortet die Frage nicht, die
@@ -149,17 +162,146 @@ const ms = (v) => (v && typeof v.toMillis === 'function' ? v.toMillis() : null);
  * Der Ort EINER Produktfoto-Einreichung.
  * @returns {{quelle, label, genauigkeitM, lat, lon, plz, ort, bundesland, land, alternativen}}
  */
+/**
+ * Grobe Länderzuordnung für Punkte außerhalb DACH — damit ein Aufnahmeort in
+ * Belgien „Belgien" heißt statt namenlos in der Landschaft zu stehen. Bewusst
+ * nur Rechtecke: die Frage ist „passt das überhaupt zusammen", nicht „welche
+ * Gemeinde". Überlappen zwei Rechtecke an einer Grenze, gibt es keinen Namen
+ * statt eines falschen.
+ */
+const LAENDER = [
+  ['Deutschland', 47.27, 55.06, 5.87, 15.04], ['Österreich', 46.37, 49.02, 9.53, 17.16],
+  ['Schweiz', 45.82, 47.81, 5.96, 10.49], ['Belgien', 49.50, 51.51, 2.55, 6.41],
+  ['Niederlande', 50.75, 53.56, 3.36, 7.23], ['Luxemburg', 49.45, 50.19, 5.73, 6.53],
+  ['Frankreich', 42.33, 51.09, -4.80, 8.23], ['Italien', 36.65, 47.09, 6.62, 18.52],
+  ['Dänemark', 54.56, 57.75, 8.07, 12.69], ['Polen', 49.00, 54.84, 14.12, 24.15],
+  ['Tschechien', 48.55, 51.06, 12.09, 18.86], ['Spanien', 36.00, 43.79, -9.30, 3.32],
+  ['Kroatien', 42.38, 46.55, 13.49, 19.45], ['Ungarn', 45.74, 48.59, 16.11, 22.90],
+  ['Großbritannien', 49.96, 58.64, -8.65, 1.76], ['Schweden', 55.34, 69.06, 11.11, 24.16],
+  ['Türkei', 35.81, 42.11, 25.66, 44.83], ['Griechenland', 34.80, 41.75, 19.37, 28.25],
+  ['USA', 24.52, 49.38, -124.77, -66.95],
+];
+function landAusKoordinate(lat, lon) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  const treffer = LAENDER.filter(([, laMin, laMax, loMin, loMax]) => lat >= laMin && lat <= laMax && lon >= loMin && lon <= loMax);
+  return treffer.length === 1 ? treffer[0][0] : null;
+}
+const inDACH = (lat, lon) => lat >= 45.8 && lat <= 55.1 && lon >= 5.8 && lon <= 17.2;
+
+/** Standardstandorte der Entwickler-Simulatoren — ein Fix von dort ist kein Einkauf. */
+const SIMULATOR_ORTE = [
+  ['iOS-Simulator, San Francisco', 37.7858, -122.4064],
+  ['iOS-Simulator, Apple Park', 37.3349, -122.0090],
+  ['Android-Emulator, Mountain View', 37.4220, -122.0840],
+];
+
+/**
+ * Was an dieser Ortsangabe erklärungsbedürftig ist — leer heißt unauffällig.
+ *
+ * Anlass: eine Einreichung stand mit einem sehr genauen Standort (± 4 m) in
+ * Belgien, bei einem Markt, der für Deutschland hinterlegt ist. Der Punkt war
+ * richtig, das Werkzeug sagte nur nicht, dass daran etwas bemerkenswert ist.
+ * Gemessen an 458 Gerätestandorten: 2 außerhalb DACH (einer davon auf dem
+ * Standardstandort des iOS-Simulators), 10 gröber als ein Kilometer.
+ */
+function auffaelligkeiten({ lat, lon, genauigkeitM, erwartetesLand, quelle }) {
+  const raus = [];
+  if (Number.isFinite(lat) && Number.isFinite(lon)) {
+    for (const [name, sLat, sLon] of SIMULATOR_ORTE) {
+      if (Math.abs(lat - sLat) < 0.05 && Math.abs(lon - sLon) < 0.05) {
+        return [{ art: 'simulator', text: `Standardstandort eines Entwickler-Simulators (${name}) — das ist keine echte Aufnahme` }];
+      }
+    }
+    if (!inDACH(lat, lon)) {
+      const land = landAusKoordinate(lat, lon);
+      raus.push({
+        art: 'ausland',
+        text: land
+          ? `Aufnahmeort liegt in ${land}, außerhalb des Aktionsgebiets`
+          : `Aufnahmeort liegt weit außerhalb des Aktionsgebiets (${lat.toFixed(2)}, ${lon.toFixed(2)})`,
+      });
+    } else if (erwartetesLand) {
+      const land = landAusKoordinate(lat, lon);
+      const kurz = { Deutschland: 'DE', Österreich: 'AT', Schweiz: 'CH' }[land];
+      if (kurz && kurz !== String(erwartetesLand).toUpperCase()) {
+        raus.push({ art: 'landabweichung', text: `Aufnahmeort liegt in ${land}, der Markt ist für ${erwartetesLand} hinterlegt` });
+      }
+    }
+  }
+  if (quelle === 'geraet' && Number.isFinite(genauigkeitM) && genauigkeitM > 1000) {
+    raus.push({ art: 'ungenau', text: `Der Standort ist nur auf ${Math.round(genauigkeitM / 1000)} km genau — als Ortsangabe kaum brauchbar` });
+  }
+  return raus;
+}
+
+const QUELLE_TEXT = {
+  gps_capture: ['geraet', 'Standort des Geräts bei der Aufnahme'],
+  exif_gps: ['geraet', 'Standort aus den Bilddaten'],
+  user_confirmed_place: ['nutzerangabe', 'Ort, den der Nutzer angegeben hat'],
+  user_profile_region: ['profil', 'aus früheren Bons abgeleiteter Wohnort'],
+  market_country: ['land', 'nur das Land des gewählten Marktes'],
+};
+
 function ortVonEinreichung(doc, zusatz) {
   const c = doc?.capture || {};
+  const erwartet = doc?.marketLand || null;
+  const p = doc?.probableLocation;
 
-  // 1) Gerätestandort
+  // Der Ortsschätzer hat bereits entschieden — hier wird nur ergänzt.
+  if (p && p.source) {
+    const [quelle, wort] = QUELLE_TEXT[p.source] || ['unbekannt', String(p.source)];
+    let lat = Number.isFinite(p.lat) ? p.lat : null;
+    let lon = Number.isFinite(p.lon) ? p.lon : null;
+    let ort = p.city || null;
+    let plz = null;
+    let bundesland = p.bundesland || null;
+
+    // Die Lücke, für die dieses Modul da ist: `granularity: 'city'` trägt einen
+    // Ortsnamen, aber keine Koordinate.
+    if (lat == null && ort) {
+      const k = ortKoordinate(ort, p.country || erwartet, zusatz);
+      if (k) { lat = k.lat; lon = k.lon; bundesland = bundesland || k.bundesland; }
+    }
+    // Umgekehrt: eine Koordinate ohne Namen bekommt einen. Die Tabelle deckt
+    // DE und AT ab — ein Punkt außerhalb bekommt darum das LAND als Namen und
+    // nicht das Etikett des Marktes, das dort nichts mehr aussagt.
+    let ausserhalb = null;
+    if (lat != null && !ort) {
+      const t = naechsteOrtschaft(lat, lon);
+      if (t) { ort = t.ort; plz = t.plz; bundesland = bundesland || t.bundesland; }
+      else ausserhalb = landAusKoordinate(lat, lon);
+    }
+    const genauigkeitM = Number.isFinite(p.accuracyM) ? Math.round(p.accuracyM) : null;
+    return {
+      quelle, quelleText: wort,
+      granularitaet: p.granularity || null,
+      konfidenz: p.confidence || null,
+      label: ort
+        ? `${ort}${plz ? `, ${plz}` : ''}`
+        : lat != null
+          ? `${ausserhalb || 'außerhalb der Ortstabelle'} (${lat.toFixed(3)}, ${lon.toFixed(3)})`
+          : (p.country ? `nur das Land ist bekannt: ${p.country}` : 'Ort nicht bestimmbar'),
+      genauigkeitM,
+      lat, lon, plz, ort, bundesland,
+      land: p.country || erwartet || null,
+      erfasstAm: ms(c.capturedAt),
+      auffaellig: auffaelligkeiten({ lat, lon, genauigkeitM, erwartetesLand: erwartet, quelle }),
+      alternativen: weitereQuellen(doc, quelle),
+      herkunft: 'probableLocation',
+    };
+  }
+
+  // Rückfall für Einreichungen ohne `probableLocation` — alle aus der Zeit vor
+  // August 2026, als der Ortsschätzer eingeführt wurde.
   const g = c.gps;
   if (g && Number.isFinite(g.lat) && Number.isFinite(g.lon)) {
     const genau = Number.isFinite(g.accuracyM) ? Math.round(g.accuracyM) : GENAUIGKEIT.geraet;
     const treffer = naechsteOrtschaft(g.lat, g.lon);
     return {
-      quelle: 'geraet',
-      label: treffer ? `${treffer.ort}${treffer.plz ? `, ${treffer.plz}` : ''}` : 'Gerätestandort',
+      quelle: 'geraet', quelleText: 'Standort des Geräts bei der Aufnahme',
+      granularitaet: 'point', konfidenz: null, herkunft: 'altbestand',
+      auffaellig: auffaelligkeiten({ lat: g.lat, lon: g.lon, genauigkeitM: genau, erwartetesLand: erwartet, quelle: 'geraet' }),
+      label: treffer ? `${treffer.ort}${treffer.plz ? `, ${treffer.plz}` : ''}` : 'Gerätestandort ohne Ortszuordnung',
       genauigkeitM: genau,
       lat: g.lat, lon: g.lon,
       plz: treffer?.plz ?? null, ort: treffer?.ort ?? null, bundesland: treffer?.bundesland ?? null,
@@ -174,7 +316,8 @@ function ortVonEinreichung(doc, zusatz) {
   if (bon && bon.zip) {
     const k = plzKoordinate(bon.zip, bon.country || doc?.marketLand);
     return {
-      quelle: 'filiale',
+      quelle: 'filiale', quelleText: 'Adresse auf dem Kassenbon im Preisbild',
+      granularitaet: 'store', konfidenz: null, herkunft: 'altbestand', auffaellig: [],
       label: [bon.street, [bon.zip, bon.city || k?.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') || 'Filiale laut Bon',
       genauigkeitM: GENAUIGKEIT.filiale,
       lat: k?.lat ?? null, lon: k?.lon ?? null,
@@ -191,7 +334,8 @@ function ortVonEinreichung(doc, zusatz) {
     const name = cp.city || cp.name;
     const k = ortKoordinate(name, doc?.marketLand, zusatz);
     return {
-      quelle: 'nutzerangabe',
+      quelle: 'nutzerangabe', quelleText: 'Ort, den der Nutzer angegeben hat',
+      granularitaet: 'city', konfidenz: null, herkunft: 'altbestand', auffaellig: [],
       label: name,
       genauigkeitM: GENAUIGKEIT.nutzerangabe,
       lat: k?.lat ?? null, lon: k?.lon ?? null,
@@ -203,7 +347,8 @@ function ortVonEinreichung(doc, zusatz) {
   }
 
   return {
-    quelle: null,
+    quelle: null, quelleText: null, granularitaet: null, konfidenz: null,
+    herkunft: 'altbestand', auffaellig: [],
     label: 'kein Ort erfasst',
     genauigkeitM: null,
     lat: null, lon: null, plz: null, ort: null, bundesland: null,
@@ -218,8 +363,13 @@ function ortVonBon(doc, zusatz) {
   const s = doc?.store || {};
   if (s.zip || s.city) {
     const k = s.zip ? plzKoordinate(s.zip, s.country) : ortKoordinate(s.city, s.country, zusatz);
+    const lat0 = k?.lat ?? null;
+    const lon0 = k?.lon ?? null;
     return {
-      quelle: 'filiale',
+      quelle: 'filiale', quelleText: 'Adresse auf dem Kassenbon',
+      granularitaet: s.zip ? 'store' : 'city', konfidenz: s.zip ? 'high' : 'medium',
+      herkunft: 'bonkopf',
+      auffaellig: auffaelligkeiten({ lat: lat0, lon: lon0, genauigkeitM: null, erwartetesLand: s.country, quelle: 'filiale' }),
       label: [s.street, [s.zip, s.city || k?.ort].filter(Boolean).join(' ')].filter(Boolean).join(', '),
       genauigkeitM: s.zip ? GENAUIGKEIT.filiale : GENAUIGKEIT.nutzerangabe,
       lat: k?.lat ?? null, lon: k?.lon ?? null,
@@ -230,7 +380,9 @@ function ortVonBon(doc, zusatz) {
     };
   }
   return {
-    quelle: null, label: 'keine Filialadresse erkannt', genauigkeitM: null,
+    quelle: null, quelleText: null, granularitaet: null, konfidenz: null,
+    herkunft: 'bonkopf', auffaellig: [],
+    label: 'keine Filialadresse auf dem Bon erkannt', genauigkeitM: null,
     lat: null, lon: null, plz: null, ort: null, bundesland: null, land: null,
     erfasstAm: null, alternativen: [],
   };
@@ -286,4 +438,7 @@ function naechsteOrtschaft(lat, lon) {
   return beste && Math.sqrt(besteD) * 111 <= 30 ? beste : null;
 }
 
-module.exports = { ortVonEinreichung, ortVonBon, plzKoordinate, ortKoordinate, ortsverzeichnisAusBons, naechsteOrtschaft, GENAUIGKEIT };
+module.exports = {
+  ortVonEinreichung, ortVonBon, plzKoordinate, ortKoordinate, ortsverzeichnisAusBons,
+  naechsteOrtschaft, landAusKoordinate, auffaelligkeiten, inDACH, GENAUIGKEIT,
+};

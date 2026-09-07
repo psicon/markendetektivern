@@ -1772,9 +1772,16 @@ exports.processCashback = onMessagePublished(
       // 'approved' und `syncLedgerForReceipt` bucht erneut (der stornierte
       // Earn steht auf netto 0, der Zweig legt einen neuen an).
       if (status === 'approved' && (receipt.reviewDecision === 'reject' || receipt.reviewDecision === 'no_reward')) {
-        status = 'review';
-        reviewReason = 'mensch_hat_entschieden';
+        // Den Endzustand des Menschen WIEDERHERSTELLEN, nicht auf 'review'
+        // setzen: 'review' machte die Ablehnung wieder zu einer offenen Frage,
+        // der Fall käme erneut in die Warteschlange und die App zeigte dem
+        // Nutzer wieder „wird geprüft". Fürs Ledger ist beides gleich (kein
+        // wantApproved, also Storno bzw. nichts) — für Warteschlange und App
+        // nicht.
+        status = receipt.reviewDecision === 'no_reward' ? 'no_reward' : 'rejected';
+        reviewReason = null;
         cashbackCents = 0;
+        if (!rejectReason && status === 'rejected') rejectReason = receipt.rejectReason || 'manual_review_rejected';
       }
       if (status === 'approved' && !alreadyCredited && receipt.reviewDecision !== 'approve') {
         const conf = ocr.robust?.confidence || null;
@@ -1828,7 +1835,13 @@ exports.processCashback = onMessagePublished(
             // Derselbe Betragsweg wie oben — ein Unterschied in der Artikelzahl
             // zählt nur, wenn er den Betrag verändert (Pfand wird über den
             // NAMEN erkannt, eine andere Lesung kann die Zahl also verschieben).
-            betragFuer: (n) => (selectedCampaign ? campaignRewardCents(n, selectedCampaign, config) : n),
+            // Ohne Aktion gibt es keinen Betrag — dann ist die Mindest-Artikelzahl
+            // die einzige Kante, an der eine abweichende Zählung Geldwirkung hätte.
+            // Die rohe Zahl zu vergleichen wäre strenger als nötig und hielte
+            // Bons wegen eines Unterschieds zurück, der nichts kostet.
+            betragFuer: (n) => (selectedCampaign
+              ? campaignRewardCents(n, selectedCampaign, config)
+              : (n >= (config.minItemsForPayout ?? 4) ? 1 : 0)),
           });
         }
 
@@ -1847,7 +1860,10 @@ exports.processCashback = onMessagePublished(
         // Auch diese Verschärfung hängt am Schalter: steht `ocrFieldGate` auf
         // `false`, verhält sich der Block bitgenau wie vor dem Umbau. Ein
         // Notaus, der nur die Hälfte zurücknimmt, ist keiner.
-        const bewertungFehlt = feldGateWirkt && conf == null && engineLiefertBewertung;
+        // Auch im Beobachtungs-Modus rechnen, aber nur im Dauer-Modus wirken —
+        // sonst bliebe ausgerechnet die einzige Verschärfung ungemessen.
+        const bewertungFehltErkannt = feldGateAn && conf == null && engineLiefertBewertung;
+        const bewertungFehlt = feldGateWirkt && bewertungFehltErkannt;
         const haltenWegenLesung = conf === 'none' || bewertungFehlt
           ? true
           : conf === 'high' || conf == null
@@ -1864,6 +1880,9 @@ exports.processCashback = onMessagePublished(
           ocrFieldAgreement = {
             ok: felder.ok, zeugen: felder.zeugen, konflikte: felder.konflikte,
             confidence: conf, modus: feldGateWirkt ? 'wirksam' : 'beobachtung',
+            // Was das Gate im Dauer-Modus entschieden HÄTTE — die Zahl, an der
+            // sich vor dem Scharfschalten ablesen lässt, was passieren wird.
+            haetteFreigegeben: felder.ok === true,
           };
         }
       }
