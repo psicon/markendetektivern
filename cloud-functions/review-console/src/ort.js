@@ -87,6 +87,7 @@ let ortIndex = null;
 function bauOrtIndex() {
   ortIndex = new Map();
   for (const [schluessel, e] of Object.entries(PLZ)) {
+    if (e[4] === 1) continue; // ein Firmenname ist kein Ortsname
     const land = schluessel.slice(0, 2);
     const k = `${land}|${normOrt(e[2])}`;
     if (!ortIndex.has(k)) ortIndex.set(k, []);
@@ -187,6 +188,8 @@ function landAusKoordinate(lat, lon) {
   return treffer.length === 1 ? treffer[0][0] : null;
 }
 const inDACH = (lat, lon) => lat >= 45.8 && lat <= 55.1 && lon >= 5.8 && lon <= 17.2;
+/** Länderkürzel, soweit sie im Projekt vorkommen. */
+const KURZ = { Deutschland: 'DE', Österreich: 'AT', Schweiz: 'CH', Belgien: 'BE', Niederlande: 'NL', Luxemburg: 'LU', Frankreich: 'FR', Italien: 'IT', Dänemark: 'DK', Polen: 'PL', Tschechien: 'CZ', Spanien: 'ES', Kroatien: 'HR', Ungarn: 'HU', Großbritannien: 'GB', Schweden: 'SE', Türkei: 'TR', Griechenland: 'GR', USA: 'US' };
 
 /** Standardstandorte der Entwickler-Simulatoren — ein Fix von dort ist kein Einkauf. */
 const SIMULATOR_ORTE = [
@@ -261,8 +264,12 @@ function ortVonEinreichung(doc, zusatz) {
 
     // Die Lücke, für die dieses Modul da ist: `granularity: 'city'` trägt einen
     // Ortsnamen, aber keine Koordinate.
+    // Der Schätzer schreibt das Land als `land` (scorer.js). `country` gab es
+    // hier nie — gemessen an 1.207 Dokumenten: 1.207× `land`, 0× `country`.
+    // Beide lesen, damit ein späterer Umbau im Schätzer nichts bricht.
+    const land = p.land ?? p.country ?? null;
     if (lat == null && ort) {
-      const k = ortKoordinate(ort, p.country || erwartet, zusatz);
+      const k = ortKoordinate(ort, land || erwartet, zusatz);
       if (k) { lat = k.lat; lon = k.lon; bundesland = bundesland || k.bundesland; }
     }
     // Umgekehrt: eine Koordinate ohne Namen bekommt einen. Die Tabelle deckt
@@ -283,10 +290,13 @@ function ortVonEinreichung(doc, zusatz) {
         ? `${ort}${plz ? `, ${plz}` : ''}`
         : lat != null
           ? `${ausserhalb || 'außerhalb der Ortstabelle'} (${lat.toFixed(3)}, ${lon.toFixed(3)})`
-          : (p.country ? `nur das Land ist bekannt: ${p.country}` : 'Ort nicht bestimmbar'),
+          : (land ? `nur das Land ist bekannt: ${land}` : 'Ort nicht bestimmbar'),
       genauigkeitM,
       lat, lon, plz, ort, bundesland,
-      land: p.country || erwartet || null,
+      // Liegt der gemessene Punkt außerhalb des erwarteten Landes, gilt die
+      // Messung — sonst stünde an einem Punkt in Belgien „DE", nur weil der
+      // Markt dafür hinterlegt ist.
+      land: (lat != null && ausserhalb ? KURZ[ausserhalb] || ausserhalb : null) || land || erwartet || null,
       erfasstAm: ms(c.capturedAt),
       auffaellig: auffaelligkeiten({ lat, lon, genauigkeitM, erwartetesLand: erwartet, quelle }),
       alternativen: weitereQuellen(doc, quelle),
@@ -417,6 +427,12 @@ let raster = null;
 function bauRaster() {
   raster = new Map();
   for (const [schluessel, e] of Object.entries(PLZ)) {
+    // Reine Firmen-Postleitzahlen (fünftes Feld = 1) taugen nicht als ORTSNAME:
+    // GeoNames führt Großkunden-Postleitzahlen mit dem Firmennamen im Ortsfeld,
+    // und ein Gerätestandort wurde dadurch zu „Finanzamt Köln-Porz" statt zu
+    // „Köln" — bei 150 von 463 Standorten. Ihre Koordinate bleibt nutzbar,
+    // nur die Rückwärts-Suche überspringt sie.
+    if (e[4] === 1) continue;
     const k = `${Math.round(e[0] * 2)}/${Math.round(e[1] * 2)}`; // halbes Grad
     if (!raster.has(k)) raster.set(k, []);
     raster.get(k).push({ plz: schluessel.slice(3), land: schluessel.slice(0, 2), lat: e[0], lon: e[1], ort: e[2], bundesland: e[3] });

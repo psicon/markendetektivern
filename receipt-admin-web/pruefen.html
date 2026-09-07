@@ -227,6 +227,15 @@
       const CONFIDENCE_DE = { high: 'sicher', medium: 'mittel', low: 'unsicher', none: 'kein Ergebnis' };
       const LEDGER_DE = { earn: 'gutgeschrieben', reverse: 'storniert', payout: 'ausgezahlt' };
 
+      // Antworten des Bon-Resolvers im Klartext.
+      const RESOLVER_DE = {
+        not_in_review: 'dieser Bon steht nicht mehr in der Prüfung — vermutlich hat ihn jemand anderes gerade entschieden',
+        campaign_missing: 'die Aktion zu diesem Bon existiert nicht mehr',
+        no_cashback_computed: 'für diesen Bon wurde kein Betrag berechnet',
+        receipt_missing: 'der Bon wurde nicht gefunden',
+        forbidden: 'der Zugang zum Resolver wurde abgelehnt',
+      };
+
       const FOLGE_DE = {
         keine_aktion: 'zu dieser Einreichung gehört keine Aktion',
         nutzer_am_limit: 'dieser Nutzer hat das Maximum der Aktion erreicht',
@@ -277,7 +286,10 @@
         return `${warnung}${esc(o.label)}<div style="color:${farbe};font-size:11.5px">${esc(o.quelleText || '')}${genau ? ` · ${genau}` : ''}</div>${andere}`;
       }
 
-      const S = { type: 'photos', queue: [], idx: 0, cache: new Map(), done: new Set(), busy: false, counts: {}, mode: null };
+      // `zeigt` = die ID des Falls, der WIRKLICH auf dem Bildschirm steht.
+      // Ohne diesen Zustand konnte über einen Fall entschieden werden, der noch
+      // lud oder gar nicht mehr angezeigt wurde.
+      const S = { type: 'photos', queue: [], idx: 0, cache: new Map(), done: new Set(), busy: false, counts: {}, mode: null, zeigt: null, gesucht: '' };
 
       const cur = () => S.queue[S.idx] || null;
       const setBusy = (b) => { S.busy = b; ['bOk', 'bNo', 'bNoReward', 'bSkip'].forEach((id) => { $(id).disabled = b; }); };
@@ -354,15 +366,34 @@
         });
       }
 
+      /**
+       * Zeigt den aktuellen Fall — und gibt die Entscheidungsleiste erst frei,
+       * wenn er WIRKLICH auf dem Bildschirm steht.
+       *
+       * Vorher wurde die Leiste sichtbar geschaltet, bevor der Fall geladen war,
+       * und ein Ladefehler blieb ungefangen. Man konnte also einen Fall
+       * freigeben, den man nie gesehen hat — bei „Lade Fall …" und aktivem F.
+       * `S.zeigt` ist die Sperre: keine Entscheidung ohne einen gerenderten Fall.
+       */
       async function showCurrent() {
         const c = cur();
+        S.zeigt = null;
         if (!c) { $('stage').innerHTML = '<div class="empty">Nichts offen 🎉</div>'; $('bar').style.visibility = 'hidden'; return; }
-        $('bar').style.visibility = 'visible';
+        $('bar').style.visibility = 'hidden';
         if (!S.cache.has(c.id)) {
           $('stage').innerHTML = '<div class="empty">Lade Fall …</div>';
-          await fetchCases([c.id]);
+          try {
+            await fetchCases([c.id]);
+          } catch (e) {
+            zeigeFehler(`Der Fall ließ sich nicht laden: ${e.message}`, () => showCurrent());
+            return;
+          }
         }
-        render(S.cache.get(c.id));
+        const fall = S.cache.get(c.id);
+        if (!fall) { zeigeFehler('Der Fall kam leer zurück.', () => { S.cache.delete(c.id); showCurrent(); }); return; }
+        render(fall);
+        S.zeigt = c.id;
+        $('bar').style.visibility = 'visible';
         // Die nächsten drei still vorladen.
         const next = S.queue.slice(S.idx + 1, S.idx + 4).map((x) => x.id);
         if (next.length) fetchCases(next).catch(() => {});
@@ -486,7 +517,15 @@
       }
 
       /** Entschiedenen Fall aus der Schlange nehmen; der nächste rückt nach. */
-      function advance() {
+      /**
+       * Entschiedenen Fall aus der Schlange nehmen und den nächsten zeigen.
+       *
+       * Bewusst `await`: ohne das kehrte advance() sofort zurück, die Leiste
+       * wurde freigegeben, und ein zweiter Tastendruck traf den nächsten Fall,
+       * bevor er auf dem Bildschirm stand — zweimal F gab also einen Fall frei,
+       * den niemand gesehen hat.
+       */
+      async function advance() {
         const c = cur();
         if (!c) return;
         S.done.add(c.id);
@@ -494,7 +533,7 @@
         S.queue = S.queue.filter((x) => x.id !== c.id);
         S.idx = Math.min(i, Math.max(0, S.queue.length - 1));
         $(S.type === 'photos' ? 'cPhotos' : 'cReceipts').textContent = S.queue.length;
-        showCurrent();
+        await showCurrent();
       }
 
       /**
@@ -531,7 +570,9 @@
       }
 
       async function decidePhoto(decision, reason, note) {
-        const c = cur(); if (!c || S.busy) return;
+        const c = cur();
+        // Nur über einen Fall entscheiden, der auch auf dem Bildschirm steht.
+        if (!c || S.busy || S.zeigt !== c.id) return;
         setBusy(true);
         try {
           const daten = { ids: [c.id], decision, reason };
@@ -543,14 +584,14 @@
             frageNachBegruendung(res.reason, (begruendung) => decidePhoto('approve', undefined, begruendung));
           } else if (res.outcome === 'approved') {
             toast(note ? 'Trotz Sperre freigegeben ✓' : 'Freigegeben ✓', 'good');
-            advance();
+            await advance();
           } else if (res.outcome === 'rejected') {
             const id = c.id;
             toast(`Abgelehnt: ${REASON_DE[reason] || reason}`, 'bad', () => reopen(id));
-            advance();
+            await advance();
           } else {
             toast(`Nicht ausgeführt: ${esc(REASON_DE[res.reason] || res.reason || res.outcome)}`, 'bad');
-            advance();
+            await advance();
           }
         } catch (e) { toast('Fehler: ' + e.message, 'bad'); }
         setBusy(false);
@@ -566,15 +607,40 @@
       }
 
       async function decideReceipt(decision, reason) {
-        const c = cur(); if (!c || S.busy) return;
+        const c = cur();
+        if (!c || S.busy || S.zeigt !== c.id) return;
         setBusy(true);
         try {
           const r = await call('reviewDecideReceipt')({ receiptId: c.id, decision, reason });
           if (r.data.ok) {
-            toast(decision === 'approve' ? `Freigegeben ✓ ${r.data.cents != null ? euro(r.data.cents) : ''}` : decision === 'no_reward' ? 'Ohne Prämie erfasst' : 'Abgelehnt', decision === 'approve' ? 'good' : 'bad');
-            advance();
+            // Der Resolver rechnet die Deckel beim Freigeben NEU — ein Bon, der
+            // Tage in der Prüfung lag, kann am Tageslimit hängen und mit
+            // `no_reward` und 0 Cent zurückkommen. Ein grüner Haken darüber
+            // wäre genau das Muster, das schon einmal 144 Freigaben mit 0 Cent
+            // durchgehen ließ. Also: den WIRKLICHEN Ausgang melden, mit Betrag.
+            // (Das Feld heißt `creditedCents` — `cents` gab es nie, der Betrag
+            // stand deshalb nie in der Meldung.)
+            const gebucht = Number(r.data.creditedCents) || 0;
+            const stand = r.data.status || null;
+            if (decision === 'approve') {
+              if (gebucht > 0) {
+                toast(`Freigegeben · ${euro(gebucht)} gebucht`, 'good');
+              } else {
+                const warum = FOLGE_DE[r.data.capReason] || FOLGE_DE[stand] || r.data.capReason || 'kein Betrag berechnet';
+                toast(`Angenommen, aber ohne Prämie — ${warum}`, 'bad');
+              }
+            } else {
+              // Eine Bon-Ablehnung lässt sich nicht per Klick zurückholen: der
+              // Resolver kennt keinen Weg von 'rejected' zurück in die Prüfung.
+              // Das gehört gesagt, statt es den Prüfer herausfinden zu lassen.
+              toast(decision === 'no_reward'
+                ? 'Angenommen, ohne Prämie erfasst'
+                : 'Abgelehnt — bei Bons endgültig, kein Zurückholen', 'bad');
+            }
+            await advance();
           } else {
-            toast(`Nicht ausgeführt: ${r.data.code || r.data.http}`, 'bad');
+            const code = r.data.code || r.data.http;
+            toast(`Nicht ausgeführt: ${esc(RESOLVER_DE[code] || code)}`, 'bad');
           }
         } catch (e) { toast('Fehler: ' + e.message, 'bad'); }
         setBusy(false);
@@ -586,6 +652,10 @@
         if (S.mode) return hideReasons();
         const list = S.type === 'photos' ? REASONS_PHOTO : REASONS_RECEIPT;
         showReasons(list, (k) => (S.type === 'photos' ? decidePhoto('reject', k) : decideReceipt('reject', k)));
+        if (S.type === 'receipts') {
+          $('reasons').insertAdjacentHTML('afterbegin',
+            '<span style="color:var(--warn);font-weight:700;font-size:12px;white-space:nowrap;align-self:center">endgültig ·</span>');
+        }
       };
       $('bNoReward').onclick = () => { if (S.mode) return hideReasons(); showReasons(NO_REWARD, (k) => decideReceipt('no_reward', k)); };
       $('bSkip').onclick = () => { hideReasons(); if (S.idx < S.queue.length - 1) { S.idx++; showCurrent(); } };
@@ -601,6 +671,10 @@
 
       document.addEventListener('keydown', (e) => {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+        // Cmd+F / Strg+F ist „Seite durchsuchen", nicht „Freigeben". Und eine
+        // gedrückt gehaltene Taste darf nicht eine Entscheidung nach der
+        // anderen auslösen.
+        if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
         if ($('light').classList.contains('on')) { $('light').classList.remove('on'); return; }
         if (S.mode) {
           if (e.key === 'Escape') return hideReasons();
@@ -632,7 +706,7 @@
       document.querySelectorAll('.tab').forEach((t) => { t.onclick = () => {
         document.querySelectorAll('.tab').forEach((x) => x.classList.remove('on'));
         t.classList.add('on'); S.type = t.dataset.type; S.done.clear(); S.cache.clear(); hideReasons();
-        $('fVerdict').classList.toggle('hidden', S.type !== 'photos');
+        $('fVerdict').classList.remove('hidden'); // gilt jetzt für beide Arten
         loadQueue();
       }; });
       $('q').onkeydown = (e) => { if (e.key === 'Enter') loadQueue(); };
@@ -675,7 +749,6 @@
       if (parameter.get('tab') === 'receipts') {
         S.type = 'receipts';
         document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x.dataset.type === 'receipts'));
-        $('fVerdict').classList.add('hidden');
       }
       initAdmin(async () => {
         $('app').classList.add('on');

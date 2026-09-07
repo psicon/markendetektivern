@@ -52,35 +52,58 @@ function tsToMillis(t) {
 
 async function streamUserCities() {
   const userCity = new Map();
-  let lastDoc = null;
+
+  // PARALLELER Partitions-Scan statt sequenzieller Seiten (Fix 16.08.2026):
+  // Der alte Ein-Cursor-Scan brauchte ~220 Netz-Runden nacheinander und
+  // riss ab ~840k Journeys das 540-s-Gen1-Limit (Timeouts ab 27.07.,
+  // täglich ab 12.08. — Bestenliste eingefroren, Reads trotzdem bezahlt).
+  // `getPartitions` ist Firestores dafür gebauter Mechanismus: er teilt
+  // die Collection-Group in disjunkte __name__-Bereiche, die parallel
+  // gelesen werden. Das Ergebnis ist deckungsgleich mit dem alten Scan
+  // (gleiche Dokumente, exakt einmal), nur ~10x schneller — der Lauf
+  // hat damit wieder die geforderten >30 % Luft zum Limit, statt bei
+  // 88–98 % zu kratzen. Die Map-Zugriffe bleiben race-frei, weil das
+  // Tally synchron im Snapshot-forEach passiert (eine JS-Event-Loop).
   const PAGE = 5000;
-  while (true) {
-    let q = db
-      .collectionGroup('journeys')
-      .select('location', 'lastUpdated')
-      .orderBy('__name__')
-      .limit(PAGE);
-    if (lastDoc) q = q.startAfter(lastDoc);
-    const snap = await q.get();
-    if (snap.empty) break;
-    snap.forEach((d) => {
-      const data = d.data();
-      const loc = data.location;
-      if (!loc || !loc.city || loc.source === 'fallback') return;
-      if (loc.city === 'DACH-Region') return;
-      const uid = d.ref.parent.parent && d.ref.parent.parent.id;
-      if (!uid) return;
-      const ts = tsToMillis(data.lastUpdated);
-      let entry = userCity.get(uid);
-      if (!entry) {
-        entry = { tally: new Map(), latest: { city: loc.city, ts } };
-        userCity.set(uid, entry);
-      }
-      entry.tally.set(loc.city, (entry.tally.get(loc.city) || 0) + 1);
-      if (ts > entry.latest.ts) entry.latest = { city: loc.city, ts };
-    });
-    lastDoc = snap.docs[snap.docs.length - 1];
+  const partitions = [];
+  for await (const part of db
+    .collectionGroup('journeys')
+    .getPartitions(24)) {
+    partitions.push(part);
   }
+  const verarbeite = (d) => {
+    const data = d.data();
+    const loc = data.location;
+    if (!loc || !loc.city || loc.source === 'fallback') return;
+    if (loc.city === 'DACH-Region') return;
+    const uid = d.ref.parent.parent && d.ref.parent.parent.id;
+    if (!uid) return;
+    const ts = tsToMillis(data.lastUpdated);
+    let entry = userCity.get(uid);
+    if (!entry) {
+      entry = { tally: new Map(), latest: { city: loc.city, ts } };
+      userCity.set(uid, entry);
+    }
+    entry.tally.set(loc.city, (entry.tally.get(loc.city) || 0) + 1);
+    if (ts > entry.latest.ts) entry.latest = { city: loc.city, ts };
+  };
+  await Promise.all(
+    partitions.map(async (part) => {
+      let lastDoc = null;
+      while (true) {
+        let q = part
+          .toQuery()
+          .select('location', 'lastUpdated')
+          .limit(PAGE);
+        if (lastDoc) q = q.startAfter(lastDoc);
+        const snap = await q.get();
+        if (snap.empty) break;
+        snap.forEach(verarbeite);
+        lastDoc = snap.docs[snap.docs.length - 1];
+        if (snap.size < PAGE) break;
+      }
+    }),
+  );
   // Reduce to most-frequent city per user.
   const final = new Map();
   userCity.forEach((entry, uid) => {
@@ -102,7 +125,9 @@ async function aggregateUsers(userCity) {
   const cityAgg = new Map();
   const userCandidates = [];
   let lastDoc = null;
-  const PAGE = 5000;
+  // 10k statt 5k: halbiert die sequenziellen Netz-Runden des users-Scans
+  // (~257k Docs → 26 Seiten). Der Journeys-Scan ist bereits parallel.
+  const PAGE = 10000;
   while (true) {
     let q = db
       .collection('users')
@@ -260,10 +285,15 @@ async function buildAndWrite() {
   console.log('aggregateLeaderboard: done');
 }
 
+// Für Admin-Skripte: lokaler Einmal-Lauf ohne das 540-s-Cloud-Limit
+// (scripts/…, Auth via ADC). KEIN CloudFunction-Objekt — die Firebase-CLI
+// deployt nur Trigger-Exporte, ein nacktes Funktions-Export wird ignoriert.
+exports.__runOnceForAdminScript = buildAndWrite;
+
 // ─── Scheduled trigger — runs every night at 03:00 Berlin time ──────────
 exports.aggregateLeaderboard = functions
   .region('europe-west1')
-  .runWith({ timeoutSeconds: 540, memory: '512MB' })
+  .runWith({ timeoutSeconds: 540, memory: '1GB' })
   .pubsub.schedule('every day 03:00')
   .timeZone('Europe/Berlin')
   .onRun(async () => {
@@ -274,7 +304,7 @@ exports.aggregateLeaderboard = functions
 // ─── Manual trigger (HTTP) — for ad-hoc reruns / first deploy ──────────
 exports.aggregateLeaderboardManual = functions
   .region('europe-west1')
-  .runWith({ timeoutSeconds: 540, memory: '512MB' })
+  .runWith({ timeoutSeconds: 540, memory: '1GB' })
   .https.onRequest(async (req, res) => {
     // Lightweight auth: a static key from the env. Anyone with the
     // key can trigger; without it, request is rejected. Set via

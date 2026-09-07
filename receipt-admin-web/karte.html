@@ -274,17 +274,25 @@
         S.punkte = r.data.punkte || [];
         const o = r.data.ohneOrt || {};
         const g = r.data.gesamt || {};
-        // Warum ein Fall keinen Punkt hat — jede Zahl mit ihrem Grund.
+        // Warum ein Fall keinen Punkt hat — mit der Trennung, auf die es
+        // ankommt: bei Fotos sind es NICHT überwiegend Altfälle. Von den
+        // Einreichungen seit dem 15.08. fehlt gut zwei Fünfteln der Ort, weil
+        // weder Standort noch Kassenbon dabei waren. Das ist ein laufendes
+        // Thema und darf nicht als erledigte Vergangenheit dastehen.
         const zeilen = [];
-        if (o.nurLand) zeilen.push(`${o.nurLand} nur mit Landesangabe`);
-        if (o.garNichts) zeilen.push(`${o.garNichts} ganz ohne Ortsangabe`);
-        if (o.wohnort) zeilen.push(`${o.wohnort} nur mit Wohnort — der sagt nichts über den Einkaufsort`);
-        if (o.ortNichtAufloesbar) zeilen.push(`${o.ortNichtAufloesbar} mit einem Ortsnamen, der sich nicht auflösen ließ`);
+        if (o.nurLand) zeilen.push(`${o.nurLand} kennen nur das Land des Marktes`);
+        if (o.garNichts) zeilen.push(`${o.garNichts} tragen gar keine Ortsangabe`);
+        if (o.wohnort) zeilen.push(`${o.wohnort} kennen nur den Wohnort — der sagt nichts über den Einkaufsort`);
+        if (o.ortNichtAufloesbar) zeilen.push(`${o.ortNichtAufloesbar} nennen einen Ort, der sich nicht auflösen ließ`);
+        const aktuellOhne = o.fotosAktuellOhne ?? 0;
+        const aktuell = o.fotosAktuell ?? 0;
+        const anteil = aktuell ? Math.round((aktuellOhne / aktuell) * 100) : 0;
         $('ohneOrt').innerHTML =
-          `Nicht auf der Karte: ${(o.fotos ?? 0)} von ${(g.fotos ?? 0)} Fotos und ` +
-          `${(o.bons ?? 0)} von ${(g.bons ?? 0)} Bons — überwiegend Altfälle.` +
-          (zeilen.length ? `<br>Bei den Fotos: ${zeilen.join(', ')}.` : '') +
-          `<br>Diese Einreichungen sind gültig; es fehlt nur die Angabe, aus der sich ein Punkt setzen ließe.`;
+          `<b>Nicht auf der Karte:</b> ${(o.fotos ?? 0)} von ${(g.fotos ?? 0)} Fotos, ` +
+          `${(o.bons ?? 0)} von ${(g.bons ?? 0)} Bons.` +
+          (aktuell ? `<br><b style="color:var(--warn)">${aktuellOhne} davon sind aktuelle Fotos</b> (${anteil} % der Einreichungen seit dem 15.08.) — bei ihnen fehlt Standort und Kassenbon, das ist kein Altbestand.` : '') +
+          (zeilen.length ? `<br>Im Einzelnen: ${zeilen.join(', ')}.` : '') +
+          `<br>Alle diese Einreichungen sind gültig; es fehlt nur die Angabe für einen Punkt.`;
 
         const maerkte = [...new Set(S.punkte.map((p) => p[MARKT]).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
         $('fMarkt').innerHTML = '<option value="alle">alle Märkte</option>' +

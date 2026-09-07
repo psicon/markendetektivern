@@ -1771,7 +1771,12 @@ exports.processCashback = onMessagePublished(
       // erneute Zustellung eines von Hand abgelehnten Bons zu Status
       // 'approved' und `syncLedgerForReceipt` bucht erneut (der stornierte
       // Earn steht auf netto 0, der Zweig legt einen neuen an).
-      if (status === 'approved' && (receipt.reviewDecision === 'reject' || receipt.reviewDecision === 'no_reward')) {
+      // Unabhängig davon, was die Neuberechnung ergibt: hat ein Mensch abgelehnt
+      // oder auf „ohne Prämie" gesetzt, gilt sein Beschluss. Vorher hing dieser
+      // Zweig am neu berechneten Status 'approved' — ergab die Neuberechnung
+      // etwas anderes (etwa 'review' wegen niedriger Bewertung), lief der Bon
+      // an der Wiederherstellung vorbei und landete wieder in der Warteschlange.
+      if (receipt.reviewDecision === 'reject' || receipt.reviewDecision === 'no_reward') {
         // Den Endzustand des Menschen WIEDERHERSTELLEN, nicht auf 'review'
         // setzen: 'review' machte die Ablehnung wieder zu einer offenen Frage,
         // der Fall käme erneut in die Warteschlange und die App zeigte dem
@@ -1835,13 +1840,13 @@ exports.processCashback = onMessagePublished(
             // Derselbe Betragsweg wie oben — ein Unterschied in der Artikelzahl
             // zählt nur, wenn er den Betrag verändert (Pfand wird über den
             // NAMEN erkannt, eine andere Lesung kann die Zahl also verschieben).
-            // Ohne Aktion gibt es keinen Betrag — dann ist die Mindest-Artikelzahl
-            // die einzige Kante, an der eine abweichende Zählung Geldwirkung hätte.
-            // Die rohe Zahl zu vergleichen wäre strenger als nötig und hielte
-            // Bons wegen eines Unterschieds zurück, der nichts kostet.
+            // Denselben Weg nehmen, den auch das Geld nimmt: mit Aktion die
+            // Aktions-Rechnung, ohne Aktion die Stufen aus der Konfiguration.
+            // Nur die Mindest-Artikelzahl zu prüfen ließe einen Unterschied
+            // durch, der zwischen zwei Stufen liegt und sehr wohl Geld kostet.
             betragFuer: (n) => (selectedCampaign
               ? campaignRewardCents(n, selectedCampaign, config)
-              : (n >= (config.minItemsForPayout ?? 4) ? 1 : 0)),
+              : tierFor(n, config.tiers)),
           });
         }
 

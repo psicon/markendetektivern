@@ -606,14 +606,28 @@ exports.reviewQueue = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
 
   if (type === 'receipts') {
     const snap = await db.collection('receipts').where('status', '==', 'review').select(...RECEIPT_LIST_FIELDS).get();
+    // Auch Bons brauchen ein Urteil in der Warteschlange — ohne das war dort
+    // jeder Punkt grün, egal ob Doppel-Verdacht oder Bildbearbeitung.
+    const BON_URTEIL = {
+      forensics_software: 'locked',
+      duplicate_content_self: 'locked',
+      duplicate_content_cross_user: 'locked',
+      bon_date_future: 'hold',
+      ocr_unavailable: 'hold',
+      ocr_confidence_none: 'hold',
+      mensch_hat_entschieden: 'hold',
+    };
     let rows = snap.docs.map(receiptRowOf).map(({ items, ...r }) => ({
       id: r.id, userId: r.userId, merchantName: r.merchantName, store: r.store, bonDate: r.bonDate,
       bonTotalCents: r.bonTotalCents, eligibleItemCount: r.eligibleItemCount, reviewReason: r.reviewReason,
       ocrConfidence: r.ocrConfidence, reconOk: r.reconOk, createdAt: r.createdAt,
+      verdict: BON_URTEIL[r.reviewReason] || (r.reconOk === false ? 'hold' : 'ok'),
     }));
     if (q) rows = rows.filter((r) => [r.id, r.userId, r.merchantName, r.store && r.store.city, r.bonDate].some((v) => v && String(v).toLowerCase().includes(q)));
+    if (p.verdict && p.verdict !== 'all') rows = rows.filter((r) => r.verdict === p.verdict);
     rows.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0)); // ältester zuerst — er wartet am längsten
-    return { type, rows, total: rows.length };
+    const counts = rows.reduce((acc, r) => ((acc[r.verdict] = (acc[r.verdict] || 0) + 1), acc), {});
+    return { type, rows, total: rows.length, counts };
   }
 
   // Produktfotos: die Vorprüfung braucht alle Einreichungen derselben EAN.
@@ -840,7 +854,11 @@ exports.reviewMapPoints = onCall({ region: REGION, memory: '1GiB', timeoutSecond
   // „Ohne Ort" ist keine Erklärung — die Gründe sind verschieden und führen zu
   // verschiedenen Schlüssen: ein Altfall ohne jede Angabe ist etwas anderes als
   // einer, bei dem nur das Land des Marktes bekannt ist.
-  const ohneOrt = { fotos: 0, bons: 0, nurLand: 0, wohnort: 0, garNichts: 0, ortNichtAufloesbar: 0 };
+  const ohneOrt = { fotos: 0, bons: 0, nurLand: 0, wohnort: 0, garNichts: 0, ortNichtAufloesbar: 0, fotosAktuellOhne: 0, fotosAktuell: 0 };
+  // Der Ortsschätzer läuft seit dem 15.08.2026. Alles davor kann keinen Ort
+  // haben — alles danach schon, und dort ist ein fehlender Ort ein laufendes
+  // Thema, kein Altbestand. Die Karte darf beides nicht in einen Topf werfen.
+  const SCHAETZER_SEIT = Date.parse('2026-08-15');
 
   const [uploads, receipts] = await Promise.all([
     db.collection(COL).select('capture', 'priceReceipt', 'probableLocation', 'marketName', 'marketLand', 'status', 'createdAt', 'productName', 'campaignId').get(),
@@ -856,8 +874,11 @@ exports.reviewMapPoints = onCall({ region: REGION, memory: '1GiB', timeoutSecond
   for (const d of uploads.docs) {
     const x = d.data();
     const o = ortVonEinreichung(x, verzeichnis);
+    const aktuell = (ms(x.createdAt) ?? 0) >= SCHAETZER_SEIT;
+    if (aktuell) ohneOrt.fotosAktuell++;
     if (o.lat == null || o.lon == null || QUELLE[o.quelle] === undefined) {
       ohneOrt.fotos++;
+      if (aktuell) ohneOrt.fotosAktuellOhne++;
       if (o.quelle === 'land') ohneOrt.nurLand++;
       else if (o.quelle === 'profil') ohneOrt.wohnort++;
       else if (o.quelle == null) ohneOrt.garNichts++;
