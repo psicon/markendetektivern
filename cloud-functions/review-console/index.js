@@ -641,16 +641,24 @@ exports.reviewQueue = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
   }
 
   // Produktfotos: die Vorprüfung braucht alle Einreichungen derselben EAN.
-  // EIN Bestands-Query mit wenigen Feldern ist schneller als viele `in`-Chunks.
-  const [openSnap, allSnap] = await Promise.all([
-    db.collection(COL).where('status', '==', 'pending').get(),
-    db.collection(COL).select('userId', 'ean', 'marketId', 'status', 'createdAt', 'priceOcr', 'manufacturerOcr').get(),
-  ]);
-  const byEan = new Map();
+  // EIN Bestands-Query mit wenigen Feldern ist schneller als viele `in`-Chunks —
+  // aber es sind über 1.600 Dokumente, um eine Schlange von einem Dutzend zu
+  // bauen, und die Funktion läuft bei jeder Anmeldung, jedem Reiterwechsel,
+  // jeder Suche und jeder Filteränderung. Firestore-Reads sind der größte
+  // eigene Serverposten des Projekts; der Bestand ändert sich zwischen zwei
+  // Klicks so gut wie nie. Zwei Minuten Aufbewahrung fangen die Wiederholungen
+  // ab, ohne dass jemand mit veralteten Nachbarn arbeitet.
+  const openSnap = await db.collection(COL).where('status', '==', 'pending').get();
+  const byEan = eanIndexAusCache();
+  if (byEan) return baueFotoListe(openSnap, byEan, p, q);
+
+  const allSnap = await db.collection(COL)
+    .select('userId', 'ean', 'marketId', 'status', 'createdAt', 'priceOcr', 'manufacturerOcr').get();
+  const frisch = new Map();
   for (const d of allSnap.docs) {
     const x = d.data();
     if (!x.ean) continue;
-    if (!byEan.has(x.ean)) byEan.set(x.ean, []);
+    if (!frisch.has(x.ean)) frisch.set(x.ean, []);
     // WICHTIG: dieselbe Form wie `rowOf` sie liefert, also mit `_policy`.
     // Vorher standen hier flache Objekte ohne dieses Feld — `precheckOf` liest
     // aber genau `_policy`, bekam also eine Liste aus lauter `undefined` und
@@ -660,8 +668,21 @@ exports.reviewQueue = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
     // dasselbe Urteil im geöffneten Fall korrekt stand. Zwei Bildschirme, die
     // sich widersprechen.
     const policy = { id: d.id, userId: x.userId ?? null, ean: x.ean ?? null, marketId: x.marketId ?? null, status: safeStatus(x.status), createdAt: ms(x.createdAt), priceOcr: x.priceOcr ?? null, manufacturerOcr: x.manufacturerOcr ?? null };
-    byEan.get(x.ean).push({ ...policy, _policy: policy });
+    frisch.get(x.ean).push({ ...policy, _policy: policy });
   }
+  eanCache = { index: frisch, stand: Date.now() };
+  return baueFotoListe(openSnap, frisch, p, q);
+});
+
+/** Zwischenspeicher des EAN-Nachbarschafts-Index (siehe reviewQueue). */
+let eanCache = null;
+const EAN_TTL_MS = 2 * 60 * 1000;
+function eanIndexAusCache() {
+  return eanCache && Date.now() - eanCache.stand < EAN_TTL_MS ? eanCache.index : null;
+}
+
+/** Die Warteschlange der Produktfotos aus dem offenen Bestand und dem Index. */
+function baueFotoListe(openSnap, byEan, p, q) {
   let rows = openSnap.docs.map((d) => {
     const r = rowOf(d);
     const pre = precheckOf(r, byEan.get(r.ean) || []);
@@ -676,8 +697,8 @@ exports.reviewQueue = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
   if (p.verdict && p.verdict !== 'all') rows = rows.filter((r) => r.verdict === p.verdict);
   rows.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
   const counts = rows.reduce((acc, r) => ((acc[r.verdict] = (acc[r.verdict] || 0) + 1), acc), {});
-  return { type, rows, total: rows.length, counts };
-});
+  return { type: 'photos', rows, total: rows.length, counts };
+}
 
 /** Bis 6 Fälle vollständig — mit fertigen Bild-URLs, für Anzeige + Vorladen. */
 exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds: 60 }, async (req) => {
