@@ -142,21 +142,29 @@ class PushNotificationService {
         userId,
       };
 
-      // In User-Dokument speichern
+      // In User-Dokument speichern.
+      //
+      // `pushNotificationsEnabled` wird hier BEWUSST NICHT gesetzt
+      // (86cbfdq5j). Bis 08.09.2026 schrieb diese Zeile ein hartes `true`
+      // — und damit hätte jedes Token-Speichern eine Abbestellung wieder
+      // aufgehoben, ohne dass der Nutzer irgendetwas getan hätte. Die
+      // Einstellung gehört allein dem Nutzer; sie lebt in
+      // lib/services/pushPreference.ts und wird nur von dort geschrieben.
+      // BEIDE Schreibvorgänge bewusst ohne await: sie hängen offline
+      // unbegrenzt, ohne je zu scheitern (Projektregel). Vorher wartete der
+      // Einschalt-Pfad darauf — im Funkloch erteilte der Nutzer die
+      // Berechtigung und der Schalter blieb trotzdem AUS, weil der
+      // anschließende `refreshPermissionStatus()` nie an die Reihe kam.
       const userRef = doc(db, 'users', userId);
-      await updateDoc(userRef, {
-        pushToken: tokenData,
-        pushNotificationsEnabled: true,
-      });
+      void updateDoc(userRef, { pushToken: tokenData }).catch((e: any) =>
+        console.warn('[push] Token am Nutzerdokument speichern fehlgeschlagen:', e?.message),
+      );
 
       // Auch in globale Token-Collection für Admin-Broadcasts
       const tokenRef = doc(db, 'pushTokens', token);
-      await setDoc(tokenRef, {
-        ...tokenData,
-        active: true,
-      });
-
-      console.log('✅ Push Token gespeichert');
+      void setDoc(tokenRef, { ...tokenData, active: true }).catch((e: any) =>
+        console.warn('[push] Token-Sammlung schreiben fehlgeschlagen:', e?.message),
+      );
     } catch (error) {
       console.error('❌ Token Speicher-Fehler:', error);
     }
@@ -240,41 +248,91 @@ class PushNotificationService {
   }
 
   /**
-   * Badge Zahl setzen (iOS)
+   * Badge-Zahl am App-Symbol setzen (iOS; auf Android ohne Wirkung).
    */
   async setBadgeCount(count: number): Promise<void> {
-    if (Platform.OS === 'ios') {
+    if (Platform.OS !== 'ios') return;
+    try {
       await Notifications.setBadgeCountAsync(count);
+    } catch (e: any) {
+      // Darf nie einen Aufrufer mitreißen — der Badge ist Beiwerk.
+      console.warn('[push] Badge setzen fehlgeschlagen:', e?.message);
     }
   }
 
   /**
-   * Push Notifications deaktivieren
+   * Die rote Zahl am App-Symbol entfernen (86cbfdq5j).
+   *
+   * Bis 08.09.2026 gab es diese Handlung im gesamten Projekt nicht — auf
+   * keinem der 19 lokalen und 7 entfernten Zweige und in keiner Zeile
+   * nativen Codes. `setBadgeCount` existierte, hatte aber KEINEN einzigen
+   * Aufrufer, während der Server bei jeder Cashback-Gutschrift `badge: 1`
+   * mitschickte. APNs setzt diesen Wert absolut; die 1 blieb, bis jemand
+   * eine 0 schreibt. Niemand tat es. Ergebnis: eine rote Eins, die sich
+   * durch nichts entfernen ließ — nicht durch Wegwischen der Mitteilung,
+   * nicht durch Neustart, nicht durch Ausloggen.
+   *
+   * Aufgerufen vom PushNotificationProvider beim Start und bei jedem
+   * Wechsel in den Vordergrund. Das deckt beide Wege ab, auf denen ein
+   * Nutzer nach einer Nachricht in die App kommt: aus dem Hintergrund
+   * (AppState wird 'active') und aus dem beendeten Zustand (Start).
    */
-  async disable(userId: string): Promise<void> {
+  async clearBadge(): Promise<void> {
+    await this.setBadgeCount(0);
+  }
+
+  /**
+   * Geräteseitig aufräumen, wenn der Nutzer Nachrichten abbestellt.
+   *
+   * Nimmt bewusst KEINE userId mehr entgegen: die Abbestellung selbst
+   * schreibt `setPushPreference` — hätte diese Methode weiterhin ein
+   * eigenes Feld ans Nutzerdokument geschrieben, gäbe es wieder zwei
+   * Stellen für dieselbe Aussage.
+   */
+  async disable(): Promise<void> {
+    // Die eigentliche Abbestellung schreibt der Aufrufer über
+    // `setPushPreference` (pushPreference.ts) — das ist das Feld, das der
+    // Server liest. Hier bleibt nur das Aufräumen auf dem Gerät.
+    //
+    // Der frühere Rahmen `if (this.pushToken) { … }` machte diese Methode
+    // meistens zum Nichtstuer: `this.pushToken` füllt allein
+    // `registerForPushNotifications()`, und lief das in DERSELBEN Sitzung
+    // nicht, war das Feld null und der ganze Block wurde übersprungen —
+    // Firestore-Schreibvorgang inklusive. Der Nutzer legte den Schalter um,
+    // und es passierte buchstäblich nichts (86cbfdq5j).
+
+    // Rote Zahl weg — wer Nachrichten abbestellt, will auch die nicht mehr.
+    await this.clearBadge();
+
+    // Listener zuerst entfernen — und die Referenzen mit, sonst greift ein
+    // späteres `remove()` auf ein bereits entferntes Abo.
     try {
-      if (this.pushToken) {
-        // Token aus Firestore entfernen
-        const tokenRef = doc(db, 'pushTokens', this.pushToken);
-        await updateDoc(tokenRef, { active: false });
-
-        // User-Einstellung updaten
-        const userRef = doc(db, 'users', userId);
-        await updateDoc(userRef, { pushNotificationsEnabled: false });
-      }
-
-      // Listener entfernen
-      if (this.notificationListener) {
-        this.notificationListener.remove();
-      }
-      if (this.responseListener) {
-        this.responseListener.remove();
-      }
-
-      console.log('🔕 Push Notifications deaktiviert');
-    } catch (error) {
-      console.error('❌ Fehler beim Deaktivieren:', error);
+      this.notificationListener?.remove?.();
+      this.responseListener?.remove?.();
+    } catch (error: any) {
+      console.warn('[push] Listener entfernen fehlgeschlagen:', error?.message);
     }
+    this.notificationListener = null;
+    this.responseListener = null;
+
+    if (this.pushToken) {
+      // Nur Hygiene: dieses Dokument gehört zum Expo-Token-Weg, den der
+      // Server für Cashback-Nachrichten gar nicht liest (er liest
+      // users/{uid}/fcmTokens/*). Es abzuräumen hält den Bestand sauber,
+      // stoppt aber für sich genommen keinen einzigen Versand.
+      //
+      // BEWUSST nicht abgewartet: Firestore-Schreibvorgänge lösen offline
+      // nie auf und werfen auch nicht (Projektregel). Ein `await` hier
+      // hätte im Funkloch dazu geführt, dass diese Methode nie zurückkehrt
+      // — und das Aufräumen oben nie liefe.
+      const tokenRef = doc(db, 'pushTokens', this.pushToken);
+      void updateDoc(tokenRef, { active: false }).catch((e: any) =>
+        console.warn('[push] Token-Dokument abräumen fehlgeschlagen:', e?.message),
+      );
+    }
+    this.pushToken = null;
+
+    console.log('🔕 Push-Nachrichten auf diesem Gerät abbestellt');
   }
 
   /**

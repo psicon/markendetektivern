@@ -1,5 +1,54 @@
 # Project notes for Claude Code
 
+## Laufendes Interview: KI-Unternehmenssystem (07.09.2026)
+
+Für die Planung des modularen KI-Unternehmenssystems zuerst
+`docs/AI_ORCHESTRATION_INTERVIEW.md` lesen. Dort stehen die im Interview
+bestätigten Rollen, Delegationsregeln, Datenvorgaben und offenen Fragen.
+Insbesondere: Gehälter/Personal, Finanzen/Buchhaltung, Investor Relations
+und wichtige Kundeninformationen sind standardmäßig nur für Patrick
+sichtbar. Das gilt auch für Suche, Zusammenfassungen und Agentenzugriffe;
+keinen pauschalen Zugriff auf das gesamte Unternehmenswissen vergeben.
+Patrick hat am 08.09.2026 den Bau beauftragt. Isolierter lokaler Aufbau
+unter `tools/company-os`; Paperclip ist aktuell nur ein Spiegel. Keine bezahlten
+Modell-APIs. EU-Verarbeitung wird auf Patricks Wunsch neu bewertet;
+das ist noch keine Freigabe vertraulicher Inhalte an globale Modelle.
+Produktivsetzung und externe Nachrichten brauchen weiter ihre Freigaben.
+Erste lokale Stagingversion: `tools/company-os/README.md` beschreibt den
+tatsächlichen Stand. Port 4310 = Teamzentrale, 4311 = Paperclip-Spiegel.
+79 automatische Tests nach Rollen-/Betriebsreview grün; früherer Browser-Probelauf
+mit synthetischen Daten ebenfalls bestanden. Details in ROLES.md unten.
+Echte Abo-Anmeldungen, Codeänderungs-/Prüfworker und Remote-24/7 noch offen;
+pausierte Paperclip-Rollen nicht als aktive KI-Mitarbeiter darstellen.
+Patrick verlangt ein gemeinsames, moderierbares Unternehmensgedächtnis
+für alle angebundenen Modelle: Quellen, gültige Versionen, Freigaben und
+rollenbezogener Pflichtkontext. Details in `tools/company-os/KNOWLEDGE.md`.
+Die bestehende Notizablage erfüllt das noch nicht; keine automatische
+Synchronisierung von Chats oder selbsttätiges Modelltraining behaupten.
+Neueste Präzisierung: BookStack ist nur ergänzendes Wiki. Ein aktives,
+dauerhaftes Agentengedächtnis muss Erfahrungen automatisch aufnehmen und
+bei passenden Aufträgen sowie Modellwechseln wieder einbringen. Hindsight
+ist erster Kandidat für einen begrenzten technischen Versuch, noch nicht
+installiert. Abo-/Kostenweg, Rechte und Übergaben sind nicht bewiesen.
+Unternehmensweite Rollen, Zuständigkeiten und konkrete Abnahmen auch für
+das Tool selbst stehen in `tools/company-os/ROLES.md`. Ausführende,
+KI-Prüfperspektiven und echte menschliche Zustimmung auseinanderhalten.
+Der kritische Review gibt dem Gesamtsystem noch keine Abnahme. Hindsight
+Selfhosting braucht kein Hindsight-Abo; Cloud ist verbrauchsabhängig.
+Keine Perfektion oder unbegrenzte Abonutzung versprechen.
+Neueste bestätigte Infrastrukturentscheidung: Gesamtsystem einschließlich
+Dashboard, Steuerung, Gedächtnis und eigener Modelle zentral bei Hetzner.
+Lokale Modelle sind verpflichtend als austauschbarer Ausführungsweg
+vorzusehen; die Abos sind kein dauerhaft notwendiger Gedächtnisanbieter.
+Eskalation bei technischen Störungen: Patrick, bei Nichterreichbarkeit
+Julian, danach Manon. Das erweitert keine vertraulichen Leserechte und
+hebt keinen privaten Gründer-Stopp auf. Fristen/Versand noch einzurichten.
+Technische Regel aus bestandenem Regressionstest: Ein weiterer Stopp darf
+einen bestehenden privaten Gründer-Stopp weder herabstufen noch seinen
+Grund überschreiben. Das gilt auch für `haltForRecovery()` nach einem
+unbestätigten Worker-Stopp. Rückfreigabe im Store selbst auf Patrick
+begrenzen; offene Worker-Bereinigung blockiert auch seine Rückfreigabe.
+
 ## Meta-Regel: "merk dir das" → SOFORT in CLAUDE.md
 
 Wenn der User sagt **"merk dir das"**, **"schreib dir das auf"**,
@@ -2652,6 +2701,97 @@ Review-Runden (29 Funde) haben Fallen gezeigt, die für JEDE Nacharbeit gelten:
   Runde 1 fand 14, Runde 2 (nach Fixes) 15 Punkte, davon 15 am neuen Stand
   widerlegt. Ohne diese Runden wären u.a. Journey-Abschlüsse aus Juli-Bons und
   der Review-Gate-Selbststorno live gegangen.
+
+## Ein Schalter, der nichts abschaltet — Opt-outs brauchen einen LESER (08.09.2026)
+
+Schwester der Regel darunter („Ein Status-Feld ist kein Mechanismus"), diesmal
+in der anderen Richtung: dort fehlte der Trigger zu einem Versprechen, hier
+fehlte der LESER zu einer Verweigerung.
+
+**Vorfall (86cbfdq5j):** Der Schalter unter `/notification-settings` schrieb
+seit Mai 2026 `users/{uid}.pushNotificationsEnabled: false`. Dieses Feld wurde
+im gesamten Projekt **nirgends gelesen** — die einzigen Treffer waren die zwei
+Schreibstellen. `getUserTokens` in `cashback-pipeline/lib/push.js` holte stur
+alle Token. Wer Push abbestellte, bekam Push. Dazu drei weitere Defekte am
+selben Schalter: `disable()` hing an `if (this.pushToken)` und war damit
+meistens ein kompletter Nichtstuer; es räumte das Badge nicht; und `isEnabled`
+war allein aus der iOS-Systemberechtigung abgeleitet, sprang beim nächsten
+Wechsel in den Vordergrund also wieder auf AN.
+
+**Regeln:**
+- **Jede Verweigerung (Opt-out, Stummschaltung, Sperre) braucht im selben
+  Commit die Stelle, die sie LIEST.** Prüffrage analog zur Geld-Regel: *Wer
+  genau fragt dieses Feld ab, bevor gehandelt wird?* Gibt es die Stelle nicht,
+  gehört der Schalter aus der Oberfläche — ein Versprechen, das niemand
+  einlöst, ist schlimmer als ein fehlendes.
+- **Die Prüfung gehört an den Ort, an dem Empfänger entstehen**, nicht an jeden
+  Aufrufer. In `push.js` steht sie deshalb in `getUserTokens`; jeder künftige
+  Sendeweg erbt sie.
+- **Fail-open bei fehlendem Wert.** 283.728 von 283.756 Konten trugen das Feld
+  gar nicht. Hätte „nicht gesetzt" als „aus" gegolten, hätte der Deploy alle
+  Nachrichten der App lautlos abgeschaltet. Nur ein ausdrückliches `false`
+  zählt; ein Lesefehler ebenfalls nicht (Infrastruktur ist keine Aussage über
+  den Willen des Nutzers — dieselbe Linie wie beim Aktionsgebiet).
+- **Berechtigung ≠ Wunsch.** Systemberechtigung („dürfen wir?") und
+  Nutzerentscheidung („will er?") sind zwei Zustände. In ein Boolean gequetscht
+  gewinnt immer der, der zuletzt geschrieben hat — hier die OS-Abfrage im
+  AppState-Listener. Getrennt führen, für die Anzeige und-verknüpfen:
+  `lib/services/pushPreference.ts` (Wunsch, lokal + gespiegelt) neben
+  `permissionStatus` (System) im `PushNotificationProvider`.
+- **Ein Token-Schreibvorgang darf eine Abbestellung nicht aufheben.**
+  `savePushToken` setzte `pushNotificationsEnabled: true` mit — damit hätte
+  jede Token-Registrierung den Opt-out stillschweigend zurückgenommen. Die
+  Einstellung schreibt NUR die Stelle, die den Nutzer gefragt hat.
+- **Offline-Absicherung für Präferenz-Writes:** Firestore-Promises lösen
+  offline nie auf und scheitern auch nicht (Projektregel) — ein `catch` fängt
+  den Fall also nicht. Deshalb Merker VOR dem Schreiben setzen, nach der
+  Bestätigung löschen, beim nächsten Start nachholen (`nachholenFallsOffen`).
+  Sonst bestellt jemand im Funkloch ab und bekommt dauerhaft weiter Nachrichten.
+
+**`aps.badge` ist ein SETZ-Feld, kein Zähler.** `cashback-pipeline` schickte
+hart `badge: 1` mit; die einzige Räum-Methode der App (`setBadgeCount`) hatte
+repo-weit KEINEN Aufrufer. Die rote Eins blieb damit für immer am App-Symbol —
+Wegwischen der Mitteilung, App-Neustart, Geräte-Neustart und Ausloggen ändern
+den Wert NICHT, weil er persistenter Gerätezustand ist und nicht an den
+Einträgen in der Mitteilungszentrale hängt. Kostete eine 1★-Rezension
+(07.09.2026, „wie bekomme ich die rote eins weg?"). Regel: Wer einen
+Badge-Wert sendet, liefert im selben Commit die Stelle, die ihn auf 0 setzt —
+Mount **und** AppState `'active'` im `PushNotificationProvider` decken beide
+Wege ab (Tap aus dem Hintergrund, Start aus dem beendeten Zustand). Ein fester
+Wert ohne Informationsgehalt (immer 1) gehört gar nicht erst gesendet.
+Bestehende Badges räumt nur eine stille Zustellung nach
+(`cashback-pipeline/.badge-reset.js`, `apns-push-type: background` +
+`content-available: 1` + `badge: 0`) — die geht an echte Geräte und braucht
+ausdrückliche Freigabe.
+
+## Testen und tsc scheitern am falschen Node — und an `tools/company-os` (08.09.2026)
+
+Zwei Umgebungsfallen, die zusammen eine halbe Stunde und fast eine
+Fehldiagnose gekostet haben:
+
+- **`jest` und `tsc` brauchen den nvm-Node 22.22.2 plus mehr Heap.** Der
+  Standard-Node dieser Shell (`~/.local/bin/node`, v22.23.1) läuft dem
+  Speicher davon. jest meldet dann **„18 failed, 11 passed"** mit
+  `ChildProcessWorker._onExit` — das sieht wie 18 kaputte Suiten aus und ist
+  ein OOM. tsc **stürzt intern ab** (`TypeError: Cannot read properties of
+  undefined (reading 'kind')`) und gibt dabei **0 Fehler** aus — wer nur
+  `grep -c "error TS"` liest, hält das für ein grünes Gate. Richtig:
+  ```bash
+  PATH="$HOME/.nvm/versions/node/v22.22.2/bin:$PATH"     NODE_OPTIONS=--max-old-space-size=6144 npx jest
+  ```
+  Immer den Exit-Code mitprüfen, nie nur die Fehlerzahl.
+- **`tools/company-os` (4,3 GB, untracked) ist in `tsconfig.include`
+  (`**/*.ts`) und im jest-Dateilauf.** Ein gezielter Testlauf
+  (`npx jest <pfad>`) kippt daran auch mit 8 GB, und tsc stürzt an den
+  vendorten Paperclip-Quellen ab. Ausweg ohne Konfigurationsänderung: einen
+  Worktree am Basis-Commit anlegen (`git worktree add --detach /tmp/md-base
+  HEAD`, `node_modules` symlinken), die geänderten Dateien hineinkopieren und
+  dort messen — der Worktree kennt keine untracked Dateien. Das ist zugleich
+  der einzige ehrliche tsc-Vergleich, weil beide Seiten denselben
+  Dateibestand haben.
+- **tsc-Baseline am 08.09.2026: 342 Fehler** (gemessen im Worktree, ohne
+  `tools/company-os`). Die im Abschnitt oben genannten 361 stammen vom
+  26.07.2026 und passen nicht mehr.
 
 ## Ein Status-Feld ist KEIN Mechanismus — Geld-Versprechen brauchen einen Trigger
 

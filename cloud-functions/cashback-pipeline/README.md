@@ -14,7 +14,8 @@ See `CASHBACK_ARCHITECTURE.md` (repo root) for the full design.
   memory 1 GiB, timeout 120s. Downloads the image, runs Gemini 2.5
   Flash OCR, reconciles Σitems vs total, applies the tier formula,
   writes the structured receipt + ledger entry, then triggers the
-  push-notification (currently a stub log — Phase 2.1 wires real FCM).
+  push-notification (echt seit b00c71a, Mai 2026 — lib/push.js; der
+  Versand respektiert seit 86cbfdq5j die Abbestellung des Nutzers).
 
 ## Environment
 

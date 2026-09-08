@@ -20,10 +20,44 @@
 const crypto = require('crypto');
 const admin = require('firebase-admin');
 const { logger } = require('firebase-functions');
+const { pushErlaubt } = require('./pushPolicy');
 
+/**
+ * Token EINES Nutzers — und zwar nur, wenn er Nachrichten überhaupt will.
+ *
+ * Die Abbestellung (86cbfdq5j) wird hier geprüft, nicht beim Aufrufer: das
+ * ist der einzige Ort, an dem Empfänger entstehen. Wer künftig einen
+ * zweiten Sendeweg baut und diese Funktion nutzt, erbt die Regel
+ * automatisch — genau das hat bisher gefehlt.
+ *
+ * Beide Lesungen laufen parallel; die Nutzer-Abfrage kostet einen Read je
+ * Push und hat ihr EIGENES catch: scheitert sie, wird gesendet. Ein
+ * Firestore-Fehler darf nicht wie eine Abbestellung wirken.
+ */
 async function getUserTokens(uid) {
   try {
-    const snap = await admin.firestore().collection(`users/${uid}/fcmTokens`).get();
+    const [nutzerDaten, snap] = await Promise.all([
+      admin
+        .firestore()
+        .doc(`users/${uid}`)
+        .get()
+        .then((d) => (d.exists ? d.data() : null))
+        .catch((e) => {
+          logger.warn('[cashback.push] Nutzerdokument nicht lesbar — wird gesendet', {
+            uid,
+            err: e.message,
+          });
+          return null;
+        }),
+      admin.firestore().collection(`users/${uid}/fcmTokens`).get(),
+    ]);
+
+    const urteil = pushErlaubt(nutzerDaten);
+    if (!urteil.erlaubt) {
+      logger.info('[cashback.push] abbestellt — kein Versand', { uid, grund: urteil.grund });
+      return [];
+    }
+
     return snap.docs.map((d) => ({
       docId: d.id,
       token: String(d.get('token') || ''),
@@ -97,7 +131,21 @@ async function sendCashbackReady(uid, payload) {
     },
     apns: {
       payload: {
-        aps: { sound: 'default', badge: 1 },
+        // KEIN `badge` hier. Bis 08.09.2026 stand an dieser Stelle
+        // `badge: 1` — hart, absolut, ohne Gegenstück. APNs setzt diesen
+        // Wert, es zählt nichts hoch: der Server schrieb 1, und niemand
+        // schrieb je 0 zurück. Die rote Eins blieb deshalb für immer am
+        // App-Symbol kleben — Wegwischen, Neustart, Ausloggen half nichts,
+        // weil der Wert Gerätezustand ist und nicht an den Einträgen in
+        // der Mitteilungszentrale hängt. Eine 1★-Rezension (07.09.2026)
+        // hat genau danach gefragt.
+        //
+        // Eine feste 1 hatte ohnehin keinen Informationswert. Kommt später
+        // eine echte Zahl (etwa offene Bons), gehört sie hierher — dann
+        // aber zusammen mit der Stelle, die sie wieder auf 0 setzt. Das
+        // Zurücksetzen macht seit 86cbfdq5j der Client
+        // (PushNotificationProvider, bei jedem Wechsel in den Vordergrund).
+        aps: { sound: 'default' },
       },
     },
     android: {

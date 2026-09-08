@@ -38,6 +38,7 @@ export default function NotificationSettingsScreen() {
   const {
     isEnabled,
     permissionStatus,
+    userPreference,
     pushToken,
     enablePushNotifications,
     disablePushNotifications,
@@ -56,8 +57,8 @@ export default function NotificationSettingsScreen() {
       if (permissionStatus === 'denied') {
         // System hat schon geantwortet — User muss in die Settings
         Alert.alert(
-          'Benachrichtigungen sind blockiert',
-          'Du hast Push-Benachrichtigungen für MarkenDetektive in den System-Einstellungen deaktiviert. Aktiviere sie dort, um wieder Push zu bekommen.',
+          'Kurzer Umweg über die Einstellungen',
+          'Benachrichtigungen für MarkenDetektive sind in den Geräte-Einstellungen ausgeschaltet. Dort einschalten — danach greift der Schalter hier wieder.',
           [
             { text: 'Abbrechen', style: 'cancel' },
             {
@@ -86,17 +87,23 @@ export default function NotificationSettingsScreen() {
     await refreshPermissionStatus();
   };
 
+  // Zwei Fragen, zwei Antworten (86cbfdq5j): das System erlaubt es — und
+  // der Nutzer will es. Vorher zeigte die Zeile allein die Berechtigung,
+  // sodass nach dem Abbestellen „Aktiv" über einem ausgeschalteten
+  // Schalter stand.
   const statusLabel =
     permissionStatus === 'granted'
-      ? 'Aktiv'
+      ? userPreference
+        ? 'Aktiv'
+        : 'Pausiert — hier jederzeit wieder einschalten'
       : permissionStatus === 'denied'
-        ? 'Blockiert (System-Einstellungen)'
+        ? 'In den Geräte-Einstellungen ausgeschaltet'
         : permissionStatus === 'undetermined'
-          ? 'Nicht aktiviert'
+          ? 'Einschalten und nichts verpassen'
           : '—';
 
   const statusColor =
-    permissionStatus === 'granted'
+    permissionStatus === 'granted' && userPreference
       ? '#2e7d32'
       : permissionStatus === 'denied'
         ? '#c62828'
@@ -198,8 +205,8 @@ export default function NotificationSettingsScreen() {
                   lineHeight: 16,
                 }}
               >
-                Push ist in den iOS/Android-Einstellungen blockiert. Tippe hier
-                um die System-Einstellungen zu öffnen.
+                Benachrichtigungen sind in den Geräte-Einstellungen
+                ausgeschaltet. Tippe hier, um sie zu öffnen.
               </Text>
             </Pressable>
           ) : null}
@@ -244,6 +251,8 @@ export default function NotificationSettingsScreen() {
             }}
           >
             Detaillierte Kategorie-Toggles folgen bald. Max 3 Nachrichten pro Tag.
+            Der Schalter oben gilt für dein Konto — also für alle Geräte, auf
+            denen du angemeldet bist.
           </Text>
         </View>
 

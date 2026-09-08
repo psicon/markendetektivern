@@ -2087,7 +2087,9 @@ exports.processCashback = onMessagePublished(
       }
 
       if (status === 'approved' && cashbackCents > 0) {
-        // 8) Push (currently stub-logs)
+        // 8) Push — echt, seit b00c71a (Mai 2026). Der alte Kommentar an
+        //    dieser Stelle sagte „stub-logs" und stimmte danach nie wieder;
+        //    wer nur ihn las, hielt den Aufruf für wirkungslos (86cbfdq5j).
         await sendCashbackReady(uid, {
           title: '🎉 Cashback bereit!',
           body: `Du hast ${(cashbackCents / 100).toFixed(2).replace('.', ',')} € Cashback erhalten.`,
