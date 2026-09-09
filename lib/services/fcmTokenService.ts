@@ -38,14 +38,27 @@ let _registered = false;
  *
  *   ok                → Token geschrieben
  *   no_module         → natives Messaging-Modul nicht verlinkt
- *   permission_denied → iOS-Berechtigung nicht AUTHORIZED/PROVISIONAL
+ *   permission_denied → iOS-Berechtigung ausdrücklich abgelehnt
+ *   permission_not_determined → nie gefragt (oder Dialog steht noch aus)
  *   token_failed      → getToken() warf (typisch: kein APNs-Token da)
  *   write_failed      → persistToken() warf (Rules, offline)
  */
 export type FcmState =
   | 'ok'
   | 'no_module'
+  /** Der Nutzer hat den System-Dialog ausdrücklich abgelehnt (iOS: endgültig). */
   | 'permission_denied'
+  /**
+   * Es wurde nie gefragt — entweder weil der Dialog noch aussteht oder weil
+   * wir bewusst nur provisorisch registrieren.
+   *
+   * Bis zum 09.09.2026 fielen beide Fälle unter `permission_denied`, und die
+   * Unterscheidung steckte nur im Freitext `reason`. Das hat prompt zu einer
+   * Fehldeutung geführt: In React Native Firebase ist `DENIED = 0` und
+   * `NOT_DETERMINED = -1` — wer das verwechselt, liest 10.665 Ablehnungen als
+   * „nie gefragt" und baut die falsche Abhilfe.
+   */
+  | 'permission_not_determined'
   | 'token_failed'
   | 'write_failed';
 
@@ -198,29 +211,83 @@ export async function registerFcmTokenForUser(uid: string): Promise<() => void> 
 
   try {
     if (Platform.OS === 'ios') {
+      // ═══ PROVISORISCH, nicht fragend (09.09.2026) ═══
+      //
+      // Bis hierher stand an dieser Stelle die harte Frage — ausgelöst,
+      // sobald eine Kennung existierte, also beim allerersten Öffnen, anonym,
+      // ohne jeden Zusammenhang. Ergebnis unter 33.841 iOS-Konten: 22.722
+      // erlaubt, 10.665 ABGELEHNT, 454 nie beantwortet. Auf iOS ist ein Nein
+      // endgültig; 31 % des Bestands sind damit dauerhaft nicht erreichbar.
+      //
+      // `provisional: true` zeigt KEINEN Dialog. Die Nachrichten landen still
+      // in der Mitteilungszentrale — ohne Banner, ohne Ton — und tragen unten
+      // „Behalten" / „Ausschalten". Der Nutzer entscheidet also an einer
+      // echten Nachricht statt an einer abstrakten Frage, und die einmalige
+      // harte Frage bleibt unverbraucht.
+      //
+      // Die harte Frage stellt `PushNotificationProvider`, wenn Interesse
+      // erkennbar ist (zweite Sitzung oder erste bedeutsame Handlung, siehe
+      // pushPermissionGate.ts) — und mit dem erklärenden Sheet davor.
+      //
+      // WICHTIG: hat der Nutzer die volle Erlaubnis bereits erteilt, ändert
+      // dieser Aufruf daran nichts. iOS stuft nicht zurück.
       const authStatus = await Messaging().requestPermission({
         alert: true,
         badge: true,
         sound: true,
+        provisional: true,
       });
       const enabled =
         authStatus === Messaging.AuthorizationStatus.AUTHORIZED ||
         authStatus === Messaging.AuthorizationStatus.PROVISIONAL;
       if (!enabled) {
-        console.log('[fcm] iOS permission denied');
-        // Den konkreten AuthorizationStatus mitschreiben: DENIED und
-        // NOT_DETERMINED sehen im Ergebnis gleich aus, unterscheiden
-        // sich aber fachlich (bewusst abgelehnt vs. Dialog nie
-        // beantwortet) — und nur ersteres ist endgultig.
-        void recordState(uid, 'permission_denied', `authStatus=${authStatus}`);
+        // Bleibt möglich: wer früher abgelehnt hat, bleibt abgelehnt — daran
+        // ändert auch die provisorische Anfrage nichts.
+        const abgelehnt = authStatus === Messaging.AuthorizationStatus.DENIED;
+        console.log('[fcm] iOS ohne Erlaubnis, authStatus=', authStatus);
+        void recordState(
+          uid,
+          abgelehnt ? 'permission_denied' : 'permission_not_determined',
+          `authStatus=${authStatus}`,
+        );
         return () => {};
       }
     } else if (Platform.OS === 'android') {
-      // Android 13+ runtime POST_NOTIFICATIONS permission — handled by
-      // requestPermission() too (no-op on older Android).
+      // ═══ Auf Android fragt requestPermission() NICHTS (Fund 09.09.2026) ═══
+      //
+      // Der frühere Kommentar an dieser Stelle behauptete, die Methode
+      // erledige auch die Android-13-Laufzeitabfrage. Das stimmt nicht:
+      // @react-native-firebase/messaging macht daraus
+      // `if (isAndroid) return Promise.resolve(AUTHORIZED)` — reines
+      // JavaScript, das native Modul kennt die Methode gar nicht. Bei
+      // targetSdk 36 fragt auch das System nicht von selbst.
+      //
+      // Der Beweis steht in den eigenen Daten: unter tausenden Konten mit
+      // Statusfeld gibt es auf Android NULL Ablehnungen — bei einem echten
+      // Dialog unmöglich. Stattdessen meldete jedes Gerät 'ok', auch wenn
+      // Android keine einzige Nachricht anzeigen durfte.
+      //
+      // Hier wird deshalb nur noch GELESEN. Gefragt wird über dasselbe Tor
+      // wie auf iOS (`harteBerechtigungAnfragen`) — ein kalter Dialog beim
+      // ersten Öffnen wäre auf Android derselbe Fehler wie der, den wir auf
+      // iOS gerade abstellen: nach zwei Ablehnungen sperrt das System die
+      // Frage dauerhaft.
       try {
-        await Messaging().requestPermission();
-      } catch {}
+        const Notifications = require('expo-notifications');
+        const { status } = await Notifications.getPermissionsAsync();
+        if (status !== 'granted') {
+          void recordState(
+            uid,
+            status === 'denied' ? 'permission_denied' : 'permission_not_determined',
+            `android status=${status}`,
+          );
+          // Der Token wird trotzdem geholt und gespeichert: er bleibt
+          // gültig, sobald die Erlaubnis später erteilt wird. Nur der
+          // Zustand darf nicht 'ok' heißen, wenn nichts angezeigt wird.
+        }
+      } catch (e: any) {
+        console.warn('[fcm] Android-Berechtigungsstand nicht lesbar:', e?.message);
+      }
     }
 
     // getToken() und persistToken() getrennt fangen: beide landeten
@@ -277,6 +344,84 @@ export async function registerFcmTokenForUser(uid: string): Promise<() => void> 
     console.warn('[fcm] registerFcmTokenForUser failed:', e?.message);
     void recordState(uid, 'token_failed', `outer: ${String(e?.message ?? e).slice(0, 180)}`);
     return () => {};
+  }
+}
+
+/**
+ * Die HARTE Berechtigung anfragen — der eine System-Dialog.
+ *
+ * Nur aufrufen, nachdem der Nutzer im erklärenden Sheet ausdrücklich Ja
+ * gesagt hat (`PrePermissionSheet`). Danach ist die Gelegenheit verbraucht:
+ * lehnt er hier ab, lässt iOS den Dialog nie wieder zu, und nur der Weg über
+ * die Systemeinstellungen bleibt.
+ *
+ * Ein bereits provisorisch registriertes Gerät wird dadurch hochgestuft —
+ * aus stillen Einträgen in der Mitteilungszentrale werden Banner und Ton.
+ * Der Token bleibt derselbe, es ist keine Neuregistrierung nötig; wir holen
+ * ihn trotzdem frisch, weil iOS beim Übergang einen neuen APNs-Token
+ * vergeben kann.
+ *
+ * @returns true, wenn danach die volle Erlaubnis vorliegt.
+ */
+export async function harteBerechtigungAnfragen(uid: string): Promise<boolean> {
+  const Messaging = await getMessagingModule();
+  if (!Messaging) {
+    void recordState(uid, 'no_module');
+    return false;
+  }
+  try {
+    // Android: über expo-notifications, weil RNFB dort nicht fragt (siehe
+    // oben). iOS: über RNFB, weil dort auch die provisorische Stufe hängt.
+    if (Platform.OS === 'android') {
+      const Notifications = require('expo-notifications');
+      const { status } = await Notifications.requestPermissionsAsync();
+      const erteilt = status === 'granted';
+      if (!erteilt) {
+        void recordState(
+          uid,
+          status === 'denied' ? 'permission_denied' : 'permission_not_determined',
+          `android nach_sheet status=${status}`,
+        );
+        return false;
+      }
+      try {
+        const token = await Messaging().getToken();
+        if (token) await persistToken(uid, token);
+        void recordState(uid, 'ok', 'android nach_sheet');
+      } catch (e: any) {
+        void recordState(uid, 'token_failed', `android nach_sheet: ${String(e?.message ?? e).slice(0, 140)}`);
+      }
+      return true;
+    }
+
+    const authStatus = await Messaging().requestPermission({
+      alert: true,
+      badge: true,
+      sound: true,
+    });
+    const voll = authStatus === Messaging.AuthorizationStatus.AUTHORIZED;
+    if (!voll) {
+      void recordState(
+        uid,
+        authStatus === Messaging.AuthorizationStatus.DENIED
+          ? 'permission_denied'
+          : 'permission_not_determined',
+        `nach_sheet authStatus=${authStatus}`,
+      );
+      return false;
+    }
+    try {
+      const token = await Messaging().getToken();
+      if (token) await persistToken(uid, token);
+      void recordState(uid, 'ok', 'nach_sheet');
+    } catch (e: any) {
+      void recordState(uid, 'token_failed', `nach_sheet: ${String(e?.message ?? e).slice(0, 160)}`);
+    }
+    return true;
+  } catch (e: any) {
+    console.warn('[fcm] harte Anfrage fehlgeschlagen:', e?.message);
+    void recordState(uid, 'token_failed', `sheet_outer: ${String(e?.message ?? e).slice(0, 160)}`);
+    return false;
   }
 }
 

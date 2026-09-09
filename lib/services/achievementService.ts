@@ -31,6 +31,7 @@ import { categoryAccessService } from './categoryAccessService';
 import leaderboardService from './leaderboardService';
 import { requestActionSurvey } from './surveyPromptBus';
 import { showDailyCapToast, showDedupeWindowToast, showOneTimeRestrictionToast, showWeeklyCapToast } from './ui/antiAbuseToast';
+import { interesseGezeigt } from './pushPermissionGate';
 
 class AchievementService {
   private static instance: AchievementService;
@@ -613,6 +614,18 @@ class AchievementService {
       console.warn('⚠️ trackAction called without userId');
       return;
     }
+
+    // Interesse für die Benachrichtigungs-Frage vermerken (09.09.2026).
+    //
+    // Hier und nicht in den Bildschirmen: durch diese Methode läuft JEDE
+    // bedeutsame Handlung — stöbern, vergleichen, auf den Zettel legen,
+    // bewerten, einreichen. Verstreute Aufrufe wären zehn Stellen, die man
+    // beim nächsten Feature vergisst.
+    //
+    // Fire-and-forget und idempotent: nach dem ersten Mal kostet es einen
+    // lokalen Lesevorgang und schreibt nichts mehr. Diese Methode läuft im
+    // Nutzerpfad, sie darf nichts blockieren.
+    void interesseGezeigt('produkt_angesehen');
 
     // Fix H — Dedupe: skip identical action+productId calls innerhalb
     // 5 s. Verhindert dass 10 schnelle Taps auf "Add to Favorite"

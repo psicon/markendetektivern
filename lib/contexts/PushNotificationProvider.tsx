@@ -1,4 +1,14 @@
+import { PrePermissionSheet } from '@/components/notifications/PrePermissionSheet';
 import { wireFcmNotificationTaps } from '@/lib/services/fcmDeepLinks';
+import { harteBerechtigungAnfragen } from '@/lib/services/fcmTokenService';
+import {
+  darfFragen,
+  frageVermerkt,
+  ladeStand,
+  sitzungBeginnt,
+} from '@/lib/services/pushPermissionGate';
+import { CoachmarkService } from '@/lib/services/coachmarkService';
+import { isAnySheetOpen, isSurveyVisible, onPresentationIdle } from '@/lib/services/sheetPresence';
 import { pushNotificationService } from '@/lib/services/pushNotificationService';
 import {
   abgleichenMitServer,
@@ -10,7 +20,19 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 import { AppState, AppStateStatus } from 'react-native';
 import { useAuth } from './AuthContext';
 
-type PermissionStatus = 'undetermined' | 'granted' | 'denied' | 'unknown';
+/**
+ * `provisional` = still zugestellt, ohne dass je ein Dialog erschien
+ * (iOS ab 12). Nachrichten kommen an, aber leise: nur Mitteilungszentrale,
+ * kein Banner, kein Ton.
+ *
+ * WICHTIG: expo meldet diesen Zustand als `undetermined` — die Abbildung
+ * `UNAuthorizationStatusProvisional` → granted/denied fehlt dort bewusst
+ * (EXUserFacingNotificationsPermissionsRequester.m:38-42). Deshalb lesen wir
+ * den genauen iOS-Wert selbst aus `perm.ios.status` (3 = provisorisch).
+ * Ohne diese Unterscheidung stünde der Schalter auf AUS, während sehr wohl
+ * Nachrichten ankommen.
+ */
+type PermissionStatus = 'undetermined' | 'provisional' | 'granted' | 'denied' | 'unknown';
 
 interface PushNotificationContextType {
   /**
@@ -70,13 +92,21 @@ export const PushNotificationProvider: React.FC<PushNotificationProviderProps> =
    * verlangt laut CLAUDE.md einen monotonen Zähler vor jedem setState.
    */
   const schaltEpoche = useRef(0);
+  /** Das erklärende Sheet vor der einmaligen System-Frage. */
+  const [fragesheetOffen, setFragesheetOffen] = useState(false);
+  /** Nur EIN Anlauf pro Sitzung, egal wie oft ein Effekt neu läuft. */
+  const inDieserSitzungGefragt = useRef(false);
 
   // Zwei getrennte Fragen, bewusst zwei getrennte Zustände:
   //   permissionStatus — DÜRFEN wir? (Auskunft des Betriebssystems)
   //   userPreference   — WILL er? (Entscheidung des Nutzers, von uns
   //                      gespeichert und vom Server gelesen)
   // Der Schalter zeigt die Und-Verknüpfung.
-  const isEnabled = permissionStatus === 'granted' && userPreference;
+  // Provisorisch heißt: es kommt an, nur leise. Für „bekommt der Nutzer
+  // Nachrichten?" zählt das mit — sonst zeigte der Schalter AUS, während in
+  // der Mitteilungszentrale Nachrichten liegen.
+  const zugestellt = permissionStatus === 'granted' || permissionStatus === 'provisional';
+  const isEnabled = zugestellt && userPreference;
 
   // Initial Setup wenn User sich ändert
   useEffect(() => {
@@ -90,6 +120,9 @@ export const PushNotificationProvider: React.FC<PushNotificationProviderProps> =
   // angemeldeten Nutzer.
   useEffect(() => {
     void getPushPreference().then(setUserPreference);
+    // Sitzung zählen: „zweite Sitzung" ist einer der beiden Auslöser für
+    // die harte Frage (pushPermissionGate.ts). Einmal pro App-Start.
+    void sitzungBeginnt();
   }, []);
 
   // Schritt 2: mit dem Server abgleichen, sobald das Profil geladen ist.
@@ -142,6 +175,96 @@ export const PushNotificationProvider: React.FC<PushNotificationProviderProps> =
     };
   }, []);
 
+  /**
+   * Die harte Frage — genau einmal, und nur bei erkennbarem Interesse.
+   *
+   * Läuft NICHT beim Start, sondern erst wenn der Berechtigungsstand
+   * bekannt ist und die Oberfläche zur Ruhe gekommen ist. Der Puffer von
+   * vier Sekunden ist kein Schmuck: direkt nach dem Start konkurrieren
+   * Coachmarks, Umfragen und der Erst-Fall-Banner um dieselbe Bühne, und
+   * zwei gleichzeitig sichtbare Sheets frieren iOS hart ein (CLAUDE.md,
+   * 86ca8g2p9).
+   */
+  useEffect(() => {
+    if (permissionStatus === 'unknown') return;
+    if (inDieserSitzungGefragt.current) return;
+    if (!user?.uid) return;
+
+    let abgebrochen = false;
+    const t = setTimeout(() => {
+      void (async () => {
+        if (abgebrochen || inDieserSitzungGefragt.current) return;
+        const stand = await ladeStand();
+        const urteil = darfFragen(
+          {
+            berechtigung:
+              permissionStatus === 'granted'
+                ? 'erteilt'
+                : permissionStatus === 'denied'
+                  ? 'abgelehnt'
+                  : 'offen',
+            // DREI Quellen, weil keine die anderen kennt:
+            //  • isAnySheetOpen — die registrierten Sheets
+            //  • isSurveyVisible — das Umfrage-Sheet zählt im Zähler
+            //    bewusst NICHT mit (registerPresence={false})
+            //  • CoachmarkService.isAnyActive — die Touren sind für BEIDE
+            //    unsichtbar, obwohl DemoProductSpotlight ein rohes
+            //    RN-<Modal> ist. Ohne diesen dritten Wächter legt sich das
+            //    Frage-Sheet über eine laufende Tour, und zwei sichtbare
+            //    Modals frieren iOS hart ein (CLAUDE.md, 86ca8g2p9) —
+            //    genau das, was der Puffer oben verhindern soll.
+            //    ratingPrompt.ts:140/220 prüft dieselbe Kombination.
+            etwasOffen: isAnySheetOpen() || isSurveyVisible() || CoachmarkService.isAnyActive(),
+            jetzt: Date.now(),
+          },
+          stand,
+        );
+        if (abgebrochen || !urteil.fragen) return;
+        inDieserSitzungGefragt.current = true;
+        // VOR dem Anzeigen vermerken: ein Absturz oder Wegwischen zwischen
+        // Anzeige und Notiz würde sonst beim nächsten Start sofort erneut
+        // fragen. Gleiche Reihenfolge wie beim Bewertungs-Dialog.
+        await frageVermerkt(Date.now());
+        if (!abgebrochen) setFragesheetOffen(true);
+      })();
+    }, 4000);
+
+    // Gegenkante (Projektregel: „jedes Gate braucht eine Gegenkante").
+    // War zum Prüfzeitpunkt etwas offen, ginge der Anlauf sonst ersatzlos
+    // verloren — der Effekt läuft nur bei Wechsel von permissionStatus oder
+    // Kennung neu. `onPresentationIdle` weckt uns, sobald die Bühne frei
+    // ist, und dann wird erneut ausgewertet.
+    const wiederholen = onPresentationIdle(() => {
+      if (abgebrochen || inDieserSitzungGefragt.current) return;
+      void (async () => {
+        const stand = await ladeStand();
+        const urteil = darfFragen(
+          {
+            berechtigung:
+              permissionStatus === 'granted'
+                ? 'erteilt'
+                : permissionStatus === 'denied'
+                  ? 'abgelehnt'
+                  : 'offen',
+            etwasOffen: isAnySheetOpen() || isSurveyVisible() || CoachmarkService.isAnyActive(),
+            jetzt: Date.now(),
+          },
+          stand,
+        );
+        if (abgebrochen || !urteil.fragen) return;
+        inDieserSitzungGefragt.current = true;
+        await frageVermerkt(Date.now());
+        if (!abgebrochen) setFragesheetOffen(true);
+      })();
+    });
+
+    return () => {
+      abgebrochen = true;
+      clearTimeout(t);
+      wiederholen();
+    };
+  }, [permissionStatus, user?.uid]);
+
   // Permission-Status auch refreshen wenn User aus den iOS-Settings
   // zurückkommt (z.B. nach manueller Aktivierung). AppState-Listener
   // fängt das ab.
@@ -169,11 +292,16 @@ export const PushNotificationProvider: React.FC<PushNotificationProviderProps> =
    */
   const refreshPermissionStatus = async () => {
     try {
-      const { status } = await Notifications.getPermissionsAsync();
+      const perm = await Notifications.getPermissionsAsync();
+      const iosStatus = (perm as { ios?: { status?: number } }).ios?.status;
       const mapped: PermissionStatus =
-        status === 'granted' ? 'granted'
-          : status === 'denied' ? 'denied'
-          : 'undetermined';
+        perm.status === 'granted' ? 'granted'
+          : perm.status === 'denied' ? 'denied'
+            // 3 = UNAuthorizationStatusProvisional. expo wirft ihn mit
+            // „noch nicht gefragt" in einen Topf, fachlich ist es das
+            // Gegenteil: es wird bereits zugestellt.
+            : iosStatus === 3 ? 'provisional'
+              : 'undetermined';
       setPermissionStatus(mapped);
       if (mapped === 'granted') {
         setPushToken(pushNotificationService.getPushToken());
@@ -244,6 +372,32 @@ export const PushNotificationProvider: React.FC<PushNotificationProviderProps> =
   return (
     <PushNotificationContext.Provider value={value}>
       {children}
+      {/*
+        Das erklärende Sheet vor der einmaligen System-Frage. Es lebt hier
+        und nicht auf einem Bildschirm, weil die Frage vom Verhalten abhängt
+        und nicht davon, wo jemand gerade ist.
+
+        „Später" ist folgenlos: der Vermerk steht schon (siehe oben), der
+        nächste Anlauf kommt nach der Frist aus pushPermissionGate.ts. Nur
+        „Ja" gibt die einmalige Gelegenheit aus.
+      */}
+      <PrePermissionSheet
+        visible={fragesheetOffen}
+        onClose={() => setFragesheetOffen(false)}
+        onAllow={async () => {
+          setFragesheetOffen(false);
+          if (!user?.uid) return;
+          const voll = await harteBerechtigungAnfragen(user.uid);
+          // Der Wunsch des Nutzers ist damit ausdrücklich ein Ja — auch
+          // wenn der System-Dialog danach scheitert. Sonst stünde der
+          // Schalter auf AUS, obwohl er gerade zugestimmt hat.
+          await setPushPreference(user.uid, true);
+          setUserPreference(true);
+          await refreshPermissionStatus();
+          console.log('[push] harte Berechtigung nach Sheet:', voll ? 'erteilt' : 'nicht erteilt');
+        }}
+        onDecline={() => setFragesheetOffen(false)}
+      />
     </PushNotificationContext.Provider>
   );
 };

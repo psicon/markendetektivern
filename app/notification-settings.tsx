@@ -69,7 +69,13 @@ export default function NotificationSettingsScreen() {
         );
         return;
       }
-      if (permissionStatus === 'undetermined' || permissionStatus === 'unknown') {
+      if (
+        permissionStatus === 'undetermined' ||
+        permissionStatus === 'unknown' ||
+        // Still zugestellt: hier lässt sich auf Banner und Ton hochstufen —
+        // die einmalige System-Frage ist noch unverbraucht.
+        permissionStatus === 'provisional'
+      ) {
         // Pre-Permission-Sheet zeigen
         setSheetVisible(true);
         return;
@@ -91,23 +97,34 @@ export default function NotificationSettingsScreen() {
   // der Nutzer will es. Vorher zeigte die Zeile allein die Berechtigung,
   // sodass nach dem Abbestellen „Aktiv" über einem ausgeschalteten
   // Schalter stand.
-  const statusLabel =
-    permissionStatus === 'granted'
-      ? userPreference
-        ? 'Aktiv'
-        : 'Pausiert — hier jederzeit wieder einschalten'
-      : permissionStatus === 'denied'
-        ? 'In den Geräte-Einstellungen ausgeschaltet'
-        : permissionStatus === 'undetermined'
-          ? 'Einschalten und nichts verpassen'
-          : '—';
+  // Drei Fragen, eine Zeile: Darf das System? Kommt es laut oder leise an?
+  // Und will der Nutzer überhaupt?
+  //
+  // `provisional` ist der Zustand, den es vor dem 09.09.2026 nicht gab: die
+  // App registriert sich beim Start still, ohne Dialog. Nachrichten kommen
+  // an, aber nur in der Mitteilungszentrale — ohne Banner, ohne Ton. Das als
+  // „aus" darzustellen wäre falsch, als „aktiv" ebenso.
+  const statusLabel = !userPreference
+    ? 'Pausiert — hier jederzeit wieder einschalten'
+    : permissionStatus === 'granted'
+      ? 'Aktiv'
+      : permissionStatus === 'provisional'
+        ? 'Leise aktiv — Nachrichten liegen in der Mitteilungszentrale'
+        : permissionStatus === 'denied'
+          ? 'In den Geräte-Einstellungen ausgeschaltet'
+          : permissionStatus === 'undetermined'
+            ? 'Einschalten und nichts verpassen'
+            : '—';
 
-  const statusColor =
-    permissionStatus === 'granted' && userPreference
+  const statusColor = !userPreference
+    ? theme.textMuted
+    : permissionStatus === 'granted'
       ? '#2e7d32'
-      : permissionStatus === 'denied'
-        ? '#c62828'
-        : theme.textMuted;
+      : permissionStatus === 'provisional'
+        ? '#f57c00'
+        : permissionStatus === 'denied'
+          ? '#c62828'
+          : theme.textMuted;
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg }}>

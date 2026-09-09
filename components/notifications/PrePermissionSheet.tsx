@@ -107,20 +107,17 @@ export function PrePermissionSheet({ visible, onClose, onAllow, onDecline }: Pro
             body="Wenn dein Bon akzeptiert wurde oder du eine Auszahlung anfordern kannst."
           />
           <Divider color={theme.border} />
-          <BulletRow
-            icon="cart-outline"
-            color="#fb8c00"
-            title="Lifecycle-Erinnerungen"
-            body="Wenn du Produkte auf dem Zettel hast oder eine Streak läuft."
-          />
-          <Divider color={theme.border} />
-          <BulletRow
-            icon="tag-outline"
-            color="#43a047"
-            title="Preis-Drops bei Favoriten"
-            body="Wenn ein Lieblingsprodukt günstiger wird."
-          />
-          <Divider color={theme.border} />
+          {/*
+            Hier standen bis zum 09.09.2026 zwei weitere Zeilen:
+            „Lifecycle-Erinnerungen" und „Preis-Drops bei Favoriten". Für
+            beides gibt es keinen Sender — weder in den Cloud Functions noch
+            sonstwo im Projekt. Eine Einwilligung, die Zwecke aufzählt, die
+            es nicht gibt, ist keine informierte Einwilligung, und für den
+            Nutzer ist sie schlicht ein gebrochenes Versprechen.
+
+            Wer die beiden Wege baut, holt die Zeilen zurück — zusammen mit
+            dem Sender, nicht davor.
+          */}
           <BulletRow
             icon="bullhorn-outline"
             color="#7e57c2"
