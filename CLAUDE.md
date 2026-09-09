@@ -932,6 +932,33 @@ solange `eas submit` nicht durch ist und Apple die Verarbeitung
 nicht abgeschlossen hat (i.d.R. 5–30 min nach submit). Bis dahin
 ist der Build NUR ein IPA-Artefakt auf den EAS-Servern.
 
+### Submit gehört zum Build — IMMER, beide Plattformen (User-Vorgabe 09.09.2026)
+
+User-Wortlaut: „beide submitten wenn sie durch sind (immer)".
+
+Ein fertiger Build ist ab jetzt kein Endzustand mehr. Wenn ein Build
+angefordert wurde und durchläuft, wird er **ohne Rückfrage submittet** —
+iOS nach TestFlight, Android in den Track, den `eas.json` vorgibt. Das
+ersetzt die frühere Praxis, nach dem Build noch einmal nachzufragen.
+
+**Was das NICHT ändert:** Builds werden weiterhin nie aus eigener Initiative
+gestartet (siehe „Builds & deploys — niemals automatisch triggern"). Die
+Regel greift erst, wenn der User einen Build bestellt hat.
+
+**Was sie NICHT abdeckt — und wo der Vorgang trotzdem stehen bleibt:** Der
+Android-Submit landet im **internen Track**. Die Freigabe für die Produktion
+ist ein Schritt von Hand in der Play Console, den ich nicht ausführen kann.
+Nach jedem Android-Submit deshalb ausdrücklich sagen, dass der Build dort
+liegt und auf die Promotion wartet — im August 2026 blieb genau so ein
+Release zwei Wochen unbemerkt liegen, während alle glaubten, es sei
+ausgerollt (siehe „Android-Submit landet NUR im INTERNAL-Track").
+
+Praktisch: `--auto-submit` beim Build mitgeben, oder nach dem Durchlauf
+`eas submit --platform <ios|android> --profile production --latest
+--non-interactive`. Danach den Submission-Status prüfen — die CLI meldet
+Fehlschläge nur unspezifisch, der ITMS-Code steht im EAS-Dashboard
+(siehe „Submission-Status lokal auslesen").
+
 ### iOS TestFlight: Pflicht-Checkliste VOR jedem Build (Juni 2026)
 
 Jede Zeile hier hat mindestens einen Build/eine TestFlight-Version
