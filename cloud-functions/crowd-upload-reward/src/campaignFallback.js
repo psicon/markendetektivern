@@ -67,13 +67,23 @@ function kandidatenZurAufnahmezeit(kampagnen, aufnahmeAt) {
   });
 
   passend.sort((a, b) => {
-    const ea = ms(a.endAt);
-    const eb = ms(b.endAt);
-    if (ea !== eb) return ea - eb; // frühestes Ende zuerst, wie im Client
-    // Bei gleichem Ende die HÖHERE Vergütung: der Client zeigt in dieser Lage
-    // ebenfalls die zuerst gelistete Aktion an, und wer einspringt, soll nicht
-    // weniger zahlen, als die App in Aussicht gestellt hat.
-    return (Number(b.cashbackPerBonCents) || 0) - (Number(a.cashbackPerBonCents) || 0);
+    // NIEDRIGSTE Vergütung zuerst — dieselbe Voreinstellung wie im Client
+    // (`guenstigsteAktion` in lib/services/productCampaignPick.ts,
+    // User-Vorgabe 09.09.2026).
+    //
+    // Bis dahin stand hier das früheste Enddatum vorn und die HÖHERE Vergütung
+    // als Gleichstand-Entscheid. Die Begründung dafür war, dass der
+    // Einspringer nicht weniger zahlen soll als die App in Aussicht gestellt
+    // hat. Genau die kehrt sich jetzt um: die App stellt ab sofort die
+    // günstigste Aktion in Aussicht, also wäre die teurere hier MEHR als
+    // versprochen. Beide Seiten müssen dieselbe Wahl treffen, sonst bucht der
+    // Server etwas anderes, als der Mensch auf dem Bildschirm gesehen hat.
+    const ba = Number(a.cashbackPerBonCents) || 0;
+    const bb = Number(b.cashbackPerBonCents) || 0;
+    if (ba !== bb) return ba - bb;
+    // Bei gleichem Betrag die frühere Frist zuerst — wie bisher, damit die
+    // Reihenfolge nicht von der Sortierung der Datenbankabfrage abhängt.
+    return ms(a.endAt) - ms(b.endAt);
   });
 
   return passend;

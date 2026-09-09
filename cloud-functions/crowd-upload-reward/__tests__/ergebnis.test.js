@@ -83,12 +83,37 @@ describe('campaignZurAufnahmezeit — der Server springt für den Client ein', (
     expect(campaignZurAufnahmezeit(alle, am('2026-09-15')).campaignId).toBeNull();
   });
 
-  test('das frühere Ende gewinnt — dieselbe Reihenfolge, die der Client sieht', () => {
+  test('die GÜNSTIGSTE gewinnt — dieselbe Voreinstellung, die der Client zeigt', () => {
+    // User-Vorgabe 09.09.2026. Vorher entschied das frühere Enddatum, und die
+    // höhere Vergütung war der Gleichstand-Entscheid — beim Geld ein
+    // Zufallsergebnis. Laufen „Milchprodukte 0,16 €" und „Produkt-Fotos
+    // 0,12 €" parallel, kostete jede stumm eingeordnete Einreichung die
+    // Differenz.
+    const alle = [
+      k('teuer', '2026-09-01', '2026-09-15', { cashbackPerBonCents: 16 }),
+      k('guenstig', '2026-09-01', '2026-09-30', { cashbackPerBonCents: 12 }),
+    ];
+    // Die teure endet FRÜHER und stünde nach der alten Regel vorn.
+    expect(campaignZurAufnahmezeit(alle, am('2026-09-10')).campaignId).toBe('guenstig');
+  });
+
+  test('bei gleichem Betrag entscheidet weiter das frühere Ende', () => {
+    // Sonst hinge die Auswahl an der Sortierung der Datenbankabfrage.
     const alle = [
       k('spaet', '2026-09-01', '2026-09-30', { cashbackPerBonCents: 16 }),
       k('frueh', '2026-09-01', '2026-09-15', { cashbackPerBonCents: 16 }),
     ];
     expect(campaignZurAufnahmezeit(alle, am('2026-09-10')).campaignId).toBe('frueh');
+  });
+
+  test('eine Aktion ohne Restbudget wird auch dann nicht genommen, wenn sie die günstigste wäre', () => {
+    // Sie zu wählen hiesse, den Vorgang mit „Budget erschöpft" abzuschliessen,
+    // während nebenan eine zahlende Aktion läuft.
+    const alle = [
+      k('leer', '2026-09-01', '2026-09-30', { cashbackPerBonCents: 5, budgetRemainingCents: 0 }),
+      k('zahlt', '2026-09-01', '2026-09-30', { cashbackPerBonCents: 12 }),
+    ];
+    expect(campaignZurAufnahmezeit(alle, am('2026-09-10')).campaignId).toBe('zahlt');
   });
 
   test('ohne Aufnahmedatum wird nicht geraten', () => {
@@ -130,11 +155,14 @@ describe('campaignZurAufnahmezeit — Ausschlüsse, die überall sonst gelten', 
     expect(campaignZurAufnahmezeit([{ id: 'offen', kind: 'product_photos', cashbackPerBonCents: 12 }], am('2026-09-10')).campaignId).toBeNull();
   });
 
-  test('bei gleichem Ende gewinnt die HÖHERE Vergütung', () => {
-    // Der Server springt für den Client ein — er soll nicht weniger zahlen,
-    // als die App in Aussicht gestellt hat.
+  test('bei gleichem Ende gewinnt die NIEDRIGERE Vergütung', () => {
+    // Umgekehrt seit dem 09.09.2026. Vorher galt: der Server springt für den
+    // Client ein und soll nicht weniger zahlen, als die App in Aussicht
+    // gestellt hat. Genau diese Begründung hat sich gedreht — die App stellt
+    // jetzt selbst die günstigste Aktion in Aussicht, die teurere wäre also
+    // MEHR als versprochen. Beide Seiten müssen dieselbe Wahl treffen.
     const alle = [k('billig', { cashbackPerBonCents: 12 }), k('teuer', { cashbackPerBonCents: 16 })];
-    expect(campaignZurAufnahmezeit(alle, am('2026-09-10')).campaignId).toBe('teuer');
+    expect(campaignZurAufnahmezeit(alle, am('2026-09-10')).campaignId).toBe('billig');
   });
 
   test('die Kandidatenliste steht vollständig zur Verfügung', () => {
