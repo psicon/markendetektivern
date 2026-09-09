@@ -1,5 +1,21 @@
 /**
- * PrePermissionSheet — Erklärt dem User VOR dem System-Permission-Dialog
+ * PrePermissionSheet — DIE Einwilligung, nicht nur eine Vorbereitung.
+ *
+ * Seit dem 09.09.2026 holt die App ohne ein Ja auf diesem Sheet weder eine
+ * Berechtigung noch überhaupt einen Geräte-Token: Das Abholen ist selbst
+ * schon ein Zugriff auf das Endgerät (§ 25 TDDDG), und die veröffentlichte
+ * Datenschutzerklärung nennt die Zustimmung des Nutzers als Rechtsgrundlage.
+ * Was hier steht, ist deshalb der Text, auf den sich diese Zustimmung
+ * bezieht — er muss die Zwecke vollständig und wahrheitsgemäß nennen.
+ *
+ * Daraus folgen zwei Regeln für jede künftige Änderung:
+ *   • Keine Nachrichtenart aufzählen, für die es keinen Sender gibt. Zwei
+ *     solche Zeilen standen hier („Lifecycle-Erinnerungen", „Preis-Drops bei
+ *     Favoriten") und sind am 09.09. entfernt worden.
+ *   • Kommt ein neuer Zweck dazu, gehört er HIER hinein — sonst deckt die
+ *     Einwilligung ihn nicht.
+ *
+ * Erklärt dem User VOR dem System-Permission-Dialog
  * was er von Push-Benachrichtigungen erwarten kann. iOS / Android zeigen
  * den nativen Dialog nur EINMAL — wenn der User dort "Nicht erlauben"
  * tippt, muss er manuell in die System-Settings um's umzudrehen.
@@ -84,8 +100,9 @@ export function PrePermissionSheet({ visible, onClose, onAllow, onDecline }: Pro
               maxWidth: 280,
             }}
           >
-            Wir benachrichtigen dich nur bei wirklich wichtigen Dingen — du
-            kannst die Themen jederzeit in den Einstellungen anpassen.
+            Sag einmal Ja, und wir melden uns, wenn es etwas zu holen gibt.
+            Abschalten kannst du es jederzeit unter Profil → Einstellungen →
+            Benachrichtigungen.
           </Text>
         </View>
 
@@ -121,8 +138,8 @@ export function PrePermissionSheet({ visible, onClose, onAllow, onDecline }: Pro
           <BulletRow
             icon="bullhorn-outline"
             color="#7e57c2"
-            title="Aktionen & App-Hinweise"
-            body="Neue Cashback-Aktionen und wichtige App-Updates."
+            title="Aktionen & Erinnerungen"
+            body="Neue Cashback-Aktionen, Erinnerungen ans Einreichen und wichtige Hinweise zur App."
           />
         </View>
 

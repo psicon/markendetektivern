@@ -1,6 +1,6 @@
 import { PrePermissionSheet } from '@/components/notifications/PrePermissionSheet';
 import { wireFcmNotificationTaps } from '@/lib/services/fcmDeepLinks';
-import { harteBerechtigungAnfragen } from '@/lib/services/fcmTokenService';
+import { harteBerechtigungAnfragen, registerFcmTokenForUser } from '@/lib/services/fcmTokenService';
 import {
   darfFragen,
   frageVermerkt,
@@ -388,6 +388,11 @@ export const PushNotificationProvider: React.FC<PushNotificationProviderProps> =
           setFragesheetOffen(false);
           if (!user?.uid) return;
           const voll = await harteBerechtigungAnfragen(user.uid);
+          // Erst jetzt den Erneuerungs-Hörer verdrahten. Beim App-Start ist
+          // `registerFcmTokenForUser` ohne Erlaubnis ein Nichtstuer und
+          // steigt vor dem Hörer aus — ohne diesen Aufruf liefe die
+          // laufende Sitzung ohne ihn weiter.
+          if (voll) void registerFcmTokenForUser(user.uid);
           // Der Wunsch des Nutzers ist damit ausdrücklich ein Ja — auch
           // wenn der System-Dialog danach scheitert. Sonst stünde der
           // Schalter auf AUS, obwohl er gerade zugestimmt hat.

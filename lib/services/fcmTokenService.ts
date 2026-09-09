@@ -197,10 +197,16 @@ export async function persistToken(uid: string, token: string): Promise<void> {
 }
 
 /**
- * Wire up FCM token registration for the given user. Idempotent —
- * safe to call multiple times (e.g. on every AuthContext mount).
+ * Token registrieren — ABER NUR, wenn die Erlaubnis schon vorliegt.
  *
- * Returns a teardown function that unbinds the onTokenRefresh listener.
+ * Fragt selbst nichts und holt ohne Erlaubnis auch keinen Token (§ 25
+ * TDDDG, siehe unten). Für Rückkehrer, die längst zugestimmt haben, ist das
+ * der Weg, auf dem sich ein erneuerter Token einträgt. Für alle anderen ist
+ * es ein Nichtstuer — bis der Nutzer im erklärenden Sheet zustimmt und
+ * `harteBerechtigungAnfragen` übernimmt.
+ *
+ * Idempotent, gefahrlos bei jedem Mount aufrufbar.
+ * Rückgabe: Aufräumfunktion für den onTokenRefresh-Hörer.
  */
 export async function registerFcmTokenForUser(uid: string): Promise<() => void> {
   const Messaging = await getMessagingModule();
@@ -210,84 +216,49 @@ export async function registerFcmTokenForUser(uid: string): Promise<() => void> 
   }
 
   try {
-    if (Platform.OS === 'ios') {
-      // ═══ PROVISORISCH, nicht fragend (09.09.2026) ═══
-      //
-      // Bis hierher stand an dieser Stelle die harte Frage — ausgelöst,
-      // sobald eine Kennung existierte, also beim allerersten Öffnen, anonym,
-      // ohne jeden Zusammenhang. Ergebnis unter 33.841 iOS-Konten: 22.722
-      // erlaubt, 10.665 ABGELEHNT, 454 nie beantwortet. Auf iOS ist ein Nein
-      // endgültig; 31 % des Bestands sind damit dauerhaft nicht erreichbar.
-      //
-      // `provisional: true` zeigt KEINEN Dialog. Die Nachrichten landen still
-      // in der Mitteilungszentrale — ohne Banner, ohne Ton — und tragen unten
-      // „Behalten" / „Ausschalten". Der Nutzer entscheidet also an einer
-      // echten Nachricht statt an einer abstrakten Frage, und die einmalige
-      // harte Frage bleibt unverbraucht.
-      //
-      // Die harte Frage stellt `PushNotificationProvider`, wenn Interesse
-      // erkennbar ist (zweite Sitzung oder erste bedeutsame Handlung, siehe
-      // pushPermissionGate.ts) — und mit dem erklärenden Sheet davor.
-      //
-      // WICHTIG: hat der Nutzer die volle Erlaubnis bereits erteilt, ändert
-      // dieser Aufruf daran nichts. iOS stuft nicht zurück.
-      const authStatus = await Messaging().requestPermission({
-        alert: true,
-        badge: true,
-        sound: true,
-        provisional: true,
-      });
-      const enabled =
+    // ═══ HIER WIRD NICHT GEFRAGT — und ohne Erlaubnis auch nichts geholt ═══
+    //
+    // Zwei Gründe, und der zweite wiegt schwerer als der erste.
+    //
+    // 1. Der Dialog ist eine Ressource, die man einmal ausgibt. Bis zum
+    //    09.09.2026 gab die App sie beim allerersten Öffnen aus, anonym,
+    //    ohne Zusammenhang: von 33.841 iOS-Konten haben 10.665 abgelehnt.
+    //    Auf iOS ist das endgültig.
+    //
+    // 2. Das Abholen des Geräte-Tokens ist selbst schon ein Zugriff auf das
+    //    Endgerät und braucht eine Einwilligung (§ 25 TDDDG). Die
+    //    veröffentlichte Datenschutzerklärung nennt dafür ausdrücklich die
+    //    Zustimmung des Nutzers als Rechtsgrundlage. Ein Token, den wir
+    //    holen, bevor jemand ein Wort gelesen hat, ist von dieser Erklärung
+    //    nicht gedeckt — egal wie nützlich er wäre.
+    //
+    // Diese Funktion registriert deshalb NUR, wenn die Erlaubnis bereits
+    // vorliegt: bei Rückkehrern, deren Token sich erneuern muss. Gefragt
+    // wird ausschließlich über `harteBerechtigungAnfragen`, und die ruft
+    // der Provider erst, nachdem der Nutzer im erklärenden Sheet
+    // ausdrücklich zugestimmt hat.
+    let erlaubt = false;
+    try {
+      const authStatus = await Messaging().hasPermission();
+      erlaubt =
         authStatus === Messaging.AuthorizationStatus.AUTHORIZED ||
         authStatus === Messaging.AuthorizationStatus.PROVISIONAL;
-      if (!enabled) {
-        // Bleibt möglich: wer früher abgelehnt hat, bleibt abgelehnt — daran
-        // ändert auch die provisorische Anfrage nichts.
-        const abgelehnt = authStatus === Messaging.AuthorizationStatus.DENIED;
-        console.log('[fcm] iOS ohne Erlaubnis, authStatus=', authStatus);
+      if (!erlaubt) {
         void recordState(
           uid,
-          abgelehnt ? 'permission_denied' : 'permission_not_determined',
-          `authStatus=${authStatus}`,
+          authStatus === Messaging.AuthorizationStatus.DENIED
+            ? 'permission_denied'
+            : 'permission_not_determined',
+          `beim_start authStatus=${authStatus}`,
         );
         return () => {};
       }
-    } else if (Platform.OS === 'android') {
-      // ═══ Auf Android fragt requestPermission() NICHTS (Fund 09.09.2026) ═══
-      //
-      // Der frühere Kommentar an dieser Stelle behauptete, die Methode
-      // erledige auch die Android-13-Laufzeitabfrage. Das stimmt nicht:
-      // @react-native-firebase/messaging macht daraus
-      // `if (isAndroid) return Promise.resolve(AUTHORIZED)` — reines
-      // JavaScript, das native Modul kennt die Methode gar nicht. Bei
-      // targetSdk 36 fragt auch das System nicht von selbst.
-      //
-      // Der Beweis steht in den eigenen Daten: unter tausenden Konten mit
-      // Statusfeld gibt es auf Android NULL Ablehnungen — bei einem echten
-      // Dialog unmöglich. Stattdessen meldete jedes Gerät 'ok', auch wenn
-      // Android keine einzige Nachricht anzeigen durfte.
-      //
-      // Hier wird deshalb nur noch GELESEN. Gefragt wird über dasselbe Tor
-      // wie auf iOS (`harteBerechtigungAnfragen`) — ein kalter Dialog beim
-      // ersten Öffnen wäre auf Android derselbe Fehler wie der, den wir auf
-      // iOS gerade abstellen: nach zwei Ablehnungen sperrt das System die
-      // Frage dauerhaft.
-      try {
-        const Notifications = require('expo-notifications');
-        const { status } = await Notifications.getPermissionsAsync();
-        if (status !== 'granted') {
-          void recordState(
-            uid,
-            status === 'denied' ? 'permission_denied' : 'permission_not_determined',
-            `android status=${status}`,
-          );
-          // Der Token wird trotzdem geholt und gespeichert: er bleibt
-          // gültig, sobald die Erlaubnis später erteilt wird. Nur der
-          // Zustand darf nicht 'ok' heißen, wenn nichts angezeigt wird.
-        }
-      } catch (e: any) {
-        console.warn('[fcm] Android-Berechtigungsstand nicht lesbar:', e?.message);
-      }
+    } catch (e: any) {
+      // Nicht lesbar heißt nicht erlaubt. Fail-closed ist hier richtig: ein
+      // Fehler darf nicht dazu führen, dass wir ohne Erlaubnis registrieren.
+      console.warn('[fcm] Berechtigungsstand nicht lesbar:', e?.message);
+      void recordState(uid, 'permission_not_determined', `lesefehler: ${String(e?.message ?? e).slice(0, 120)}`);
+      return () => {};
     }
 
     // getToken() und persistToken() getrennt fangen: beide landeten
@@ -350,16 +321,17 @@ export async function registerFcmTokenForUser(uid: string): Promise<() => void> 
 /**
  * Die HARTE Berechtigung anfragen — der eine System-Dialog.
  *
+ * Der EINZIGE Weg, auf dem diese App je nach Erlaubnis fragt — und damit
+ * auch der einzige, auf dem je ein Token entsteht.
+ *
  * Nur aufrufen, nachdem der Nutzer im erklärenden Sheet ausdrücklich Ja
- * gesagt hat (`PrePermissionSheet`). Danach ist die Gelegenheit verbraucht:
+ * gesagt hat (`PrePermissionSheet`). Dieses Ja IST die Einwilligung im
+ * Sinne der Datenschutzerklärung; der System-Dialog danach regelt nur noch,
+ * wie laut zugestellt wird. Danach ist die Gelegenheit verbraucht:
  * lehnt er hier ab, lässt iOS den Dialog nie wieder zu, und nur der Weg über
  * die Systemeinstellungen bleibt.
  *
- * Ein bereits provisorisch registriertes Gerät wird dadurch hochgestuft —
- * aus stillen Einträgen in der Mitteilungszentrale werden Banner und Ton.
- * Der Token bleibt derselbe, es ist keine Neuregistrierung nötig; wir holen
- * ihn trotzdem frisch, weil iOS beim Übergang einen neuen APNs-Token
- * vergeben kann.
+ * Nach dem Ja wird der Token geholt und gespeichert — vorher nie.
  *
  * @returns true, wenn danach die volle Erlaubnis vorliegt.
  */
