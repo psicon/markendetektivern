@@ -3175,6 +3175,27 @@ Gotchas:
   „Upload fehlgeschlagen" für einen vergüteten Bon. Reparatur per
   `.fix-stale-mirrors.js`; Root-Fix (bonUploadQueue darf den Mirror nur
   schreiben, wenn dort kein Server-Status steht) ist offen.
+- **md5-Bilddedup NUR auf den Identitäts-Fotos (09.09.2026):** Die Regel
+  „dieselben Fotos = wiederverwendet = ablehnen" darf `preis` NICHT mitzählen.
+  Befund der Runde 09.09.: zwei ECHTE Sorten (K-Classic Minis Edelschimmel /
+  Kümmel, eigene EANs, derselbe Markt, dieselbe Minute) teilten ausschließlich
+  das Preisschild — ein gemeinsames Regal-/Aktionsschild ist plausibel. Mit
+  `preis` in der Prüfmenge lehnt die Regel beide korrekten Einreichungen ab
+  (und trifft dabei auch das Original, weil beide Seiten markiert werden).
+  Prüfmenge deshalb: front, rueckseite, hersteller, ean, naehrwerte, zutaten.
+  Die Review-Konsole hat den md5-Check bisher gar nicht — er lebt nur im
+  Ops-Skript `.crowd-review-0909.js`; beim Übernehmen in die Konsole diese
+  Einschränkung mitnehmen.
+- **Ops-Freigaberunden ab 09.09. laufen mit den KONSOLEN-Regeln:**
+  `.crowd-review-0909.js` importiert `review-console/src/duplicatePolicy.js`
+  (Vollständigkeit + 30-Tage-Doppel-Regel) und schreibt dieselben Felder wie
+  `reviewDecideUploads` (status, review.precheck, reviewedAt, reviewedBy,
+  holdReasons, rejectReason, reviewNote mit den Konsolen-Texten). Nicht wieder
+  die alten Skript-Regeln (.crowd-approve.js/.crowd-reject.js) verwenden — sonst
+  entscheiden Konsole und Skript verschieden. Zusätzlich zur Konsole: md5-Check
+  (siehe oben) und der Gemini-Vision-Audit; **ohne Vision-Verdict wird nicht
+  freigegeben** (frische Uploads laufen noch durch die Namer-OCR und bleiben
+  offen für die nächste Runde).
 - **Produktfoto-Freigabe, Ortsangabe (03.09.2026):** Android 6.0.15 überspringt
   den Orts-Schritt bei erteilter Berechtigung (18b8cb6) und hat KEINEN Fallback,
   wenn der GPS-Fix ausbleibt → Einreichung ohne Ort, `locationGate` würde
