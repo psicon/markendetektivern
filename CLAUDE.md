@@ -3196,6 +3196,40 @@ Gotchas:
   (siehe oben) und der Gemini-Vision-Audit; **ohne Vision-Verdict wird nicht
   freigegeben** (frische Uploads laufen noch durch die Namer-OCR und bleiben
   offen für die nächste Runde).
+- **Eine Doppel-Regel MUSS eine Kopie übrig lassen (10.09.2026).** Schwester der
+  Regel „Ein Status-Feld ist kein Mechanismus": dort fehlte der Trigger, hier
+  entschied die Regel gegen ALLE. `crowd_uploads` enthielt 3 Gruppen (7 Docs,
+  3 Nutzer), in denen jede Kopie abgelehnt war — eine als
+  `bilder_wiederverwendet`, die übrigen als `doppelt_eingereicht`. Damit ging
+  auch die erste, völlig korrekte Einreichung leer aus; niemand bekam für diese
+  Produkte etwas. Ursache: der md5-Vergleich in `.crowd-review-0909.js`
+  (`md5Map`) markiert BEIDE Seiten eines Treffers, also auch die Referenz.
+  **Prüffrage bei jeder Sperr-/Doppel-/Dedup-Regel: Kann eine Gruppe entstehen,
+  in der am Ende KEINE Einreichung freigabefähig ist?** Wenn ja, ist die Regel
+  falsch. Konkret: die älteste Kopie einer byteidentischen Gruppe nie markieren
+  (sie IST die Referenz), rein pendente Gruppen halten statt sperren, und für
+  die jüngeren `doppelt_eingereicht` statt `bilder_wiederverwendet` verwenden.
+  Die Konsolen-Regel macht das richtig (`duplicatePolicy.js`: ältere offene
+  Kopie → `hold`, Sperre nur gegen `approved`) — beim Nachziehen des md5-Checks
+  in `precheckOf` (ClickUp 86cbfvwtm) darf diese Eigenschaft nicht verloren
+  gehen. Reparatur: `.crowd-doppel-original-0910.js` (je Gruppe die älteste
+  Kopie `rejected → approved`, Buchung macht der Trigger; 12+15+12 ct im Ledger
+  verifiziert). Gegenprobe danach: 0 EANs ohne eine zahlbare Einreichung.
+  Nebenbefund aus derselben Runde: der Ablehnungstext unterstellte „dieselben
+  Fotos für eine andere Einreichung verwendet" — tatsächlich hatte die App
+  dieselbe Einreichung mehrfach abgeschickt. Ein Sperr-Text darf nie ein
+  Verhalten behaupten, das die Daten nicht belegen (`reviewNote` ist intern,
+  war hier also nicht sichtbar — die App-Texte in
+  `lib/utils/productSubmissionCopy.ts` sind es).
+- **Budget 0 ist keine Ablehnung, sondern ein stiller Nicht-Vorgang — auch bei
+  Produktfotos (10.09.2026).** Eine der drei Nachfreigaben hing an
+  `mai-juni-2026CloneClone` mit `budgetRemainingCents: 0` (Übertrag in den
+  Nachfolger am 03.09.). Eine Freigabe wäre in `campaign_budget_exhausted`
+  gelaufen und hätte NICHTS gebucht — exakt die 38 Fälle vom 03.09. Regel: vor
+  einer Nachfreigabe das Budget der ZUGEORDNETEN Aktion prüfen und genau den
+  nie ausgezahlten Betrag zurücklegen (nach der Buchung steht die Aktion wieder
+  auf 0, netto verschiebt sich kein Budget) — ODER die Einreichung bewusst dem
+  Nachfolger zuordnen. Niemals blind auf `approved` setzen und hoffen.
 - **Produktfoto-Freigabe, Ortsangabe (03.09.2026):** Android 6.0.15 überspringt
   den Orts-Schritt bei erteilter Berechtigung (18b8cb6) und hat KEINEN Fallback,
   wenn der GPS-Fix ausbleibt → Einreichung ohne Ort, `locationGate` würde
