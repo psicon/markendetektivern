@@ -411,6 +411,45 @@ Recent-Sessions.
   `{step}.jpg`-Basename einführen — jeder Basename muss über Einreichungen/User
   hinweg eindeutig sein, damit kein Basename-gekeyter Prozess je Bilder vertauscht.
 
+- **`addDoc` auf dem Geldpfad — ein Schreibvorgang ohne Schlüssel, an dem ein
+  zweiter scheitern kann (10.09.2026).** `submitProduct` legte Produktfoto-
+  Einreichungen mit `addDoc` an; jeder Aufruf prägt eine neue Zufalls-ID, also
+  wird JEDE Wiederholung zwangsläufig ein zusätzliches Dokument. Ausgelöst hat
+  es der Einreichen-Knopf, der im ausgelieferten Stand (build 1234, `18b8cb6`)
+  nur `disabled={!allCaptured}` trug und während ≥4 s GPS-Wartezeit plus sieben
+  Dateikopien keinerlei Rückmeldung gab — jeder weitere Tipp startete einen
+  eigenen Lauf mit eigenem Bild-Token. Ergebnis: 3 Nutzer, 7 byteidentische
+  Einreichungen, jede davon abgelehnt (siehe „Eine Doppel-Regel MUSS eine Kopie
+  übrig lassen"). **Die 10–13 s zwischen den Kopien sind KEINE Frist**, sondern
+  die Laufzeit EINES Auftrags in der seriellen Warteschlange — wer nach einem
+  Retry-Timer sucht, sucht falsch. Fix (`productSubmissionDocId`): deterministische
+  Doc-ID `uid_sessionId_productIndex` + `setDoc`. Weil `firestore.rules` auf
+  `crowd_uploads` `update, delete: if false` setzt, ist der zweite Schreibvorgang
+  ein verbotenes `update` — „der erste gewinnt" ist damit SERVERSEITIG erzwungen
+  und hängt nicht an Client-Disziplin (im Emulator belegt,
+  `rules-tests/firestore.rules.test.js`). Regel: **jeder Schreibvorgang, an dem
+  Geld hängt, braucht eine deterministische ID aus fachlichen Feldern** — die
+  Buchungsseite macht es längst so (`crowd_<uploadId>`, siehe „Ein Status-Feld
+  ist kein Mechanismus"), die Erzeugungsseite tat es nicht. Zwei Ergänzungen,
+  die nicht fehlen dürfen: ohne verwertbaren Schlüssel wird auf eine Zufalls-ID
+  ausgewichen (eine Dublette ist besser als eine verlorene Einreichung), und ein
+  `permission-denied` gilt nur dann als „liegt schon vor", wenn ein Lesevorgang
+  das Dokument BESTÄTIGT — sonst verschwände eine Einreichung bei abgelaufener
+  Anmeldung lautlos. Die Doc-ID im Regelwerk an die uid zu binden wäre der
+  nächste Schritt, sperrt aber sofort alle Feldgeräte aus, die weiter Zufalls-IDs
+  schreiben — erst nach vollständiger Update-Verbreitung.
+- **Einen Auslöse-Knopf ohne Wiedereintritts-Zustand lassen, wenn danach eine
+  rückmeldungsfreie Wartezeit kommt.** Teil desselben Vorfalls. Zwei Details, die
+  eine naive Sperre nicht abdeckt: (1) `Alert.alert` blockiert NICHT — eine
+  Sperre, die im `finally` fällt, ist wieder offen, während der Erfolgs-Dialog
+  noch steht und die Fotos unverändert im State liegen; (2) ein `boolean` reicht
+  nicht, weil „läuft gerade" und „für diesen Vorgang schon erledigt" zwei
+  Zustände sind. Muster im Wizard: `submitZustand: 'idle' | 'laeuft' | 'fertig'`
+  plus ein Ref mit den bereits eingereichten Slots; die Sperre fällt erst, wenn
+  ein NEUER Vorgang beginnt. Und der Riegel gehört zusätzlich dorthin, wo Arbeit
+  entsteht (`enqueueProductUpload` gibt für denselben Slot den bestehenden
+  Auftrag zurück) — sonst kostet jeder Extra-Tipp sieben Dateikopien und sieben
+  Uploads, auch wenn am Ende nur ein Dokument übrig bleibt.
 - **Zwei React-Native-`<Modal>`s gleichzeitig sichtbar präsentieren.**
   iOS deadlockt ("Attempt to present X on Y which is already presenting Z")
   → App FRIERT EIN (kein Crash, harter Hang). Passierte als Hyperbug

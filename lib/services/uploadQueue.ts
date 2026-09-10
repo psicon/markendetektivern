@@ -223,6 +223,29 @@ async function deleteJobFiles(jobId: string) {
  *  after copying images + writing the queue (no network). */
 export async function enqueueProductUpload(input: EnqueueInput): Promise<string> {
   await ensureLoaded();
+
+  // Derselbe Produkt-Slot liegt schon in der Warteschlange → derselbe Auftrag.
+  //
+  // Zustands-Prüfung, keine Zeitsperre: ob der zweite Aufruf 200 ms oder 20 s
+  // später kommt, ist gleichgültig — es bleibt EIN Auftrag mit EINEM Bildsatz.
+  // Ohne das legte jeder weitere Tipp auf den Einreichen-Knopf einen eigenen
+  // Auftrag an, kopierte sieben Dateien und lud sie erneut hoch (Vorfall
+  // 10.09.2026: 2–3 byteidentische Einreichungen je Nutzer).
+  //
+  // Steht der Auftrag auf `failed`, ist ein erneutes Einreichen als
+  // Wiederholung zu lesen: der Auto-Versuchsvorrat wird zurückgesetzt, sonst
+  // täte der Tipp bei erschöpftem Vorrat sichtbar nichts.
+  const bereitsDa = jobs.find(
+    (j) => j.uid === input.uid && j.sessionId === input.sessionId && j.productIndex === input.productIndex,
+  );
+  if (bereitsDa) {
+    if (bereitsDa.status === 'failed') {
+      setJob(bereitsDa.id, { status: 'queued', attempts: 0, lastError: null });
+    }
+    void processQueue();
+    return bereitsDa.id;
+  }
+
   await ensureDir();
   const id = randomId();
 

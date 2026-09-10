@@ -352,6 +352,23 @@ describe('Ratings, Feedback, Telemetrie, Push-Tokens', () => {
     await assertSucceeds(setDoc(doc(alice(), 'crowd_uploads/cu1'), { userId: ALICE }));
     await assertFails(updateDoc(doc(alice(), 'crowd_uploads/cu1'), { status: 'approved' }));
   });
+  test('crowd_uploads: der deterministische Slot-Schlüssel lässt nur den ERSTEN durch', async () => {
+    // Trägt die Idempotenz von `submitProduct` (lib/services/productSubmit.ts,
+    // productSubmissionDocId): ein Produkt-Slot einer Wizard-Sitzung ist EIN
+    // Dokument. Der zweite Schreibvorgang auf denselben Pfad ist ein `update`
+    // und muss scheitern — sonst hängt „der erste gewinnt" allein an der
+    // Disziplin des Clients, und genau die hat am 10.09.2026 gefehlt
+    // (3 Nutzer, 7 byteidentische Einreichungen, jede davon abgelehnt).
+    const slot = `crowd_uploads/${ALICE}_94ea55c3fd9caddfbce6bd1c_3`;
+    await assertSucceeds(setDoc(doc(alice(), slot), { userId: ALICE }));
+    await assertFails(setDoc(doc(alice(), slot), { userId: ALICE }));
+    // Ein anderer Slot derselben Sitzung bleibt frei — echte zweite Produkte
+    // dürfen nicht mitgesperrt werden.
+    await assertSucceeds(setDoc(doc(alice(), `crowd_uploads/${ALICE}_94ea55c3fd9caddfbce6bd1c_4`), { userId: ALICE }));
+    // Fremdes Konto kann den Slot weder besetzen noch lesen.
+    await assertFails(setDoc(doc(mallory(), slot), { userId: MALLORY }));
+    await assertFails(getDoc(doc(mallory(), slot)));
+  });
   test('ratingFunnelEvents: eigenes schreiben ok, Spoof/Unauth/Read/Delete nie', async () => {
     const own = `ratingFunnelEvents/${ALICE}_6.0.12_requested`;
     const gut = {

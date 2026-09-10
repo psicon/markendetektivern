@@ -119,7 +119,22 @@ export default function ProductWizardScreen() {
   // Knopf — ein stummer, sekundenlang wirkungsloser Knopf lädt zum zweiten
   // Tippen geradezu ein.
   const submitLaeuftRef = useRef(false);
-  const [submitting, setSubmitting] = useState(false);
+  /**
+   * Welche Produkt-Slots dieser Sitzung sind schon eingereiht?
+   *
+   * Die Lauf-Sperre allein genügt nicht: sie fällt im `finally`, WÄHREND der
+   * Erfolgs-Dialog noch steht (`Alert.alert` blockiert nicht), und die Fotos
+   * liegen unverändert im State — derselbe Satz war danach erneut absendbar.
+   * Dieser Merker überlebt das Dialog-Fenster und fällt erst, wenn „Weiteres
+   * Produkt" einen neuen Slot beginnt.
+   */
+  const eingereichteSlotsRef = useRef<Set<number>>(new Set());
+  /**
+   * Ein Zustand statt zweier Booleans (CLAUDE.md): `idle` → `laeuft` →
+   * `fertig`. `fertig` ist der Dialog-Zeitraum, in dem der Knopf gesperrt
+   * bleiben MUSS.
+   */
+  const [submitZustand, setSubmitZustand] = useState<'idle' | 'laeuft' | 'fertig'>('idle');
   /** Der im `place`-Schritt bestätigte Ort — gilt für die ganze Sitzung. */
   const [confirmedPlace, setConfirmedPlace] = useState<ConfirmedPlace | null>(null);
   // Submit-Gate (Orts-Audit 05.09.2026): scheitert der stille GPS-Fix beim
@@ -502,8 +517,11 @@ export default function ProductWizardScreen() {
     // also zwei Einreichungen, zwei Freigaben, zwei Buchungen. Ref statt State,
     // damit die Sperre sofort greift und nicht erst nach dem nächsten Render.
     if (submitLaeuftRef.current) return;
+    // Dieser Slot ist bereits eingereiht — ein weiterer Tipp (etwa über den
+    // noch offenen Erfolgs-Dialog) darf keine zweite Einreichung erzeugen.
+    if (eingereichteSlotsRef.current.has(productIndex)) return;
     submitLaeuftRef.current = true;
-    setSubmitting(true);
+    setSubmitZustand('laeuft');
     try {
     // Hand the captured set to the background upload queue. Enqueue is
     // near-instant (copies images to a persistent dir + writes the queue,
@@ -579,6 +597,9 @@ export default function ProductWizardScreen() {
       showInfoToast('Konnte nicht vorgemerkt werden — bitte nochmal.', 'error');
       return;
     }
+    // Erst JETZT gilt der Slot als eingereicht — nicht vorher: der Rückweg über
+    // den Orts-Schritt ruft doSubmit bewusst noch einmal auf.
+    eingereichteSlotsRef.current.add(productIndex);
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     const online = isOnline();
@@ -614,6 +635,8 @@ export default function ProductWizardScreen() {
           setEanCode(null);
           setProductIndex((n) => n + 1);
           setStepIdx(0);
+          // Neuer Slot, neuer Anlauf — der neue Index steht nicht im Merker.
+          setSubmitZustand('idle');
           // Ohne diesen Reset trüge das ZWEITE Produkt die Aufnahmezeit des
           // ersten — bei mehreren Einreichungen hintereinander wäre die
           // Zeitangabe damit systematisch zu früh.
@@ -629,7 +652,10 @@ export default function ProductWizardScreen() {
       // Orts-Schritt, der doSubmit gleich erneut aufruft. Ohne das bliebe der
       // Knopf danach für immer gesperrt.
       submitLaeuftRef.current = false;
-      setSubmitting(false);
+      // Nach einem erfolgreichen Einreihen bleibt der Knopf gesperrt, solange
+      // dieser Slot der aktuelle ist; sonst zurück auf Anfang (Abbruch über den
+      // Orts-Schritt, Fehler beim Einreihen).
+      setSubmitZustand(eingereichteSlotsRef.current.has(productIndex) ? 'fertig' : 'idle');
     }
     // `confirmedPlace` MUSS in den Abhängigkeiten stehen: ohne ihn hielte
     // doSubmit die Closure eines früheren Renders fest und schriebe den
@@ -1084,20 +1110,26 @@ export default function ProductWizardScreen() {
               zweite Einreichung mit denselben Fotos. */}
           <Pressable
             onPress={doSubmit}
-            disabled={!allCaptured || submitting}
-            style={[styles.cta, { backgroundColor: allCaptured && !submitting ? PURPLE : theme.borderStrong ?? '#ccc', flex: 1 }]}
+            disabled={!allCaptured || submitZustand !== 'idle'}
+            style={[styles.cta, { backgroundColor: allCaptured && submitZustand === 'idle' ? PURPLE : theme.borderStrong ?? '#ccc', flex: 1 }]}
           >
-            {submitting ? (
+            {submitZustand === 'laeuft' ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
-              <MaterialCommunityIcons name="cloud-upload-outline" size={18} color="#fff" />
+              <MaterialCommunityIcons
+                name={submitZustand === 'fertig' ? 'check' : 'cloud-upload-outline'}
+                size={18}
+                color="#fff"
+              />
             )}
             <Text style={styles.ctaText}>
-              {submitting
+              {submitZustand === 'laeuft'
                 ? 'Wird eingereicht …'
-                : allCaptured
-                  ? 'Produkt einreichen'
-                  : `Noch ${PRODUCT_PHOTO_STEPS.length - capturedCount}`}
+                : submitZustand === 'fertig'
+                  ? 'Eingereicht'
+                  : allCaptured
+                    ? 'Produkt einreichen'
+                    : `Noch ${PRODUCT_PHOTO_STEPS.length - capturedCount}`}
             </Text>
           </Pressable>
         </View>

@@ -28,13 +28,13 @@ import {
 } from '@/lib/services/productCampaignPick';
 import { getChosenProductCampaignId } from '@/lib/services/productCampaignChoice';
 import {
-  addDoc,
   collection,
   doc,
   getDoc,
   onSnapshot,
   query,
   serverTimestamp,
+  setDoc,
   where,
   type Unsubscribe,
 } from '@react-native-firebase/firestore';
@@ -133,6 +133,78 @@ export function productImagePath(
 ): string {
   const name = fileName || `${step}.jpg`;
   return `crowduploads/${uid}/${sessionId}/produkt_${index}/images/${name}`;
+}
+
+/**
+ * Der fachliche Schlüssel einer Einreichung: EIN Produkt-Slot EINER
+ * Wizard-Sitzung = EIN Dokument.
+ *
+ * ═══ Warum das kein `addDoc` mehr sein darf ═══
+ *
+ * `addDoc` prägt bei jedem Aufruf eine neue Zufalls-ID. Damit wird JEDE
+ * Wiederholung zwangsläufig ein zusätzliches Dokument — es gibt keinen
+ * Schlüssel, an dem ein zweiter Schreibvorgang scheitern könnte.
+ *
+ * Gemessen am 10.09.2026: drei Nutzer haben so je 2–3 byteidentische Kopien
+ * derselben Einreichung erzeugt (gleicher Session-Ordner, gleicher Slot,
+ * gleiches `capturedAt`, nur je ein neuer Bild-Token). Ausgelöst hat es der
+ * Einreichen-Knopf, der im ausgelieferten Stand (build 1234, `18b8cb6`) nur
+ * gegen unvollständige Fotos gesperrt war und während ≥4 s GPS-Wartezeit plus
+ * sieben Dateikopien keinerlei Rückmeldung gab — jeder weitere Tipp startete
+ * einen eigenen Lauf. Die 10–13 s zwischen den Kopien sind keine Frist,
+ * sondern die Laufzeit EINES Auftrags in der seriellen Warteschlange.
+ *
+ * Abgelehnt wurde daraufhin jede Kopie, auch die erste korrekte — niemand
+ * bekam etwas. Eine Oberflächensperre allein kuriert nur den Auslöser.
+ *
+ * ═══ Warum ausgerechnet dieser Schlüssel ═══
+ *
+ * `firestore.rules` erlaubt auf `crowd_uploads` `create`, aber
+ * `update, delete: if false`. Eine deterministische ID macht den zweiten
+ * Schreibvorgang deshalb zu einem verbotenen `update`: „der erste gewinnt"
+ * ist damit SERVERSEITIG erzwungen und hängt nicht an der Disziplin des
+ * Clients — auch nicht an der einer künftigen zweiten Aufrufstelle.
+ *
+ * An den drei echten Vorfällen gegengeprüft: alle Kopien einer Gruppe fallen
+ * auf genau einen Schlüssel.
+ *
+ * ═══ Was die Regel NICHT prüft (ehrlich benannt) ═══
+ *
+ * `create` prüft die Nutzlast (`data.userId == auth.uid`), NICHT die Dokument-
+ * ID. Wer uid, `sessionId` UND Slot-Nummer eines anderen kennt, könnte dessen
+ * Slot also vorab besetzen und eine einzelne Einreichung blockieren. Die ID im
+ * Regelwerk an die uid zu binden wäre naheliegend — und wäre falsch: die
+ * Regeln gelten für ALLE Clients, auch die im Feld, die weiter Zufalls-IDs
+ * schreiben. Ein Formatzwang sperrte sie sofort aus, und ein App-Update
+ * braucht Wochen.
+ *
+ * Die praktische Schranke ist stattdessen, dass `sessionId` (12 Bytes Hex)
+ * vor der Einreichung bekannt sein müsste. Auf `crypto.getRandomValues`, wo
+ * vorhanden; ohne Polyfill fällt `newSessionId` auf `Math.random()` zurück —
+ * also KEINE kryptografische Zusage. Der mögliche Schaden ist eine einzelne
+ * blockierte Einreichung, kein Geldfluss und kein Datenzugriff (`read` hängt
+ * weiter an `data.userId`). Sobald die ID-Bindung gefahrlos möglich ist (alle
+ * Clients aktualisiert), gehört sie in die Regeln nachgezogen.
+ */
+export function productSubmissionDocId(
+  uid: string,
+  sessionId: string,
+  productIndex: number,
+): string {
+  // Ohne verwertbaren Schlüssel KEINE Idempotenz erzwingen: zwei
+  // verschiedene Einreichungen auf derselben ID würden bedeuten, dass die
+  // zweite verworfen wird — also genau der Schaden, der hier behoben wird.
+  // Eine Dublette ist das kleinere Übel als eine verlorene Einreichung, und
+  // die serverseitige Doppel-Regel fängt sie auf.
+  const sitzung = String(sessionId ?? '').replace(/[^A-Za-z0-9_-]/g, '');
+  const slot = Number(productIndex);
+  if (!uid || !sitzung || !Number.isFinite(slot)) {
+    console.warn('[productSubmit] kein Slot-Schlüssel möglich — eigene ID', { sessionId, productIndex });
+    return `fallback_${newImageBatchId()}${newImageBatchId()}`;
+  }
+  // Ein Schrägstrich im Schlüssel ergäbe einen verschachtelten Pfad statt
+  // einer Dokument-ID — deshalb wird oben gefiltert, nicht gehofft.
+  return `${uid}_${sitzung}_${slot}`;
 }
 
 // ─── Campaign gating ────────────────────────────────────────────────
@@ -431,32 +503,79 @@ async function collectContext(
   return ctx;
 }
 
+/** RNFirebase meldet den Regelverstoß als `firestore/permission-denied`. */
+function istZugriffVerweigert(e: any): boolean {
+  return String(e?.code ?? '').includes('permission-denied');
+}
+
+/**
+ * Liegt das Dokument wirklich schon? Mit Zeitdeckel, weil ein Firestore-Read
+ * ohne Netz auf Android nie auflöst (die Disk-Persistenz ist dort bewusst
+ * abgeschaltet, siehe CLAUDE.md). Ein Lesefehler ist KEINE Aussage über die
+ * Einreichung: dann bleibt der Auftrag lieber in der Warteschlange liegen und
+ * wird sichtbar wiederholt, statt still als erledigt zu gelten.
+ */
+async function liegtSchonVor(ref: any, timeoutMs = 8000): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const snap = await Promise.race([
+      getDoc(ref),
+      new Promise<undefined>((res) => {
+        timer = setTimeout(() => res(undefined), timeoutMs);
+      }),
+    ]);
+    return snap !== undefined && (snap as any).exists();
+  } catch {
+    return false;
+  } finally {
+    // Sonst hängt der Timer noch Sekunden nach der Antwort — im Test als
+    // offener Handle sichtbar, im Betrieb als unnötig wach gehaltener Timer.
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function submitProduct(
   uid: string,
   input: ProductSubmissionInput,
 ): Promise<string> {
   if (!auth.currentUser) throw codeErr('not_authenticated');
   const context = await collectContext(uid, input.capture ?? null);
-  const docRef = await addDoc(collection(db, 'crowd_uploads'), {
-    userId: uid,
-    sessionId: input.sessionId,
-    productIndex: input.productIndex,
-    marketId: input.marketId ?? null,
-    marketName: input.marketName ?? null,
-    marketLand: input.marketLand ?? null,
-    productName: input.productName ?? null,
-    ean: input.ean ?? null,
-    campaignId: input.campaignId ?? null,
-    ...(input.campaignResolve ? { campaignResolve: input.campaignResolve } : {}),
-    images: input.images,
-    stepCount: Object.keys(input.images).length,
-    status: 'pending',
-    ...(input.clientVersion ? { clientVersion: input.clientVersion } : {}),
-    ...context,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-  return docRef.id;
+  const id = productSubmissionDocId(uid, input.sessionId, input.productIndex);
+  const ref = doc(db, 'crowd_uploads', id);
+  try {
+    await setDoc(ref, {
+      userId: uid,
+      sessionId: input.sessionId,
+      productIndex: input.productIndex,
+      marketId: input.marketId ?? null,
+      marketName: input.marketName ?? null,
+      marketLand: input.marketLand ?? null,
+      productName: input.productName ?? null,
+      ean: input.ean ?? null,
+      campaignId: input.campaignId ?? null,
+      ...(input.campaignResolve ? { campaignResolve: input.campaignResolve } : {}),
+      images: input.images,
+      stepCount: Object.keys(input.images).length,
+      status: 'pending',
+      ...(input.clientVersion ? { clientVersion: input.clientVersion } : {}),
+      ...context,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (e: any) {
+    // Der Slot ist schon geschrieben → die Regeln lehnen den zweiten Versuch
+    // als `update` ab. Das IST der Duplikat-Schutz, kein Fehler.
+    //
+    // Ein echtes `permission-denied` (abgelaufene Anmeldung, fremdes Dokument
+    // auf demselben Pfad) darf dagegen NIEMALS als Erfolg durchgehen — sonst
+    // verschwände eine Einreichung lautlos, und genau dieses Muster hat schon
+    // einmal „144 freigegeben, 0 Cent ausgezahlt" erzeugt. Deshalb wird
+    // nachgesehen, ob das Dokument wirklich da ist; nur dann gilt es als
+    // erledigt.
+    if (!istZugriffVerweigert(e) || !(await liegtSchonVor(ref))) throw e;
+    console.log('[productSubmit] Slot war schon eingereicht — kein zweites Dokument:', id);
+  }
+  return id;
 }
 
 // ─── Read (overview) ────────────────────────────────────────────────
