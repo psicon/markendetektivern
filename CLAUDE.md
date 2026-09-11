@@ -162,6 +162,28 @@ Bug-Fix, Refactor, etc.):
 Tool: `mcp__…__clickup_create_task_comment` für 1, `clickup_update_task`
 mit `status: 'in review'` für 2.
 
+## Meta-Regel: Lange Antworten brauchen TLDR + Stichpunkte (User-Vorgabe 11.09.2026)
+
+User-Wortlaut: „Ich möchte, dass du dir mal merkst, dass du, wenn du das tust,
+zumindest ein TLDR hinzufügst und in Stichpunkten erklärst, inklusive
+Empfehlungen, was zu tun ist und warum."
+
+Das ist die dritte Ansage zum selben Punkt (vorher: „ich blicke bei dir nicht
+durch, weil du immer alles in einer Rolle of Text zurückgibst"). Kurz fassen
+allein reicht nicht — manche Antworten MÜSSEN lang sein (Bewertungen,
+Architekturfragen, Geld-Läufe). Dann gilt:
+
+1. **TLDR zuerst**, vor allem anderen. Zwei bis drei Zeilen, die die Frage
+   beantworten und die Empfehlung nennen. Wer nur das liest, kann entscheiden.
+2. **Danach Stichpunkte**, keine Absätze. Tabellen, wo es Zahlen sind.
+3. **Empfehlung ausdrücklich als solche kennzeichnen** — was zu tun ist UND
+   warum. Nicht die Begründung über den Text verteilen und den Leser selbst
+   schließen lassen.
+4. **Offene Entscheidungen ans Ende**, als klare Frage.
+
+Gegenprobe vor dem Absenden: Wenn die Antwort über ~10 Zeilen geht und oben
+kein TLDR steht, ist sie nicht fertig.
+
 ## Meta-Regel: User-Wortlaut zweimal lesen, nicht "vereinfachen"
 
 "Selbes Aussehen, aber X" = alles bleibt, ändere NUR X. Keine
