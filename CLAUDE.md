@@ -1,53 +1,107 @@
 # Project notes for Claude Code
 
-## Laufendes Interview: KI-Unternehmenssystem (07.09.2026)
+## KI-Unternehmenssystem: bestätigte Vorgaben und aktueller Einstieg
 
-Für die Planung des modularen KI-Unternehmenssystems zuerst
-`docs/AI_ORCHESTRATION_INTERVIEW.md` lesen. Dort stehen die im Interview
-bestätigten Rollen, Delegationsregeln, Datenvorgaben und offenen Fragen.
-Insbesondere: Gehälter/Personal, Finanzen/Buchhaltung, Investor Relations
-und wichtige Kundeninformationen sind standardmäßig nur für Patrick
-sichtbar. Das gilt auch für Suche, Zusammenfassungen und Agentenzugriffe;
-keinen pauschalen Zugriff auf das gesamte Unternehmenswissen vergeben.
-Patrick hat am 08.09.2026 den Bau beauftragt. Isolierter lokaler Aufbau
-unter `tools/company-os`; Paperclip ist aktuell nur ein Spiegel. Keine bezahlten
-Modell-APIs. EU-Verarbeitung wird auf Patricks Wunsch neu bewertet;
-das ist noch keine Freigabe vertraulicher Inhalte an globale Modelle.
-Produktivsetzung und externe Nachrichten brauchen weiter ihre Freigaben.
-Erste lokale Stagingversion: `tools/company-os/README.md` beschreibt den
-tatsächlichen Stand. Port 4310 = Teamzentrale, 4311 = Paperclip-Spiegel.
-79 automatische Tests nach Rollen-/Betriebsreview grün; früherer Browser-Probelauf
-mit synthetischen Daten ebenfalls bestanden. Details in ROLES.md unten.
-Echte Abo-Anmeldungen, Codeänderungs-/Prüfworker und Remote-24/7 noch offen;
-pausierte Paperclip-Rollen nicht als aktive KI-Mitarbeiter darstellen.
-Patrick verlangt ein gemeinsames, moderierbares Unternehmensgedächtnis
-für alle angebundenen Modelle: Quellen, gültige Versionen, Freigaben und
-rollenbezogener Pflichtkontext. Details in `tools/company-os/KNOWLEDGE.md`.
-Die bestehende Notizablage erfüllt das noch nicht; keine automatische
-Synchronisierung von Chats oder selbsttätiges Modelltraining behaupten.
-Neueste Präzisierung: BookStack ist nur ergänzendes Wiki. Ein aktives,
-dauerhaftes Agentengedächtnis muss Erfahrungen automatisch aufnehmen und
-bei passenden Aufträgen sowie Modellwechseln wieder einbringen. Hindsight
-ist erster Kandidat für einen begrenzten technischen Versuch, noch nicht
-installiert. Abo-/Kostenweg, Rechte und Übergaben sind nicht bewiesen.
-Unternehmensweite Rollen, Zuständigkeiten und konkrete Abnahmen auch für
-das Tool selbst stehen in `tools/company-os/ROLES.md`. Ausführende,
-KI-Prüfperspektiven und echte menschliche Zustimmung auseinanderhalten.
-Der kritische Review gibt dem Gesamtsystem noch keine Abnahme. Hindsight
-Selfhosting braucht kein Hindsight-Abo; Cloud ist verbrauchsabhängig.
-Keine Perfektion oder unbegrenzte Abonutzung versprechen.
-Neueste bestätigte Infrastrukturentscheidung: Gesamtsystem einschließlich
-Dashboard, Steuerung, Gedächtnis und eigener Modelle zentral bei Hetzner.
-Lokale Modelle sind verpflichtend als austauschbarer Ausführungsweg
-vorzusehen; die Abos sind kein dauerhaft notwendiger Gedächtnisanbieter.
-Eskalation bei technischen Störungen: Patrick, bei Nichterreichbarkeit
-Julian, danach Manon. Das erweitert keine vertraulichen Leserechte und
-hebt keinen privaten Gründer-Stopp auf. Fristen/Versand noch einzurichten.
-Technische Regel aus bestandenem Regressionstest: Ein weiterer Stopp darf
-einen bestehenden privaten Gründer-Stopp weder herabstufen noch seinen
-Grund überschreiben. Das gilt auch für `haltForRecovery()` nach einem
-unbestätigten Worker-Stopp. Rückfreigabe im Store selbst auf Patrick
-begrenzen; offene Worker-Bereinigung blockiert auch seine Rückfreigabe.
+Für diese Arbeit zuerst `docs/AI_ORCHESTRATION_INTERVIEW.md` lesen.
+Der tatsächliche technische Stand steht in `tools/company-os/README.md`,
+Rollen und Abnahmen in `tools/company-os/ROLES.md`, der Wissensvertrag
+in `tools/company-os/KNOWLEDGE.md`. Historische Testzahlen und frühere
+Installationspläne nicht als aktuellen Zustand ausgeben.
+
+Patrick hat den Bau und die zentrale Staging-Einrichtung autorisiert.
+Dashboard, Steuerung, gemeinsames moderierbares Gedächtnis und austauschbare
+selbst betriebene Modelle sollen bei Hetzner laufen. Der aktuelle zentrale
+Zugang ist `https://team.revealy.de`, Server `144.76.202.144`.
+Keine bezahlten Modell-APIs oder automatisch aktivierten Zusatzcredits.
+Persönliche Codex-/Claude-Abos gehören jeweils ihrem Nutzer; keine
+Kontingentbündelung oder Limitumgehung. Ein erreichbares Dashboard ist
+kein Beleg für unbegrenzte KI-Verfügbarkeit.
+
+Patrick ist Gründer, Entwickler und derzeit für Sales, Support,
+Buchhaltung und Investor Relations verantwortlich. Julian ist Senior
+Developer; Manon ist für Marketing zuständig. Timo ist perspektivisch
+im Sales vorgesehen und hat noch keine operativen Rechte. Gehälter,
+Personal, Finanzen, Buchhaltung, Investor Relations und wichtige
+Kundeninformationen bleiben standardmäßig ausschließlich für Patrick
+sichtbar, auch in Suche, Erinnerungen und Modellkontexten. Die erneute
+Bewertung der EU-Verarbeitung ist keine pauschale Datenfreigabe.
+Produktionsveröffentlichungen und externe Nachrichten benötigen die
+entsprechende ausdrückliche Autorisierung.
+
+13 interne Prüfperspektiven sind aufgabenbezogen konfigurierbar. Eine
+KI-Perspektive ersetzt weder menschliche Zustimmung noch tatsächliche
+Kunden- oder psychologische Abnahme. Patrick gibt zunächst konkrete
+Aufgabenfassungen frei; Verantwortliche delegieren, danach folgen echte
+Ergebnisse, unabhängige Prüfungen und die Endabnahme. Quellen-, Plan-
+oder Ergebniswechsel entwerten frühere Freigaben.
+
+Stand 09.09.2026: Zentrale Stagingversion auf Hetzner installiert,
+ClickUp-Quellenprüfung und kontrollierter Statusabgleich implementiert.
+Patricks Codex-/Claude-Logins wurden erkannt; Kostenbestätigungen und
+ein echter persönlich freigegebener Produktlauf fehlen noch. ClickUp
+war zuletzt zentral nicht verbunden. Hindsight ist lokal angeschlossen,
+wartet aber auf freigegebene Quellen. BookStack ist optional und noch
+nicht installiert; Paperclip bleibt deaktiviert. Mit „Claw“ meinte
+Patrick Claude, nicht OpenClaw.
+
+Seit 09.09.2026, 13:31:39 UTC sind Claude-/Codex-Rollenprüfungen über
+die persönlichen Broker technisch angeschlossen: Anbieterwahl, separate
+versionsgebundene Datenfreigabe, vollständige Originalbelege und Quellenzitate.
+705 Linux-Tests bestanden, acht übersprungen. Persönliche Prüfprofile bleiben
+ausgeschaltet; echte Abo-Qualifikation und Kostenbestätigungen fehlen.
+Abo-Limits halten weitere Rollenprüfungen desselben persönlichen Anbieters
+auch nach Neustart an. Nur bewusstes erneutes Beauftragen durch den Owner
+gibt diese Warteschlange frei; kein automatischer Modell-/Kontowechsel.
+Details: `tools/company-os/docs/native-review-workers.md`.
+
+Seit 09.09.2026, 14:02:52 UTC ist der Text-/Markdown-Wissenseingang
+mit Originaldatei, SHA-256, Meeting-Datum und Zeilenbereich bereitgestellt.
+713 Linux-Tests bestanden, acht übersprungen. Import ist keine Modellfreigabe;
+Teamfreigabe umfasst ausdrücklich auch die vollständige Originaldatei.
+PDF/Word und automatische Meetings fehlen noch. Seit 14:24:32 UTC ist für große Bestände eine nachvollziehbare
+Wortauswahl eingebaut: alle Pflichtregeln plus sämtliche erkannten passenden
+Quellen, mit sichtbarer Auslassungsliste. 724 Linux-Tests bestanden, acht
+übersprungen. Semantische Vollständigkeit ist nicht belegt. Das ausgewählte
+Kontextpaket bleibt auf 8000 Bytes begrenzt; passt es nicht, hält der Auftrag an. Keine echte Unternehmensquelle wurde durch diesen Release importiert.
+Details: `tools/company-os/docs/knowledge-import.md`.
+
+Seit 09.09.2026, 14:53:45 UTC ist der automatische ClickUp-Eingang
+bereitgestellt: ausschließlich für Patrick sichtbar nach zentralem OAuth, mit Suche, persistentem Pausenschalter und Wartezeit
+nach Abruffehlern. Import ist standardmäßig ein privater Entwurf; eine
+Teamaufgabe benötigt ausdrückliche Teilung der vollständigen Quelle und
+die Wahl des Verantwortlichen. Keine automatische Freigabe, Zuweisung
+in ClickUp, Modellbeauftragung oder Wissensaufnahme daraus ableiten.
+743 Linux-Tests bestanden, acht übersprungen. Details und Grenzen:
+`tools/company-os/docs/clickup-intake.md`.
+Der ursprüngliche Fünf-Minuten-Takt ist überholt. Seit 15:12:47 UTC gilt
+bei noch unbekanntem ClickUp-Tarif höchstens ein automatischer Versuch
+alle drei Stunden: 60 reservierte MCP-Anfragen der Zentrale in rollierenden
+24 Stunden, davon höchstens 30 automatisch. Andere Apps teilen das entfernte
+Workspace-Kontingent; das tatsächliche Restkontingent ist unbekannt.
+Neustart, Anmeldung oder Umschalten setzen den eigenen Zähler nicht zurück.
+757 Linux-Tests bestanden, acht übersprungen; neun Betriebsprüfungen gesund.
+Details: `tools/company-os/docs/clickup-budget.md`.
+Die Tarif-/Everything-AI-Frage ist seit dieser Prüfung offen.
+
+Die vollständige autonome Entwicklungsorganisation ist noch nicht
+abgenommen. Qwen3:1.7b ist ein begrenzter Pilot. Der getrennte 8B-Versuch
+bestätigte nach korrigiertem HTTP-Zeitlimit eine echte vollständige
+Antwort, scheiterte aber an einem nicht wortgleichen Quellenzitat.
+Keine Prüferfreigabe daraus ableiten; Details und Fortsetzung stehen
+in `tools/company-os/docs/local-model-qualification-handoff-2026-09-09.md`.
+Die experimentellen Änderungen sind nicht im Live-Dashboard registriert.
+
+Betriebsstörungen eskalieren Patrick → Julian → Manon, ohne zusätzliche
+vertrauliche Leserechte. E-Mail-Adressen und Fristen sind noch zu klären;
+kein funktionierender automatischer Versand oder externes Backup behaupten.
+Seit 09.09.2026, 12:51 UTC ist der unabhängige interne Betriebsmonitor
+mit Minutenintervall und der Dashboard-Ansicht „Betrieb“ aktiv. Neun
+Kernprüfungen sind bestätigt. Eine Vorfallübernahme ist weder Reparatur
+noch Aufgabenfreigabe. Externe Hostüberwachung bleibt offen.
+Ein weiterer Stopp darf einen bestehenden privaten Gründer-Stopp weder
+herabstufen noch dessen Grund überschreiben, auch nicht bei
+`haltForRecovery()`. Nur Patrick kann ihn aufheben; unbestätigte
+Worker-Bereinigung blockiert auch seine Rückfreigabe.
 
 ## Meta-Regel: "merk dir das" → SOFORT in CLAUDE.md
 
@@ -3236,6 +3290,30 @@ Gotchas:
   „Upload fehlgeschlagen" für einen vergüteten Bon. Reparatur per
   `.fix-stale-mirrors.js`; Root-Fix (bonUploadQueue darf den Mirror nur
   schreiben, wenn dort kein Server-Status steht) ist offen.
+- **Bild-Wiederverwendung trifft nur die JÜNGERE Einreichung (13.09.2026):**
+  Bis dahin markierte die md5-Regel beide Seiten einer Gruppe — bei einem
+  Nutzer, der denselben Artikel zweimal einreichte, fiel damit auch der
+  legitime Erst-Datensatz durch. Richtig ist: pro Bildgruppe (Storage-Pfad
+  oder md5, nur Identitäts-Slots) nach `createdAt` sortieren, die älteste
+  behält ihre Chance, alle jüngeren gelten als Wiederverwendung. Wirkung in
+  der Runde 13.09.: aus 16 Ablehnungen „bilder_wiederverwendet" wurden 7
+  Freigaben plus 9 Ablehnungen unter dem fachlich richtigen Grund
+  (30-Tage-Doppel-Regel, gleicher Nutzer).
+- **Lauf-internen Status auch bei Ablehnung nachziehen:** Wer eine Runde
+  chronologisch entscheidet, muss abgelehnte Einreichungen im Speicher auf
+  `rejected` setzen — sonst sieht das jüngere Geschwister sie weiter als
+  „noch offen" und bleibt grundlos auf `doppelt_eingereicht` hängen (9 Fälle
+  am 13.09.). Die Konsole hat das Problem nicht, weil sie in der Transaktion
+  den echten Stand liest.
+- **Namens-OCR kann versagen, ohne dass die Einreichung schlecht ist
+  (13.09.2026):** 23 vollständige Einreichungen trugen `productNameOcrAt`
+  (der Namer lief), aber keinen Namen — bei 21 davon las ein zweiter
+  Gemini-Lauf auf dasselbe Vorderseiten-Foto den Namen problemlos, und keine
+  der EANs stand im Katalog (es waren also genau die Lücken-Datensätze, für
+  die die Aktion zahlt). Vor einer Ablehnung wegen `kein_produktname` deshalb
+  einen Rettungs-Lauf fahren (`.crowd-name-rescue-1309.js`, schreibt in ein
+  EIGENES Feld `productNameRescueOcr`, damit die Messung der Namer-Qualität
+  nicht verfälscht wird).
 - **md5-Bilddedup NUR auf den Identitäts-Fotos (09.09.2026):** Die Regel
   „dieselben Fotos = wiederverwendet = ablehnen" darf `preis` NICHT mitzählen.
   Befund der Runde 09.09.: zwei ECHTE Sorten (K-Classic Minis Edelschimmel /
