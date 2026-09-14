@@ -65,7 +65,9 @@ const CASHBACK_ADMIN_KEY = defineSecret('NUTRITION_SCRAPER_TRIGGER_KEY');
 const { extractReceipt, reconcile, countEligibleItems, tierFor, isPfandItem, DEFAULT_MODEL } = require('./lib/ocr');
 const { extractReceiptCVHybrid } = require('./lib/ocr_cvhybrid');
 const { extractReceiptRobust } = require('./lib/ocr_robust');
-const { moneyFieldAgreement } = require('./lib/fieldAgreement');
+const { moneyFieldAgreement, normMerchant } = require('./lib/fieldAgreement');
+const { refereeMode, shouldRequestReferee, infraVerhindert: refereeInfraVerhindert } = require('./lib/refereePolicy');
+const { runReferee } = require('./lib/ocr_referee');
 const { extractReceiptDocAI, isConfigured: isDocAIConfigured } = require('./lib/ocr_docai');
 const { deriveStoreAddress } = require('./lib/storeAddress');
 const { resolveRegion, pickCampaignForRegion, matchesTargeting, targetingStamp } = require('./lib/targeting');
@@ -203,6 +205,12 @@ function buildOcrField(ocr, recon, escalation) {
       thoughts: ocr.thoughtsTokens ?? null,
     },
     escalation: escalation?.fired ? escalation : null,
+    // Zweitprüfung (86cbfvwge). Beide Felder MÜSSEN hier stehen: diese
+    // Funktion ist eine Whitelist, und der Final-Write ersetzt `ocr` komplett.
+    // Fehlte `refereeRequest`/`referee`, wäre die Schleifensperre nach dem
+    // ersten Write weg (derselbe Fehlertyp wie `robust` am 02.09.).
+    refereeRequest: ocr.refereeRequest ?? null,
+    referee: ocr.referee ?? null,
     reconciliation: {
       ok: recon.ok,
       sumItemsCents: recon.sumItemsCents,
@@ -210,8 +218,156 @@ function buildOcrField(ocr, recon, escalation) {
       deltaCents: recon.deltaCents,
       signedDeltaCents: recon.signedDeltaCents,
       direction: recon.direction,
+      basketDiscountCents: recon.basketDiscountCents ?? null,
     },
   };
+}
+
+/**
+ * Baut `ocr`/`recon`/`escalation` aus dem am Bon gespeicherten OCR-Feld —
+ * ohne Modellaufruf. Einmal definiert, weil die Zweitprüfung denselben Weg
+ * mit einem frisch gelesenen Stand noch einmal gehen muss.
+ */
+function ocrFromCache(cachedOcr) {
+  const ocr = {
+    parsed: cachedOcr.parsed,
+    engine: cachedOcr.engine ?? null,
+    model: cachedOcr.model ?? null,
+    promptVersion: cachedOcr.promptVersion ?? null,
+    latencyMs: cachedOcr.latencyMs ?? null,
+    cvLatencyMs: cachedOcr.cvLatencyMs ?? null,
+    geminiLatencyMs: cachedOcr.geminiLatencyMs ?? null,
+    // Self-Consistency-Ergebnis MIT übernehmen (Money-Ops-Review 02.09.):
+    // ohne `robust` sah das Review-Gate 6w bei jedem Retry/Reprocessing
+    // conf=null → kein Halt → ungeprüfte Gutschrift, und der Final-Write
+    // überschrieb robust am Doc mit null.
+    robust: cachedOcr.robust ?? null,
+    inputTokens: cachedOcr.chosenReadTokens?.input ?? null,
+    outputTokens: cachedOcr.chosenReadTokens?.output ?? null,
+    thoughtsTokens: cachedOcr.chosenReadTokens?.thoughts ?? null,
+    refereeRequest: cachedOcr.refereeRequest ?? null,
+    referee: cachedOcr.referee ?? null,
+    ocrText: '',
+  };
+  const recon =
+    cachedOcr.reconciliation && typeof cachedOcr.reconciliation.ok === 'boolean'
+      ? cachedOcr.reconciliation
+      : reconcile(ocr.parsed);
+  const escalation = cachedOcr.escalation || { fired: false };
+  return { ocr, recon, escalation };
+}
+
+// Zweitprüfung: so lange gilt ein Anspruch als „läuft gerade". Länger als die
+// Frist der Prüfung (lib/ocr_referee.js, 330 s) plus Puffer, kürzer als der
+// Sweeper-Takt (20 min), damit ein abgestürzter Lauf wieder aufgenommen wird.
+const REFEREE_CLAIM_MS = 8 * 60 * 1000;
+
+/** Tagesdeckel der Zweitprüfung; ungültige Werte gelten als Standard, nie als „unbegrenzt". */
+function refereeTagesDeckel(value) {
+  const v = typeof value === 'number' ? value : Number.NaN;
+  return Number.isInteger(v) && v >= 0 ? v : DEFAULT_CONFIG.ocrRefereeMaxPerDay;
+}
+
+/**
+ * Nimmt die Zweitprüfung eines Bons transaktional in Anspruch. PubSub stellt
+ * mindestens einmal zu, und der Sweeper legt ältere Bons erneut auf — ohne
+ * Anspruch liefen zwei teure Prüfungen parallel. Zählt die Läufe pro Berliner
+ * Tag gegen `ocrRefereeMaxPerDay` (Kostendeckel).
+ *
+ * Wiederaufnahme des EIGENEN Anspruchs (Review 14.09.): nur bei derselben
+ * Event-ID UND gestiegenem `attempts` (der catch-Block zählt hoch). Eine
+ * gleichzeitige Doppelzustellung trägt dieselbe Event-ID, aber denselben
+ * Zähler → „läuft gerade"; sonst liefen zwei bezahlte Prüfungen parallel.
+ * Achtung: der Trigger hat KEINEN PubSub-Retry (DO_NOT_RETRY) — dieser Zweig
+ * greift nur bei einer verspäteten Doppelzustellung. Die reguläre
+ * Wiederaufnahme ist der Sweeper: neue Event-ID, frühestens nach 20 min, der
+ * Anspruch (8 min) ist dann abgelaufen und wird neu genommen.
+ *
+ * Beim Tagesdeckel wird NICHTS geschrieben: die Anfrage bleibt offen, eine
+ * spätere Nachverarbeitung kann die Prüfung noch holen.
+ *
+ * @returns {Promise<{state: 'claimed'|'busy'|'done'|'gone'|'daily_cap', ocr?: object}>}
+ */
+async function claimRefereeRun(docRef, maxPerDay, eventId) {
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(docRef);
+    const data = snap.exists ? snap.data() : {};
+    const o = data.ocr || null;
+    if (!o || !o.parsed) return { state: 'gone' };
+    if (o.referee) return { state: 'done', ocr: o };
+    const req = o.refereeRequest;
+    if (!req) return { state: 'gone' };
+    const versuche = data.attempts || 0;
+    const claimedMs = req.claimedAt?.toMillis?.() ?? 0;
+    const laeuft = claimedMs && Date.now() - claimedMs < REFEREE_CLAIM_MS;
+    const wiederaufnahme = Boolean(laeuft && eventId && req.claimedBy === eventId
+      && Number.isFinite(req.claimedAttempt) && versuche > req.claimedAttempt);
+    if (laeuft && !wiederaufnahme) return { state: 'busy' };
+    const dayRef = db.doc(`cashback_referee_usage/${todayBerlin()}`);
+    const daySnap = await tx.get(dayRef);
+    const runs = daySnap.exists ? daySnap.data().runs || 0 : 0;
+    const deckel = refereeTagesDeckel(maxPerDay);
+    if (!wiederaufnahme && deckel > 0 && runs >= deckel) return { state: 'daily_cap' };
+    const claimedAt = admin.firestore.Timestamp.now();
+    const anspruch = { claimedAt, claimedBy: eventId || null, claimedAttempt: versuche };
+    tx.update(docRef, {
+      'ocr.refereeRequest.claimedAt': anspruch.claimedAt,
+      'ocr.refereeRequest.claimedBy': anspruch.claimedBy,
+      'ocr.refereeRequest.claimedAttempt': anspruch.claimedAttempt,
+    });
+    if (!wiederaufnahme) {
+      tx.set(dayRef, { runs: admin.firestore.FieldValue.increment(1), updatedAt: claimedAt }, { merge: true });
+    }
+    return { state: 'claimed', ocr: { ...o, refereeRequest: { ...req, ...anspruch } } };
+  });
+}
+
+/**
+ * Legt das Ergebnis der Zweitprüfung ab — nur, wenn der Anspruch noch UNSER
+ * ist und noch kein Ergebnis dasteht. Sonst hat ein anderer Lauf übernommen:
+ * steht dessen Ergebnis schon da, mit DEM weiterrechnen (`done`); fehlt es,
+ * gehört der Bon gerade dem anderen Lauf (`verloren`).
+ *
+ * @returns {Promise<{state: 'ok'}|{state: 'done', ocr: object}|{state: 'verloren'}>}
+ */
+async function persistRefereeResult(docRef, fields, anspruch) {
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(docRef);
+    const o = snap.exists ? snap.data().ocr : null;
+    if (o && o.parsed && o.referee) return { state: 'done', ocr: o };
+    const req = o?.refereeRequest;
+    const unserer = req
+      && req.claimedBy === anspruch.claimedBy
+      && req.claimedAttempt === anspruch.claimedAttempt
+      && req.claimedAt?.toMillis?.() === anspruch.claimedAt?.toMillis?.();
+    if (!unserer) return { state: 'verloren' };
+    tx.update(docRef, fields);
+    return { state: 'ok' };
+  });
+}
+
+/**
+ * Schreibt das `ocr`-Feld NUR, wenn am Dokument noch keine Zweitprüfung
+ * angefordert oder abgelegt ist (Review 14.09., Befund „Überschreiben"). Das
+ * `ocr`-Feld wird immer ganz ersetzt; ein paralleler Lauf mit älterem Stand
+ * (z. B. frische OCR nach Reprocessing + Sweeper) würde sonst Anspruch und
+ * Ergebnis der Prüfung löschen — mit der Folge paralleler, bezahlter Prüfungen
+ * und im schlimmsten Fall einer Storno-Buchung gegen eine entschiedene
+ * Gutschrift.
+ *
+ * @returns {Promise<'ok'|'ueberholt'>}
+ */
+async function writeOcrIfNoReferee(docRef, fields) {
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(docRef);
+    const o = snap.exists ? snap.data().ocr : null;
+    // Ohne `parsed` ist der gespeicherte Stand unbrauchbar (z. B. Ops hat nur
+    // die Lesung geleert) — dann darf die frische OCR ihn ersetzen, sonst
+    // bliebe der Bon für immer hängen.
+    if (o && o.parsed && (o.refereeRequest || o.referee)) return 'ueberholt';
+    tx.update(docRef, fields);
+    return 'ok';
+  });
 }
 
 // In-memory PubSub publisher (re-used across invocations).
@@ -226,6 +382,16 @@ const DEFAULT_CONFIG = {
   // Scharfschalten geschieht ausdrücklich in `cashback_config/v1`, wo auch
   // `'shadow'` möglich ist: rechnen und protokollieren, aber nicht wirken.
   ocrFieldGate: false,
+  // Zweitprüfung vor der Ablehnung unsicher gelesener Bons (86cbfvwge).
+  // Gleiches Muster: Default aus, scharf nur über `cashback_config/v1`.
+  // false = aus, 'shadow' = prüfen und am Bon ablegen, Entscheidung unverändert,
+  // true = das Ergebnis der Prüfung gilt.
+  ocrReferee: false,
+  // Kostendeckel: höchstens so viele Prüfungen pro Berliner Tag (0 = kein
+  // Deckel). Gemessen 14.09.: ~0,02–0,05 $ pro Lesung, bis zu 4 Lesungen →
+  // im Extremfall ~8 $ pro Tag; real fielen seit 01.09. ~5–6 Bons pro Tag in
+  // die Regel (77 in 14 Tagen).
+  ocrRefereeMaxPerDay: 40,
   tiers: [
     { minItems: 4, cents: 5 },
     { minItems: 8, cents: 8 },
@@ -1198,29 +1364,7 @@ exports.processCashback = onMessagePublished(
       let escalation = { fired: false };
       const cachedOcr = receipt.ocr && receipt.ocr.parsed ? receipt.ocr : null;
       if (cachedOcr) {
-        ocr = {
-          parsed: cachedOcr.parsed,
-          engine: cachedOcr.engine ?? null,
-          model: cachedOcr.model ?? null,
-          promptVersion: cachedOcr.promptVersion ?? null,
-          latencyMs: cachedOcr.latencyMs ?? null,
-          cvLatencyMs: cachedOcr.cvLatencyMs ?? null,
-          geminiLatencyMs: cachedOcr.geminiLatencyMs ?? null,
-          // Self-Consistency-Ergebnis MIT übernehmen (Money-Ops-Review 02.09.):
-          // ohne `robust` sah das Review-Gate 6w bei jedem Retry/Reprocessing
-          // conf=null → kein Halt → ungeprüfte Gutschrift, und der Final-Write
-          // überschrieb robust am Doc mit null.
-          robust: cachedOcr.robust ?? null,
-          inputTokens: cachedOcr.chosenReadTokens?.input ?? null,
-          outputTokens: cachedOcr.chosenReadTokens?.output ?? null,
-          thoughtsTokens: cachedOcr.chosenReadTokens?.thoughts ?? null,
-          ocrText: '',
-        };
-        recon =
-          cachedOcr.reconciliation && typeof cachedOcr.reconciliation.ok === 'boolean'
-            ? cachedOcr.reconciliation
-            : reconcile(ocr.parsed);
-        escalation = cachedOcr.escalation || { fired: false };
+        ({ ocr, recon, escalation } = ocrFromCache(cachedOcr));
       } else {
         if (OCR_ENGINE === 'cv-hybrid') {
           ocr = await extractReceiptCVHybrid(bytes, mimeType, { model: config.ocrModel });
@@ -1328,9 +1472,176 @@ exports.processCashback = onMessagePublished(
         // 86ca0wbg7 (A): OCR-Ergebnis SOFORT persistieren (vor Gates/Dedup/
         // Merchant). Schlägt ein späterer Schritt fehl, nutzt der Retry diese
         // OCR und ruft Gemini/DocAI NICHT erneut.
-        await docRef
-          .update({ ocr: buildOcrField(ocr, recon, escalation), updatedAt: now })
-          .catch(() => {});
+        // Transaktional: hat ein paralleler Lauf inzwischen eine Zweitprüfung
+        // angefordert oder abgelegt, gehört der Bon diesem Lauf — diese frische
+        // OCR darf deren Stand nicht überschreiben (Review 14.09.).
+        const fruehPersist = await writeOcrIfNoReferee(docRef, {
+          ocr: buildOcrField(ocr, recon, escalation),
+          updatedAt: now,
+        }).catch(() => 'fehler');
+        if (fruehPersist === 'ueberholt') {
+          logger.warn('ocr-ueberholt-von-zweitpruefung', { cashbackId });
+          return;
+        }
+      }
+
+      // 3b) Zweitprüfung, Durchlauf 2 (86cbfvwge). Durchlauf 1 (Schritt 6v)
+      // hat festgestellt, dass dieser Bon abgelehnt würde, obwohl die Lesung
+      // unsicher war, und die Prüfung angefordert. Hier liest ein stärkeres
+      // Modell nach — auf dem Cache-Pfad, damit die Prüfung ihre eigenen 540 s
+      // hat und nicht nach bis zu 7 Robust-Lesungen im selben Lauf steckt.
+      // Danach laufen ALLE Gates ganz normal über das (ggf. ersetzte) Ergebnis.
+      // Der Schalter gilt, wie er JETZT steht — ein Notaus zwischen Anforderung
+      // und Prüfung wirkt sofort. Übersprungen (Schalter aus, Tagesdeckel,
+      // menschliche Entscheidung) wird NICHTS abgelegt: die Anfrage bleibt
+      // offen, der Bon läuft diesmal ohne Prüfung durch die Gates, und eine
+      // spätere Nachverarbeitung kann die Prüfung noch holen. Ein abgelegtes
+      // „skipped" hätte die Prüfung für immer verbraucht (Review 14.09.).
+      const refereeModus = refereeMode(config.ocrReferee);
+      // Hat IN DIESEM LAUF eine Zweitprüfung die Lesung ersetzt (selbst oder
+      // frisch von einem parallelen Lauf übernommen)? Dann passt ein früherer
+      // Jahres-Korrektur-Vermerk nicht mehr zur Lesung (siehe Final-Write).
+      let lesungErsetzt = false;
+      if (cachedOcr && ocr.refereeRequest && !ocr.referee && !refereeModus) {
+        logger.info('referee-skip', { cashbackId, grund: 'abgeschaltet' });
+      } else if (cachedOcr && ocr.refereeRequest && !ocr.referee && receipt.reviewDecision) {
+        logger.info('referee-skip', { cashbackId, grund: 'mensch_entschied' });
+      } else if (cachedOcr && ocr.refereeRequest && !ocr.referee) {
+        const anspruch = await claimRefereeRun(docRef, config.ocrRefereeMaxPerDay, event.id);
+        if (anspruch.state === 'busy' || anspruch.state === 'gone') {
+          // Ein anderer Lauf prüft gerade (oder die Anfrage ist weg) — dieser
+          // Zustellung nichts tun. Stirbt der andere Lauf, übernimmt der
+          // Sweeper nach Ablauf des Anspruchs.
+          logger.info('referee-skip-delivery', { cashbackId, state: anspruch.state });
+          return;
+        }
+        if (anspruch.state === 'done') {
+          // Ein anderer Lauf hat die Prüfung schon abgelegt: mit DEM Stand weiter.
+          ({ ocr, recon, escalation } = ocrFromCache(anspruch.ocr));
+          lesungErsetzt = anspruch.ocr.referee?.applied === true;
+        } else if (anspruch.state === 'daily_cap') {
+          logger.warn('referee-skip', { cashbackId, grund: 'tageslimit' });
+        } else {
+          ocr.refereeRequest = anspruch.ocr.refereeRequest;
+          const anfrage = ocr.refereeRequest;
+          // Erstlesungen als Maßstab für plausibel() (lib/refereePolicy.js).
+          // Ältere Bons ohne Einzel-Fingerabdrücke: die gespeicherte Lesung.
+          const erstlesungen = Array.isArray(ocr.robust?.reads) && ocr.robust.reads.length
+            ? ocr.robust.reads
+            : [{
+                isReceipt: ocr.parsed?.isReceipt !== false,
+                totalCents: Number.isFinite(ocr.parsed?.totalCents) ? ocr.parsed.totalCents : null,
+                bonDate: ocr.parsed?.bonDate ?? null,
+                eligibleItems: countEligibleItems(ocr.parsed),
+              }];
+          const { result, chosen } = await runReferee(bytes, mimeType, {
+            reason: anfrage.reason,
+            prior: erstlesungen,
+            // Marktnamen über den Resolver vergleichen, wie im Gate 6w.
+            merchantKeyFor: async (name, land) => {
+              const roh = normMerchant(name);
+              if (!roh) return null;
+              try {
+                const t = await resolveMerchant(name, land ?? null);
+                if (t && t.id) return `id:${t.id}`;
+              } catch (e) {
+                logger.warn('referee-merchant-failed', { cashbackId, err: e.message });
+              }
+              return `roh:${roh}`;
+            },
+          });
+          // Hat die Infrastruktur die Entscheidung verhindert? Keine Lesung kam
+          // zurück — oder die ausgefallenen Lesungen (429/Timeout/Frist) hätten
+          // rechnerisch die fehlenden Zeugen stellen können. Dann ist
+          // „unentschieden" keine Aussage über den Bon (Regel seit Incident
+          // 19.08., Review Runde 3). Nur wenn die Prüfung WIRKT: NICHTS
+          // ablegen, den Platz im Tagesdeckel zurückgeben, werfen. Es gibt
+          // keinen PubSub-Retry (DO_NOT_RETRY) — der Bon bleibt `ocr_pending`,
+          // der Sweeper stellt ihn neu zu, nach MAX_PROCESS_ATTEMPTS landet er
+          // in 'review', nie in 'rejected'. Im Beobachtungs-Modus darf ein
+          // Ausfall das Ergebnis nicht verändern: dort nur protokollieren und
+          // ohne Prüfung weiter.
+          const infraVerhindert = refereeInfraVerhindert(result);
+          if (infraVerhindert) {
+            logger.warn('referee-unavailable', { cashbackId, verdict: result.verdict, failures: result.failures, mode: refereeModus });
+            db.doc(`cashback_referee_usage/${todayBerlin()}`)
+              .set({ runs: admin.firestore.FieldValue.increment(-1), infraFehler: admin.firestore.FieldValue.increment(1) }, { merge: true })
+              .catch(() => {});
+          }
+          if (infraVerhindert && refereeModus === true) {
+            const err = new Error(`referee_unavailable: ${String(result.failures?.[0] || 'keine Lesung').slice(0, 160)}`);
+            err.code = 'referee_unavailable';
+            throw err;
+          }
+          // Beobachtungs-Modus mit Ausfall: nichts ablegen, ohne Prüfung weiter.
+          if (!infraVerhindert) {
+            const angewandt = refereeModus === true && result.verdict === 'decided' && !!chosen;
+            const vorher = {
+              merchant: ocr.parsed?.merchant ?? null,
+              bonDate: ocr.parsed?.bonDate ?? null,
+              totalCents: ocr.parsed?.totalCents ?? null,
+              subtotalCents: ocr.parsed?.subtotalCents ?? null,
+              itemCount: Array.isArray(ocr.parsed?.items) ? ocr.parsed.items.length : 0,
+              reconDirection: recon?.direction ?? null,
+              model: ocr.model ?? null,
+              promptVersion: ocr.promptVersion ?? null,
+            };
+            ocr.referee = {
+              ...result,
+              mode: refereeModus,
+              applied: angewandt,
+              reason: anfrage.reason ?? null,
+              priorConfidence: anfrage.confidence ?? null,
+              previous: angewandt ? vorher : null,
+              at: admin.firestore.Timestamp.now(),
+            };
+            if (angewandt) {
+              ocr.parsed = chosen.parsed;
+              ocr.model = chosen.model;
+              ocr.promptVersion = chosen.promptVersion;
+              ocr.inputTokens = chosen.inputTokens ?? null;
+              ocr.outputTokens = chosen.outputTokens ?? null;
+              ocr.thoughtsTokens = chosen.thoughtsTokens ?? null;
+              recon = reconcile(ocr.parsed);
+            }
+            // Sofort ablegen: eine spätere Wiederaufnahme (Sweeper) darf die
+            // bezahlte Prüfung nicht wiederholen. Transaktional, nur mit eigenem
+            // Anspruch (sonst überschriebe die zuletzt fertige Prüfung die
+            // andere). Scheitert das Ablegen, NICHT in die Geld-Schritte
+            // weiterlaufen — werfen; der Bon bleibt `ocr_pending` für den Sweeper.
+            // Ersetzt die Prüfung die Lesung, gehört ein früherer Jahres-
+            // Korrektur-Vermerk zur alten Lesung → gleich mit löschen.
+            const abgelegt = await persistRefereeResult(
+              docRef,
+              {
+                ocr: buildOcrField(ocr, recon, escalation),
+                ...(angewandt ? { bonDateCorrection: null } : {}),
+                updatedAt: now,
+              },
+              anfrage,
+            );
+            if (abgelegt.state === 'verloren') {
+              logger.warn('referee-anspruch-verloren', { cashbackId });
+              return;
+            }
+            if (abgelegt.state === 'done') {
+              ({ ocr, recon, escalation } = ocrFromCache(abgelegt.ocr));
+              lesungErsetzt = abgelegt.ocr.referee?.applied === true;
+            } else {
+              lesungErsetzt = angewandt;
+            }
+            logger.info('referee-done', {
+              cashbackId,
+              verdict: result.verdict,
+              grund: result.grund,
+              applied: angewandt,
+              mode: refereeModus,
+              reason: anfrage.reason,
+              attempts: result.attempts,
+              latencyMs: result.latencyMs ?? null,
+            });
+          }
+        }
       }
 
       // 4) Bon-Datum freshness check (server-side, Berlin-anchored).
@@ -1788,8 +2099,92 @@ exports.processCashback = onMessagePublished(
         cashbackCents = 0;
         if (!rejectReason && status === 'rejected') rejectReason = receipt.rejectReason || 'manual_review_rejected';
       }
+
+      // 6v) Zweitprüfung anfordern, Durchlauf 1 (86cbfvwge). Würde der Bon
+      // wegen eines LESE-abhängigen Grunds abgelehnt, obwohl die Mehrfach-
+      // Lesung sich nicht sicher war, entscheidet vorher ein stärkeres Modell.
+      // Hier wird nur angefordert: Anfrage am Bon ablegen (volles `ocr`-Feld,
+      // damit der nächste Lauf garantiert den Cache-Pfad nimmt), neu
+      // zustellen, fertig. Bis dahin wurde nichts geschrieben — kein Ledger,
+      // kein Mirror; die App zeigt weiter „Bon wird geprüft".
+      // Die Regeln (wann, wann nicht) stehen in lib/refereePolicy.js.
+      // Liegt überhaupt ein gelesenes Datum in der Frist? Nur dann kann eine
+      // Prüfung an `bon_too_old` etwas ändern (sie wählt nur zwischen
+      // gelesenen Daten). Dieselbe Jahres-Plausibilisierung wie oben.
+      const gelesenesAlter = (Array.isArray(ocr.robust?.reads) ? ocr.robust.reads : [])
+        .filter((r) => r && r.isReceipt !== false && r.bonDate)
+        .map((r) => bonAgeDays(plausibilizeBonDate(r.bonDate, uploadedAt).bonDate, uploadedAt.getTime()));
+      const einDatumInFrist = gelesenesAlter.length
+        ? gelesenesAlter.some((a) => a != null && a <= effectiveMaxAgeDays)
+        : null;
+      const refereeAnfrage = shouldRequestReferee({
+        mode: config.ocrReferee,
+        status,
+        rejectReason,
+        confidence: ocr.robust?.confidence ?? null,
+        reads: ocr.robust?.reads,
+        parsed: ocr.parsed,
+        reviewDecision: receipt.reviewDecision ?? null,
+        alreadyCredited,
+        hasRequest: Boolean(ocr.refereeRequest || receipt.ocr?.refereeRequest),
+        hasReferee: Boolean(ocr.referee || receipt.ocr?.referee),
+        einDatumInFrist,
+      });
+      if (refereeAnfrage.request) {
+        ocr.refereeRequest = {
+          requestedAt: admin.firestore.Timestamp.now(),
+          reason: rejectReason,
+          confidence: ocr.robust?.confidence ?? null,
+          grund: refereeAnfrage.grund,
+          mode: refereeMode(config.ocrReferee),
+        };
+        // Transaktional und nur, wenn noch keine Prüfung angefordert/abgelegt
+        // ist — sonst zwei Anfragen und zwei bezahlte Prüfungen, wenn zwei
+        // Läufe parallel hier ankommen (Review 14.09.). Die Jahres-Korrektur
+        // mit ablegen: `parsed.bonDate` ist oben schon korrigiert, im zweiten
+        // Durchlauf gäbe es sonst nichts mehr zu korrigieren und der Vermerk
+        // ginge verloren. Ohne .catch: schlägt das Ablegen fehl, greift der
+        // normale Retry — lieber noch einmal als eine Anfrage ohne Spur.
+        const anfrageGeschrieben = await writeOcrIfNoReferee(docRef, {
+          ocr: buildOcrField(ocr, recon, escalation),
+          ...(bonDateCorrection ? { bonDateCorrection } : {}),
+          updatedAt: now,
+        });
+        if (anfrageGeschrieben === 'ueberholt') {
+          logger.warn('referee-request-ueberholt', { cashbackId });
+          return;
+        }
+        await pubsub.topic(PUBSUB_TOPIC).publishMessage({
+          json: { cashbackId, uid },
+          attributes: { uid, cashbackId },
+        });
+        logger.info('referee-requested', {
+          cashbackId,
+          reason: rejectReason,
+          confidence: ocr.robust?.confidence ?? null,
+          grund: refereeAnfrage.grund,
+        });
+        return;
+      }
+
       if (status === 'approved' && !alreadyCredited && receipt.reviewDecision !== 'approve') {
-        const conf = ocr.robust?.confidence || null;
+        // Hat die Zweitprüfung den Bon entschieden, ist er nicht mehr
+        // abgelehnt — die AUSZAHLUNG läuft aber durch dasselbe Gate wie jeder
+        // andere unsichere Bon: Bewertung `medium`, feldweise Prüfung über die
+        // Zeugen der Zweitprüfung. Bewusst NICHT `high` (Review 14.09.): zwei
+        // Lesungen desselben Modells sind korreliert, und sonst würden gerade
+        // die schwächsten Erstlesungen am wenigsten geprüft und am Notaus
+        // `ocrFieldGate` vorbei ausgezahlt. Mit `ocrFieldGate: true` gibt das
+        // Gate sie automatisch frei, im Beobachtungs-Modus hält es sie.
+        const refereeEntschied = ocr.referee?.applied === true && ocr.referee?.verdict === 'decided';
+        const conf = refereeEntschied ? 'medium' : ocr.robust?.confidence || null;
+        const feldLesungen = refereeEntschied
+          // Genau das Zeugen-Paar, auf dem die Entscheidung beruht — eine
+          // dritte, als unplausibel verworfene Lesung darf das Gate nicht kippen.
+          ? (Array.isArray(ocr.referee.reads) && Array.isArray(ocr.referee.paar)
+            ? ocr.referee.paar.map((i) => ocr.referee.reads[i]).filter(Boolean)
+            : null)
+          : ocr.robust?.reads;
         const editedImage = receipt.capture?.forensicFlags?.suspiciousSoftware === true;
 
         // 86cbet2w1 — die Bewertung der Robust-OCR entsteht aus dem Vergleich
@@ -1817,13 +2212,13 @@ exports.processCashback = onMessagePublished(
         const feldGateAn = gateSchalter === true || gateSchalter === 'shadow';
         const feldGateWirkt = gateSchalter === true;
         let felder = null;
-        if (feldGateAn && (conf === 'low' || conf === 'medium') && Array.isArray(ocr.robust?.reads)) {
+        if (feldGateAn && (conf === 'low' || conf === 'medium') && Array.isArray(feldLesungen)) {
           // Marktnamen ÜBER DEN RESOLVER vergleichen, nicht über den Rohtext:
           // „REWE" und „REWE Markt GmbH" sind derselbe Markt. Die Auflösung ist
           // asynchron, deshalb hier vorab je eindeutigem Namen einmal — bei
           // zwei bis drei Lesungen sind das ein bis zwei Aufrufe gegen den
           // modulweit zwischengespeicherten Discounter-Index.
-          const namen = [...new Set(ocr.robust.reads.map((r) => r.merchant ?? null))];
+          const namen = [...new Set(feldLesungen.map((r) => r.merchant ?? null))];
           const schluessel = new Map();
           for (const nm of namen) {
             let key = `roh:${String(nm || '').toLowerCase().replace(/[^a-z0-9]/g, '')}`;
@@ -1835,7 +2230,7 @@ exports.processCashback = onMessagePublished(
             }
             schluessel.set(nm, key);
           }
-          felder = moneyFieldAgreement(ocr.robust.reads, {
+          felder = moneyFieldAgreement(feldLesungen, {
             merchantKey: (m) => schluessel.get(m ?? null) ?? null,
             // Derselbe Betragsweg wie oben — ein Unterschied in der Artikelzahl
             // zählt nur, wenn er den Betrag verändert (Pfand wird über den
@@ -1889,6 +2284,22 @@ exports.processCashback = onMessagePublished(
             // sich vor dem Scharfschalten ablesen lässt, was passieren wird.
             haetteFreigegeben: felder.ok === true,
           };
+        }
+      }
+
+      // 6y2) Überholt? (Review 14.09., zwei Runden) Steht am Dokument
+      // inzwischen ein Prüf-Ergebnis, das dieser Lauf nicht kennt — oder eine
+      // Anfrage, obwohl dieser Lauf von gar keiner Prüfung weiß —, hat ein
+      // paralleler Lauf mit neuerem Stand übernommen. Dieser Lauf rechnete mit
+      // der alten Lesung; bucht er jetzt, könnte er eine von der Prüfung
+      // entschiedene Gutschrift stornieren. Ein Lesevorgang pro Bon.
+      {
+        const aktuell = (await docRef.get()).data()?.ocr;
+        const fremdesErgebnis = Boolean(aktuell?.referee) && !ocr.referee;
+        const fremdeAnfrage = Boolean(aktuell?.refereeRequest) && !ocr.refereeRequest && !ocr.referee;
+        if (fremdesErgebnis || fremdeAnfrage) {
+          logger.warn('ledger-ueberholt-von-zweitpruefung', { cashbackId, status });
+          return;
         }
       }
 
@@ -2020,7 +2431,12 @@ exports.processCashback = onMessagePublished(
           ? { id: 'unknown', raw: ocr.parsed.merchant, matchedScore: 0 }
           : null,
         bonDate: ocr.parsed.bonDate || null,
-        bonDateCorrection: bonDateCorrection ?? null,
+        // Eine im ersten Durchlauf (oder früheren Lauf) abgelegte Jahres-
+        // Korrektur bleibt stehen: `parsed.bonDate` ist dann schon korrigiert,
+        // dieser Lauf hat nichts mehr zu korrigieren. Ersetzt die Zweitprüfung
+        // die Lesung, gilt deren Datum — der alte Vermerk passt nicht mehr.
+        bonDateCorrection: bonDateCorrection
+          ?? (cachedOcr && !lesungErsetzt ? receipt.bonDateCorrection ?? null : null),
         // Welche Aktion galt regional und warum (06.09.2026). null, solange
         // keine laufende Aktion ein Gebiet einschränkt.
         targeting: targeting ?? null,
@@ -2131,7 +2547,9 @@ exports.processCashback = onMessagePublished(
         // republishen) oder resolveCashbackReview. Nur echte Poison-Messages
         // (Bild kaputt, Parser-Crash) enden weiterhin als 'rejected'.
         const infraCode =
-          err && (err.code === 'ocr_unavailable' || err.code === 'ledger_precheck_failed') ? err.code : null;
+          err && (err.code === 'ocr_unavailable' || err.code === 'ledger_precheck_failed' || err.code === 'referee_unavailable')
+            ? err.code
+            : null;
         const infra = !!infraCode;
         const finalDoc = infra
           ? { status: 'review', reviewReason: infraCode, attempts, lastError, updatedAt: now }

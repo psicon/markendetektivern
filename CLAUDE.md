@@ -2772,6 +2772,99 @@ von Hand auflöst. Sinnvolle Verschärfung wäre, `low` nur dann in Review zu
 schicken, wenn zusätzlich ein für Geld relevantes Feld unsicher ist
 (Markt unbekannt, Datum fehlt, Rekonziliation schief) — sonst durchlaufen lassen.
 
+## Zweitprüfung unsicherer Bons + Warenkorb-Rabatt + Rossmann (14.09.2026)
+
+User-Vorgabe (86cbfvwge): „ein fetteres Model drüber lassen, das dann entscheiden
+kann. Wenn das auch nicht entscheiden kann, dann wird erst abgelehnt."
+
+**Wie es läuft** (`lib/refereePolicy.js` Regeln, `lib/ocr_referee.js` Aufruf,
+`lib/prompt_referee.js` Prompt, index.js Schritte 3b/6v/6y2):
+- Würde ein Bon mit Robust-Bewertung `none`/`low` wegen `reconciliation_delta`,
+  `no_bon_date`, `not_a_receipt`, `unknown_merchant` oder `bon_too_old` abgelehnt,
+  fordert Durchlauf 1 die Prüfung an (`ocr.refereeRequest`) und stellt neu zu.
+  Durchlauf 2 (Cache-Pfad, eigene 540 s) nimmt sie per Transaktion in Anspruch
+  (`claimedBy` = Event-ID, Tagesdeckel `ocrRefereeMaxPerDay`, Zähler
+  `cashback_referee_usage/{Tag}`), liest bis zu 4× mit `gemini-3.1-pro-preview`
+  und ersetzt die Lesung nur bei zwei übereinstimmenden, in sich stimmigen,
+  vollständigen Lesungen. Danach laufen ALLE Gates normal.
+- Schalter `cashback_config/v1.ocrReferee`: false | 'shadow' | true (Default aus).
+- **Eine Entscheidung heißt „nicht abgelehnt", nicht „ausgezahlt"**: sie zählt im
+  Gate 6w als `medium` (Feld-Gate über die Zeugen der Prüfung). Mit
+  `ocrFieldGate: 'shadow'` landet sie in der Prüfkonsole, mit `true` wird sie
+  automatisch freigegeben. NICHT auf `high` setzen — zwei Lesungen desselben
+  Modells sind korreliert, und sonst würden die schwächsten Erstlesungen am
+  wenigsten geprüft (Review 14.09.).
+- Ausgelassen (Regeln aus den Live-Daten): Markt auf allen Lesungen gleich
+  (Katalogfrage, z. B. Rossmann), Datum auf allen Lesungen gleich oder keins in
+  der Frist, not_a_receipt ohne Markt UND Datum.
+
+**Gemessen** (Live-Test an 13+6 echten Ablehnungen, nur lesend):
+- Alle 3 Netto-Bons mit Warenkorb-Rabatt/App-Gutschein entschieden — die OCR war
+  dort RICHTIG, nur `reconcile()` kannte keine Rabatte auf den ganzen Einkauf
+  (18 von 44 recon-`none`-Ablehnungen seit 01.09.).
+- Abgeschnittene/verdeckte/zerknitterte Fotos: kein Modell rettet sie; das Modell
+  meldet sie per `bonComplete: false` selbst → abgelehnt, wie gewollt.
+- ~10–65 s pro Bon, ~0,02–0,05 $ pro Lesung, ~3 von 30 Aufrufen 429.
+
+**Teure Fallen, nicht wieder hineinlaufen:**
+- `gemini-3.1-pro-preview` ignoriert `thinkingBudget` (Denken bis MAX_TOKENS,
+  ~195 s, kein Ergebnis) → `thinkingConfig: { thinkingLevel: 'LOW' }`. Nur unter
+  Location `global` erreichbar; 429 und 404 → Rückfall `gemini-2.5-pro`.
+  Google empfiehlt für Gemini 3 Temperatur 1.0 (niedriger → Schleifen).
+- Keinen Ablehngrund und kein Upload-Datum in den Prompt: „Datum lag vor dem
+  Upload" + Upload-Datum lädt ein, ein passendes Datum zu „finden"; „Summe passte
+  nicht" lädt zu einer erfundenen Rabattzeile ein. Außerdem prüft `plausibel()`
+  jede Lesung gegen die Erstlesungen (Endsumme bekannt, bei Rabatt nicht mehr
+  Artikel, bei bon_too_old nur ein schon gelesenes Datum).
+- Warenkorb-Rabatt in `reconcile()` nur mit Belegkette: Σ Artikel = gedruckte
+  Zwischensumme, Zwischensumme − benannte Rabattzeilen = Endbetrag (±2 ct),
+  Rabatt < 25 % und ≤ 20 €. Ohne diese Grenzen besteht eine Lesung, die jeden
+  Artikel doppelt führt und die Differenz als „Rabatt" ausweist.
+- `buildOcrField` ist eine Whitelist und der Final-Write ersetzt `ocr` komplett —
+  `refereeRequest`/`referee` MÜSSEN dort und in `ocrFromCache` stehen (sonst ist
+  die Schleifensperre nach dem ersten Write weg, wie bei `robust` am 02.09.).
+- Parallele Läufe (Reprocessing mit geleertem `ocr` + Sweeper) überschreiben das
+  `ocr`-Feld ganz: Früh-Persist und Anforderung laufen deshalb über
+  `writeOcrIfNoReferee` (Transaktion, bricht ab, wenn schon eine Prüfung
+  angefordert/abgelegt ist), und Schritt 6y2 liest vor dem Ledger nach, ob ein
+  anderer Lauf übernommen hat. Sonst: parallele bezahlte Prüfungen und im
+  schlimmsten Fall ein Storno gegen eine entschiedene Gutschrift.
+- Übersprungene Prüfungen (Schalter aus, Tagesdeckel, menschliche Entscheidung)
+  legen NICHTS ab — ein gespeichertes „skipped" hätte die Prüfung für immer
+  verbraucht. Kam KEINE Lesung zurück (429/Timeout), wird nichts abgelegt und
+  mit `referee_unavailable` geworfen (Infra-Code → nach 5 Versuchen `review`,
+  nie `rejected`). Das Ergebnis wird transaktional nur mit eigenem Anspruch
+  abgelegt (`persistRefereeResult`), sonst überschriebe die zuletzt fertige
+  Prüfung die andere.
+- `shadow`-Ergebnisse wirken nach dem Umschalten auf `true` NICHT nach (der Bon
+  gilt als geprüft). Nicht erst in `shadow` laufen lassen, wenn man die Wirkung
+  auf genau diese Bons will.
+
+**`processCashback` hat KEINEN PubSub-Retry** (`retryPolicy:
+RETRY_POLICY_DO_NOT_RETRY`, geprüft 14.09. per `gcloud functions describe`).
+Die Kommentare „werfen → PubSub-Retry" im catch-Block stimmen nicht: ein Wurf
+erhöht nur `attempts` und bleibt liegen. Die EINZIGE Wiederaufnahme ist
+`sweepStuckReceipts` (nur Status `ocr_pending`, ≥ 20 min seit Anlage/letztem
+Sweep, max. 5×, jedes Mal neue Event-ID). Wer „bei Fehler werfen, der Retry
+holt es" plant, muss prüfen, dass der Bon dabei in `ocr_pending` bleibt.
+
+**Rossmann (12487v299kf):** Der Alias stand seit Langem in `lib/merchant.js`, aber
+es gab kein `discounter`-Dokument → jeder Rossmann-Bon `unknown_merchant`.
+`eligibleMerchants` in `DEFAULT_CONFIG` wird NIRGENDS gelesen (tote Config, nicht
+als Wahrheit nehmen). Angelegt: `discounter/8bQNdFStWCnJKy9P1Gey` (DE, Logo
+`maerkte/rossmann.png`, Farbe `#EC0000` aus dem Logo). Nebenwirkung: jeder neue
+`discounter` erscheint sofort in Stöbern-Marktfilter, MarketSelector und
+Onboarding — ohne Produkte mit leerer Liste. Nachverarbeitet per
+`.rossmann-nachverarbeitung-1409.js` (199 Bons seit Juli, pro Nutzer sequenziell,
+Pipeline entscheidet): 16 gutgeschrieben, 16 Prüfung, 97 ohne Prämie wegen
+< 4 Artikeln (Drogerie-Bons sind kurz), 29 Tageslimit, 19 zu alt, 10 Summe,
+5 ohne Datum, 4 ohne Aktion, 3 Duplikat.
+
+**Deploy aus einem Worktree: die gitignorierte `.env` fehlt dort.** Ohne sie fielen
+`CASHBACK_OCR_ENGINE`, DocAI-Einstellungen und `TREMENDOUS_CAMPAIGN_ID` still weg.
+Vor jedem Deploy aus einem Worktree `cloud-functions/<codebase>/.env` aus dem
+Haupt-Checkout kopieren und per `cmp` prüfen.
+
 ## Bons nachverarbeiten / Review auflösen — Regeln (Money-Ops 02.09.2026)
 
 Am 02.09. wurden 163 Review-Bons (seit Juli gehalten, „meistens innerhalb eines

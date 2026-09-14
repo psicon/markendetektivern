@@ -110,22 +110,29 @@ async function extractReceipt(imageBytes, mimeType, opts = {}) {
     ? imageBytes.toString('base64')
     : Buffer.from(imageBytes).toString('base64');
 
-  const response = await client.models.generateContent({
+  // Zweitprüfung (lib/ocr_referee.js) nutzt denselben Aufruf mit eigenem
+  // Prompt/Schema, eigener Denkstufe, Temperatur und hartem Zeitlimit. Ohne
+  // diese Optionen verhält sich die Funktion wie zuvor.
+  const abort = opts.timeoutMs > 0 ? new AbortController() : null;
+  const request = client.models.generateContent({
     model,
     contents: [
       {
         role: 'user',
         parts: [
           { inlineData: { data: base64, mimeType } },
-          { text: USER_PROMPT },
+          { text: opts.userPrompt || USER_PROMPT },
         ],
       },
     ],
     config: {
-      systemInstruction: SYSTEM_PROMPT,
-      temperature: 0.1,
+      systemInstruction: opts.systemInstruction || SYSTEM_PROMPT,
+      temperature: Number.isFinite(opts.temperature) ? opts.temperature : 0.1,
       responseMimeType: 'application/json',
-      responseSchema: RESPONSE_SCHEMA,
+      responseSchema: opts.responseSchema || RESPONSE_SCHEMA,
+      // Bricht die HTTP-Anfrage beim Zeitlimit tatsächlich ab (sonst liefe sie
+      // weiter, würde abgerechnet und belegte Kontingent).
+      ...(abort ? { abortSignal: abort.signal } : {}),
       // Ohne explizites Limit greift ein niedriger Default → lange Bons
       // (viele Artikel × raw-Zeile) werden mittendrin abgeschnitten → kaputtes
       // JSON oder gedroppte Items. Gleicher Guard wie im cv-hybrid-Parser.
@@ -135,11 +142,40 @@ async function extractReceipt(imageBytes, mimeType, opts = {}) {
       // übergibt das Modell auch für Flash-Reads immer explizit. Die
       // Pro-Eskalation ('gemini-2.5-pro') bleibt unangetastet: sie
       // unterstützt Budget 0 nicht und ist die letzte Rettung schwerer Bons.
-      ...(THINKING_BUDGET != null && /flash/i.test(model)
-        ? { thinkingConfig: { thinkingBudget: THINKING_BUDGET } }
-        : {}),
+      // Eine ausdrücklich übergebene Denk-Konfiguration hat Vorrang.
+      ...(opts.thinkingConfig
+        ? { thinkingConfig: opts.thinkingConfig }
+        : THINKING_BUDGET != null && /flash/i.test(model)
+          ? { thinkingConfig: { thinkingBudget: THINKING_BUDGET } }
+          : {}),
     },
   });
+
+  // Zeitlimit zusätzlich über Promise.race: das Abbruch-Signal wirkt nur
+  // clientseitig, und ob es den laufenden Aufruf wirklich beendet, hängt am
+  // Transport. So kehrt der Aufruf nach `timeoutMs` garantiert zurück.
+  let timer = null;
+  let response;
+  // Verspätete Ablehnung nach einem Zeitlimit nicht unbehandelt lassen (sonst
+  // unhandledRejection im Function-Prozess). Das Race abonniert separat.
+  if (opts.timeoutMs > 0) request.catch(() => {});
+  try {
+    response = opts.timeoutMs > 0
+      ? await Promise.race([
+          request,
+          new Promise((_, reject) => {
+            timer = setTimeout(() => {
+              const err = new Error(`OCR timeout after ${opts.timeoutMs} ms (${model})`);
+              err.code = 'ocr_timeout';
+              if (abort) abort.abort();
+              reject(err);
+            }, opts.timeoutMs);
+          }),
+        ])
+      : await request;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 
   const latencyMs = Date.now() - started;
   const raw = response.text || '';
@@ -147,9 +183,13 @@ async function extractReceipt(imageBytes, mimeType, opts = {}) {
   try {
     parsed = JSON.parse(raw);
   } catch (e) {
-    const err = new Error(`OCR JSON parse failed: ${e.message}`);
+    // Bei MAX_TOKENS/SAFETY ist die Antwort leer oder abgeschnitten — der
+    // Grund steht dann NUR hier, nicht im Rückgabewert.
+    const finishReason = response.candidates?.[0]?.finishReason ?? null;
+    const err = new Error(`OCR JSON parse failed${finishReason ? ` (${finishReason})` : ''}: ${e.message}`);
     err.raw = raw;
     err.code = 'ocr_json_decode';
+    err.finishReason = finishReason;
     throw err;
   }
 
@@ -157,8 +197,11 @@ async function extractReceipt(imageBytes, mimeType, opts = {}) {
   return {
     parsed,
     model,
-    promptVersion: PROMPT_VERSION,
+    promptVersion: opts.promptVersion || PROMPT_VERSION,
     latencyMs,
+    // Warum die Antwort endete (STOP, MAX_TOKENS …) — bei der Zweitprüfung
+    // endet ein Denk-Überlauf sonst still als JSON-Fehler.
+    finishReason: response.candidates?.[0]?.finishReason ?? null,
     inputTokens: usage.promptTokenCount ?? null,
     outputTokens: usage.candidatesTokenCount ?? null,
     // Unsichtbare Denk-Token — bisher nirgends erfasst, dadurch war der
@@ -199,6 +242,42 @@ async function extractReceipt(imageBytes, mimeType, opts = {}) {
 const RECON_TOLERANCE_UNDERSHOOT_CENTS = 200; // Σ < total: Pfand-tolerant
 const RECON_TOLERANCE_OVERSHOOT_CENTS = 50;   // Σ > total: tight, missed-discount territory
 
+// Warenkorb-Rabatt (14.09.2026, ClickUp 86cbfvwge): 18 von 44 Ablehnungen
+// wegen reconciliation_delta mit Bewertung 'none' waren RICHTIG gelesen —
+// Σ Artikel entsprach exakt der gedruckten Zwischensumme, der Endbetrag lag
+// nur wegen eines Rabatts auf den ganzen Einkauf darunter („5% Rabatt
+// Warenkorb −3,95", „Gutschein Netto-App −2,00"). Die Überschuss-Toleranz von
+// 50 ct kann das nicht abbilden. Anerkannt wird so ein Bon NUR mit Belegkette:
+// die Lesung nennt die Rabattzeilen einzeln (`basketDiscounts`), Σ Artikel =
+// Zwischensumme und Zwischensumme − Rabatte = Endbetrag, jeweils ±2 ct.
+// Das Haupt-Schema (v1.4) kennt `basketDiscounts` nicht — der Zweig wirkt
+// daher ausschließlich auf Lesungen der Zweitprüfung (lib/prompt_referee.js).
+const BASKET_DISCOUNT_TOLERANCE_CENTS = 2;
+// Plausibilitätsgrenzen (Review 14.09.): ohne sie besteht auch eine Lesung,
+// die jeden Artikel doppelt aufführt und die Differenz als erfundenen
+// „Rabatt" ausweist (5 Artikel × 2 € → 10 Artikel, Zwischensumme 20 €, Rabatt
+// 10 €) — genau die Verdopplung, gegen die die 50-ct-Grenze steht. Gesehen
+// wurden 2 €, 3,95 € (5 %) und 5 €; Mitarbeiter-/Coupon-Rabatte liegen
+// üblich bei 10–20 %. Größere Abzüge sind eher Zahlungszeilen.
+const BASKET_DISCOUNT_MAX_SHARE = 0.25;
+const BASKET_DISCOUNT_MAX_CENTS = 2000;
+// Eine Rabattzeile muss als solche benannt sein — ein Betrag ohne Bezeichnung
+// ist kein Beleg.
+const BASKET_DISCOUNT_LABEL = /rabatt|gutschein|coupon|kupon|nachlass|prozent|%|vorteil|ersparnis|abzug|aktion|discount|bonus/i;
+
+/** Summe der benannten Warenkorb-Rabatte in Cent (unbenannte zählen nicht). */
+function basketDiscountCents(parsed) {
+  if (!parsed || !Array.isArray(parsed.basketDiscounts)) return 0;
+  return parsed.basketDiscounts.reduce(
+    (acc, d) => acc + (
+      d && Number.isFinite(d.cents) && typeof d.label === 'string' && BASKET_DISCOUNT_LABEL.test(d.label)
+        ? Math.abs(d.cents)
+        : 0
+    ),
+    0,
+  );
+}
+
 function reconcile(parsed) {
   if (!parsed || !Array.isArray(parsed.items)) {
     return {
@@ -236,6 +315,21 @@ function reconcile(parsed) {
   } else {
     direction = 'match';
     ok = true;
+  }
+  if (!ok) {
+    const rabatt = basketDiscountCents(parsed);
+    const subtotal = Number.isFinite(parsed.subtotalCents) ? parsed.subtotalCents : null;
+    if (
+      rabatt > 0
+      && subtotal != null
+      && subtotal > 0
+      && rabatt < subtotal * BASKET_DISCOUNT_MAX_SHARE
+      && rabatt <= BASKET_DISCOUNT_MAX_CENTS
+      && Math.abs(sumItemsCents - subtotal) <= BASKET_DISCOUNT_TOLERANCE_CENTS
+      && Math.abs(subtotal - rabatt - total) <= BASKET_DISCOUNT_TOLERANCE_CENTS
+    ) {
+      return { ok: true, sumItemsCents, deltaCents, signedDeltaCents, direction: 'basket_discount', basketDiscountCents: rabatt };
+    }
   }
   return { ok, sumItemsCents, deltaCents, signedDeltaCents, direction };
 }
@@ -286,4 +380,4 @@ function tierFor(eligibleItemCount, tiers) {
   return 0;
 }
 
-module.exports = { extractReceipt, reconcile, countEligibleItems, tierFor, isPfandItem, DEFAULT_MODEL };
+module.exports = { extractReceipt, reconcile, basketDiscountCents, countEligibleItems, tierFor, isPfandItem, DEFAULT_MODEL };
