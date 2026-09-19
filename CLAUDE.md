@@ -2872,6 +2872,57 @@ Auszahlung.** Gemessen am 19.09.: 98 Bons in der Prüfkonsole (7,90 €), davon
 würden mit `ocrFieldGate: true` 64 (5,12 €) automatisch freigegeben, 24 blieben
 wegen uneiniger Geldfelder, 10 haben keine Einzellesungen.
 
+**`ocrFieldGate` steht seit 19.09.2026 auf `true`** (Entscheidung Patrick). Zwei
+Dinge, die man dabei wissen muss:
+- **Weder der Schalter noch die Zweitprüfung wirken rückwirkend.** Beide greifen
+  nur im laufenden Verarbeitungsdurchlauf. Wer eine Warteschlange auflösen will,
+  muss die Bons ERNEUT ZUSTELLEN (`.nachlauf-1909.js`: Status auf `ocr_pending`,
+  Spiegel mit, publish, pro Nutzer sequenziell, mehrere Nutzer parallel).
+- Gemessen am 19.09. über 134 Bons (103 aus der Warteschlange + 31
+  Zweitprüfungs-Kandidaten): 60 freigegeben und gebucht (480 ct), 12 Tageslimit,
+  3 als Doppel erkannt, 33 blieben in der Warteschlange. Alle Geld-Invarianten
+  sauber (0 Doppelbuchungen, 0 Freigaben ohne Buchung, 0 Buchungen ohne
+  Freigabe, 0 Tageslimit-Verstöße, Spiegel überall gleich).
+- **Die Zweitprüfung entscheidet selten** — von 31 Kandidaten 3 entschieden
+  (1 davon mit Geld), 25 unentschieden, 3 vorher schon als Doppel erkannt. Das
+  deckt sich mit der Messung vom 14.09.: der Hebel liegt beim Warenkorb-Rabatt,
+  nicht am stärkeren Modell. Verbrauch an dem Tag: 33 Läufe (Deckel 40).
+- **Ein Rest bleibt strukturell hängen:** 10 der verbliebenen 33 Bons tragen
+  keine Einzellesungen (`ocr.robust.reads` fehlt, Stand vor dem Deploy vom
+  09.09.) — das Feld-Gate kann sie nie freigeben. Für sie hilft nur eine frische
+  Texterkennung (`ocr`-Feld löschen + republish) oder eine Entscheidung in der
+  Prüfkonsole.
+
+**Beim erneuten Zustellen greift der Schutz gegen nachträgliches Abhaken NICHT
+(19.09.2026).** Die Regel vom 02.09. („nachgezogene Bon-Positionen dürfen keinen
+heutigen Einkaufszettel abhaken") hängt an `purchased_products.backfilled ===
+true` — und dieses Feld setzt AUSSCHLIESSLICH `resolveCashbackReview`. Der Weg
+über `processCashback` (Sweeper, jedes Reprocessing-Skript, der Nachlauf vom
+19.09.) setzt es nicht. Gemessen: bei 75 von 134 Bons war die Journey-/Zettel-
+Schließung scharf, 108 `receiptMatches` mit erlaubter Schließung; dass nichts
+passierte, lag daran, dass kein betroffener Nutzer einen offenen Zettel-Eintrag
+hatte. **Vor jedem Massen-Reprocessing also entweder über den Resolver gehen
+oder erst den Fix einbauen** (ClickUp-Task 19.09.). Merksatz: der Schutz hängt am
+AUFRUFER statt an der Tatsache — genau das Muster, das die Ortsregel vermeidet.
+
+**Weitere Merker aus dem Nachlauf (alle gemessen, 19.09.2026):**
+- `matchStatus: 'skipped_ineligible'` im receipt-matcher ist ein ENDZUSTAND: der
+  Trigger hängt an `onDocumentCreated`, und der spätere Merge-Write (Bon wird
+  doch freigegeben) ist ein Update — es feuert nichts mehr. 33 Artikel zweier
+  bezahlter Bons hängen dadurch dauerhaft.
+- `crowd_uploads.rewardCents` taugt NICHT für Geld-Auswertungen: 208 tatsächlich
+  gebuchte Freigaben tragen das Feld nicht. Immer das Ledger nehmen.
+- Budget-Abgleiche brauchen einen STABILEN Lesezeitpunkt (der Zähler läuft im
+  Betrieb weiter) — sonst sieht ein Fenster von 8 ct wie eine Lücke aus.
+- Die alte 3110-ct-Differenz auf `milchprodukt-fotos-september-2026` ist geklärt:
+  exakt der Verbrauch der Schwester-Aktion bis 05.09., also die manuelle
+  „ein Topf"-Angleichung. Steht jetzt in deren `budgetNote`. Regel: **jede
+  manuelle Budget-Korrektur dort vermerken** — `increment` hinterlässt keine Spur.
+- Fallen bei einem Massen-Lauf mehrere gehaltene Bons desselben Nutzers auf
+  denselben Bon-TAG, entscheidet sonst die Verarbeitungsreihenfolge, wer die
+  Prämie bekommt (3 Fälle am 19.09.). Das ist eine fachliche Entscheidung —
+  Kollisionen vorher ausweisen und bewusst wählen (höhere Endsumme o. Ä.).
+
 **Die Uhrzeit der Zweitprüfung wird aus den Erstlesungen übernommen**
 (`einheitlicheUhrzeit`, 19.09.). Sie ist der einzige Teil des
 kontenübergreifenden Doppel-Schlüssels (`transactionHash`), den keine Prüfung
