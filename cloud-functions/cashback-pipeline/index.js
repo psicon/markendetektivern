@@ -66,7 +66,7 @@ const { extractReceipt, reconcile, countEligibleItems, tierFor, isPfandItem, DEF
 const { extractReceiptCVHybrid } = require('./lib/ocr_cvhybrid');
 const { extractReceiptRobust } = require('./lib/ocr_robust');
 const { moneyFieldAgreement, normMerchant } = require('./lib/fieldAgreement');
-const { refereeMode, shouldRequestReferee, infraVerhindert: refereeInfraVerhindert } = require('./lib/refereePolicy');
+const { refereeMode, shouldRequestReferee, infraVerhindert: refereeInfraVerhindert, einheitlicheUhrzeit } = require('./lib/refereePolicy');
 const { runReferee } = require('./lib/ocr_referee');
 const { extractReceiptDocAI, isConfigured: isDocAIConfigured } = require('./lib/ocr_docai');
 const { deriveStoreAddress } = require('./lib/storeAddress');
@@ -1597,6 +1597,15 @@ exports.processCashback = onMessagePublished(
             };
             if (angewandt) {
               ocr.parsed = chosen.parsed;
+              // Uhrzeit aus den einheitlichen Erstlesungen übernehmen (Review
+              // 19.09.): sie ist Teil des kontenübergreifenden Doppel-Schlüssels
+              // und wird von keiner Prüfung der Zweitprüfung abgesichert.
+              const uhr = einheitlicheUhrzeit(erstlesungen);
+              if (uhr && ocr.parsed.bonTime !== uhr) {
+                logger.info('referee-uhrzeit-aus-erstlesung', { cashbackId, vonPruefung: ocr.parsed.bonTime ?? null, ausErstlesung: uhr });
+                ocr.parsed = { ...ocr.parsed, bonTime: uhr };
+                ocr.referee.bonTimeAusErstlesung = uhr;
+              }
               ocr.model = chosen.model;
               ocr.promptVersion = chosen.promptVersion;
               ocr.inputTokens = chosen.inputTokens ?? null;

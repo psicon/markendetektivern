@@ -2860,6 +2860,66 @@ Pipeline entscheidet): 16 gutgeschrieben, 16 Prüfung, 97 ohne Prämie wegen
 < 4 Artikeln (Drogerie-Bons sind kurz), 29 Tageslimit, 19 zu alt, 10 Summe,
 5 ohne Datum, 4 ohne Aktion, 3 Duplikat.
 
+**Praxistest in Produktion (19.09.2026, Schalter von Patrick auf true).** Drei
+echte, zuvor abgelehnte Bons neu zugestellt: zwei Netto-Bons mit Warenkorb-Rabatt
+wurden in 24 bzw. 33 s entschieden (3,95 € bzw. 2,00 € Rabatt erkannt, je 8 ct
+berechnet) und stehen jetzt in der Prüfkonsole; der abgeschnittene Screenshot
+blieb unentschieden und damit abgelehnt. Keine Auszahlung, kein Storno, Zähler
+`cashback_referee_usage/2026-09-19` = 3 Läufe, 0 Ausfälle. Wichtig für die
+Erwartung: **im Beobachtungs-Modus (`ocrFieldGate: 'shadow'`) macht die
+Zweitprüfung aus einer Ablehnung einen Warteschlangen-Eintrag, keine
+Auszahlung.** Gemessen am 19.09.: 98 Bons in der Prüfkonsole (7,90 €), davon
+würden mit `ocrFieldGate: true` 64 (5,12 €) automatisch freigegeben, 24 blieben
+wegen uneiniger Geldfelder, 10 haben keine Einzellesungen.
+
+**Die Uhrzeit der Zweitprüfung wird aus den Erstlesungen übernommen**
+(`einheitlicheUhrzeit`, 19.09.). Sie ist der einzige Teil des
+kontenübergreifenden Doppel-Schlüssels (`transactionHash`), den keine Prüfung
+absichert: `plausibel()` schaut auf Endsumme, Artikelzahl und Datum, und im
+Zeugen-Paar gilt eine FEHLENDE Uhrzeit nicht als Widerspruch. Im Praxistest las
+eine von drei Prüf-Lesungen 06:21 statt 08:19 (sechs Erstlesungen einheitlich) —
+gerettet hat nur, dass zufällig das andere Paar gewann. Die Entscheidung wird
+deshalb NICHT verworfen (die Uhrzeit trägt kein Geld), nur der Schlüssel richtig
+gestellt.
+
+**Bildprüfung: ein an 429 gescheiterter Audit darf NICHT freigeben (19.09.2026).**
+`.crowd-review-*.js` übersprang bis dahin nur Einreichungen OHNE Verdikt; ein
+Verdikt `{echt: null}` (Infrastrukturfehler) rutschte als Freigabe durch. Jetzt:
+`skip` mit Grund `vision_audit_unvollstaendig`, die Einreichung bleibt offen für
+die nächste Runde. Gegenstück zur Regel „ein Infrastrukturfehler ist nie ein
+Urteil über Nutzerdaten" — er ist eben auch keine Freigabe. Praktisch: bei 429
+den Audit für die offenen Fälle einfach wiederholen (mit Pause), das löst die
+meisten.
+
+**EAN-Rettung (19.09.2026), mit Vorsicht.** Wie die Namens-Rettung vom 13.09.:
+vollständige Einreichungen ohne `ean` (Barcode-Foto liegt vor) werden per Vision
+nachgelesen → eigenes Feld `eanRescueOcr` (`.crowd-ean-rescue-1909.js`).
+Übernommen wird nur, was ZWEI unabhängige Lesungen gleich lesen UND die
+GTIN-Prüfziffer besteht. Grund für die Strenge: unter den EAN-losen Einreichungen
+ist viel lose Ware (Banane, Melone, Salat) — ein Modell, das nach einer Nummer
+gefragt wird, liefert dort gern eine vom Waage-Etikett, und händlerinterne GTINs
+(Präfix 02, 20–29) bestehen die Prüfziffer. Wurzel ist der Wizard: im
+Barcode-Schritt nimmt der Auslöser ein Foto an, auch wenn nichts dekodiert wurde
+(`app/product-submit/wizard.tsx`), das manuelle Eingabefeld erscheint nur auf dem
+Galerie-Weg — 163 sonst vollständige Einreichungen ohne EAN.
+**Drift-Warnung:** die Prüfkonsole (`review-console/index.js precheckOf`) liest
+WEDER `productNameRescueOcr` NOCH `eanRescueOcr` — Konsole und Ops-Skript
+urteilen über denselben Fall verschieden. Beim nächsten Konsolen-Umbau nachziehen.
+
+**Korrekturen an älteren Notizen (gemessen 19.09.2026):**
+- Der Foto-Trigger schreibt das Ergebnis inzwischen ans Dokument
+  (`rewardResult` / `rewardNotCreditedReason`); der Satz „Per-User-Deckel greift
+  still, der Trigger schreibt nichts ans Doc" stimmt nicht mehr. Seit 13.09. gibt
+  es keine freigegebene Einreichung ohne `rewardResult`.
+- `weeklyBonCap` gilt für Produktfotos NICHT (der Trigger liest es nicht, bewusst:
+  eine Foto-Freigabe soll dem Nutzer die Bon-Woche nicht wegnehmen). Einzige
+  Mengenbremse pro Kopf ist `maxPerUserCents` — und zwar JE AKTION.
+- Spiegel-Drift (Client überschreibt Server-Status): Rate stabil 0,6–0,7 % seit
+  dem 04.09., die „Verdreifachung" war ein Artefakt der Reparatur vom 03.09.
+  Am 19.09. wurden 28 Spiegel repariert. **Vorsicht bei Reparaturen:** der
+  GamificationProvider feiert jeden Übergang aus einem nicht-terminalen Zustand —
+  eine Reparatur lässt bei offener App Banner für Tage alte Bons aufpoppen.
+
 **Deploy aus einem Worktree: die gitignorierte `.env` fehlt dort.** Ohne sie fielen
 `CASHBACK_OCR_ENGINE`, DocAI-Einstellungen und `TREMENDOUS_CAMPAIGN_ID` still weg.
 Vor jedem Deploy aus einem Worktree `cloud-functions/<codebase>/.env` aus dem

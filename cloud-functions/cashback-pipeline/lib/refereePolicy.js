@@ -264,9 +264,40 @@ function infraVerhindert(result) {
   return ausfaelle > 0 && (result.zeugen || 0) + ausfaelle >= 2;
 }
 
+/**
+ * Uhrzeit aus den Erstlesungen, wenn die sich einig sind (Review 19.09.).
+ *
+ * Die Uhrzeit ist der einzige Teil des kontenübergreifenden Doppel-Schlüssels
+ * (`transactionHash` = Markt | Datum | Uhrzeit | Summe), den die Zweitprüfung
+ * mitbringt, ohne dass ihn irgendeine Prüfung absichert: `plausibel()` schaut
+ * auf Endsumme, Artikelzahl und Datum, nicht auf die Uhr, und im Zeugen-Paar
+ * gilt eine FEHLENDE Uhrzeit nicht als Widerspruch. Im Praxistest 19.09. las
+ * eine von drei Prüf-Lesungen 06:21 statt 08:19 (sechs Erstlesungen
+ * einheitlich 08:19) — gerettet hat nur, dass zufällig das andere Paar gewann.
+ * Mit einer Minderheits-Uhrzeit im Schlüssel könnten zwei Konten denselben Bon
+ * einreichen, ohne dass die Doppel-Erkennung greift.
+ *
+ * Deshalb: die Entscheidung NICHT verwerfen (die Uhrzeit trägt kein Geld),
+ * sondern den Schlüssel richtig stellen — lesen die Erstlesungen einheitlich
+ * eine Uhrzeit, gilt sie. Sind sie uneinig oder haben keine, bleibt es bei der
+ * Prüf-Lesung.
+ *
+ * @param {Array} priorReads Erstlesungen (ocr.robust.reads).
+ * @returns {string|null} einheitliche Uhrzeit oder null
+ */
+function einheitlicheUhrzeit(priorReads) {
+  const zeiten = (Array.isArray(priorReads) ? priorReads : [])
+    .filter((r) => r && r.isReceipt !== false)
+    .map((r) => (typeof r.bonTime === 'string' ? r.bonTime.slice(0, 5) : null))
+    .filter((t) => t);
+  if (zeiten.length < 2) return null;
+  return new Set(zeiten).size === 1 ? zeiten[0] : null;
+}
+
 module.exports = {
   REFEREE_REASONS,
   infraVerhindert,
+  einheitlicheUhrzeit,
   refereeMode,
   shouldRequestReferee,
   refereeFingerprint,

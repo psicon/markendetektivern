@@ -1,5 +1,5 @@
 'use strict';
-const { shouldRequestReferee, decideReferee, refereeFingerprint, refereeMode, infraVerhindert } = require('../lib/refereePolicy');
+const { shouldRequestReferee, decideReferee, refereeFingerprint, refereeMode, infraVerhindert, einheitlicheUhrzeit } = require('../lib/refereePolicy');
 
 /** Ein abgelehnter, unsicher gelesener Bon — Ausgangslage für die Zweitprüfung. */
 const fall = (over = {}) => ({
@@ -276,5 +276,26 @@ describe('infraVerhindert — ein Ausfall ist keine Aussage über den Bon', () =
   test('entschieden ist nie verhindert', () => {
     expect(infraVerhindert({ verdict: 'decided', zeugen: 2, failedAttempts: 2 })).toBe(false);
     expect(infraVerhindert(null)).toBe(false);
+  });
+});
+
+describe('einheitlicheUhrzeit — der Doppel-Schlüssel darf nicht an einer Minderheits-Lesung hängen', () => {
+  const l = (bonTime, over = {}) => ({ isReceipt: true, bonTime, ...over });
+  test('alle Erstlesungen gleich → diese Uhrzeit', () => {
+    expect(einheitlicheUhrzeit([l('08:19'), l('08:19'), l('08:19')])).toBe('08:19');
+  });
+  test('uneinig → null (dann bleibt es bei der Zweitprüfung)', () => {
+    expect(einheitlicheUhrzeit([l('08:19'), l('06:21')])).toBeNull();
+  });
+  test('weniger als zwei Zeitangaben → null', () => {
+    expect(einheitlicheUhrzeit([l('08:19'), l(null)])).toBeNull();
+    expect(einheitlicheUhrzeit([])).toBeNull();
+    expect(einheitlicheUhrzeit(null)).toBeNull();
+  });
+  test('Lesungen ohne Bon zählen nicht mit', () => {
+    expect(einheitlicheUhrzeit([l('08:19'), l('08:19'), l('23:59', { isReceipt: false })])).toBe('08:19');
+  });
+  test('Sekunden werden abgeschnitten', () => {
+    expect(einheitlicheUhrzeit([l('08:19:44'), l('08:19:02')])).toBe('08:19');
   });
 });
