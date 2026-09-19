@@ -3661,6 +3661,43 @@ präsentiert, MUSS zusätzlich `isSurveyVisible()` aus
 `lib/services/sheetPresence.ts` prüfen (sonst Zwei-Modal-Deadlock bzw. still
 verschluckter System-Dialog).
 
+## Push: Link, Berechtigung, Deploy — drei Fallen aus dem 17.09.2026
+
+**1. Ein Deep-Link hat zwei Seiten — nie nur eine prüfen.** Vom 19.08. bis
+17.09. schickte `sendCashbackReady` `markendetektivern://cashback/pending/<id>`,
+der App-Resolver entfernte nur `markendetektive://` (ohne „rn"). Jeder Tap
+landete auf der Startseite, obwohl der Tap-Fix 86cb7gfc9 „fertig" war. Regel:
+Server-Link und Resolver hängen an einem Vertragstest
+(`lib/services/__tests__/pushDeepLinkVertrag.test.ts` lädt
+`cashback-pipeline/lib/pushLinks.js`). Links als Pfad (`/cashback/pending/<id>`)
+schicken, nicht als Schema. Und Kaltstart-Taps vormerken, bis die erste Route
+steht: `app/index.tsx` ersetzt sonst per `replace('/(tabs)')` das Ziel.
+Android meldet jeden Tap doppelt (expo-notifications + RNFB) → Duplikatsperre
+in `pushDeepLinks.ts` nicht entfernen.
+
+**2. expo-notifications `denied` heißt auf Android 13+ NICHT „abgelehnt".**
+`getPermissionsWithPromiseImplApi33` prüft `!areNotificationsEnabled()` vor
+„undetermined" — eine nie angefragte Berechtigung kommt als `denied`. Bis 6.0.17
+wurde deshalb kein Android-13+-Nutzer je gefragt (7.362 Konten). Immer
+`canAskAgain` mitlesen (`pushPermissionStatus.ts`). RNFB `hasPermission` kennt
+auf Android nur 1/0. Und nach `harteBerechtigungAnfragen` NIE einen zweiten Weg
+laufen lassen, der selbst fragt (`pushNotificationService.initialize`) —
+Android zeigt den Dialog sonst sofort erneut, und die zweite Ablehnung ist
+endgültig.
+
+**3. Vor einem Functions-Deploy den DEPLOYTEN Stand vergleichen, nicht nur den
+Working Tree.** Am 17.09. lief die cashback-pipeline auf `e1c2030`
+(Zweitprüfung 86cbfvwge, Branch `claude/quirky-morse-a8d24d`, nicht gemergt).
+Ein Deploy aus `feat/rnfirebase-migration` hätte die Zweitprüfung still aus der
+Produktion entfernt. Prüfung ohne Risiko:
+```bash
+gcloud functions describe processCashback --region=europe-west3 --gen2 --project=markendetektive-895f7 \
+  --format="value(buildConfig.source.storageSource.bucket,buildConfig.source.storageSource.object)"
+# Zip holen (gcloud storage cp), entpacken, index.js + lib/ gegen den Deploy-Stand diffen
+```
+Weicht es ab: aus einem Worktree auf dem deployten Commit + eigener Änderung
+deployen (`.env` hineinkopieren — sie ist nicht im Git) oder erst mergen.
+
 ## Meta-Regel: Support-Sessions — antworten, NICHT selbst fixen
 
 Sessions, in denen der User App-/Support-Anfragen (Kontaktformular,

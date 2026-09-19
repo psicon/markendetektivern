@@ -21,7 +21,11 @@ Firebase Console + Deep-Link-Routing + Image-Support.
 ### 3. Ziel auswählen
 - **App: MarkenDetektive** (de.markendetektive)
 - **Plattform: iOS + Android** (beide)
-- **Audience: alle / Topic / einzelne Token** (siehe `pushTokens`-Collection)
+- **Audience: alle / Topic / einzelne Token** — Einzeltest: „Testnachricht
+  senden" mit dem FCM-Token aus `users/{uid}/fcmTokens/*`, Feld `token`
+  (NICHT die Dokument-ID, NICHT `pushTokens` — dort liegen Expo-Token, die die
+  Console nicht annimmt). Der Store-Build zeigt den Token nirgends an; lesen
+  per Admin-SDK oder Firebase Console.
 
 ### 4. Scheduling
 - Sofort senden ODER für ein Datum schedulen
@@ -45,7 +49,7 @@ Gültige Routes (Whitelist in `lib/services/pushDeepLinks.ts`):
 | `/noname-detail/{produktId}` | NoName-Produkt-Detail |
 | `/product-comparison/{markenProduktId}` | Marken-Produkt-Vergleich |
 | `/external-product/{ean}` | Externe Produkt-Lookup-Page |
-| `/cashback/review/{bonId}` | Bon-Detail |
+| `/cashback/pending/{bonId}` | Bon-Detail (Ziel der Cashback-Push) |
 | `/achievements` | Achievements / Level |
 | `/shopping-list` | Einkaufszettel |
 | `/favorites` | Favoriten |
@@ -53,7 +57,9 @@ Gültige Routes (Whitelist in `lib/services/pushDeepLinks.ts`):
 | `/profile` | Profil |
 | `/notification-settings` | Notification-Einstellungen |
 
-→ Wenn `deepLink` fehlt oder ungültig: User landet auf der Home-Tab.
+→ Wenn `deepLink` fehlt oder ungültig: der Tap öffnet nur die App (kein
+  Sprung; beim Kaltstart also die Startseite). Bis 17.09.2026 ersetzte die App
+  in diesem Fall den aktuellen Bildschirm per `replace` durch die Tabs.
 
 ### 6. Senden + Audit
 Klick auf **Veröffentlichen** → FCM sendet an alle Tokens. Status sichtbar
@@ -62,45 +68,62 @@ in Firebase Analytics.
 
 ---
 
-## Was technisch passiert (Quick-Reference)
+## Was technisch passiert (Quick-Reference, Stand 17.09.2026)
 
 ```
-Firebase Console
+Firebase Console / cashback-pipeline (sendCashbackReady)
     │
-    │ FCM-Send mit { notification, data: { deepLink } }
+    │ FCM-Send mit { notification, data: { deepLink, pushId } }
+    │ Android: channelId 'cashback' (legt die App beim Start an)
     ▼
-Device (iOS/Android)
+Gerät — Tap auf die Nachricht
     │
-    │ App im Foreground → Notification erscheint, kein automatisches Routing
-    │ App im Background/Closed → Banner; Tap öffnet App
+    │ RNFB: onNotificationOpenedApp (Hintergrund) / getInitialNotification (Kaltstart)
+    │ Android zusätzlich: expo-notifications meldet denselben Tap
     ▼
-expo-notifications.addNotificationResponseReceivedListener
+lib/services/fcmDeepLinks.ts → navigateToDeepLink (pushDeepLinks.ts)
     │
-    │ pushNotificationService.handleNotificationResponse(response)
+    │ Whitelist-Check; derselbe Pfad binnen 5 s nur einmal (Doppelmeldung)
+    │ vor der ersten echten Route: nur vormerken — app/index.tsx ersetzt
+    │ sonst per replace('/(tabs)') das Ziel wieder
     ▼
-extractDeepLink(data) → resolveDeepLink(path)
-    │
-    │ Whitelist-Check, dann router.push(path)
-    ▼
-expo-router navigiert zur Detail-Page
+router.push(path), sobald Route + Nutzer stehen (PushNotificationProvider)
 ```
 
-Cold-Start (App war vorher zu): `Notifications.getLastNotificationResponseAsync()`
-wird beim Provider-Mount geholt und nach 500 ms (Router-Ready-Wait)
-ausgeführt — siehe `PushNotificationProvider.useEffect`.
+Den Server-Link erzeugt `cashback-pipeline/lib/pushLinks.js`; der Vertrag
+mit dem App-Resolver ist per Test festgenagelt
+(`lib/services/__tests__/pushDeepLinkVertrag.test.ts`).
+
+Testen im Debug-Client: Der Entwickler-Client startet sich nach einem
+Nachrichten-Tap mit seiner eigenen Adresse neu und verwirft dabei die
+Nachrichtendaten — der Kaltstart-Weg lässt sich dort nur simulieren
+(App-Prozess beenden, dann `am start … --es google.message_id '<id aus
+shared_prefs/io.invertase.firebase.xml>'`). „Beenden erzwingen" ist kein
+Kaltstart-Test: Android stellt gestoppten Apps keine Nachrichten zu.
 
 ---
 
-## Token-Verwaltung
+## Token-Verwaltung (Stand 17.09.2026)
 
-Tokens werden bei jedem Login pro UID in zwei Collections gespeichert:
+**Maßgeblich ist der FCM-Token** in `users/{uid}/fcmTokens/{id}`
+(`token`, `platform`, `addedAt`, `lastSeenAt`) — den liest der Server
+(`cashback-pipeline/lib/push.js`) und den nimmt die Firebase Console an.
+Geschrieben von `lib/services/fcmTokenService.ts`, und zwar NUR mit
+Erlaubnis: beim Start (wenn schon erteilt), nach Zustimmung im erklärenden
+Sheet oder auf der Einstellungsseite, und beim Wechsel auf „erlaubt" nach der
+Rückkehr aus den Systemeinstellungen. Warum ein Konto keinen Token hat, steht
+in `users/{uid}.fcmStatus`.
 
-- `users/{uid}.pushToken` — single-token-shape `{ token, platform, deviceName, lastUpdated }`
-- `pushTokens/{token}` — globale Token-Liste für Admin-Broadcasts, mit `active: bool`
+Android 13+: expo-notifications meldet „nie gefragt" als `denied`. Die App
+wertet das über `canAskAgain` als „offen" (`pushPermissionStatus.ts`) — bis
+6.0.17 fehlte das, und kein Android-13+-Nutzer wurde je gefragt.
 
-Beim Disable-Toggle in `/notification-settings` wird `active: false` gesetzt.
-Bei `INVALID_TOKEN`-Errors von FCM sollten wir auch `active: false`
-setzen (TODO Phase 2).
+Nebenbei (nur Expo-Weg, vom Server nicht gelesen):
+- `users/{uid}.pushToken` — `{ token, platform, deviceName, lastUpdated }`
+- `pushTokens/{token}` — Expo-Token mit `active: bool`
+
+Ungültige FCM-Token entfernt der Server beim nächsten Versand
+(`pruneInvalidTokens`).
 
 ---
 

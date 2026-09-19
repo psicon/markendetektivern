@@ -92,6 +92,20 @@ describe('darfFragen — die Frage muss VOR dem Verhalten kommen', () => {
   });
 });
 
+describe('darfFragen — wer abbestellt hat, wird nicht gefragt (17.09.2026)', () => {
+  test('Abbestellung schlägt jedes Interesse', () => {
+    expect(darfFragen(lage({ abbestellt: true }), stand({ sitzungen: 5, handlung: true }))).toEqual({
+      fragen: false,
+      grund: 'nutzer_hat_abbestellt',
+    });
+  });
+
+  test('ohne Angabe wird wie bisher gefragt', () => {
+    expect(darfFragen(lage(), stand({ sitzungen: 2 }))).toEqual({ fragen: true });
+    expect(darfFragen(lage({ abbestellt: false }), stand({ sitzungen: 2 }))).toEqual({ fragen: true });
+  });
+});
+
 describe('darfFragen — „Später" kostet nichts, drängeln schon', () => {
   test('kurz nach dem letzten Anlauf wird nicht erneut gefragt', () => {
     const r = darfFragen(

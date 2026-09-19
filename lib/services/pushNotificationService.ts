@@ -174,6 +174,15 @@ class PushNotificationService {
    * Notification Listener einrichten
    */
   private setupListeners(): void {
+    // Vorhandene Hörer zuerst entfernen: jedes Einschalten in den
+    // Einstellungen ruft `initialize` erneut auf, und ohne das hingen danach
+    // mehrere Tap-Hörer — ein Tap öffnete sein Ziel dann mehrfach.
+    try {
+      this.notificationListener?.remove?.();
+      this.responseListener?.remove?.();
+    } catch {
+      /* Aufräumen darf das Einrichten nicht verhindern */
+    }
     // Notification erhalten (App im Vordergrund)
     this.notificationListener = Notifications.addNotificationReceivedListener(notification => {
       console.log('📬 Notification erhalten:', notification);
@@ -195,11 +204,17 @@ class PushNotificationService {
    * Custom Data" ODER aus CF mit `data.deepLink`):
    *   { deepLink: '/noname-detail/abc123' }
    *
-   * Whitelist + Fallback laut pushDeepLinks.ts. Wenn kein deepLink
-   * gesetzt ist, landet der User auf der Home-Tab.
+   * Whitelist laut pushDeepLinks.ts. Ohne gültigen deepLink passiert nichts
+   * weiter — der Tap öffnet nur die App. Gilt nur noch für LOKALE
+   * Nachrichten; FCM-Taps routet fcmDeepLinks.ts.
    */
   private handleNotificationResponse(response: Notifications.NotificationResponse): void {
     try {
+      // Remote-Nachrichten (FCM) routet lib/services/fcmDeepLinks.ts. expo
+      // meldet denselben Tap zusätzlich — unter iOS ohne Daten (dann ersetzte
+      // der alte Default-`replace` die gerade geöffnete Bon-Seite), unter
+      // Android als Doppel. Hier also nur noch lokale Nachrichten.
+      if ((response.notification.request.trigger as { type?: string } | null)?.type === 'push') return;
       const data = response.notification.request.content.data;
       const deepLink = extractDeepLink(data);
       console.log('[push-tap] deepLink=', deepLink, 'data=', data);
@@ -223,8 +238,40 @@ class PushNotificationService {
       if (!last) return;
       console.log('[push-tap] cold-start response found');
       this.handleNotificationResponse(last);
+      // expo hält die Antwort für die ganze Prozesslaufzeit. Ohne Leeren
+      // öffnete ein Neuaufbau der Wurzel (Android: Activity weg, Prozess lebt)
+      // das alte Ziel erneut.
+      await Notifications.clearLastNotificationResponseAsync();
     } catch (e: any) {
       console.warn('[push-tap] cold-start handler failed:', e?.message);
+    }
+  }
+
+  /**
+   * Android-Benachrichtigungskanäle anlegen, die der Server benutzt.
+   *
+   * `sendCashbackReady` (cashback-pipeline/lib/push.js) schickt Android-
+   * Nachrichten mit `channelId: 'cashback'`. Angelegt hat diesen Kanal bis
+   * 17.09.2026 niemand — Android stellte die Nachrichten deshalb in den
+   * Ersatzkanal des FCM-SDK („Sonstiges"), den Nutzer nicht zuordnen können.
+   *
+   * Das Anlegen fragt NICHT nach der Berechtigung (targetSdk ≥ 33) und ist
+   * idempotent; Android übernimmt Wichtigkeit und Ton nur beim ersten Mal,
+   * danach gehören sie dem Nutzer.
+   */
+  async androidKanaeleAnlegen(): Promise<void> {
+    if (Platform.OS !== 'android') return;
+    try {
+      await Notifications.setNotificationChannelAsync('cashback', {
+        name: 'Cashback & Bons',
+        description: 'Wenn dein Cashback gutgeschrieben ist',
+        importance: Notifications.AndroidImportance.HIGH,
+        sound: 'default',
+        vibrationPattern: [0, 250, 250, 250],
+      });
+    } catch (e: any) {
+      // Ohne Kanal kommt die Nachricht trotzdem an (Ersatzkanal).
+      console.warn('[push] Android-Kanal anlegen fehlgeschlagen:', e?.message);
     }
   }
 
