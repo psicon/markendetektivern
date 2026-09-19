@@ -2893,6 +2893,33 @@ Dinge, die man dabei wissen muss:
   Texterkennung (`ocr`-Feld löschen + republish) oder eine Entscheidung in der
   Prüfkonsole.
 
+**Warteschlange auflösen: über den RESOLVER, nicht über erneutes Zustellen
+(19.09.2026).** Am selben Tag beide Wege gefahren und verglichen:
+- Erneutes Zustellen (`processCashback`) wendet das Feld-Gate an, setzt aber
+  KEIN `backfilled` → der Schutz gegen nachträgliches Abhaken greift nicht.
+- Der Resolver (`resolveCashbackReview`, auch der Weg der Prüfkonsole) rechnet
+  die Deckel neu, bucht, schreibt die Positionen MIT `backfilled: true`
+  (Stichprobe 19.09.: 104 von 104) und pusht. Damit bleibt ein heutiger
+  Einkaufszettel unberührt.
+Vorgehen, das sich bewährt hat: `.pruefe-bons-*.js` (unabhängige Zweitlesung,
+schreibt nichts) → Auffälligkeiten selbst ansehen → `.review-approve-*.js`
+(Duplikat- und Tageslimit-Logik wie die Pipeline, Freigabe über den Resolver,
+`SKIP_IDS` für von Hand zurückgestellte Fälle). Ergebnis 19.09.: 35 Freigaben,
+294 ct, 0 Doppelbuchungen, 0 Freigaben ohne Buchung, Warteschlange von 37 auf 2.
+
+**Zwei Fallen in der Zweitlesung selbst** (beide am 19.09. aufgetreten):
+- „manipuliert" trifft sonst jeden eBon und jedes Bildschirmfoto. Die Frage muss
+  ausdrücklich sagen: ein digitaler Bon oder ein sauberer Screenshot IST ein
+  Kassenbon, Manipulation heißt sichtbare Bearbeitungsspuren. Vorher: 4 von 37
+  falsch markiert, danach 0.
+- „datum_widerspricht" entsteht fast immer durch die Jahres-Fehllesung der
+  ZWEITLESUNG (2020/2024/2028 statt 2026) — Tag und Monat stimmen. Erst
+  vergleichen, ob nur das Jahr abweicht; die Pipeline korrigiert genau das
+  (`plausibilizeBonDate`).
+- Das alte `.pruefe-bons.js` misst das Bon-Alter gegen HEUTE. Für lange
+  gehaltene Bons ist das falsch — die Pipeline misst gegen den UPLOAD. In der
+  Kopie vom 19.09. korrigiert.
+
 **Beim erneuten Zustellen greift der Schutz gegen nachträgliches Abhaken NICHT
 (19.09.2026).** Die Regel vom 02.09. („nachgezogene Bon-Positionen dürfen keinen
 heutigen Einkaufszettel abhaken") hängt an `purchased_products.backfilled ===
