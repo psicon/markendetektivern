@@ -3003,6 +3003,75 @@ urteilen über denselben Fall verschieden. Beim nächsten Konsolen-Umbau nachzie
 Vor jedem Deploy aus einem Worktree `cloud-functions/<codebase>/.env` aus dem
 Haupt-Checkout kopieren und per `cmp` prüfen.
 
+## Produktfoto-Runde 20.09.2026 — vier Regeln, die je eine Runde gekostet hätten
+
+**Ein Ops-Skript im Worktree lädt die Regel AUS DEMSELBEN Worktree.**
+`.crowd-review-*.js` holt die Doppel-Regel über `path.join(__dirname, '..',
+'review-console', 'src', 'duplicatePolicy.js')` — das löst auf die Worktree-Kopie
+auf, nicht auf den Haupt-Checkout. Am 20.09. hatte Patrick die Regel um 13:22
+geändert (`ffda2c3`: fremde Einreichungen sperren niemanden mehr, gegen den
+eigenen Account nur noch 24 h statt 30 Tage). Der Worktree trug die Fassung vom
+14.09. — der fertig geprüfte Lauf hätte **8 von 14 Ablehnungen** gegen eine
+Entscheidung geschrieben, die wenige Stunden alt war, und eine Ablehnung ist
+terminal. **Vor jeder Entscheidungsrunde prüfen, ob die geladene Regeldatei dem
+Haupt-Checkout entspricht** (`git log -1 -- cloud-functions/review-console/src/
+duplicatePolicy.js` dort gegen den Worktree, oder schlicht `git cherry-pick`).
+Gefunden hat das nur die adversarielle Prüfrunde, nicht der Lauf selbst.
+
+**Die Ablehntexte der Ops-Skripte erreichen die Nutzer NICHT.** `noteFor()`
+schreibt nach `reviewNote` — und `lib/utils/productSubmissionCopy.ts` sagt im
+Kopfkommentar ausdrücklich, dass dieses Feld nie angezeigt wird. Was der Nutzer
+liest, steht in `REASON_COPY`, gekeyt auf den Grund-Code. Gemessen am 20.09.:
+**140 von 447 Ablehnungen (31 %) trugen einen Code ohne Eintrag** (73×
+`unvollstaendig`, 36+26× die beiden Sperr-Gründe, dazu `bild_defekt`) und
+zeigten deshalb den Standardtext „alle Ansichten scharf, EAN und Preis gut
+lesbar" — bei Sperren sachlich falsch, denn deren Fotos waren in Ordnung.
+Regel: **jeder neue Grund-Code braucht im selben Commit einen `REASON_COPY`-
+Eintrag.** Nachgezogen für alle sechs offenen Codes.
+
+**Fail-closed braucht Symmetrie.** Die Doppel-Regel wertet einen fehlenden
+Vergleichswert als „gleich" — wer also keinen Preis hat, wird gesperrt. Wenn
+man fehlende Preise beim KANDIDATEN nachliest, muss die REFERENZ dieselbe
+Chance bekommen, sonst entscheidet, auf welcher Seite die OCR zufällig
+versagte. Am 20.09. hingen 4 von 9 Sperren nur an einer Referenz ohne Preis;
+nach der Nachlesung blieben alle vier gesperrt (1,49/1,79/0,99/1,29 € beidseits
+identisch) — jetzt aber belegt statt angenommen.
+
+**Ein geretteter PREIS darf eine Sperre lösen, ein geretteter HERSTELLER
+nicht.** Beim K-Classic Gouda las die eine Seite „Kaufland Stiftung & Co."
+(Markeninhaber), die andere „DMK Deutsches Milchkontor" (Produzent) — beides
+steht auf derselben Packung. Als „andere Daten" gewertet hätte das eine echte
+Dublette (identischer Preis, gleicher Markt, 10 Tage) freigegeben. Preis vom
+Schild ist eindeutig, eine Firmenangabe ist es nicht.
+
+**Sieben Dateien sind nicht sieben Ansichten — und dieselbe Datei ist nicht
+immer ein Mangel.** Zwei Fälle am selben Tag, beide nur durch den Bild-Audit
+unterscheidbar: (a) ein Petersilienbund mit sieben EIGENEN Aufnahmen derselben
+Vorderansicht (sieben verschiedene md5 → die Bild-Dedup ist blind, die
+Vollständigkeitsregel zählt nur Dateien) — keine der verlangten Angaben ist zu
+sehen, abgelehnt; (b) ein geriebener Gouda, bei dem `zutaten`, `naehrwerte` und
+`hersteller` byteidentisch sind — das eine Rückseitenfoto trägt Zutatenliste,
+Nährwerttabelle UND die Kontaktangabe, der Datensatz ist vollständig,
+freigegeben. Eine Byte-Prüfung entscheidet hier in beide Richtungen falsch.
+
+**Preis- und Hersteller-Rettung (`.crowd-preis-rescue-2009.js`)** — dritter Fall
+der Klasse nach Name (13.09.) und EAN (19.09.). Ursache ist derselbe
+Spar-Reflex, der bei der Bon-OCR schon dokumentiert ist: `crowd-upload-namer`
+liest Name, Preis und Hersteller in EINEM Aufruf mit
+`thinkingConfig: { thinkingBudget: 0 }` und 512 Token. Von 102 offenen
+Einreichungen fehlten 4 Namen, 23 Preise, 16 Herstellerangaben; mit Denken
+nachgelesen kamen 4 Namen, 8 Preise und 16 Herstellerangaben dazu. Gegenprobe
+zur Erwartung: bei **18 der 32 Fälle war schlicht kein Preis im Bild** — das
+„Preis"-Foto zeigt zu 40 % nochmal das Produkt (deckt sich mit der Messung des
+Namers vom 06.09.). Grenzen wie bei der EAN-Rettung: zwei übereinstimmende
+Lesungen, eigenes Feld (`priceRescueOcr`/`manufacturerRescueOcr`), nie in
+`priceOcr`/`manufacturerOcr`.
+
+**Ergebnis der Runde:** 102 offen → 96 freigegeben (1316 ct, alle gebucht),
+6 abgelehnt (1 Barcode-Foto zeigt den Boden, 3 lose Ware ohne Produkt-Barcode,
+1 siebenmal dieselbe Ansicht, 1 Eigen-Doppel binnen einer Minute), 0 ohne
+Buchung, 0 ohne Grund am Dokument, Warteschlange leer.
+
 ## Bons nachverarbeiten / Review auflösen — Regeln (Money-Ops 02.09.2026)
 
 Am 02.09. wurden 163 Review-Bons (seit Juli gehalten, „meistens innerhalb eines

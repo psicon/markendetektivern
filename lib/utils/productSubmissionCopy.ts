@@ -56,6 +56,38 @@ const REASON_COPY: Record<string, { headline: string; body: string }> = {
     headline: 'Ein Foto passte nicht zum Schritt',
     body: 'Zum Beispiel das Regal statt des Preisschilds. Beim nächsten Mal einfach auf die Vorgabe im jeweiligen Schritt achten.',
   },
+  // 20.09.2026: Diese sechs Codes wurden längst vergeben, hatten hier aber
+  // keinen Eintrag — 140 von 447 abgelehnten Einreichungen zeigten deshalb den
+  // Standardtext („alle Ansichten scharf, EAN und Preis gut lesbar"), der zu
+  // ihrem Fall gar nicht passte. Wer eine Rückmeldung bekommt, soll lesen, was
+  // wirklich war.
+  unvollstaendig: {
+    headline: 'Ein paar Ansichten fehlten',
+    body: 'Mit allen sieben Schritten — Vorderseite, Rückseite, Zutaten, Nährwerte, Hersteller, Barcode und Preis — zählt der Datensatz sofort.',
+  },
+  sperre_30_tage_gleicher_nutzer: {
+    headline: 'Dieses Produkt liegt uns von dir schon vor',
+    body: 'Die erste Einreichung zählt. Ab dem nächsten Tag zählt derselbe Artikel wieder — und sofort, wenn sich Preis, Hersteller oder Markt geändert haben.',
+  },
+  // Altbestand: bis zum 20.09.2026 sperrte auch die Einreichung eines ANDEREN
+  // Nutzers. Das gilt nicht mehr; der Text sagt das, statt eine Frist zu nennen,
+  // die es nicht mehr gibt.
+  sperre_30_tage_anderer_nutzer: {
+    headline: 'Dieses Produkt war damals schon frisch erfasst',
+    body: 'Das bremst dich nicht mehr: Inzwischen zählen deine Einreichungen auch dann, wenn jemand anderes dasselbe Produkt schon fotografiert hat.',
+  },
+  ean_fehlt_lose_ware: {
+    headline: 'Lose Ware hat keinen Produkt-Barcode',
+    body: 'Kräuterbunde und Frischetheken-Artikel tragen nur händlerinterne Waage-Etiketten. Mit verpackten Artikeln mit Barcode zählt deine Einreichung sofort.',
+  },
+  gleiche_ansicht_mehrfach: {
+    headline: 'Alle Fotos zeigten dieselbe Ansicht',
+    body: 'Wir brauchen die sieben Schritte einzeln — Vorderseite, Rückseite, Zutaten, Nährwerte, Hersteller, Barcode und Preis. Bei Ware ohne diese Angaben klappt es mit verpackten Artikeln am besten.',
+  },
+  bild_defekt: {
+    headline: 'Ein Foto ist beschädigt angekommen',
+    body: 'Das lag an der Übertragung, nicht an dir. Beim nächsten Mal mit stabiler Verbindung hochladen — dann zählt der Datensatz.',
+  },
 };
 
 const DEFAULT_HELD = {
