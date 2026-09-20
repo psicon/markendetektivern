@@ -56,6 +56,7 @@ Gültige Routes (Whitelist in `lib/services/pushDeepLinks.ts`):
 | `/history` | Historie |
 | `/profile` | Profil |
 | `/notification-settings` | Notification-Einstellungen |
+| `/product-submit` | Liste der eigenen Produkt-Einreichungen (Ziel der Vergütungs-Nachricht) |
 
 → Wenn `deepLink` fehlt oder ungültig: der Tap öffnet nur die App (kein
   Sprung; beim Kaltstart also die Startseite). Bis 17.09.2026 ersetzte die App
@@ -93,6 +94,15 @@ router.push(path), sobald Route + Nutzer stehen (PushNotificationProvider)
 Den Server-Link erzeugt `cashback-pipeline/lib/pushLinks.js`; der Vertrag
 mit dem App-Resolver ist per Test festgenagelt
 (`lib/services/__tests__/pushDeepLinkVertrag.test.ts`).
+
+**Zweiter automatischer Sendeweg seit 20.09.2026 (12487v2akvp):**
+`crowd-upload-reward/src/push.js` schickt eine Nachricht, sobald eine
+Produktfoto-Einreichung freigegeben **und das Geld gebucht** ist — und nur
+dann. Eine Ablehnung bleibt bewusst leise (ihr Grund steht in der Liste der
+Einreichungen). Ziel `/product-submit`, `kind: 'crowd_reward'`, Merker
+`rewardPushSentAt` am Upload-Dokument gegen doppelte Zustellung. Das Modul
+ist eine KOPIE des Bon-Senders: bei Änderungen an Tokenlesung, Abbestellung
+oder Payload beide nachziehen.
 
 Testen im Debug-Client: Der Entwickler-Client startet sich nach einem
 Nachrichten-Tap mit seiner eigenen Adresse neu und verwirft dabei die

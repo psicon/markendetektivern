@@ -62,6 +62,11 @@ const ALLOWED_ROOTS = new Set([
   // Stand in der Anleitung (PUSH_NOTIFICATIONS_GUIDE.md) schon als Ziel,
   // fehlte aber hier — ein solcher Link landete still auf der Startseite.
   '/notification-settings',
+  // Ziel der Vergütungs-Nachricht für Produktfotos (12487v2akvp). Der Server
+  // schickt diesen Pfad, sobald crowd-upload-reward deployt ist — ältere
+  // App-Versionen kennen ihn nicht und öffnen dann nur die App, ohne zu
+  // springen (kein Fehler, nur kein Sprung).
+  '/product-submit',
 ]);
 
 /**
