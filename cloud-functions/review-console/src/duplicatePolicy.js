@@ -4,11 +4,22 @@
  * Doppel-Regel für Produkt-Einreichungen (Produktentscheidung 05.09.2026).
  *
  * Ein Produkt = EAN. Referenz („prior") ist die jüngste FREIGEGEBENE Einreichung
- * desselben Produkts. Innerhalb von 30 Tagen nach dieser Referenz wird eine
- * neue Einreichung nur freigegeben, wenn sie ANDERE Daten liefert (Preis,
- * Hersteller oder Markt) — egal ob vom selben oder einem anderen Nutzer.
- * Sonst: Sperre (Grund je nach Nutzer). Liegt die Referenz noch in `pending`,
- * wird gehalten, bis die ältere entschieden ist.
+ * desselben Produkts.
+ *
+ * GRÜNDERENTSCHEIDUNG 20.09.2026 — die Sperre gilt NUR NOCH GEGEN SICH SELBST:
+ * Was ein ANDERER Nutzer eingereicht hat, sperrt niemanden mehr. Wer im Laden
+ * steht und fotografiert, kann nicht wissen, ob jemand anderes dasselbe Produkt
+ * schon erfasst hat — die Ablehnung traf also immer die Falschen und hat aktive
+ * Nutzer gekostet. Ziel ist mehr Scannen und mehr Fotografieren.
+ *
+ * Gegen den SELBEN Nutzer greift die Sperre weiterhin, aber nur für
+ * versehentliche Doppel kurz hintereinander (SAME_USER_LOCK_MS, 24 h) — und
+ * auch dann nur, wenn die Einreichung KEINE anderen Daten liefert (Preis,
+ * Hersteller oder Markt). Eine echte neue Erfassung Wochen später zählt wieder.
+ *
+ * Liegt eine ÄLTERE eigene Einreichung noch in `pending`, wird gehalten, bis
+ * sie entschieden ist (sonst zahlt ein Doppel zweimal). Fremde Pendings halten
+ * nichts mehr auf.
  *
  * Reine Funktionen, keine Firestore-Abhängigkeit — der Aufrufer liefert die
  * Kandidaten. Die Bewertung nutzt den EINREICH-Zeitpunkt (createdAt), nicht
@@ -21,6 +32,9 @@
 
 const LOCK_DAYS = 30;
 const LOCK_MS = LOCK_DAYS * 24 * 60 * 60 * 1000;
+// Fenster für versehentliche Doppel desselben Nutzers (z. B. zweimal auf
+// „Senden" getippt). Alles darüber ist neue Arbeit und wird vergütet.
+const SAME_USER_LOCK_MS = 24 * 60 * 60 * 1000;
 
 const REASON = Object.freeze({
   SAME_USER: 'sperre_30_tage_gleicher_nutzer',
@@ -128,7 +142,7 @@ function evaluateDuplicate(candidate, others) {
 
   // Ältere, noch offene Einreichung desselben Produkts → erst die entscheiden.
   const pendingOlder = list
-    .filter((o) => o.status === 'pending' && (ms(o.createdAt) ?? Infinity) < cAt)
+    .filter((o) => o.status === 'pending' && o.userId === candidate.userId && (ms(o.createdAt) ?? Infinity) < cAt)
     .sort((a, b) => (ms(a.createdAt) ?? 0) - (ms(b.createdAt) ?? 0));
   if (pendingOlder.length) {
     const p = pendingOlder[0];
@@ -136,8 +150,14 @@ function evaluateDuplicate(candidate, others) {
   }
 
   // Alle Freigaben im 30-Tage-Fenster um den Kandidaten herum, jüngste zuerst.
+  // NUR EIGENE Freigaben sperren, und nur binnen 24 h (versehentliche Doppel).
   const inWindow = list
-    .filter((o) => o.status === 'approved' && Math.abs((ms(o.createdAt) ?? 0) - cAt) < LOCK_MS)
+    .filter(
+      (o) =>
+        o.status === 'approved'
+        && o.userId === candidate.userId
+        && Math.abs((ms(o.createdAt) ?? 0) - cAt) < SAME_USER_LOCK_MS,
+    )
     .sort((a, b) => (ms(b.createdAt) ?? 0) - (ms(a.createdAt) ?? 0));
   if (!inWindow.length) {
     // Referenz außerhalb des Fensters nur zur Information (priorId), nie sperrend.
@@ -158,14 +178,16 @@ function evaluateDuplicate(candidate, others) {
   const blocking = inWindow.find((p) => !dataDiffers(candidate, p).any);
   const ref = blocking || inWindow[0];
   const pAt = ms(ref.createdAt) ?? 0;
-  const lockUntil = pAt + LOCK_MS;
+  const lockUntil = pAt + SAME_USER_LOCK_MS;
   const sameUser = ref.userId === candidate.userId;
   const diff = dataDiffers(candidate, ref);
   const updatedFields = ['price', 'manufacturer', 'market'].filter((k) => diff[k]);
   const base = { priorId: ref.id, priorUserId: ref.userId ?? null, sameUser, lockUntil, diff: diff.details };
 
   if (!blocking) return { verdict: 'ok', reason: null, updatedFields, ...base };
-  return { verdict: 'locked', reason: sameUser ? REASON.SAME_USER : REASON.OTHER_USER, updatedFields: [], ...base };
+  // `sameUser` ist hier immer true (das Fenster filtert fremde Einreichungen
+  // heraus). REASON.OTHER_USER bleibt nur für Altbestand im Export erhalten.
+  return { verdict: 'locked', reason: REASON.SAME_USER, updatedFields: [], ...base };
 }
 
 /** Vollständigkeits-Vorprüfung (dieselben Regeln wie die manuellen Freigabe-Runden 08/2026). */
@@ -180,4 +202,4 @@ function completenessCheck(u, requiredSteps) {
   return { ok: problems.length === 0, problems, missing };
 }
 
-module.exports = { LOCK_DAYS, LOCK_MS, REASON, evaluateDuplicate, dataDiffers, manufacturerEqual, completenessCheck, normText, ms };
+module.exports = { LOCK_DAYS, LOCK_MS, SAME_USER_LOCK_MS, REASON, evaluateDuplicate, dataDiffers, manufacturerEqual, completenessCheck, normText, ms };
