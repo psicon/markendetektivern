@@ -3785,3 +3785,38 @@ die Reste stören den EAS-Upload also nicht.
 
 **`shrinkResources` bleibt AUS.** Zweite, unabhängige Fehlerquelle (Ressourcen, die nur per
 `getIdentifier()` angesprochen werden). Wenn das mal kommt, dann als eigener Release.
+
+### Reflexion unter R8: der eine Test, der entscheidet (Nachtrag 20.09.2026)
+
+**R8 schreibt Reflexions-Zeichenketten MIT UM, wenn der Klassenbezug statisch im
+Code steht.** `ReactActivityDelegate::class.java.getDeclaredField("mReactDelegate")`
+funktioniert deshalb weiter — R8 benennt das Feld um *und* ersetzt das Literal;
+im DEX von Build 1242 kommt „mReactDelegate" 0-mal vor. **Nicht** umschreiben kann
+R8, wenn die Klasse erst zur Laufzeit feststeht: `fragment.getClass().getMethod(…)`,
+`classLoader.loadClass("…")`. Dort bleibt das Literal stehen, das Ziel wird
+umbenannt, der Zugriff scheitert — und praktisch immer lautlos, weil solche Stellen
+ihre Ausnahme abfangen.
+
+**Der Test dauert zwei Befehle und beendet jede Diskussion:**
+```bash
+strings classes*.dex | grep -F "<literal>"     # Literal noch da?
+grep "<name>" mapping.txt                       # Ziel umbenannt?
+```
+Beides ja = echter Bruch. Literal weg = R8 hat es mitgezogen, nichts zu tun.
+**Nie eine Keep-Regel aus einer Quelltext-Fundstelle allein ableiten** — das
+produzierte in dieser Runde einen Fehlalarm („Startabsturz auf jedem Gerät"), der
+sich am installierten Release-Build in 30 Sekunden widerlegen ließ.
+
+**Gefunden hat dieser Test drei echte Fälle** (alle in `proguard-rules.pro` 6c/5):
+`ScreenFragment.getScreen()` (Reanimated → Tab-Übergänge tot),
+`FirebaseRemoteConfig` (Analytics löscht den Rollout-Zustand),
+`Screen.getActivityState()` (überlebte nur zufällig).
+
+**Nicht verwechseln:** Der `NoSuchFieldException: No field mIsFinished` im logcat
+kommt **nicht** von R8 — RN 0.79.7 hat `MessageQueueThreadImpl` auf Kotlin
+umgestellt, das Feld heißt dort `isFinished`. Reanimated sucht den alten Java-Namen,
+der Fehler steht auch in 6.0.18 im Log. Keine Keep-Regel dafür bauen, sie träfe ins Leere.
+
+**Abnahme eines R8-Releases gehört auf ein echtes Gerät**, nicht in den Debug-Build:
+AAB → `bundletool build-apks --mode=universal` → `adb install` → starten, durchklicken,
+`logcat` auf `FATAL` und `[Reanimated]` prüfen. Nur dort zeigen sich Verschleierungsfehler.
