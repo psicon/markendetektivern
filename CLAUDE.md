@@ -238,6 +238,35 @@ Architekturfragen, Geld-Läufe). Dann gilt:
 Gegenprobe vor dem Absenden: Wenn die Antwort über ~10 Zeilen geht und oben
 kein TLDR steht, ist sie nicht fertig.
 
+## Meta-Regel: KURZ und in normaler Sprache (User-Vorgabe 20.09.2026)
+
+User-Wortlaut: „Ich habe nicht die Zeit, die ganze Scheiße immer zu lesen und
+mit deiner geschwurbelten Argumentation und Verbalität hier umzugehen. Halt das
+kurz." Das ist die VIERTE Ansage zum selben Punkt (vorher: Rolle of Text, TLDR-
+Regel 11.09.). Die TLDR-Regel darunter bleibt gültig, reicht aber offensichtlich
+nicht — sie hat lange Antworten nur besser sortiert statt kürzer gemacht.
+
+Ab jetzt gilt beim Antworten:
+
+1. **Standard sind 5–10 Zeilen.** Länger nur, wenn Patrick ausdrücklich Details
+   will oder eine Zahl ohne Kontext falsch verstanden würde. Im Zweifel kurz und
+   nachfragen, ob mehr gewünscht ist.
+2. **Keine internen Namen ohne Erklärung.** „Namer", „Prüfkonsole",
+   „Doppel-Regel", „Worktree", „fail-closed", „Präfix 02/2x" — das sind MEINE
+   Wörter, nicht seine. Entweder in einem Halbsatz erklären („der Dienst, der
+   aus den Fotos den Produktnamen liest") oder weglassen.
+3. **Erst das Ergebnis, dann die Folge, dann — nur wenn nötig — der Weg.**
+   Nicht die Beweisführung nacherzählen. Was ich geprüft habe, interessiert nur,
+   wenn das Ergebnis strittig ist.
+4. **Keine Tabellen für drei Zahlen.** Ein Satz reicht.
+5. **Bei ClickUp-Tasks:** im Chat EIN Satz je Task, in normaler Sprache, was
+   kaputt ist und was es ihn kostet. Die Details stehen im Task — dafür ist er da.
+6. **Gegenprobe vor dem Absenden:** Würde jemand ohne diesen Sitzungs-Kontext
+   die Antwort in 30 Sekunden verstehen? Wenn nein, kürzen.
+
+Das gilt auch für Zwischenmeldungen während der Arbeit, nicht nur für den
+Abschlussbericht.
+
 ## Meta-Regel: User-Wortlaut zweimal lesen, nicht "vereinfachen"
 
 "Selbes Aussehen, aber X" = alles bleibt, ändere NUR X. Keine
