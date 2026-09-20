@@ -15,6 +15,25 @@
 # proguard.txt im AAR selbst mit, und AGP speist sie ueber
 # FILTERED_PROGUARD_RULES in den R8-Lauf ein.
 #
+# DIE ENTSCHEIDENDE UNTERSCHEIDUNG (am Artefakt von Build 1242 gemessen):
+# R8 schreibt Reflexions-ZEICHENKETTEN MIT UM, wenn es den Bezug statisch
+# aufloesen kann. Beispiel expo (ReactActivityDelegateWrapper.kt:181):
+#     ReactActivityDelegate::class.java.getDeclaredField("mReactDelegate")
+# Die Klasse steht als Literal im Code, R8 kennt also das gemeinte Feld,
+# benennt es in "e" um UND ersetzt die Zeichenkette gleich mit. Im DEX von
+# 1242 kommt "mReactDelegate" 0-mal vor - der Zugriff funktioniert. Eine
+# Keep-Regel waere hier reine Verschwendung.
+# NICHT umschreiben kann R8, wenn die Klasse erst zur LAUFZEIT feststeht:
+#     fragment.getClass().getMethod("getScreen")          (reanimated)
+#     messageQueueThread.getClass().getDeclaredField(...)  (worklets)
+#     classLoader.loadClass("com.google.firebase...")      (Analytics/scion)
+# Dann bleibt das Literal stehen, das Ziel wird umbenannt, und der Zugriff
+# scheitert - lautlos, weil alle drei Stellen die Ausnahme abfangen.
+# PRUEFMUSTER fuer kuenftige Faelle, billig und eindeutig:
+#   Literal noch im DEX?   strings classes*.dex | grep -F "<literal>"
+#   Ziel umbenannt?        grep "<name>" mapping.txt
+# Beides ja = Bruch. Literal weg = R8 hat es mitgezogen, nichts zu tun.
+#
 # ZWEI MECHANISMEN, DIE HIER BEWUSST NICHT NACHGEBAUT WERDEN
 # (beide am 20.09.2026 am echten Artefakt nachgewiesen, nicht angenommen):
 #
@@ -175,10 +194,15 @@
 #     android/app/build/intermediates/merged_manifest/release/*/AndroidManifest.xml
 # Stand 20.09.2026 liefert das vier Werte. Drei davon sind nachweislich
 # fremdgedeckt: Camera2Config$DefaultProvider (camera-camera2-1.4.1.aar/
-# proguard.txt haelt ihn woertlich), CredentialProviderPlayServicesImpl
-# (credentials-play-services-auth/proguard.txt: -keep class
-# androidx.credentials.playservices.**) und ComponentRegistrar (Abschnitt
+# proguard.txt haelt ihn woertlich) und ComponentRegistrar (Abschnitt
 # "bewusst nicht enthalten"). Der vierte ist dieser hier.
+# KORREKTUR zu CredentialProviderPlayServicesImpl: dessen Regel in
+# credentials-play-services-auth steht unter der Bedingung
+# "-if class androidx.credentials.CredentialManager" und greift deshalb NICHT -
+# R8 hat die Klasse in 1242 samt CredentialManager entfernt. Das ist in Ordnung,
+# weil kein Pfad dieser App sie erreicht (@react-native-google-signin nutzt sie
+# hier nicht), und deshalb steht hier bewusst KEINE Regel. Nicht "reparieren",
+# ohne vorher einen echten Aufrufer zu belegen.
 -keep class expo.modules.adapters.react.apploader.RNHeadlessAppLoader {
     public <init>(android.content.Context);
 }
@@ -246,7 +270,11 @@
     !static !transient <fields>;
     !private <methods>;
 }
--keepclassmembernames class expo.modules.notifications.notifications.triggers.** {
+# -keepclassmembers (nicht -keepclassmembernames): Letzteres verbietet nur das
+# Umbenennen, NICHT das Entfernen - R8 hat in 1242 genau diese Member entfernt,
+# womit die Regel ihr eigenes Versprechen (stabile serialVersionUID) nicht
+# eingeloest haette.
+-keepclassmembers class expo.modules.notifications.notifications.triggers.** {
     !static !transient <fields>;
     !private <methods>;
 }
@@ -303,6 +331,23 @@
 # die Konstantennamen muessen also erhalten bleiben. Zwei winzige Klassen.
 -keep class com.google.firebase.analytics.FirebaseAnalytics$ConsentStatus { *; }
 -keep class com.google.firebase.analytics.FirebaseAnalytics$ConsentType { *; }
+
+# Gleiche Klasse von Defekt, zweite Stelle: Firebase Analytics (scion) prueft
+# ueber den NAMEN, ob Remote Config in der App steckt -
+#   ClassLoader.loadClass("com.google.firebase.remoteconfig.FirebaseRemoteConfig")
+# Am Artefakt von 1242 belegt: das Literal steht im DEX, die Klasse wurde zu
+# com.google.firebase.remoteconfig.b umbenannt, und configuration.txt enthaelt
+# ueber ALLE 239 gemergten Consumer-Regeln keine einzige remoteconfig-Zeile.
+# Bis 6.0.18 deckte nur das entfernte "-keep class com.google.firebase.** { *; }"
+# den Namen zufaellig mit ab.
+# Folge ohne die Zeile: scion schliesst bei jedem Durchlauf, Remote Config sei
+# aus der App entfernt worden, und loescht den gespeicherten Zustand der aktiven
+# Feature-Rollouts ("Remote config removed with active feature rollouts").
+# Das blosse Abholen von Parametern laeuft weiter (die RN-Bruecke referenziert
+# die Klasse statisch) - kaputt ist die Verbindung Remote Config <-> Analytics
+# und die Rollout-Zuordnung in Crashlytics. Kein Absturz, kein Log in der App.
+# Die App nutzt Remote Config produktiv: lib/services/remoteConfigService.ts:41-45.
+-keepnames class com.google.firebase.remoteconfig.FirebaseRemoteConfig
 
 
 # -----------------------------------------------------------------------------
@@ -376,6 +421,44 @@
 # diese zwei Namen halten den ausdruecklichen Zweig zusaetzlich am Leben.
 -keepnames class com.facebook.soloader.SoLoaderDSONotFoundError
 -keepnames class com.facebook.soloader.SoLoaderULError
+
+
+# -----------------------------------------------------------------------------
+# 6c) Member, die ueber eine erst zur Laufzeit bekannte Klasse gesucht werden
+# -----------------------------------------------------------------------------
+# Hier greift die Umschreibung aus dem Kopf NICHT, weil die Klasse aus
+# getClass() kommt. Alle drei Faelle sind am Artefakt von Build 1242 belegt:
+# das Literal steht noch im DEX, das Ziel war umbenannt.
+
+# reanimated: TabNavigatorObserver.java:54-56
+#   Class<?> screenFragmentClass = fragment.getClass();
+#   getScreen = screenFragmentClass.getMethod("getScreen");
+#   getActivityState = screen.getClass().getMethod("getActivityState");
+# In 1242 wurde getScreen() zu "g" umbenannt (mapping.txt), das Literal
+# "getScreen" blieb stehen -> NoSuchMethodException. Der catch in Zeile 59-62
+# loggt nur Log.e("[Reanimated]", ...), also KEIN Absturz: addScreenListener
+# wird nie erreicht, die gemeinsamen Element-Uebergaenge und die
+# Layout-Animationen der Tab-Navigation laufen dauerhaft ins Leere.
+# getActivityState() ueberlebte in 1242 zufaellig - wird hier mitgepinnt,
+# damit es nicht vom Glueck abhaengt.
+-keepclassmembers class com.swmansion.rnscreens.ScreenFragment {
+    public com.swmansion.rnscreens.Screen getScreen();
+}
+-keepclassmembers class com.swmansion.rnscreens.Screen {
+    public com.swmansion.rnscreens.Screen$ActivityState getActivityState();
+}
+
+# NICHT HIERHER GEHOERT der NoSuchFieldException auf "mIsFinished", der im
+# logcat eines Release-Builds auftaucht (WorkletsMessageQueueThreadBase.java:54,
+# messageQueueThread.getClass().getDeclaredField("mIsFinished")). Das sieht wie
+# ein R8-Schaden aus, ist aber KEINER: React Native 0.79.7 hat
+# MessageQueueThreadImpl auf Kotlin umgestellt, das Feld heisst dort
+# "isFinished" (MessageQueueThreadImpl.kt:37) - den Namen "mIsFinished" gibt es
+# seitdem gar nicht mehr. Der Fehler tritt also auch ohne Verschleierung auf,
+# reanimated sucht schlicht den alten Java-Namen. Eine Keep-Regel darauf traefe
+# ins Leere (in seeds.txt nachgeprueft: kein Treffer) und wuerde nur vortaeuschen,
+# hier sei etwas geschuetzt. Der catch faengt es ab; betroffen ist allein das
+# Herunterfahren. Upstream-Thema, nicht unseres.
 
 
 # -----------------------------------------------------------------------------
