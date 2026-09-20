@@ -3727,3 +3727,61 @@ tun ("fix das", "mach das", "setz das um"). Dann normal umsetzen.
 Datenkorrekturen am Kundenkonto (Kulanz-Gutschrift, Level-Freigabe
 o.ä.) sind KEIN Dev-Work in diesem Sinne — die gehören zum
 Beantworten dazu, brauchen aber weiterhin das Okay des Users.
+
+## R8 ist seit 6.0.19 an — und die Pauschalregeln waren die Ursache (20.09.2026)
+
+Play meldete für 6.0.17 „DEX-Codeoptimierung: Verschleierung 2 %" (Grenzwert 25 %,
+Frist Februar 2027). Ursache war eine fehlende Zeile: `android.enableProguardInReleaseBuilds`
+stand nirgends, also lief jeder Release mit `minifyEnabled false`. Jetzt gesetzt in
+`android/gradle.properties`; gemessen an `mapping.txt`: **59,1 % der 44.678 Klassen umbenannt**.
+
+**Die wichtigste Erkenntnis ist die umgekehrte Richtung:** Die zehn Pauschalregeln
+`-keep class <paket>.** { *; }`, die in `proguard-rules.pro` standen, hätten 24.369 Klassen
+(37 % des DEX) von der Umbenennung ausgenommen — `com.google.android.gms.**` allein 22 %.
+Alle zehn waren überflüssig, weil die Bibliotheken ihre Regeln selbst mitliefern
+(`consumerProguardFiles` bzw. `proguard.txt` im AAR). **Vor jeder neuen Keep-Regel erst
+prüfen, ob die Bibliothek sie schon mitbringt:**
+```bash
+grep -n consumerProguardFiles node_modules/<lib>/android/build.gradle
+unzip -p ~/.gradle/caches/modules-2/files-2.1/<gruppe>/<artefakt>/*/*/<x>.aar proguard.txt
+```
+Nie wieder eine Pauschalregel über einen großen Paketbaum zurückholen — sie arbeitet direkt
+gegen die Play-Kennzahl.
+
+**Zwei Mechanismen, die man NICHT nachbauen muss** (beide am Artefakt belegt):
+aapt2 erzeugt Keep-Regeln für jede im Manifest per `android:name` deklarierte Komponente,
+und die AGP-Standarddatei hält `native <methods>`, Enums, Parcelable-CREATOR und
+`@JavascriptInterface`. **Aber:** Klassennamen in `android:value` sind NICHT gedeckt —
+deshalb braucht `RNHeadlessAppLoader` eine eigene Regel. Bei neuen Bibliotheken prüfen:
+```bash
+grep -oE 'android:value="[a-z][a-zA-Z0-9_.$]*\.[A-Z][a-zA-Z0-9_.$]*"' \
+  android/app/build/intermediates/merged_manifest/release/*/AndroidManifest.xml
+```
+
+**Vier Fälle, die still gebrochen wären** (Details je Regel in `proguard-rules.pro`):
+Hermes-Intl (libhermes.so sucht 5 Klassen per JNI über den Namen, kein Java-Code
+referenziert sie → R8 **löscht** sie → jedes `toLocaleString('de-DE')` bricht);
+`ExpoModulesPackageList` (nur per `Class.forName`, alle Aufrufer fangen die Exception ab
+→ App startet ohne ein einziges natives Expo-Modul, ohne Fehlermeldung);
+expo-notifications-Parcelables (Klassenname steht im Parcel → Tap auf eine beim Update
+offene Nachricht stürzt in `NotificationForwarderActivity.onCreate` ab);
+`FirebaseAnalytics.setConsent` (UMP reicht die Einwilligung per Reflection dorthin weiter
+→ ohne Schutz erhebt die App weiter Analytics, obwohl der Nutzer abgelehnt hat).
+Gemeinsames Muster: **kein Absturz im Debug, kein Aufrufer im Code, kein Test schlägt an.**
+
+**Prüfschritt, der sich gelohnt hat — R8 EINMAL LOKAL laufen lassen**, bevor ein EAS-Build
+startet. Das ist die bewusste Ausnahme von „keine lokalen Release-Builds": es geht nicht um
+ein Artefakt, sondern um die Diagnosedateien, die es sonst nirgends gibt.
+```bash
+cd android && JAVA_HOME=/usr/local/opt/openjdk@17 ANDROID_HOME=$HOME/Library/Android/sdk \
+  ./gradlew :app:minifyReleaseWithR8 --console=plain --no-daemon   # ~11 min
+```
+Danach in `android/app/build/outputs/mapping/release/`: `missing_rules.txt` (existiert nur bei
+Fehlern — AGP 8.13 macht aus fehlenden Klassen einen **Fehler**, der Build stirbt),
+`configuration.txt` (vollständig gemergte Regelmenge — damit ist jede Annahme über fremde
+Regeln prüfbar statt geglaubt), `usage.txt` (alles, was R8 **entfernt** hat),
+`mapping.txt` (Verschleierungsquote direkt messbar). `android/app/build/` ist in `.easignore`,
+die Reste stören den EAS-Upload also nicht.
+
+**`shrinkResources` bleibt AUS.** Zweite, unabhängige Fehlerquelle (Ressourcen, die nur per
+`getIdentifier()` angesprochen werden). Wenn das mal kommt, dann als eigener Release.
