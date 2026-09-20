@@ -3032,6 +3032,21 @@ urteilen über denselben Fall verschieden. Beim nächsten Konsolen-Umbau nachzie
 Vor jedem Deploy aus einem Worktree `cloud-functions/<codebase>/.env` aus dem
 Haupt-Checkout kopieren und per `cmp` prüfen.
 
+## Produktentscheidung 20.09.2026: lose Ware wird angenommen
+
+Frische/lose Ware (Kräuterbund, Obst, Frischetheke) trägt keinen echten
+Produkt-Barcode, sondern nur den Code der Ladenwaage — der gilt nur in diesem
+Markt, und zwei verschiedene Produkte können denselben tragen.
+
+**Entscheidung Patrick: trotzdem annehmen und vergüten.** Niemand soll fürs
+Mitmachen bestraft werden. Diese Datensätze werden aufgenommen und für
+Preisvergleiche genutzt.
+
+Was daraus folgt (offen, ClickUp 12487v2akqg): solche Codes am Dokument
+kennzeichnen und die Doppel-Prüfung bei ihnen zusätzlich nach Markt trennen —
+sonst sperrt ein fremdes Produkt aus einem anderen Laden eine korrekte
+Einreichung. Nicht ablehnen, nur sauber einsortieren.
+
 ## Produktfoto-Runde 20.09.2026 — vier Regeln, die je eine Runde gekostet hätten
 
 **Ein Ops-Skript im Worktree lädt die Regel AUS DEMSELBEN Worktree.**
