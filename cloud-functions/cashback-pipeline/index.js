@@ -1256,7 +1256,7 @@ exports.processCashback = onMessagePublished(
                 }
                 if (parsedReads.every((p) => String(p.merchant || '').trim())) {
                   const infos = await Promise.all(
-                    parsedReads.map((p) => resolveMerchant(p.merchant, p.bonCountry)),
+                    parsedReads.map((p) => resolveMerchant(p.merchant, p.bonCountry, p.items)),
                   );
                   if (infos.every((m) => !m)) return 'unknown_merchant';
                 }
@@ -1356,6 +1356,9 @@ exports.processCashback = onMessagePublished(
       const merchantInfo = await resolveMerchant(
         ocr.parsed.merchant,
         ocr.parsed.bonCountry,
+        // Artikel mitgeben: nennt der Bonkopf die Kette nicht (selbstständige
+        // EDEKA-/REWE-Kaufleute), erkennt der Resolver sie an den Eigenmarken.
+        ocr.parsed.items,
       );
       // 5a) Filialadresse (Straße/PLZ/Ort) — Entscheidung 05.09.2026: der
       //     Einkaufsort kommt vom Bon-Kopf (OCR v1.4 `storeAddress`, sonst
