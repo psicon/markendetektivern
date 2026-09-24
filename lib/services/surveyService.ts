@@ -428,8 +428,10 @@ export async function getActionSurvey(
   // UNGEFRAGT aufgeht, soll nicht mit einer Sperre beginnen. Ohne Freigabe
   // wird sie HIER übersprungen — vor Session-Sperre und Cooldown, damit eine
   // nie gezeigte Umfrage weder das Kontingent verbraucht noch die nächste
-  // passende (z. B. unvergütete) verdrängt. Über die Umfrage-Liste bleibt sie
-  // erreichbar; dort erklärt der Sperrhinweis den Weg. Lazy, einmal je Aufruf.
+  // passende (z. B. unvergütete) verdrängt. Nach erteilter Freigabe kommt sie
+  // beim nächsten Auslöser. Gilt auch für anonyme Konten: für sie zahlt die
+  // Umfrage ohnehin erst mit Konto + Cashback, und das verlangt die Freigabe.
+  // Lazy, einmal je Aufruf.
   let standortOk: boolean | undefined;
   for (const p of polls) {
     const trig = pollTriggerOf(p);

@@ -548,6 +548,13 @@ export default function ProductWizardScreen() {
     // Versuch beim Mounten vergiftete sonst die ganze Sitzung, weil „konnte
     // nicht nachsehen" von „es läuft keine Aktion" nicht zu unterscheiden war
     // (86cbet2nw: 58 unvergütete Einreichungen aus Juli und August).
+    // Freigabe direkt vor dem Einreichen frisch prüfen: über die
+    // Android-Schnelleinstellungen lassen sich die Ortungsdienste abschalten,
+    // ohne dass die App den Vordergrund verlässt (kein AppState-Wechsel).
+    if ((await pflicht.pruefen()) !== 'erfuellt') {
+      submitNachFreigabeRef.current = true;
+      return;
+    }
     const [capture, aktion] = await Promise.all([
       erfasseCaptureContext({
         capturedAt: firstCaptureAtRef.current ?? Date.now(),
@@ -556,17 +563,9 @@ export default function ProductWizardScreen() {
       resolveProductCampaignForSubmit(campaign),
     ]);
 
-    // Kein GPS und kein bestätigter Ort. Zwei Fälle, streng getrennt:
-    //  - Freigabe fehlt (entzogen, „Einmal erlauben" verfallen, Dienste
-    //    aus) → Sperrhinweis; nach der Freigabe reicht der Effekt unten
-    //    von selbst ein. Fotos bleiben erhalten.
-    //  - Freigabe steht, nur der Fix blieb aus → einmal den Ort erfragen.
+    // Kein GPS und kein bestätigter Ort, obwohl die Freigabe steht (oben
+    // geprüft): nur der Fix blieb aus → einmal den Ort erfragen.
     if (!capture.gps && !confirmedPlace) {
-      const stand = await pflicht.pruefen();
-      if (stand !== 'erfuellt') {
-        submitNachFreigabeRef.current = true;
-        return;
-      }
       submitNachOrtRef.current = true;
       setOrtHinweis('Dein Standort ließ sich gerade nicht ermitteln — bitte kurz den Ort angeben, dann geht es direkt weiter.');
       setPhase('place');
@@ -707,10 +706,10 @@ export default function ProductWizardScreen() {
             art="foto"
             laeuft={pflicht.laeuft}
             onErfuellen={() => void pflicht.erfuellen()}
-            onZurueck={() => {
-              submitNachFreigabeRef.current = false;
-              close();
-            }}
+            // Merker NICHT hier löschen: close() fragt nach, und wer dort
+            // „Abbrechen" wählt, soll nach der Freigabe automatisch weiter
+            // einreichen. Verlässt er den Assistenten, stirbt der Merker mit.
+            onZurueck={close}
           />
         </View>
       </View>

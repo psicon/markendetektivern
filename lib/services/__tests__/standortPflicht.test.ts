@@ -74,7 +74,8 @@ describe('standortPflichtErfuellen', () => {
     expect(mockLocation.requestForegroundPermissionsAsync).toHaveBeenCalledTimes(1);
   });
 
-  it('einstellungen → App-Einstellungen, Stand kommt über den AppState (null)', async () => {
+  it('iOS, einstellungen → App-Einstellungen, Stand kommt über den AppState (null)', async () => {
+    mockRN.Platform.OS = 'ios';
     await expect(standortPflichtErfuellen('einstellungen')).resolves.toBeNull();
     expect(mockRN.Linking.openSettings).toHaveBeenCalledTimes(1);
   });
@@ -99,7 +100,52 @@ describe('standortPflichtErfuellen', () => {
     expect(mockRN.Linking.openSettings).toHaveBeenCalledTimes(1);
   });
 
+  it('Android, „einstellungen": kommt der Dialog doch noch, erst ihn — ohne Dialog in die Einstellungen', async () => {
+    // Dialog erscheint, Nutzer erlaubt
+    mockLocation.requestForegroundPermissionsAsync.mockResolvedValue(erlaubt);
+    mockLocation.getForegroundPermissionsAsync.mockResolvedValue(erlaubt);
+    await expect(standortPflichtErfuellen('einstellungen')).resolves.toBe('erfuellt');
+    expect(mockRN.Linking.openSettings).not.toHaveBeenCalled();
+
+    // sofortige Absage = kein Dialog → Einstellungen
+    mockLocation.requestForegroundPermissionsAsync.mockResolvedValue(endgueltigAbgelehnt);
+    mockLocation.getForegroundPermissionsAsync.mockResolvedValue(endgueltigAbgelehnt);
+    await expect(standortPflichtErfuellen('einstellungen')).resolves.toBeNull();
+    expect(mockRN.Linking.openSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('Android: wer einen Dialog gesehen und abgelehnt hat, wird nicht ungefragt weitergeleitet', async () => {
+    let t = 1000;
+    const now = jest.spyOn(Date, 'now').mockImplementation(() => t);
+    mockLocation.requestForegroundPermissionsAsync.mockImplementation(async () => {
+      t += 2000; // Nutzer hat 2 s auf den Dialog geschaut
+      return endgueltigAbgelehnt;
+    });
+    mockLocation.getForegroundPermissionsAsync.mockResolvedValue(endgueltigAbgelehnt);
+    await expect(standortPflichtErfuellen('einstellungen')).resolves.toBe('einstellungen');
+    expect(mockRN.Linking.openSettings).not.toHaveBeenCalled();
+
+    mockLocation.enableNetworkProviderAsync.mockImplementation(async () => {
+      t += 2000;
+      throw new Error('nein danke');
+    });
+    mockLocation.getForegroundPermissionsAsync.mockResolvedValue(erlaubt);
+    mockLocation.hasServicesEnabledAsync.mockResolvedValue(false);
+    await expect(standortPflichtErfuellen('dienste_aus')).resolves.toBe('dienste_aus');
+    expect(mockRN.Linking.sendIntent).not.toHaveBeenCalled();
+    now.mockRestore();
+    mockLocation.requestForegroundPermissionsAsync.mockReset();
+    mockLocation.enableNetworkProviderAsync.mockReset();
+  });
+
+  it('Dienste aus hat Vorrang vor „nie gefragt" (iOS zeigt sonst keinen Dialog)', async () => {
+    mockLocation.getForegroundPermissionsAsync.mockResolvedValue(nieGefragt);
+    mockLocation.hasServicesEnabledAsync.mockResolvedValue(false);
+    await expect(pruefeStandortPflicht()).resolves.toBe('dienste_aus');
+  });
+
   it('Einstellungen nicht zu öffnen → alter Stand, keine Sackgasse ohne Rückmeldung', async () => {
+    mockRN.Platform.OS = 'ios';
     mockRN.Linking.openSettings.mockRejectedValue(new Error('kaputt'));
     await expect(standortPflichtErfuellen('einstellungen')).resolves.toBe('einstellungen');
   });
