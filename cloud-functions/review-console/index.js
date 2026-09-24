@@ -1020,3 +1020,51 @@ exports.reviewTagesberichte = onCall({ region: REGION, timeoutSeconds: 30 }, asy
     });
   return { berichte };
 });
+
+/**
+ * Statistik der letzten N Tage fürs Dashboard (Logik: src/statistik.js).
+ * Nur lesend. Rund 16.000 Lesevorgänge pro frischer Berechnung (alle
+ * crowd_uploads, Bons der Periode, je gebuchter Foto-Freigabe ein Ledger-
+ * Dokument per fester ID) — deshalb 10 Minuten im Speicher gehalten.
+ */
+const { baueStatistik } = require('./src/statistik');
+let statistikCache = { at: 0, tage: 0, daten: null };
+exports.reviewStatistik = onCall({ region: REGION, memory: '1GiB', timeoutSeconds: 120, maxInstances: 2 }, async (req) => {
+  assertAdmin(req);
+  const tage = Math.min(Math.max(Number(req.data?.tage) || 60, 7), 120);
+  if (statistikCache.daten && statistikCache.tage === tage && Date.now() - statistikCache.at < 10 * 60 * 1000) {
+    return { ...statistikCache.daten, ausCache: true, stand: statistikCache.at };
+  }
+  const jetzt = Date.now();
+  const ab = jetzt - tage * 24 * 60 * 60 * 1000;
+  const [fotoSnap, bonSnap] = await Promise.all([
+    db.collection('crowd_uploads').select('status', 'createdAt', 'reviewedAt', 'rejectReason', 'holdReasons', 'userId').get(),
+    db.collection('receipts').where('createdAt', '>=', admin.firestore.Timestamp.fromMillis(ab)).select('status', 'createdAt', 'rejectReason', 'noRewardReason', 'cashbackCents').get(),
+  ]);
+  const fotos = fotoSnap.docs.map((d) => {
+    const x = d.data();
+    // Ältere Ablehnungen (vor der Konsole) tragen den Grund nur in holdReasons
+    // („ean_fehlt", „fotos_unpassend: <Vision-Text>") — erster Eintrag, ohne Zusatz.
+    const altGrund = Array.isArray(x.holdReasons) && x.holdReasons.length ? String(x.holdReasons[0]).split(':')[0].trim() : null;
+    return { id: d.id, uid: x.userId || null, status: x.status || null, createdAt: ms(x.createdAt), reviewedAt: ms(x.reviewedAt), rejectReason: x.rejectReason || altGrund || null };
+  });
+  // Geld aus dem Ledger: nur für Freigaben, deren Entscheidung im Fenster liegen
+  // KANN (reviewedAt im Fenster oder fehlend = Altbestand, dann entscheidet der Buchungstag).
+  const kandidaten = fotos.filter((f) => f.status === 'approved' && f.uid && (f.reviewedAt == null || f.reviewedAt >= ab));
+  const fotoBuchungen = new Map();
+  for (let i = 0; i < kandidaten.length; i += 200) {
+    const teil = kandidaten.slice(i, i + 200);
+    const snaps = await db.getAll(...teil.map((f) => db.doc(`users/${f.uid}/cashback_ledger/crowd_${f.id}`)));
+    snaps.forEach((s, j) => {
+      if (!s.exists || s.get('type') !== 'earn') return;
+      fotoBuchungen.set(teil[j].id, { cents: Number(s.get('cents')) || 0, at: ms(s.get('createdAt')) });
+    });
+  }
+  const bons = bonSnap.docs.map((d) => {
+    const x = d.data();
+    return { status: x.status || null, createdAt: ms(x.createdAt), grund: x.rejectReason || x.noRewardReason || null, cents: Number(x.cashbackCents) || 0 };
+  });
+  const daten = baueStatistik({ jetzt, tage, fotos, fotoBuchungen, bons });
+  statistikCache = { at: jetzt, tage, daten };
+  return { ...daten, ausCache: false, stand: jetzt };
+});

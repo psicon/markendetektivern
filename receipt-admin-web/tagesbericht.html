@@ -96,6 +96,8 @@
       </header>
       <main>
         <div id="inhalt"><p class="leer">Lade Berichte …</p></div>
+        <div id="statistik" style="margin-top:22px"><p class="leer">Lade Statistik …</p></div>
+        <div id="details" style="margin-top:22px"></div>
       </main>
     </div>
 
@@ -113,7 +115,7 @@
         fotos_unpassend: 'Fotos unpassend',
         gleiche_ansicht_mehrfach: 'Immer dieselbe Ansicht',
         bild_nicht_lesbar_infrastruktur: 'Datei nicht abrufbar (Technik)',
-        doppelt_eingereicht: 'Ältere Einreichung noch offen',
+        doppelt_eingereicht: 'Doppelt eingereicht',
         nachlesen_gescheitert: 'Nachlesen gescheitert (Google-Limit)',
         bild_audit_gescheitert: 'Bildprüfung gescheitert (Google-Limit)',
         kein_bild_audit: 'Nicht geprüft (Zeit)',
@@ -135,6 +137,15 @@
         no_active_campaign: 'Keine Aktion',
         not_a_receipt: 'Kein Kassenbon',
         not_credited: 'Nicht gebucht',
+        sperre_30_tage_anderer_nutzer: 'Doppelt (andere Person, alte Regel)',
+        ean_fehlt_lose_ware: 'Lose Ware ohne Barcode (alte Regel)',
+        bild_defekt: 'Datei beschädigt',
+        produkt_bereits_verguetet: 'Schon im Katalog (alte Regel)',
+        ohne_grund: 'ohne Angabe',
+        ausserhalb_aktionsgebiet: 'Außerhalb des Aktionsgebiets',
+        duplicate_content: 'Doppelt',
+        max_retries_exceeded: 'Verarbeitung gescheitert',
+        manual_review_rejected: 'Von Hand abgelehnt',
       };
       const g = (c) => GRUND[c] || c;
       const STATUS = { approved: 'Freigegeben', no_reward: 'Ohne Prämie', rejected: 'Abgelehnt', review: 'In Prüfung', ocr_pending: 'In Arbeit' };
@@ -197,6 +208,7 @@
         if (!sichtbar.length) sichtbar = berichte;
         if (!sichtbar.length) {
           $('inhalt').innerHTML = '<p class="leer">Noch kein Lauf. Die Morgenrunde läuft täglich um 8:00 Uhr.</p>';
+          $('details').innerHTML = '';
           return;
         }
         const b = sichtbar[0];
@@ -225,8 +237,10 @@
             <div class="kachel"><div class="z" style="color:var(--offen)">${b.offen ?? 0}</div><div class="l">wartet auf dich</div></div>
             <div class="kachel"><div class="z" style="color:var(--geld)">${euro(b.gebuchtCents || 0)}</div><div class="l">gebucht${b.buchungAusstehend ? ` · ${b.buchungAusstehend} ausstehend` : ''}</div></div>
             <div class="kachel"><div class="z">${b.personenBezahlt ?? 0}</div><div class="l">Personen bezahlt</div></div>
-          </div>
-
+          </div>`;
+        // Oben Warnungen + Kacheln, darunter die Statistik, danach die Laufdetails.
+        $('details').innerHTML = `
+          <h2 style="margin:0 0 12px;font-size:18px">Details zum Lauf</h2>
           <div class="raster">
             <section class="box"><h3>Wartet auf dich (${b.offen ?? 0}${(b.wartetAufDich || []).length < (b.offen || 0) ? `, erste ${(b.wartetAufDich || []).length} gezeigt` : ''})</h3>${faelle(b.wartetAufDich, 'Nichts offen.')}</section>
             <section class="box"><h3>Automatisch abgelehnt (${b.abgelehnt ?? 0}${(b.abgelehntListe || []).length < (b.abgelehnt || 0) ? `, erste ${(b.abgelehntListe || []).length} gezeigt` : ''})</h3>${faelle(b.abgelehntListe, 'Keine Ablehnungen.')}</section>
@@ -281,6 +295,76 @@
           </section>`;
       }
 
+      /* ─── Statistik: letzte 60 Tage aus den echten Daten (reviewStatistik) ─── */
+      function balken(jeTag, serien, geldFeld, hoehe = 140) {
+        const B = 11, L = 3, oben = 10, unten = 26;
+        const max = Math.max(1, ...jeTag.map((t) => serien.reduce((a, s) => a + (t[s.feld] || 0), 0)));
+        const maxGeld = Math.max(1, ...jeTag.map((t) => t[geldFeld] || 0));
+        const w = jeTag.length * (B + L) + 30;
+        const y = (v) => oben + hoehe - (v / max) * hoehe;
+        let svg = `<svg width="${w}" height="${hoehe + oben + unten}" role="img" aria-label="Verlauf je Tag">`;
+        svg += `<line x1="0" x2="${w}" y1="${oben + hoehe}" y2="${oben + hoehe}" stroke="var(--line2)"/>`;
+        const pkt = [];
+        jeTag.forEach((t, i) => {
+          const x = 15 + i * (B + L);
+          let basis = 0;
+          for (const s of serien) {
+            const v = t[s.feld] || 0;
+            if (!v) continue;
+            svg += `<rect x="${x}" y="${y(basis + v)}" width="${B}" height="${y(basis) - y(basis + v)}" fill="${s.farbe}" rx="1.5"><title>${esc(t.tag)}: ${v} ${esc(s.name)}</title></rect>`;
+            basis += v;
+          }
+          pkt.push(`${x + B / 2},${oben + hoehe - ((t[geldFeld] || 0) / maxGeld) * hoehe}`);
+          const d = t.tag.slice(8, 10), m = t.tag.slice(5, 7);
+          if (d === '01' || i === 0 || i === jeTag.length - 1 || d === '15') svg += `<text x="${x + B / 2}" y="${oben + hoehe + 15}" fill="var(--fg3)" font-size="10" text-anchor="middle">${d}.${m}.</text>`;
+        });
+        svg += `<polyline points="${pkt.join(' ')}" fill="none" stroke="var(--geld)" stroke-width="1.8"/>`;
+        jeTag.forEach((t, i) => { svg += `<circle cx="${15 + i * (B + L) + B / 2}" cy="${oben + hoehe - ((t[geldFeld] || 0) / maxGeld) * hoehe}" r="5" fill="transparent"><title>${esc(t.tag)}: ${euro(t[geldFeld] || 0)} ausgezahlt</title></circle>`; });
+        return `<div class="diagramm">${svg}</svg></div><div class="legende">${serien.map((s) => `<span><i style="background:${s.farbe}"></i>${esc(s.name)}</span>`).join('')}<span><i style="background:var(--geld)"></i>ausgezahlt (€, eigene Skala)</span></div>`;
+      }
+      const kachel = (z, l, farbe = '') => `<div class="kachel"><div class="z"${farbe ? ` style="color:${farbe}"` : ''}>${z}</div><div class="l">${l}</div></div>`;
+      const top = (obj, n = 10) => zeilen(Object.fromEntries(Object.entries(obj || {}).sort((a, b) => b[1] - a[1]).slice(0, n)), 'keine');
+
+      function zeigeStatistik(st) {
+        const f = st.fotos, b = st.bons;
+        $('statistik').innerHTML = `
+          <div class="lauf"><h2>Statistik — letzte ${st.tage.length} Tage</h2>
+            <span class="meta">aus den echten Daten · Stand ${esc(fmtDateTime(st.stand))}${st.ausCache ? ' (zwischengespeichert)' : ''}</span></div>
+          <section class="box"><h3>Produktfotos</h3>
+            <div class="kacheln" style="margin:6px 0 14px">
+              ${kachel(f.letzte7.freigegeben, `freigegeben · 7 Tage (${f.summe.freigegeben} in ${st.tage.length})`, 'var(--ok)')}
+              ${kachel(f.letzte7.abgelehnt, `abgelehnt · 7 Tage (${f.summe.abgelehnt})`, 'var(--nein)')}
+              ${kachel(euro(f.letzte7.cents), `ausgezahlt · 7 Tage (${euro(f.summe.cents)})`, 'var(--geld)')}
+              ${kachel(f.letzte7.eingereicht, `eingereicht · 7 Tage (${f.summe.eingereicht})`)}
+              ${kachel(f.offen, 'offen jetzt', 'var(--offen)')}
+            </div>
+            ${balken(f.jeTag, [{ feld: 'freigegeben', name: 'freigegeben', farbe: 'var(--ok)' }, { feld: 'abgelehnt', name: 'abgelehnt', farbe: 'var(--nein)' }], 'cents')}
+            <h3 style="margin-top:14px">Ablehngründe (${st.tage.length} Tage)</h3>${top(f.gruende)}
+          </section>
+          <section class="box" style="margin-top:14px"><h3>Bons</h3>
+            <div class="kacheln" style="margin:6px 0 14px">
+              ${kachel(b.letzte7.eingereicht, `eingereicht · 7 Tage (${b.summe.eingereicht})`)}
+              ${kachel(b.letzte7.approved, `mit Prämie · 7 Tage (${b.summe.approved})`, 'var(--ok)')}
+              ${kachel(b.letzte7.no_reward, `ohne Prämie · 7 Tage (${b.summe.no_reward})`)}
+              ${kachel(b.letzte7.rejected, `abgelehnt · 7 Tage (${b.summe.rejected})`, 'var(--nein)')}
+              ${kachel(euro(b.letzte7.cents), `ausgezahlt · 7 Tage (${euro(b.summe.cents)})`, 'var(--geld)')}
+              ${kachel(b.inPruefung, 'in Prüfung jetzt', 'var(--offen)')}
+            </div>
+            ${balken(b.jeTag, [{ feld: 'approved', name: 'mit Prämie', farbe: 'var(--ok)' }, { feld: 'no_reward', name: 'ohne Prämie', farbe: 'var(--fg3)' }, { feld: 'rejected', name: 'abgelehnt', farbe: 'var(--nein)' }], 'cents')}
+            <h3 style="margin-top:14px">Gründe ohne Prämie / abgelehnt (${st.tage.length} Tage)</h3>${top(b.gruende)}
+          </section>
+          <p class="leer" style="margin-top:8px">Fotos zählen am Tag der Entscheidung, Bons am Tag des Einreichens. Foto-Beträge kommen aus dem Ledger, Bon-Beträge aus dem Bon.</p>`;
+      }
+
+      async function ladeStatistik() {
+        try {
+          const r = await call('reviewStatistik')({ tage: 60 });
+          zeigeStatistik(r.data);
+        } catch (e) {
+          $('statistik').innerHTML = `<p class="leer">Statistik konnte nicht geladen werden: ${esc(e.message)}</p>`;
+        }
+      }
+
       async function lade() {
         try {
           const r = await call('reviewTagesberichte')({ anzahl: 60 });
@@ -293,7 +377,7 @@
       }
 
       $('trockenBtn').onclick = () => { mitTrocken = !mitTrocken; $('trockenBtn').classList.toggle('on', mitTrocken); zeige(); };
-      initAdmin(() => lade());
+      initAdmin(() => { lade(); ladeStatistik(); });
     </script>
   </body>
 </html>
