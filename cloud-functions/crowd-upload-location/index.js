@@ -49,10 +49,11 @@ const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/
 const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
 
-const { bewerteLocation, landAusKoordinate, MODEL_VERSION } = require('./src/scorer');
+const { MODEL_VERSION } = require('./src/scorer');
 const { findeExifGps } = require('./src/exif');
 const { findeJourneyLocation } = require('./src/journey');
-const { bonAdresseAusDoc, bonAdresseGeaendert } = require('./src/bonAdresse');
+const { bonAdresseGeaendert } = require('./src/bonAdresse');
+const { bewerteDokument, minutenZwischen } = require('./src/bewerten');
 const PLZ = require('./data/plz.json');
 
 admin.initializeApp();
@@ -60,10 +61,6 @@ const db = admin.firestore();
 
 const REGION = 'europe-west1'; // wie die übrigen crowd_uploads-Trigger
 const MAX_BILDER_FUER_EXIF = 8;
-
-/** Millisekunden zwischen zwei Zeitpunkten, in Minuten und gerundet. */
-const minutenZwischen = (aMs, bMs) =>
-  aMs == null || bMs == null ? null : Math.round(Math.abs(aMs - bMs) / 60000);
 
 exports.onCrowdUploadCreated = onDocumentCreated(
   { document: 'crowd_uploads/{id}', region: REGION, memory: '512MiB', timeoutSeconds: 120 },
@@ -180,7 +177,11 @@ exports.onCrowdUploadCreated = onDocumentCreated(
  * ändert sie nicht, eine Schleife ist ausgeschlossen.
  */
 exports.onCrowdUploadBonAdresse = onDocumentUpdated(
-  { document: 'crowd_uploads/{id}', region: REGION, memory: '256MiB', timeoutSeconds: 60 },
+  // retry: dieser Trigger ist praktisch der einzige Weg, auf dem die
+  // Bon-Adresse zum Ort wird — ein einzelner Transaktionsfehler darf sie
+  // nicht dauerhaft verlieren. Gefahrlos: fremde Änderungen enden sofort
+  // am Filter, und die Bewertung ist deterministisch.
+  { document: 'crowd_uploads/{id}', region: REGION, memory: '256MiB', timeoutSeconds: 60, retry: true },
   async (event) => {
     const vorher = event.data?.before?.data();
     const nachher = event.data?.after?.data();
@@ -206,39 +207,7 @@ async function bewertenUndSchreiben(ref, id, zusatz) {
     const frisch = await tx.get(ref);
     if (!frisch.exists) return null;
     const doc = frisch.data();
-    const capturedAtMs = zusatz.capturedAtMs
-      ?? doc.capture?.capturedAt?.toDate?.().getTime()
-      ?? doc.createdAt?.toDate?.().getTime()
-      ?? Date.now();
-    const ipLocation = zusatz.ipLocation ?? doc.journeyLocation ?? null;
-    const profileRegion = zusatz.profileRegion ?? doc.userLocation ?? null;
-    const exifGps = zusatz.exifGps
-      ?? (doc.exifGps && typeof doc.exifGps.lat === 'number'
-        ? { lat: doc.exifGps.lat, lon: doc.exifGps.lon, accuracyM: doc.exifGps.accuracyM ?? null, ageMinutes: doc.exifGps.ageMinutes ?? null }
-        : null);
-    const captureGps = doc.capture?.gps
-      ? {
-          lat: doc.capture.gps.lat,
-          lon: doc.capture.gps.lon,
-          accuracyM: doc.capture.gps.accuracyM ?? null,
-          ageMinutes: minutenZwischen(
-            doc.capture.gps.fixAt?.toDate?.().getTime() ?? capturedAtMs,
-            capturedAtMs,
-          ),
-        }
-      : null;
-
-    const probableLocation = bewerteLocation({
-      submittedAtMs: doc.createdAt?.toDate?.().getTime() ?? Date.now(),
-      receiptAddress: bonAdresseAusDoc(doc, PLZ),
-      captureGps,
-      exifGps,
-      confirmedPlace: doc.capture?.confirmedPlace ?? null,
-      profileRegion,
-      marketLand: doc.marketLand ?? null,
-      ipLand: ipLocation?.source === 'ip' ? landAusIpOrtung(ipLocation) : null,
-      ipLocation,
-    });
+    const { probableLocation, resolvedBy } = bewerteDokument(doc, zusatz, PLZ);
 
     tx.set(
       ref,
@@ -247,7 +216,7 @@ async function bewertenUndSchreiben(ref, id, zusatz) {
         probableLocation: {
           ...probableLocation,
           computedAt: admin.firestore.FieldValue.serverTimestamp(),
-          resolvedBy: doc.capture?.gps || doc.capture?.confirmedPlace ? 'client' : 'server',
+          resolvedBy,
         },
         probableLocationAt: admin.firestore.FieldValue.serverTimestamp(),
       },
@@ -264,21 +233,4 @@ async function bewertenUndSchreiben(ref, id, zusatz) {
     modelVersion: MODEL_VERSION,
     nachgetragen: Object.keys(zusatz.nachtrag || {}),
   });
-}
-
-/**
- * Landeszuordnung der IP-Ortung. Die Stadt ist wertlos, das Land war in
- * allen vier Ground-Truth-Fällen korrekt — also wird genau das und nicht
- * mehr daraus abgeleitet.
- *
- * Die Boxen liegen bewusst NICHT hier, sondern in `scorer.landAusKoordinate`:
- * eine zweite Kopie würde früher oder später abweichen, und zwar still.
- */
-function landAusIpOrtung(loc) {
-  const { lat, lon } = loc || {};
-  if (typeof lat !== 'number' || typeof lon !== 'number') return null;
-  // Der DACH-Fallback (51.15/10.45) ist kein Ort und darf auch kein Land
-  // begründen — er steht genau dann im Feld, wenn die IP-Abfrage scheiterte.
-  if (Math.abs(lat - 51.15) < 0.01 && Math.abs(lon - 10.45) < 0.01) return null;
-  return landAusKoordinate(lat, lon);
 }

@@ -50,12 +50,15 @@ describe('Rangfolge', () => {
     expect(r.confidence).toBe('medium');
   });
 
-  test('Postleitzahl nicht in der Tabelle: Ortsname bleibt, Sicherheit mittel, keine Koordinate', () => {
-    const r = bewerteLocation({ submittedAtMs: 0, receiptAddress: bonAdresseAusDoc(bon({ zip: '99999', city: 'Nirgendwo' }), PLZ), marketLand: 'DE' });
-    expect(r.source).toBe('receipt_address');
-    expect(r.city).toBe('Nirgendwo');
-    expect(r.lat).toBeNull();
-    expect(r.confidence).toBe('medium');
+  test('Postleitzahl nicht in der Tabelle: kein Rang-1-Kandidat, GPS gewinnt (Review 24.09.2026)', () => {
+    expect(bonAdresseAusDoc(bon({ zip: '99999', city: 'Nirgendwo' }), PLZ)).toBeNull();
+    const r = bewerteLocation({
+      submittedAtMs: 0,
+      receiptAddress: bonAdresseAusDoc(bon({ zip: '99999', city: 'Nirgendwo' }), PLZ),
+      captureGps: { lat: 51.85, lon: 6.87, accuracyM: 10, ageMinutes: 0 },
+      marketLand: 'DE',
+    });
+    expect(r.source).toBe('gps_capture');
   });
 
   test('ohne Bon unverändert: GPS gewinnt', () => {
@@ -73,8 +76,13 @@ describe('bonAdresseAusDoc', () => {
     expect(bonAdresseAusDoc(null, PLZ)).toBeNull();
   });
 
-  test('vierstellige PLZ = Österreich', () => {
-    expect(bonAdresseAusDoc({ priceReceipt: { zip: '1010', city: 'Wien', complete: true } }, PLZ)).toMatchObject({ land: 'AT', lat: 48.21 });
+  test('vierstellige PLZ = Österreich, außer der Markt steht ausdrücklich woanders', () => {
+    const wien = { priceReceipt: { zip: '1010', city: 'Wien', complete: true } };
+    expect(bonAdresseAusDoc(wien, PLZ)).toMatchObject({ land: 'AT', lat: 48.21 });
+    expect(bonAdresseAusDoc({ ...wien, marketLand: 'AT' }, PLZ)).toMatchObject({ land: 'AT' });
+    // Deutscher Markt + vierstellige PLZ = Lesefehler (z. B. „8435" statt „84355")
+    expect(bonAdresseAusDoc({ ...wien, marketLand: 'DE' }, PLZ)).toBeNull();
+    expect(bonAdresseAusDoc({ ...wien, marketLand: 'CH' }, PLZ)).toBeNull();
   });
 
   test('Änderung erkennen — und nur dann neu bewerten', () => {

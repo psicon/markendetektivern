@@ -23,18 +23,24 @@ function bonAdresseAusDoc(doc, plz) {
   if (!r || !r.complete || !r.zip || !r.city) return null;
   const zip = String(r.zip).trim();
   const markt = String(doc.marketLand || '').toUpperCase().slice(0, 2);
-  // Land der Filiale: fünfstellige PLZ = Deutschland, vierstellige = Österreich
-  // (die Tabelle deckt DE und AT ab); das Marktland entscheidet nur, wenn es
-  // zur Stellenzahl passt.
-  const land = zip.length === 5 ? 'DE' : zip.length === 4 ? (markt === 'CH' ? 'CH' : 'AT') : (markt || null);
+  // Land der Filiale: fünfstellige PLZ = Deutschland, vierstellige =
+  // Österreich — aber nur, wenn der Markt nicht ausdrücklich woanders steht.
+  // Eine vierstellige PLZ an einem deutschen Markt ist ein Lesefehler.
+  const land = zip.length === 5 ? 'DE' : zip.length === 4 && (markt === 'AT' || markt === '') ? 'AT' : null;
   const e = plz && land ? plz[`${land}:${zip}`] : null;
+  // Rang 1 nur mit aufgelöster Koordinate (Review 24.09.2026): ohne sie
+  // könnte der Scorer den Widerspruch zu einem GPS-Punkt nicht prüfen, und
+  // ein Lesefehler im Bon verdrängte einen genauen Aufnahmeort. Die
+  // Vergütungsregel bleibt davon unberührt — dort zählt, DASS ein Ort
+  // belegt ist, nicht wo er auf der Karte liegt.
+  if (!e) return null;
   return {
     zip,
     city: String(r.city).trim(),
-    lat: e ? e[0] : null,
-    lon: e ? e[1] : null,
+    lat: e[0],
+    lon: e[1],
     land,
-    bundesland: e ? e[3] || null : null,
+    bundesland: e[3] || null,
   };
 }
 

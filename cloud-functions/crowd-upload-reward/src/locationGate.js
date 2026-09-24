@@ -96,16 +96,6 @@ function standortpflichtGilt(doc, ab) {
 }
 
 /**
- * Verwertbare IP-Ortung? `source: 'fallback'` ist der DACH-Mittelpunkt, den
- * die App einträgt, wenn die IP-Abfrage scheiterte — kein Ort (CLAUDE.md).
- */
-function ipOrtNutzbar(jl) {
-  if (!jl || typeof jl !== 'object') return false;
-  if (String(jl.source || '') === 'fallback') return false;
-  return Boolean(jl.city) || (Number.isFinite(Number(jl.lat)) && Number.isFinite(Number(jl.lon)));
-}
-
-/**
  * @param {object} doc Das crowd_uploads-Dokument.
  * @param {object} [opts]
  * @param {{android: number|null, ios: number|null}} [opts.standortpflichtAb]  für Tests
@@ -147,14 +137,16 @@ function pruefeOrtsanforderung(doc, opts = {}) {
   }
 
   // 4) IP-Ortung als letzte Stufe: nur wenn GPS technisch scheiterte
-  // (unavailable/timeout — Freigabe erteilt, aber kein Fix) UND eine
-  // verwertbare IP-Ortung vorliegt. Der Grund-Wert stammt aus der Regel vom
-  // 03.09.2026 (Android 6.0.15 übersprang den Orts-Schritt): bis 24.09. wurde
-  // dort ganz ohne Ort vergütet; seit der Rangfolge nur noch mit IP-Ortung
-  // (gemessen: 38 von 42 Fällen in 30 Tagen hatten eine).
+  // (unavailable/timeout — Freigabe erteilt, aber kein Fix). Der Grund-Wert
+  // stammt aus der Regel vom 03.09.2026 (Android 6.0.15 übersprang den
+  // Orts-Schritt). Vergütet wird auch, wenn die IP-Abfrage selbst scheiterte
+  // (`journeyLocation.source: 'fallback'` oder gar keine): das ist ein
+  // Infrastrukturfehler und keine Aussage über den Nutzer (Review 24.09.:
+  // sonst 3 von 66 Fällen in 14 Tagen neu mit 0 Cent). Als ORT taugt die
+  // IP ohnehin nur auf Landesebene — das entscheidet der Ortsschätzer.
   // 'denied' bleibt no_location: da hat der Nutzer die Berechtigung
   // verweigert UND den angebotenen Orts-Schritt übersprungen.
-  if ((gpsStatus === 'unavailable' || gpsStatus === 'timeout') && ipOrtNutzbar(doc?.journeyLocation)) {
+  if (gpsStatus === 'unavailable' || gpsStatus === 'timeout') {
     return { ok: true, grund: 'gps_fix_fehlt_schritt_uebersprungen' };
   }
 

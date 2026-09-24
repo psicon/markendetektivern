@@ -88,12 +88,14 @@ describe('Die App hat den Orts-Schritt übersprungen, der GPS-Fix blieb aus', ()
     expect(r.ok).toBe(true);
   });
 
-  it('ohne jede Ortung (auch keine IP) keine Vergütung — Rangfolge 24.09.2026', () => {
+  it('gescheiterte IP-Abfrage ist ein Infrastrukturfehler — vergütet trotzdem (Review 24.09.2026)', () => {
     const ohne = pruefeOrtsanforderung({ clientVersion: { app: '6.0.15' }, capture: { gpsStatus: 'unavailable' } });
-    expect(ohne).toEqual({ ok: false, grund: 'no_location' });
-    // 'fallback' ist der DACH-Mittelpunkt einer gescheiterten IP-Abfrage — kein Ort.
+    expect(ohne).toEqual({ ok: true, grund: 'gps_fix_fehlt_schritt_uebersprungen' });
+    // 'fallback' ist der DACH-Mittelpunkt einer gescheiterten IP-Abfrage.
     const fallback = pruefeOrtsanforderung({ clientVersion: { app: '6.0.15' }, capture: { gpsStatus: 'timeout' }, journeyLocation: { source: 'fallback', lat: 51.15, lon: 10.45 } });
-    expect(fallback.ok).toBe(false);
+    expect(fallback.ok).toBe(true);
+    const leer = pruefeOrtsanforderung({ clientVersion: { app: '6.0.15' }, capture: { gpsStatus: 'timeout' }, journeyLocation: { lat: null, lon: null, city: null, source: null } });
+    expect(leer.ok).toBe(true);
   });
 
   it('IP-Ortung ersetzt keine verweigerte Freigabe', () => {

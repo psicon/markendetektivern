@@ -289,11 +289,20 @@ function ortVonEinreichung(doc, zusatz) {
       else ausserhalb = landAusKoordinate(lat, lon);
     }
     const genauigkeitM = Number.isFinite(p.accuracyM) ? Math.round(p.accuracyM) : null;
+    // Quelle Bon (ploc-v2): probableLocation trägt weder PLZ noch Straße —
+    // die stehen am Bon selbst. Dieselbe Schreibweise wie im Altpfad.
+    const bonQuelle = p.source === 'receipt_address' ? doc?.priceReceipt || null : null;
+    if (bonQuelle?.zip) plz = String(bonQuelle.zip);
+    const bonLabel = bonQuelle
+      ? [bonQuelle.street, [bonQuelle.zip, bonQuelle.city || ort].filter(Boolean).join(' ')].filter(Boolean).join(', ')
+      : null;
     return {
       quelle, quelleText: wort,
       granularitaet: p.granularity || null,
       konfidenz: p.confidence || null,
-      label: ort
+      label: bonLabel
+        ? bonLabel
+        : ort
         ? `${ort}${plz ? `, ${plz}` : ''}`
         : lat != null
           ? `${ausserhalb || 'außerhalb der Ortstabelle'} (${lat.toFixed(3)}, ${lon.toFixed(3)})`
