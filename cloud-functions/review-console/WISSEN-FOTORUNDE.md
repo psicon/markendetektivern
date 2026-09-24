@@ -17,7 +17,7 @@ hat, steht hier als Regel. Wer die Runde ändert, ändert zuerst diese Datei.
 | Dashboard | https://md-receipt-admin.web.app/tagesbericht.html (Callable `reviewTagesberichte`) |
 | Morgen-Chat | geplante Aufgabe `morgenrunde-bericht` in der Claude-App (08:35/08:48), postet in ClickUp |
 | Schalter | `cashback_config/v1.fotoWorker === true` → scharf, sonst Trockenlauf |
-| Von Hand anstoßen | HTTP `fotoRundeManuell` (europe-west1) — ohne `key` + `scharf=1` immer Trockenlauf |
+| Von Hand anstoßen | HTTP `fotoRundeManuell?key=…` (europe-west1) — ohne Schlüssel 403; scharf nur mit `scharf=1` und eingeschaltetem Schalter |
 
 Die Runde liegt bewusst in der Prüfkonsole und nicht in einer eigenen
 Codebase: eine Kopie der Doppel-Regel wäre genau der Fehler vom 20.09.

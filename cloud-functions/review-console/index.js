@@ -981,14 +981,22 @@ exports.fotoRundeTaeglich = onSchedule(
 );
 
 /**
- * Manueller Anstoß. Ohne Schlüssel IMMER Trockenlauf. Scharf nur mit Schlüssel
- * UND `scharf=1` UND eingeschaltetem Schalter — der Schalter gilt für beide Wege.
+ * Manueller Anstoß — NUR mit Schlüssel. Auch ein Trockenlauf kostet
+ * Google-Aufrufe (Nachlesen + Bildprüfung je offener Einreichung) und schreibt
+ * nachgelesene Angaben; die Adresse ist öffentlich erreichbar (Cloud-Run-
+ * Invoker allUsers), also darf sie ohne Schlüssel nichts anstoßen.
+ * Scharf nur mit `scharf=1` UND eingeschaltetem Schalter — der Schalter gilt
+ * für beide Wege.
  */
 exports.fotoRundeManuell = onRequest(
   { ...RUNDE_OPTS, secrets: [CASHBACK_ADMIN_KEY] },
   async (req, res) => {
+    if (!req.query.key || req.query.key !== CASHBACK_ADMIN_KEY.value()) {
+      res.status(403).json({ error: 'Schlüssel fehlt oder falsch.' });
+      return;
+    }
     const cfg = (await db.doc('cashback_config/v1').get()).data() || {};
-    const scharf = req.query.key === CASHBACK_ADMIN_KEY.value() && req.query.scharf === '1' && cfg.fotoWorker === true;
+    const scharf = req.query.scharf === '1' && cfg.fotoWorker === true;
     const bericht = await taeglicheRunde({ dryRun: !scharf, projekt: PROJEKT, ausloeser: 'manuell' });
     res.json(bericht);
   },
