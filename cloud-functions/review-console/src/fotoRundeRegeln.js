@@ -28,7 +28,7 @@ const BILD_GRUENDE = new Set(['fotos_unpassend', 'gleiche_ansicht_mehrfach']);
  * @param {string[]} f.leer         Slots mit 0-Byte-Datei (echter Mangel)
  * @param {string[]} f.unlesbar     Slots, deren Metadaten Storage nicht lieferte (unsere Technik)
  * @param {boolean} f.wiederverwendet  Identitätsfoto stammt aus einer älteren Einreichung
- * @param {{echt:boolean, loseWare:boolean, gleicheAnsicht:boolean, grund:string}|null} f.audit
+ * @param {{echt:boolean, loseWare:boolean, traegtAngaben?:boolean, gleicheAnsicht:boolean, grund:string}|null} f.audit
  * @param {string|null} f.auditFehler   Fehlermeldung, wenn die Bildprüfung scheiterte
  * @param {{name?:string, ean?:string, preis?:string, alles?:string}} f.rettungFehler  Nachlesen ist an unserer Technik gescheitert
  * @param {boolean} [f.preisFehlt]  Kandidat oder Referenz der Doppel-Regel hat keinen Preis
@@ -71,7 +71,9 @@ function entscheideFall(f) {
     if (!audit) return offen(f.auditFehler ? 'bild_audit_gescheitert' : 'kein_bild_audit', { hinweis: f.auditFehler || null });
     // Lose Ware wird angenommen (Entscheidung Patrick 20.09.2026): Waage-Etiketten
     // tragen keinen Produkt-Barcode, das ist kein Fehler der Einreichung.
-    if (audit.loseWare && audit.echt && !audit.gleicheAnsicht) return { entscheidung: 'freigeben', grund: null, ctx: {}, loseWare: true };
+    // Waage-Etiketten wiederholen sich zwangsläufig auf allen Fotos — „dieselbe
+    // Ansicht" ist bei loser Ware kein Mangel (Vergleich 24.09., Bergkäse).
+    if (audit.loseWare && audit.echt) return { entscheidung: 'freigeben', grund: null, ctx: {}, loseWare: true };
     if (rf.ean || rf.alles) return offen('nachlesen_gescheitert', { hinweis: rf.ean || rf.alles });
     return ablehnen('ean_fehlt');
   }
@@ -80,8 +82,13 @@ function entscheideFall(f) {
     const defekt = /decode|image data/i.test(String(f.auditFehler || ''));
     return offen(defekt ? 'bild_defekt' : f.auditFehler ? 'bild_audit_gescheitert' : 'kein_bild_audit', { hinweis: f.auditFehler || null });
   }
-  if (audit.gleicheAnsicht) return ablehnen('gleiche_ansicht_mehrfach', { hinweis: audit.grund });
+  // „Immer dieselbe Ansicht" ist nur ein Mangel, wenn das Produkt Angaben trägt,
+  // die dadurch fehlen. Frischware ohne Zutaten/Nährwerte (Nektarinen im Netz)
+  // hat nur ihr eines Etikett — ist es fotografiert, ist der Datensatz vollständig.
+  // Vor „unecht" geprüft: der genauere Grund ergibt den passenderen App-Text.
+  if (audit.gleicheAnsicht && audit.traegtAngaben !== false) return ablehnen('gleiche_ansicht_mehrfach', { hinweis: audit.grund });
   if (!audit.echt) return ablehnen('fotos_unpassend', { hinweis: audit.grund });
+  if (audit.traegtAngaben === false) return { entscheidung: 'freigeben', grund: null, ctx: {}, ohneAngaben: true };
   return { entscheidung: 'freigeben', grund: null, ctx: {} };
 }
 

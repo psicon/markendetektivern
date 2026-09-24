@@ -66,6 +66,16 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   immer ein Mangel: ein Rückseitenfoto kann Zutaten, Nährwerte und Hersteller
   zugleich zeigen (vollständig), sieben Aufnahmen derselben Vorderseite sind
   wertlos (unvollständig). Das entscheidet nur die Bildprüfung.
+- **„Immer dieselbe Ansicht" ist nur ein Mangel, wenn dadurch etwas fehlt, das
+  das Produkt trägt.** Vergleich 24.09. (Runde gegen Handrunde, 235 Fälle, 231
+  gleich): Nektarinen im Netz und Bergkäse von der Theke hat die Runde
+  abgelehnt, weil alle Fotos dasselbe Etikett zeigten. Vier unabhängige
+  Gutachten: falsch. Unverarbeitetes Obst/Gemüse, Kräuter, Eier und
+  Thekenware tragen keine Zutaten- oder Nährwertangaben; ihr einziges Etikett
+  war vollständig fotografiert. Die Bildprüfung fragt deshalb getrennt
+  `traegtAngaben`; abgelehnt wird nur bei `gleicheAnsicht && traegtAngaben`.
+  Solche Freigaben tragen `frischwareOhneAngaben: true` (zählbar). Lose Ware
+  wird auch dann angenommen, wenn alle Fotos das Waage-Etikett zeigen.
 - **Ein gescheiterter Bild-Audit ist keine Freigabe und keine Ablehnung.**
   Bricht die Prüfung an einem Limit ab (429), bleibt der Fall offen für morgen.
 - **Jeder Ablehngrund braucht einen App-Text** in `lib/utils/productSubmissionCopy.ts`.

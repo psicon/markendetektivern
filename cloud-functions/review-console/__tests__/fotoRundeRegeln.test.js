@@ -47,6 +47,12 @@ describe('entscheideFall', () => {
     expect(entscheideFall(fall({ comp, rettungFehler: { name: '429' } })).entscheidung).toBe('offen');
   });
 
+  it('lose Ware: auch wenn alle Fotos das Waage-Etikett zeigen → angenommen (Bergkäse 24.09.)', () => {
+    const comp = { ok: false, problems: ['ean_fehlt'], missing: [] };
+    const e = entscheideFall(fall({ comp, audit: { ...echt, loseWare: true, gleicheAnsicht: true, traegtAngaben: false } }));
+    expect(e).toMatchObject({ entscheidung: 'freigeben', loseWare: true });
+  });
+
   it('lose Ware ohne Barcode wird ANGENOMMEN (Entscheidung 20.09.)', () => {
     const comp = { ok: false, problems: ['ean_fehlt'], missing: [] };
     const e = entscheideFall(fall({ comp, audit: { ...echt, loseWare: true } }));
@@ -70,8 +76,18 @@ describe('entscheideFall', () => {
     expect(e).toMatchObject({ entscheidung: 'offen', grund: 'bild_defekt' });
   });
 
-  it('fünfmal dieselbe Ansicht → ablehnen gleiche_ansicht_mehrfach (Quark 24.09.)', () => {
+  it('fünfmal dieselbe Ansicht bei Ware MIT Angaben → ablehnen (Quark 24.09.)', () => {
+    expect(entscheideFall(fall({ audit: { ...echt, gleicheAnsicht: true, traegtAngaben: true } })).grund).toBe('gleiche_ansicht_mehrfach');
+    // ohne Aussage des Modells: streng bleiben
     expect(entscheideFall(fall({ audit: { ...echt, gleicheAnsicht: true } })).grund).toBe('gleiche_ansicht_mehrfach');
+  });
+
+  it('dieselbe Ansicht bei Frischware OHNE Angaben → freigeben (Nektarinen 24.09.)', () => {
+    expect(entscheideFall(fall({ audit: { ...echt, gleicheAnsicht: true, traegtAngaben: false } }))).toMatchObject({ entscheidung: 'freigeben', ohneAngaben: true });
+  });
+
+  it('Frischware ohne Angaben, aber unecht → trotzdem ablehnen', () => {
+    expect(entscheideFall(fall({ audit: { ...echt, echt: false, traegtAngaben: false } })).grund).toBe('fotos_unpassend');
   });
 
   it('unecht → ablehnen fotos_unpassend', () => {

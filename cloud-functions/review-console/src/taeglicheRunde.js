@@ -216,7 +216,7 @@ async function bildAudit(ai, bucket, x) {
       'Du prüfst eine Produkt-Einreichung (die Fotos sind oben je Schritt benannt).',
       `Erwartet: echtes Einzelhandels-Produkt "${nameOf(x) || 'unbekannt'}" (EAN ${eanOf(x) || 'unbekannt'}).`,
       'Erwartung je Schritt: front=Vorderseite, rueckseite=Rückseite, hersteller=Hersteller-/Adressangabe, ean=Barcode, naehrwerte=Nährwerttabelle, zutaten=Zutatenliste, preis=Preisschild oder Bon.',
-      'JSON: {"echt":true|false,"loseWare":true|false,"gleicheAnsicht":true|false,"grund":"kurz"}.',
+      'JSON: {"echt":true|false,"loseWare":true|false,"traegtAngaben":true|false,"gleicheAnsicht":true|false,"grund":"kurz"}.',
       'echt=false NUR bei eindeutigem Ausschluss: kein reales Produkt, abfotografierter Bildschirm, fremde Motive, Schritte grob falsch belegt.',
       'Unscharf, angeschnitten oder zwei vertauschte Schritte = trotzdem echt=true.',
       // 24.09.2026: Das Preisfoto zeigte eine Tischdecke, alles andere war
@@ -225,7 +225,12 @@ async function bildAudit(ai, bucket, x) {
       'Das Preis-Foto darf ohne Preis sein (z. B. nochmal das Produkt, der Tisch, der Einkaufswagen) — das allein ist KEIN Ausschluss.',
       'Ein und dasselbe Foto darf mehrere Schritte abdecken, wenn dort wirklich mehrere Angaben stehen — auf vielen Rückseiten stehen Zutaten, Nährwerte und Anschrift zusammen. Das ist KEIN Mangel.',
       // 24.09.2026: fünf von sieben Fotos zeigten nur den Barcode am Becherboden.
-      'gleicheAnsicht=true, wenn mindestens fünf Fotos dasselbe Motiv zeigen und dadurch Zutaten, Nährwerte UND Herstellerangabe auf keinem Foto zu sehen sind.',
+      // Vergleich am selben Tag: Nektarinen im Netz und Bergkäse von der Theke
+      // wurden fälschlich als „dieselbe Ansicht" gewertet — beide tragen gar
+      // keine Zutaten-/Nährwertangaben, ihr einziges Etikett war vollständig
+      // fotografiert (vier unabhängige Gutachten). Deshalb die Frage getrennt:
+      'traegtAngaben: trägt DIESES Produkt von Natur aus eine Zutatenliste oder Nährwerttabelle? false bei unverarbeitetem frischem Obst und Gemüse (auch im Netz, in der Schale, mit Banderole und echtem Barcode), frischen Kräutern, Eiern und Ware von der Frischetheke. true bei verarbeiteten, verpackten Lebensmitteln und bei Drogerieartikeln mit Inhaltsstoffliste.',
+      'gleicheAnsicht=true NUR, wenn mindestens fünf Fotos dasselbe Motiv zeigen UND dadurch Angaben fehlen, die dieses Produkt tatsächlich trägt (z. B. Zutaten und Nährwerte stehen auf der Packung, fotografiert wurde aber immer nur Vorderseite oder Barcode). Trägt das Produkt keine weiteren Angaben und ist sein Etikett lesbar fotografiert, ist gleicheAnsicht=false.',
       'loseWare=true bei unverpackter Ware ohne Produkt-Barcode (Kräuterbund, Obst, Frischetheke mit Waage-Etikett).',
     ].join('\n'),
   });
@@ -235,7 +240,7 @@ async function bildAudit(ai, bucket, x) {
   }));
   const p = JSON.parse(String(r.text ?? '').replace(/^```json\s*|```\s*$/g, ''));
   if (typeof p.echt !== 'boolean') throw new Error('Bildprüfung ohne verwertbare Antwort');
-  return { echt: p.echt !== false, loseWare: p.loseWare === true, gleicheAnsicht: p.gleicheAnsicht === true, grund: String(p.grund || '').slice(0, 140) };
+  return { echt: p.echt !== false, loseWare: p.loseWare === true, traegtAngaben: p.traegtAngaben !== false, gleicheAnsicht: p.gleicheAnsicht === true, grund: String(p.grund || '').slice(0, 140) };
 }
 
 /* ─────────────────────────── Hilfen ─────────────────────────── */
@@ -461,7 +466,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     for (const p of plan) {
       if (p.entscheidung === 'offen') continue;
       const precheck = { verdict: p.comp.ok ? (p.dup.verdict === 'ok' ? 'ok' : p.dup.verdict) : 'incomplete', reasons: [...p.comp.problems, ...(p.dup.reason ? [p.dup.reason] : [])] };
-      const bild = p.audit ? { echt: p.audit.echt, loseWare: p.audit.loseWare, gleicheAnsicht: p.audit.gleicheAnsicht, grund: p.audit.grund } : null;
+      const bild = p.audit ? { echt: p.audit.echt, loseWare: p.audit.loseWare, traegtAngaben: p.audit.traegtAngaben, gleicheAnsicht: p.audit.gleicheAnsicht, grund: p.audit.grund } : null;
       try {
       await db.runTransaction(async (tx) => {
         const s = await tx.get(p.ref);
@@ -475,6 +480,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
             // crowd-upload-reward. Ein hier gesetztes `rewardPushSentAt` hielte
             // er für „schon verschickt" — die Person bekäme gar nichts.
             ...(p.loseWare ? { loseWare: { art: 'vom_bildaudit_erkannt', markiertAm: FieldValue.serverTimestamp() } } : {}),
+            ...(p.ohneAngaben ? { frischwareOhneAngaben: true } : {}),
           });
         } else {
           tx.update(p.ref, {
