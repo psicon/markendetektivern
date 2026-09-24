@@ -63,6 +63,7 @@ function entscheideFall(f) {
   if (comp.problems.includes('kein_produktname')) {
     // Scheiterte das Nachlesen (Limit ODER das Speichern des Ergebnisses), ist
     // das kein Beleg für „kein Name".
+    if (rf.name === 'lesungen_uneinig') return offen('lesung_unsicher', { hinweis: 'Name nur einmal gelesen' });
     if (rf.name || rf.alles) return offen('nachlesen_gescheitert', { hinweis: rf.name || rf.alles });
     return ablehnen('kein_produktname');
   }
@@ -74,6 +75,7 @@ function entscheideFall(f) {
     // Waage-Etiketten wiederholen sich zwangsläufig auf allen Fotos — „dieselbe
     // Ansicht" ist bei loser Ware kein Mangel (Vergleich 24.09., Bergkäse).
     if (audit.loseWare && audit.echt) return { entscheidung: 'freigeben', grund: null, ctx: {}, loseWare: true };
+    if (rf.ean === 'lesungen_uneinig') return offen('lesung_unsicher', { hinweis: 'Barcode unsicher gelesen' });
     if (rf.ean || rf.alles) return offen('nachlesen_gescheitert', { hinweis: rf.ean || rf.alles });
     return ablehnen('ean_fehlt');
   }
@@ -91,6 +93,44 @@ function entscheideFall(f) {
   if (audit.traegtAngaben === false) return { entscheidung: 'freigeben', grund: null, ctx: {}, ohneAngaben: true };
   return { entscheidung: 'freigeben', grund: null, ctx: {} };
 }
+
+/**
+ * Name aus zwei Nachlesungen (24.09.2026, Hinweis APP_ORIGINAL). Verlangt
+ * wird, dass ein Name LESBAR ist — nicht, dass zwei Lesungen wortgleich sind.
+ *  - beide lesen einen Namen → übernehmen (bei Abweichung die kürzere Fassung,
+ *    die längere als Alternative merken),
+ *  - nur eine liest einen Namen → unsicher → der Fall bleibt offen (kein Urteil),
+ *  - keine liest einen Namen → kein Name (darf abgelehnt werden).
+ */
+function nameAusLesungen(a, b) {
+  const lies = (x) => (x && x.sicher !== false ? String(x.name || '').trim() : '');
+  const na = lies(a);
+  const nb = lies(b);
+  if (na && nb) {
+    const gleich = normName(na) === normName(nb);
+    const kurz = na.length <= nb.length ? na : nb;
+    return { name: kurz.slice(0, 120), alternative: gleich ? null : (kurz === na ? nb : na).slice(0, 120) };
+  }
+  if (na || nb) return { unsicher: true };
+  return {};
+}
+
+/**
+ * Barcode aus zwei Nachlesungen. Hier bleibt es STRENG, weil eine falsche EAN
+ * das Produkt falsch zuordnet: übernommen nur bei zweimal gleich + Prüfziffer.
+ * Lesen die beiden aber Ziffern, ohne sich zu einigen, ist ein Barcode da und
+ * nur schwer lesbar — dann offen statt „kein Barcode" (kein Urteil).
+ */
+function eanAusLesungen(a, b, pruefzifferOk) {
+  const lies = (x) => (x && x.sicher !== false ? String(x.ean || '').replace(/\D/g, '') : '');
+  const ea = lies(a);
+  const eb = lies(b);
+  if (ea && ea === eb && pruefzifferOk(ea)) return { ean: ea };
+  if (ea || eb) return { unsicher: true };
+  return {};
+}
+
+const normName = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9äöüß]/g, '');
 
 function ablehnen(grund, ctx = {}) { return { entscheidung: 'ablehnen', grund, ctx }; }
 function offen(grund, ctx = {}) { return { entscheidung: 'offen', grund, ctx }; }
@@ -131,4 +171,4 @@ function notbremse(plan, { schnittQuote = null, bildMaxAnteil = 0.1, bildMin = 5
   return ergebnis;
 }
 
-module.exports = { entscheideFall, notbremse, BILD_GRUENDE };
+module.exports = { entscheideFall, notbremse, nameAusLesungen, eanAusLesungen, BILD_GRUENDE };

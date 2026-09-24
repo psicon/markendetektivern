@@ -147,3 +147,33 @@ describe('Nachlese-Fehler sind kein Urteil (Gegenprüfung 24.09.)', () => {
     expect(entscheideFall(fall({ dup, preisFehlt: false, rettungFehler: { preis: '429' } })).entscheidung).toBe('ablehnen');
   });
 });
+
+describe('Nachlesen: lesbar heißt nicht wortgleich (Hinweis APP_ORIGINAL 24.09.)', () => {
+  const { nameAusLesungen, eanAusLesungen } = require('../src/fotoRundeRegeln');
+  const gtin = (c) => c === '4061464833821';
+
+  it('zwei leicht verschiedene Namen → Name übernommen, Alternative gemerkt', () => {
+    expect(nameAusLesungen({ name: 'K-Classic Mango Eis', sicher: true }, { name: 'K Classic Mango-Eis mit Stücken', sicher: true }))
+      .toEqual({ name: 'K-Classic Mango Eis', alternative: 'K Classic Mango-Eis mit Stücken' });
+  });
+  it('gleiche Namen → keine Alternative', () => {
+    expect(nameAusLesungen({ name: 'Milsani Skyr', sicher: true }, { name: 'milsani skyr', sicher: true })).toEqual({ name: 'Milsani Skyr', alternative: null });
+  });
+  it('nur eine Lesung findet einen Namen → unsicher (bleibt offen)', () => {
+    expect(nameAusLesungen({ name: 'Milsani Skyr', sicher: true }, { name: '', sicher: false })).toEqual({ unsicher: true });
+  });
+  it('keine Lesung → kein Name', () => {
+    expect(nameAusLesungen({ name: '', sicher: false }, { name: '', sicher: false })).toEqual({});
+  });
+  it('EAN bleibt streng: nur zweimal gleich mit Prüfziffer', () => {
+    expect(eanAusLesungen({ ean: '4061464833821' }, { ean: '4061464833821' }, gtin)).toEqual({ ean: '4061464833821' });
+    expect(eanAusLesungen({ ean: '4061464833821' }, { ean: '4061464833828' }, gtin)).toEqual({ unsicher: true });
+    expect(eanAusLesungen({ ean: '' , sicher: false }, { ean: '', sicher: false }, gtin)).toEqual({});
+  });
+  it('unsichere Lesung führt zu „offen", nicht zur Ablehnung', () => {
+    expect(entscheideFall(fall({ comp: { ok: false, problems: ['kein_produktname'], missing: [] }, rettungFehler: { name: 'lesungen_uneinig' } })))
+      .toMatchObject({ entscheidung: 'offen', grund: 'lesung_unsicher' });
+    expect(entscheideFall(fall({ comp: { ok: false, problems: ['ean_fehlt'], missing: [] }, rettungFehler: { ean: 'lesungen_uneinig' } })))
+      .toMatchObject({ entscheidung: 'offen', grund: 'lesung_unsicher' });
+  });
+});

@@ -37,7 +37,7 @@ const { FieldValue } = require('firebase-admin/firestore');
 const logger = require('firebase-functions/logger');
 const { GoogleGenAI } = require('@google/genai');
 const { evaluateDuplicate, completenessCheck } = require('./duplicatePolicy');
-const { entscheideFall, notbremse, BILD_GRUENDE } = require('./fotoRundeRegeln');
+const { entscheideFall, notbremse, nameAusLesungen, eanAusLesungen, BILD_GRUENDE } = require('./fotoRundeRegeln');
 const { warnungen } = require('./warnungen');
 
 const COL = 'crowd_uploads';
@@ -152,19 +152,24 @@ async function rettungFuer(ai, bucket, ref, x) {
     const p = 'Lies den PRODUKTNAMEN von der Verpackung. JSON: {"name":"…","sicher":true|false}. name = Marke + Bezeichnung + Sorte, ohne Menge und Preis. Nicht zweifelsfrei lesbar → name leer, sicher false.';
     try {
       const [a, b] = [await frage(ai, bucket, x.images, ['front', 'rueckseite'], p), await frage(ai, bucket, x.images, ['front', 'rueckseite'], p)];
-      if (a.name && a.sicher !== false && norm(a.name) === norm(b.name)) patch.productNameRescueOcr = String(a.name).slice(0, 120);
+      const r = nameAusLesungen(a, b);
+      if (r.name) {
+        patch.productNameRescueOcr = r.name;
+        if (r.alternative) patch.productNameRescueAlternative = r.alternative;
+      } else if (r.unsicher) fehler.name = 'lesungen_uneinig';
     } catch (e) { fehler.name = String(e.message).slice(0, 120); }
   }
   if (offenEan) {
     const p = 'Lies die EAN/GTIN unter dem Strichcode. JSON: {"ean":"nur Ziffern","sicher":true|false}. Vollständig und in gedruckter Reihenfolge. Nicht zweifelsfrei lesbar oder kein Strichcode → leer. Nichts raten.';
     try {
       const [a, b] = [await frage(ai, bucket, x.images, ['ean', 'rueckseite', 'front'], p), await frage(ai, bucket, x.images, ['ean', 'rueckseite', 'front'], p)];
-      const ea = String(a.ean || '').replace(/\D/g, '');
       // Streng: unter den EAN-losen Einreichungen ist viel lose Ware, und ein
       // Modell, das nach einer Nummer gefragt wird, liefert dort gern die vom
       // Waage-Etikett (Befund 19.09.). Händlerinterne Codes (02, 20–29) bestehen
       // die Prüfziffer — deshalb die zweite Lesung.
-      if (ea && ea === String(b.ean || '').replace(/\D/g, '') && a.sicher !== false && b.sicher !== false && pruefzifferOk(ea)) patch.eanRescueOcr = ea;
+      const r = eanAusLesungen(a, b, pruefzifferOk);
+      if (r.ean) patch.eanRescueOcr = r.ean;
+      else if (r.unsicher) fehler.ean = 'lesungen_uneinig';
     } catch (e) { fehler.ean = String(e.message).slice(0, 120); }
   }
   if (offenPreis || offenHersteller) {
