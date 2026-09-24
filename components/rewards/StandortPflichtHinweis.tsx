@@ -16,11 +16,14 @@ import type { StandortPflicht } from '@/lib/services/standortPflicht';
  * Ton nach Projektregel: der Nutzen und der nächste Schritt, kein Mangel.
  */
 
-export type RewardArt = 'bon' | 'foto' | 'umfrage';
+export type RewardArt = 'bon' | 'bon_review' | 'foto' | 'umfrage';
 
 const WOFUER: Record<RewardArt, string> = {
   bon: 'Die Standortfreigabe gehört zur Teilnahme am Belohnungsprogramm. Bei Bons zählt vor allem die Filialadresse vom Bon — danach geht es direkt zum Scanner.',
   foto: 'Die Standortfreigabe gehört zur Teilnahme am Belohnungsprogramm — so landen deine Fotos bei dem Markt, in dem du gerade stehst.',
+  // Auf der Bestätigungsseite liegt das Foto schon vor — es darf nicht nach
+  // „nochmal scannen" klingen.
+  bon_review: 'Die Standortfreigabe gehört zur Teilnahme am Belohnungsprogramm. Dein Foto bleibt erhalten — nach der Freigabe kannst du den Bon direkt einreichen.',
   umfrage: 'Die Standortfreigabe gehört zur Teilnahme am Belohnungsprogramm — danach geht es direkt mit der Umfrage weiter.',
 };
 
@@ -33,13 +36,21 @@ const TEXTE: Record<Exclude<StandortPflicht, 'erfuellt'>, { titel: string; taste
 function wegBeschreibung(stand: Exclude<StandortPflicht, 'erfuellt'>): string | null {
   if (stand === 'einstellungen') {
     return Platform.OS === 'ios'
-      ? 'Dort unter „Standort" „Beim Verwenden der App" wählen.'
+      ? 'Dort unter „Standort" „Beim Verwenden der App" wählen. Ist die Auswahl gesperrt (Bildschirmzeit oder Firmengerät), lässt sie sich nur dort freigeben.'
       : 'Dort unter „Berechtigungen" den Standort erlauben.';
   }
   if (stand === 'dienste_aus' && Platform.OS === 'ios') {
-    return 'Einstellungen → Datenschutz & Sicherheit → Ortungsdienste.';
+    // iOS lässt nur die App-Seite öffnen; den globalen Schalter findet man
+    // unter „Datenschutz" (bis iOS 15) bzw. „Datenschutz & Sicherheit".
+    return 'Die Ortungsdienste sind am iPhone ausgeschaltet: Einstellungen → Datenschutz (& Sicherheit) → Ortungsdienste.';
   }
   return null;
+}
+
+/** iOS kann die Ortungsdienste nicht direkt öffnen — die Taste sagt, was passiert. */
+function tastenText(stand: Exclude<StandortPflicht, 'erfuellt'>): string {
+  if (stand === 'dienste_aus' && Platform.OS === 'ios') return 'Einstellungen öffnen';
+  return TEXTE[stand].taste;
 }
 
 interface Props {
@@ -129,7 +140,7 @@ export function StandortPflichtHinweis({ stand, art, laeuft, onErfuellen, onZuru
           <ActivityIndicator color="#fff" />
         ) : (
           <Text style={{ color: '#fff', fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 15 }}>
-            {t.taste}
+            {tastenText(stand)}
           </Text>
         )}
       </Pressable>

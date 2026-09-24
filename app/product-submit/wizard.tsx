@@ -214,7 +214,11 @@ export default function ProductWizardScreen() {
 
   // Deterministic camera-stack handoff state.
   const nativeAvailable = isBonScannerAvailable;
-  const wantBarcode = phase === 'capture' && step.mode === 'barcode';
+  // Auch an die Standort-Sperre gebunden: blendet sie sich im EAN-Schritt ein,
+  // fällt wantBarcode ab, der Übergabe-Effekt setzt expoActive zurück, und nach
+  // der Freigabe wartet die expo-Kamera wieder auf das Stoppen der NEUEN
+  // nativen Session — sonst liefen beide AVCaptureSessions gleichzeitig an.
+  const wantBarcode = pflicht.stand === 'erfuellt' && phase === 'capture' && step.mode === 'barcode';
   // Native scanner runs for every non-barcode step; its session is stopped the
   // moment we move to the EAN step.
   const bonActive = phase === 'capture' && nativeAvailable && !wantBarcode;

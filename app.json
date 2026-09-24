@@ -49,7 +49,7 @@
           "UIInterfaceOrientationPortrait"
         ],
         "NSCameraUsageDescription": "Diese App benötigt Zugriff auf die Kamera, um Barcodes von Produkten zu scannen und Preise zu vergleichen.",
-        "NSLocationWhenInUseUsageDescription": "Bei Produktfotos wird dein Standort erfasst und dem Datensatz zugeordnet — so ist nachvollziehbar, wo ein Produkt zu finden war. Bei Bons lesen wir die Filialadresse direkt vom Bon ab. Die Standortfreigabe ist Voraussetzung für die Teilnahme am Cashback-Programm.",
+        "NSLocationWhenInUseUsageDescription": "Bei Produktfotos wird dein Standort erfasst und dem Datensatz zugeordnet — so ist nachvollziehbar, wo ein Produkt zu finden war. Bei Bons lesen wir die Filialadresse direkt vom Bon ab. Die Standortfreigabe ist Voraussetzung für die Teilnahme am Cashback-Programm (Bons, Produktfotos und vergütete Umfragen).",
         "NSPhotoLibraryUsageDescription": "Diese App benötigt Zugriff auf deine Fotos, um dein Profilbild aus der Galerie auszuwählen."
       }
     },
@@ -106,7 +106,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Bei Produktfotos wird dein Standort erfasst und dem Datensatz zugeordnet — so ist nachvollziehbar, wo ein Produkt zu finden war. Bei Bons lesen wir die Filialadresse direkt vom Bon ab. Die Standortfreigabe ist Voraussetzung für die Teilnahme am Cashback-Programm.",
+          "locationWhenInUsePermission": "Bei Produktfotos wird dein Standort erfasst und dem Datensatz zugeordnet — so ist nachvollziehbar, wo ein Produkt zu finden war. Bei Bons lesen wir die Filialadresse direkt vom Bon ab. Die Standortfreigabe ist Voraussetzung für die Teilnahme am Cashback-Programm (Bons, Produktfotos und vergütete Umfragen).",
           "locationAlwaysAndWhenInUsePermission": false,
           "locationAlwaysPermission": false
         }

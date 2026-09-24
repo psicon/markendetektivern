@@ -14,7 +14,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import React, { useCallback, useLayoutEffect, useMemo, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -152,6 +152,9 @@ export default function CashbackReviewScreen() {
   // Bild bleibt erhalten (Routen-Parameter), nach der Freigabe geht es hier
   // weiter.
   const pflicht = useStandortPflicht();
+  // Sperrt den Knopf während der (kurzen) Standortprüfung — `submitting` wird
+  // erst danach gesetzt, ein zweiter Tipp in diesem Fenster liefe sonst mit.
+  const pruefungLaeuftRef = useRef(false);
 
   const [checks, setChecks] = useState<Record<'corners' | 'date' | 'items', boolean>>({
     corners: false,
@@ -227,7 +230,15 @@ export default function CashbackReviewScreen() {
       return;
     }
     // Fehlt die Freigabe, zeigt der Screen den Sperrhinweis (Render unten).
-    if ((await pflicht.pruefen()) !== 'erfuellt') return;
+    if (pruefungLaeuftRef.current) return;
+    pruefungLaeuftRef.current = true;
+    let stand;
+    try {
+      stand = await pflicht.pruefen();
+    } finally {
+      pruefungLaeuftRef.current = false;
+    }
+    if (stand !== 'erfuellt') return;
     setSubmitting(true);
     // Hash-Fallback (86cb6twnp): schlug das Hashen beim Aufnehmen fehl
     // (Heap/IO), einmal nachziehen statt hart zu blockieren. Der Server
@@ -408,10 +419,11 @@ export default function CashbackReviewScreen() {
         <View style={{ flex: 1, justifyContent: 'center' }}>
           <StandortPflichtHinweis
             stand={pflicht.stand}
-            art="bon"
+            art="bon_review"
             laeuft={pflicht.laeuft}
             onErfuellen={() => void pflicht.erfuellen()}
             onZurueck={handleDismiss}
+            zurueckLabel="Bon verwerfen"
           />
         </View>
       </View>

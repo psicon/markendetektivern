@@ -76,13 +76,15 @@ const REASON_COPY: Record<string, { headline: string; body: string }> = {
     headline: 'Dieses Produkt war damals schon frisch erfasst',
     body: 'Das bremst dich nicht mehr: Inzwischen zählen deine Einreichungen auch dann, wenn jemand anderes dasselbe Produkt schon fotografiert hat.',
   },
+  // Altbestand (Runde 20.09.2026): seit der Entscheidung vom selben Tag wird
+  // lose Ware angenommen. Der Text sagt das, statt davon abzuraten.
   ean_fehlt_lose_ware: {
-    headline: 'Lose Ware hat keinen Produkt-Barcode',
-    body: 'Kräuterbunde und Frischetheken-Artikel tragen nur händlerinterne Waage-Etiketten. Mit verpackten Artikeln mit Barcode zählt deine Einreichung sofort.',
+    headline: 'Lose Ware zählt inzwischen mit',
+    body: 'Damals galt das noch nicht — heute zählen auch Artikel mit Waage-Etikett. Beim nächsten Mal einfach alle sieben Schritte fotografieren.',
   },
   gleiche_ansicht_mehrfach: {
     headline: 'Alle Fotos zeigten dieselbe Ansicht',
-    body: 'Wir brauchen die sieben Schritte einzeln — Vorderseite, Rückseite, Zutaten, Nährwerte, Hersteller, Barcode und Preis. Bei Ware ohne diese Angaben klappt es mit verpackten Artikeln am besten.',
+    body: 'Wir brauchen die Angaben der Verpackung einzeln — Vorderseite, Rückseite, Zutaten, Nährwerte, Hersteller, Barcode und Preis. Frischware ohne solche Angaben zählt auch so.',
   },
   bild_defekt: {
     headline: 'Ein Foto ist beschädigt angekommen',
