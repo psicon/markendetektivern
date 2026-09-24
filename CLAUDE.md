@@ -4072,6 +4072,32 @@ gcloud functions describe processCashback --region=europe-west3 --gen2 --project
 Weicht es ab: aus einem Worktree auf dem deployten Commit + eigener Änderung
 deployen (`.env` hineinkopieren — sie ist nicht im Git) oder erst mergen.
 
+**4. Eine Nebenwirkung (Push, Mail) hängt am Ergebnis der Transaktion, nie an
+einem vorab gelesenen Zustand (24.09.2026).** Bis dahin prüfte der Bon-Push
+`!alreadyCredited` — gelesen VOR der Ledger-Transaktion. Zwei gleichzeitige
+Läufe sahen beide „noch nicht gebucht", einer buchte, beide schickten
+„Ka-ching!". Und Pub/Sub stellt dieselbe Nachricht wirklich doppelt zu, mit
+DERSELBEN Event-ID und parallel (seit 08.09. sechsmal, fünfmal überlappend):
+las der zweite Lauf die OCR anders, stornierte er die schon gemeldete
+Gutschrift. Mit dem Live-Code nachgestellt, in Produktion bis dahin ohne
+Schaden. Regeln:
+- Die Buchungsfunktion sagt, ob SIE gebucht hat (`syncLedgerForReceipt` →
+  `frischGebucht`); nur darauf reagieren. Zusätzlich ein Merker am Dokument in
+  einer Transaktion (`gutschriftPushAt`, bei Fotos `rewardPushSentAt`).
+- Wer einen Bon verarbeitet oder entscheidet, meldet sich in einer Transaktion
+  am Dokument an (`lib/laufAnspruch.js`): gleiche Event-ID parallel → nichts
+  tun; Konsole entscheidet nicht, solange ein Lauf rechnet; Pipeline rechnet
+  nicht, solange die Konsole entscheidet; der Kehrlauf legt keinen Bon neu auf,
+  an dem gerade ein Lauf rechnet.
+- Eine Statusprüfung („nur `review` ist auflösbar") außerhalb einer
+  Transaktion schützt vor nichts, sobald zwei Menschen oder ein Mensch und ein
+  Skript gleichzeitig klicken.
+- Ein Trigger, der bei Lesefehlern wirft, „damit erneut zugestellt wird",
+  braucht `retry: true` — sonst ist der Wurf ein stilles Verwerfen
+  (crowd-upload-reward lief bis 24.09. mit RETRY_POLICY_DO_NOT_RETRY). Und eine
+  Wiederholung wertet das ALTE Ereignis aus: den aktuellen Status in der
+  Buchungs-Transaktion mitlesen.
+
 ## Meta-Regel: Support-Sessions — antworten, NICHT selbst fixen
 
 Sessions, in denen der User App-/Support-Anfragen (Kontaktformular,

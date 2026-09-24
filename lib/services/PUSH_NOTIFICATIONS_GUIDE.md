@@ -19,6 +19,13 @@ Firebase Console + Deep-Link-Routing + Image-Support.
 | **Notification-Bild** | (optional) HTTPS-URL, **1024×512 px**, JPG/PNG, max 1 MB |
 
 ### 3. Ziel auswählen
+> ⚠️ **Konsolen-Kampagnen ignorieren die Abbestellung.** Wer in der App Push
+> ausschaltet, bekommt Kampagnen aus der Konsole trotzdem — die Abbestellung
+> (`users/{uid}.pushNotificationsEnabled`) prüfen nur die beiden Cloud
+> Functions, und die App löscht ihren FCM-Token beim Abbestellen nicht
+> (Prüfung 24.09.2026, ClickUp 12487v2bkkc). Bis das gelöst ist, vor jeder
+> Kampagne bewusst entscheiden.
+
 - **App: MarkenDetektive** (de.markendetektive)
 - **Plattform: iOS + Android** (beide)
 - **Audience: alle / Topic / einzelne Token** — Einzeltest: „Testnachricht
@@ -106,6 +113,25 @@ wird so eine Nachricht mit der Summe. Ziel `/product-submit`,
 `kind: 'crowd_reward'`. Not-Aus ohne Deploy:
 `cashback_config/v1.crowdPushAus = true`.
 
+**Genau einmal, nur bei Geld (Push-Prüfung 24.09.2026).** Beide Wege
+schicken nur, wenn wirklich gebucht wurde — nie bei Ablehnung, nie bei „ohne
+Prämie". Gegen doppelte Nachrichten und „Ka-ching, danach Storno":
+- **Bons:** `processCashback` schickt nur, wenn SEINE Ledger-Transaktion den
+  Earn geschrieben hat (`frischGebucht`); der Resolver bei `credited > 0`.
+  Vor jedem Versand setzt `sendCashbackReady` den Merker
+  `receipts/{id}.gutschriftPushAt` in einer Transaktion — höchstens eine
+  Nachricht je Bon, auch über Storno und erneute Gutschrift hinweg.
+- **Bons, Wettläufe:** Jeder Pipeline-Lauf meldet sich am Bon an
+  (`verarbeitung.e<eventId>`); eine parallele Doppelzustellung derselben
+  Pub/Sub-Nachricht tut nichts. Die Prüfkonsole meldet ihre Entscheidung in
+  derselben Transaktion an, in der sie den Status prüft (`entscheidungLaeuft`);
+  solange ein Lauf rechnet, antwortet sie `processing_in_progress`, bei einer
+  zweiten gleichzeitigen Entscheidung `decision_in_progress`. Der Kehrlauf legt
+  keinen Bon neu auf, an dem gerade ein Lauf rechnet. Code:
+  `cashback-pipeline/lib/laufAnspruch.js`, `lib/pushMerker.js`.
+- **Fotos:** Merker `rewardPushSentAt` am Upload, Trigger mit Wiederholung
+  (`retry: true`); nach 12 h Fehlern wird `rewardResult` sichtbar vermerkt.
+
 **Texte (Entscheidung Patrick, 24.09.2026) — gleich für Fotos und Bons:**
 Das Geld steht in der Überschrift, die Detektiv-Sprache darunter.
 
@@ -114,6 +140,10 @@ Das Geld steht in der Überschrift, die Detektiv-Sprache darunter.
 | Produktfotos | `Ka-ching! 💰 +0,16 € für dich` | `Deine Produktfotos sind freigegeben. Starke Detektivarbeit!` |
 | Bon | `Ka-ching! 💰 +0,08 € für dich` | `Dein Bon von Lidl ist geprüft. Weiter so, Spürnase!` |
 | 10 € erreicht | `Ka-ching! 🎉 10,06 € zum Auszahlen` | `… dein Guthaben kannst du dir jetzt auszahlen lassen.` |
+
+Der Zahltag-Text kommt nur, wenn genau diese Gutschrift die Schwelle
+überschritten hat UND das Guthaben beim Senden noch darüber liegt (wer im
+Sammelfenster schon ausgezahlt hat, bekommt den normalen Text).
 
 Die Texte stehen zweimal: `cashback-pipeline/lib/pushTexte.js` und
 `crowd-upload-reward/src/push.js` (die Codebases teilen keinen Code). Wer

@@ -72,6 +72,7 @@ const { extractReceiptDocAI, isConfigured: isDocAIConfigured } = require('./lib/
 const { deriveStoreAddress } = require('./lib/storeAddress');
 const { resolveRegion, pickCampaignForRegion, matchesTargeting, targetingStamp } = require('./lib/targeting');
 const { aktionZumZeitpunkt, wirksameAktionId } = require('./lib/campaignZeit');
+const { laufBeginnen, laufBeenden, entscheidungBeanspruchen, entscheidungFreigeben, aktiveLaeufe } = require('./lib/laufAnspruch');
 const { resolveMerchant } = require('./lib/merchant');
 const { sendCashbackReady } = require('./lib/push');
 const {
@@ -673,6 +674,12 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
   // selbst-exklusiv (dieser Zweig läuft nur ohne aktiven Earn; das Tages-
   // limit ignoriert den eigenen receiptId). capReason → Status außen.
   let capReason = null;
+  // Hat GENAU DIESE Transaktion den Earn geschrieben? Nur dann darf der Aufrufer
+  // „Ka-ching!" schicken (Push-Prüfung 24.09.2026). Ein vorab gelesenes
+  // `alreadyCredited` reicht nicht: zwei gleichzeitige Läufe sehen beide
+  // „noch nicht gebucht", einer bucht, der andere landet im Noop-Zweig — und
+  // meldete bisher trotzdem `creditedCents > 0`.
+  let frischGebucht = false;
 
   await db.runTransaction(async (tx) => {
     // Firestore wiederholt den Callback bei Konflikt → Ergebnisfelder pro
@@ -681,6 +688,7 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
     creditedCents = cashbackCents;
     budgetExhausted = false;
     capReason = null;
+    frischGebucht = false;
     // ── Alle Reads ZUERST (Firestore-Transaktions-Regel) ──
     const earns = await tx.get(
       ledgerCol.where('receiptId', '==', cashbackId).where('type', '==', 'earn'),
@@ -815,6 +823,7 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
       budgetExhausted = campaignMode && earnCents === 0 && cashbackCents > 0 && !capReason;
 
       if (earnCents > 0) {
+        frischGebucht = true;
         const ref = ledgerCol.doc();
         tx.set(ref, {
           type: 'earn',
@@ -946,7 +955,7 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
     // else: not approved + no prior earn — noop.
   });
 
-  return { creditedCents, budgetExhausted, capReason };
+  return { creditedCents, budgetExhausted, capReason, frischGebucht };
 }
 
 async function verifyAuthFromRequest(req) {
@@ -1335,6 +1344,47 @@ exports.processCashback = onMessagePublished(
     secrets: [GEMINI_API_KEY],
   },
   async (event) => {
+    // Push-Prüfung 24.09.2026 (lib/laufAnspruch.js): Pub/Sub stellt dieselbe
+    // Nachricht gelegentlich doppelt zu. Laufen beide Zustellungen parallel,
+    // kann die zweite mit eigener, abweichender OCR-Lesung eine schon gemeldete
+    // Gutschrift stornieren. Darum meldet sich jeder Lauf am Bon an; eine
+    // zweite Zustellung DERSELBEN Nachricht, solange der erste Lauf läuft, tut
+    // nichts. Ebenso wird nicht gerechnet, solange die Prüfkonsole entscheidet.
+    let payload = {};
+    try {
+      payload = event.data.message.json || {};
+    } catch (e) {
+      // Kaputte Nutzlast: die Verarbeitung unten meldet sie wie bisher.
+    }
+    const anspruchRef = payload.cashbackId ? db.doc(`receipts/${payload.cashbackId}`) : null;
+    const anspruch = anspruchRef
+      ? await laufBeginnen({ db, admin, docRef: anspruchRef, eventId: event.id })
+      : { urteil: 'frei', angemeldet: false };
+    if (anspruch.urteil !== 'frei') {
+      logger.warn('process-uebersprungen', { cashbackId: payload.cashbackId, eventId: event.id, grund: anspruch.urteil });
+      return;
+    }
+    if (anspruch.fehler) {
+      logger.warn('lauf-anspruch-fehlgeschlagen', { cashbackId: payload.cashbackId, err: anspruch.fehler });
+    }
+    try {
+      await verarbeiteCashback(event);
+    } finally {
+      if (anspruch.angemeldet && !(await laufBeenden({ admin, docRef: anspruchRef, eventId: event.id }))) {
+        // Der Anspruch verfällt nach LAUF_MAX_MS von selbst; bis dahin meldet
+        // die Konsole für diesen Bon processing_in_progress.
+        logger.warn('lauf-abmeldung-fehlgeschlagen', { cashbackId: payload.cashbackId, eventId: event.id });
+      }
+    }
+  },
+);
+
+/**
+ * Die eigentliche Bon-Verarbeitung (bis 24.09.2026 direkt der Handler oben).
+ * Die Einrückung ist bewusst unverändert geblieben, damit parallele Zweige an
+ * diesem Block ohne Konflikte zusammenfinden.
+ */
+async function verarbeiteCashback(event) {
     const data = event.data.message.json || {};
     const { cashbackId, uid } = data;
     if (!cashbackId || !uid) {
@@ -2554,15 +2604,17 @@ exports.processCashback = onMessagePublished(
         });
       }
 
-      if (status === 'approved' && cashbackCents > 0 && !alreadyCredited) {
+      if (status === 'approved' && cashbackCents > 0 && settle.frischGebucht) {
         // 8) Push — echt, seit b00c71a (Mai 2026). Der alte Kommentar an
         //    dieser Stelle sagte „stub-logs" und stimmte danach nie wieder;
         //    wer nur ihn las, hielt den Aufruf für wirkungslos (86cbfdq5j).
-        //    `!alreadyCredited`: wird ein schon gutgeschriebener Bon erneut
-        //    verarbeitet (PubSub-Redelivery, Kehrlauf, Nachverarbeitung), kam
-        //    bisher eine zweite Nachricht über dasselbe Geld. Brach ein früherer
-        //    Lauf NACH der Buchung, aber VOR dem Push ab, fehlt die Nachricht
-        //    jetzt — die fehlende ist der kleinere Schaden.
+        //    `settle.frischGebucht` (24.09.2026) statt des vorab gelesenen
+        //    `alreadyCredited`: nur der Lauf, dessen Transaktion den Earn
+        //    geschrieben hat, meldet sich. Zwei gleichzeitige Läufe sahen beide
+        //    „noch nicht gebucht" und schickten beide. Dazu setzt
+        //    sendCashbackReady einen Merker am Bon (lib/pushMerker.js). Brach
+        //    ein früherer Lauf NACH der Buchung, aber VOR dem Push ab, fehlt die
+        //    Nachricht — die fehlende ist der kleinere Schaden.
         //    Das `.catch` hält jeden Push-Fehler aus dem Geld-Zweig heraus: ein
         //    Wurf hier würde sonst im umgebenden try landen und einen längst
         //    gutgeschriebenen Bon in die Wiederholung schicken.
@@ -2631,8 +2683,7 @@ exports.processCashback = onMessagePublished(
       await docRef.update({ attempts, lastError, updatedAt: now }).catch(() => {});
       throw err;
     }
-  },
-);
+}
 
 // ─── requestPayout (HTTPS) ──────────────────────────────────────────
 //
@@ -3086,19 +3137,38 @@ exports.resolveCashbackReview = onRequest(
       });
       return;
     }
+    const ref = db.collection('receipts').doc(receiptId);
+    // Nach einem Fehler den EIGENEN Anspruch sofort freigeben, damit ein
+    // erneuter Klick nicht 2 Minuten lang „entscheidet gerade jemand" meldet.
+    // Das Geld bleibt dabei konsistent: das Ledger ist idempotent je Bon, ein
+    // zweiter Versuch bucht nichts doppelt.
+    let anspruchToken = null;
+    const anspruchFreigeben = async () => {
+      if (!anspruchToken) return;
+      const ok = await entscheidungFreigeben({ db, admin, ref, token: anspruchToken });
+      if (!ok) logger.warn('entscheidung-freigabe-fehlgeschlagen', { receiptId });
+    };
     try {
-      const ref = db.collection('receipts').doc(receiptId);
-      const snap = await ref.get();
-      if (!snap.exists) {
+      // Nur 'review' ist auflösbar → kein Doppel-Credit/Zustandsfehler. Seit
+      // 24.09.2026 (Push-Prüfung) werden Statusprüfung und Anmeldung der
+      // Entscheidung in EINER Transaktion gemacht (lib/laufAnspruch.js):
+      // vorher meldeten gleichzeitiges Freigeben und Ablehnen beide Erfolg —
+      // am Ende stand „Ka-ching!" beim Nutzer und ein Storno im Ledger. Und
+      // solange die Pipeline den Bon noch rechnet, wird nicht entschieden.
+      const anspruch = await entscheidungBeanspruchen({ db, admin, ref, decision });
+      if (anspruch.urteil === 'not_found') {
         res.status(404).json({ code: 'not_found' });
         return;
       }
-      const r = snap.data() || {};
-      // Nur 'review' ist auflösbar → kein Doppel-Credit/Zustandsfehler.
-      if (r.status !== 'review') {
-        res.status(409).json({ code: 'not_in_review', status: r.status || null });
+      if (anspruch.urteil !== 'frei') {
+        const code = anspruch.urteil === 'in_verarbeitung' ? 'processing_in_progress' : anspruch.urteil;
+        res.status(409).json({ code, status: anspruch.status ?? null });
         return;
       }
+      // Frisch gelesen NACH der Anmeldung: seit dem Aufruf kann die Pipeline den
+      // Bon neu gerechnet haben (anderer Betrag, andere Aktion).
+      anspruchToken = anspruch.token;
+      const r = (await ref.get()).data() || {};
       const uid = r.userId;
       const ts = admin.firestore.FieldValue.serverTimestamp();
       const mirrorRef = db.doc(`users/${uid}/cashback_status/${receiptId}`);
@@ -3116,6 +3186,7 @@ exports.resolveCashbackReview = onRequest(
       const wirksameAktion = wirksameAktionId(r);
       const campaign = wirksameAktion ? await loadCampaignById(wirksameAktion) : null;
       if (wirksameAktion && !campaign) {
+        await anspruchFreigeben();
         res.status(409).json({ code: 'campaign_missing', campaignId: wirksameAktion });
         return;
       }
@@ -3135,6 +3206,7 @@ exports.resolveCashbackReview = onRequest(
           rejectReason,
           ...(duplicateOf ? { duplicateOf } : {}),
           reviewDecision: 'reject',
+          entscheidungLaeuft: admin.firestore.FieldValue.delete(),
           store: store ?? null,
           reviewResolvedAt: ts,
           updatedAt: ts,
@@ -3165,6 +3237,7 @@ exports.resolveCashbackReview = onRequest(
           cashbackCents: 0,
           rejectReason: reason,
           reviewDecision: 'no_reward',
+          entscheidungLaeuft: admin.firestore.FieldValue.delete(),
           store: store ?? null,
           reviewResolvedAt: ts,
           updatedAt: ts,
@@ -3201,6 +3274,7 @@ exports.resolveCashbackReview = onRequest(
       if (cents <= 0) {
         // Kein berechnetes Cashback (z.B. ocr_unavailable-Hold ohne OCR) →
         // NICHT still als „Budget erschöpft" final schreiben.
+        await anspruchFreigeben();
         res.status(409).json({ code: 'no_cashback_computed', reviewReason: r.reviewReason || null });
         return;
       }
@@ -3228,6 +3302,7 @@ exports.resolveCashbackReview = onRequest(
         cashbackCents: credited,
         rejectReason: finalReason,
         reviewDecision: 'approve',
+        entscheidungLaeuft: admin.firestore.FieldValue.delete(),
         store: store ?? null,
         reviewResolvedAt: ts,
         updatedAt: ts,
@@ -3246,6 +3321,11 @@ exports.resolveCashbackReview = onRequest(
           backfilled: true, // nachgezogen → Matcher darf keinen heutigen Zettel abhaken
         });
       }
+      // Anders als in processCashback genügt hier `credited > 0`: ein Bon im
+      // Status 'review' mit schon aktiver Gutschrift entsteht nur, wenn ein
+      // früherer Lauf nach der Buchung abbrach (catch-Zweig) oder eine Freigabe
+      // nach der Buchung scheiterte — in beiden Fällen kam noch keine
+      // Nachricht. Doppelte verhindert der Merker in sendCashbackReady.
       if (credited > 0) {
         await sendCashbackReady(uid, {
           cashbackId: receiptId,
@@ -3258,6 +3338,7 @@ exports.resolveCashbackReview = onRequest(
       res.json({ ok: true, status: finalStatus, creditedCents: credited, capReason: settle?.capReason || null });
     } catch (e) {
       logger.error('resolveCashbackReview-failed', { receiptId, err: e.message });
+      await anspruchFreigeben();
       res.status(500).json({ code: 'internal' });
     }
   },
@@ -3281,14 +3362,20 @@ exports.sweepStuckReceipts = onSchedule(
   { region: REGION, schedule: 'every 15 minutes', timeoutSeconds: 120, memory: '256MiB' },
   async () => {
     const snap = await db.collection('receipts').where('status', '==', 'ocr_pending').limit(500).get();
-    const cutoff = Date.now() - SWEEP_MIN_AGE_MS;
+    const jetzt = Date.now();
+    const cutoff = jetzt - SWEEP_MIN_AGE_MS;
     const stuck = snap.docs.filter((d) => {
       const x = d.data();
       const created = x.createdAt?.toMillis?.() ?? 0;
       const lastSweep = x.sweptAt?.toMillis?.() ?? 0;
       // Nicht öfter als alle 20 min pro Bon; nach 5 Sweeps aufgeben (dann ist
       // es kein verlorener Publish mehr, sondern ein echter Verarbeitungsfehler).
-      return created && created < cutoff && lastSweep < cutoff && (x.sweepCount || 0) < 5;
+      // Und nie neben einem Lauf, der gerade rechnet (24.09.2026): zwei Läufe
+      // mit frischer OCR können verschieden lesen, und der zweite stornierte
+      // dann die Gutschrift, die der erste schon gemeldet hatte. Der nächste
+      // Kehrlauf holt den Bon, falls er danach noch hängt.
+      return created && created < cutoff && lastSweep < cutoff && (x.sweepCount || 0) < 5
+        && aktiveLaeufe(x.verarbeitung, jetzt).length === 0;
     }).slice(0, SWEEP_MAX_PER_RUN);
     if (!stuck.length) return;
     const topic = pubsub.topic(PUBSUB_TOPIC);

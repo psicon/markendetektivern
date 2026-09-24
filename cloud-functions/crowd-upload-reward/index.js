@@ -58,8 +58,23 @@ const db = admin.firestore();
 const REGION = 'europe-west1';
 const CAMPAIGNS_COL = 'cashback_campaigns';
 
+/**
+ * Wie lange ein technischer Fehler wiederholt wird (Push-Prüfung 24.09.2026).
+ * Der Trigger lief bis dahin OHNE Wiederholung (RETRY_POLICY_DO_NOT_RETRY),
+ * obwohl der Code bei Lesefehlern wirft, „damit Firestore erneut zustellt" —
+ * eine kurze Störung ließ eine Freigabe still ohne Geld und ohne Nachricht
+ * zurück. Mit `retry: true` stellt Eventarc erneut zu, mit wachsendem Abstand.
+ * Nach dieser Frist wird nicht mehr geworfen, sondern der Fehler ans Dokument
+ * geschrieben (rewardResult not_credited, technischer_fehler) und als Fehler
+ * ins Error Reporting geloggt — Eventarc gibt nach spätestens 24 Stunden
+ * ohnehin auf, und dann bliebe gar keine Spur. Die Morgenrunde sieht nur ihre
+ * eigenen Freigaben der letzten Minuten; eine Dashboard-Warnung für solche
+ * Fälle fehlt noch.
+ */
+const WIEDERHOLUNG_MAX_MS = 12 * 60 * 60 * 1000;
+
 exports.onCrowdUploadApproved = onDocumentUpdated(
-  { document: 'crowd_uploads/{id}', region: REGION },
+  { document: 'crowd_uploads/{id}', region: REGION, retry: true },
   async (event) => {
     const before = event.data?.before?.data();
     const after = event.data?.after?.data();
@@ -76,9 +91,14 @@ exports.onCrowdUploadApproved = onDocumentUpdated(
 
     /** Ergebnis ans Dokument — die Invariante trägt `rewardResult`, siehe src/ergebnis.js. */
     const markiere = (opts) =>
-      uploadRef.set(ergebnisFelder(admin.firestore.FieldValue, opts), { merge: true }).catch((e) =>
-        logger.error('[crowd-reward] Ergebnis-Marker nicht geschrieben', { uploadId, err: e.message }),
-      );
+      uploadRef
+        .set(ergebnisFelder(admin.firestore.FieldValue, opts), { merge: true })
+        .then(() => true)
+        .catch((e) => {
+          logger.error('[crowd-reward] Ergebnis-Marker nicht geschrieben', { uploadId, err: e.message });
+          return false;
+        });
+
 
     if (!uid) {
       logger.error('[crowd-reward] ohne userId — nicht buchbar', { uploadId });
@@ -93,269 +113,330 @@ exports.onCrowdUploadApproved = onDocumentUpdated(
     // liegen alle vor der Buchungs-Transaktion und sähen den Eintrag sonst nie.
     const userRef = db.collection('users').doc(uid);
     const ledgerRef = userRef.collection('cashback_ledger').doc(`crowd_${uploadId}`);
-    try {
-      const vorhanden = await ledgerRef.get();
-      if (vorhanden.exists) {
-        const gebucht = Number(vorhanden.data().cents) || 0;
-        const storniert = vorhanden.data().type === 'reverse';
-        logger.info('[crowd-reward] bereits gebucht — nur Ergebnis nachtragen', { uploadId, uid, cents: gebucht });
-        await markiere(
-          storniert || gebucht <= 0
-            ? { result: 'not_credited', reason: 'storniert' }
-            : { result: 'credited', cents: gebucht },
-        );
-        // Nachricht nachholen, falls der erste Lauf nach der Buchung, aber vor
-        // der Vormerkung abbrach. Der Merker `rewardPushSentAt` verhindert das
-        // doppelte Zählen. Nur für frische Buchungen: nach „ablehnen →
-        // zurückholen → freigeben" einer alten Nachbuchung käme sonst Tage
-        // später eine Ka-ching-Nachricht für längst bekanntes Geld.
-        const gebuchtAm = vorhanden.data().createdAt?.toMillis?.() ?? 0;
-        if (!storniert && gebucht > 0 && Date.now() - gebuchtAm < 24 * 60 * 60 * 1000) {
-          await zurSammlungHinzufuegen({ uploadRef, uploadId, uid, cents: gebucht });
-        }
+
+    /**
+     * Technischer Fehler: werfen, damit Eventarc erneut zustellt (die feste
+     * Doc-ID `crowd_<uploadId>` macht das gefahrlos). Ist das Ereignis älter
+     * als WIEDERHOLUNG_MAX_MS, nicht mehr werfen, sondern sichtbar vermerken —
+     * nach einem Blick ins Ledger: eine Transaktion kann durchgelaufen sein,
+     * obwohl ihre Antwort verloren ging, und dann ist das Geld gebucht.
+     */
+    const technischerFehler = async (e) => {
+      const alterMs = Date.now() - (Date.parse(event.time) || Date.now());
+      if (alterMs < WIEDERHOLUNG_MAX_MS) throw e;
+      let gebucht;
+      try {
+        const snap = await ledgerRef.get();
+        gebucht = !snap.exists ? 0 : snap.data().type === 'reverse' ? -1 : Number(snap.data().cents) || 0;
+      } catch (e2) {
+        // Ohne gesicherten Blick ins Ledger kein Urteil — lieber keine Spur als
+        // „nicht gebucht" an einer Einreichung, deren Geld vielleicht gebucht ist.
+        logger.error('[crowd-reward] Wiederholung aufgegeben, Ledger nicht lesbar — kein Vermerk', { uploadId, uid, alterMs, err: e.message, err2: e2.message });
         return;
       }
-    } catch (e) {
-      // Ledger nicht lesbar: kein Urteil fällen, sondern erneut zustellen lassen.
-      logger.error('[crowd-reward] Ledger nicht lesbar', { uploadId, uid, err: e.message });
-      throw e;
-    }
-
-    // Aktionskennzeichen. Fehlt es, hat der Client es nicht auflösen können
-    // (86cbet2nw) — das heißt NICHT, dass keine Aktion lief. Der Server schaut
-    // deshalb selbst nach, und zwar für den ZEITPUNKT DER EINREICHUNG.
-    let cid = after.campaignId;
-    let campaignQuelle = null;
-    let campaignZeitQuelle = null;
-    if (!cid) {
+      logger.error('[crowd-reward] Wiederholung aufgegeben', { uploadId, uid, alterMs, gebucht, err: e.message });
+      await markiere(
+        gebucht > 0
+          ? { result: 'credited', cents: gebucht }
+          : { result: 'not_credited', reason: gebucht < 0 ? 'storniert' : 'technischer_fehler' },
+      );
+    };
+    // Jeder Wurf — auch einer außerhalb der Blöcke unten, etwa bei einer
+    // ungültigen Aktions-ID — geht durch technischerFehler: jung wiederholen,
+    // nach WIEDERHOLUNG_MAX_MS sichtbar vermerken statt stumm verschwinden.
+    try {
       try {
-        const alle = await db.collection(CAMPAIGNS_COL).get();
-        // Maßgeblich ist die AUFNAHME, nicht der Moment, in dem die
-        // Warteschlange das Dokument schrieb: offline erfasste Einreichungen
-        // laden Tage später hoch (gemessen bis 68 Stunden), und genau die sind
-        // es, bei denen der Client keine Aktion auflösen konnte.
-        const aufnahme = after.capture?.capturedAt?.toMillis?.() ?? null;
-        const geschrieben = after.createdAt?.toMillis?.() ?? null;
-        campaignZeitQuelle = aufnahme != null ? 'capturedAt' : 'createdAt';
-        const treffer = campaignZurAufnahmezeit(
-          alle.docs.map((d) => ({ id: d.id, ...d.data() })),
-          aufnahme ?? geschrieben,
-        );
-        if (treffer.campaignId) {
-          cid = treffer.campaignId;
-          campaignQuelle = 'server_fallback';
-          logger.warn('[crowd-reward] Aktion serverseitig aufgelöst', { uploadId, uid, cid });
-        } else {
-          logger.info('[crowd-reward] keine Aktion zur Aufnahmezeit', { uploadId, uid, grund: treffer.grund });
-          await markiere({ result: 'not_credited', reason: treffer.grund });
+        const vorhanden = await ledgerRef.get();
+        if (vorhanden.exists) {
+          const gebucht = Number(vorhanden.data().cents) || 0;
+          const storniert = vorhanden.data().type === 'reverse';
+          logger.info('[crowd-reward] bereits gebucht — nur Ergebnis nachtragen', { uploadId, uid, cents: gebucht });
+          const vermerkt = await markiere(
+            storniert || gebucht <= 0
+              ? { result: 'not_credited', reason: 'storniert' }
+              : { result: 'credited', cents: gebucht },
+          );
+          // Ohne Vermerk gilt „approved ohne rewardResult" als echter Fehler —
+          // also wiederholen lassen, statt die Lücke stehen zu lassen.
+          if (!vermerkt) throw new Error('Ergebnis-Vermerk nicht geschrieben');
+          // Nachricht nachholen, falls der erste Lauf nach der Buchung, aber vor
+          // der Vormerkung abbrach. Der Merker `rewardPushSentAt` verhindert das
+          // doppelte Zählen. Nur für frische Buchungen: nach „ablehnen →
+          // zurückholen → freigeben" einer alten Nachbuchung käme sonst Tage
+          // später eine Ka-ching-Nachricht für längst bekanntes Geld.
+          const gebuchtAm = vorhanden.data().createdAt?.toMillis?.() ?? 0;
+          if (!storniert && gebucht > 0 && Date.now() - gebuchtAm < 24 * 60 * 60 * 1000) {
+            await zurSammlungHinzufuegen({ uploadRef, uploadId, uid, cents: gebucht });
+          }
           return;
         }
       } catch (e) {
-        // Ein Lesefehler ist keine Aussage über die Einreichung: erneut zustellen.
-        logger.error('[crowd-reward] Aktions-Rückfall fehlgeschlagen', { uploadId, err: e.message });
+        // Ledger nicht lesbar: kein Urteil fällen, sondern erneut zustellen lassen.
+        logger.error('[crowd-reward] Ledger nicht lesbar', { uploadId, uid, err: e.message });
         throw e;
       }
-    }
 
-    // Ortsanforderung des Reward-Programms. Der Wizard verlangt den Ort
-    // verpflichtend, aber nur bei aktualisierten Apps — eine Geld-Regel,
-    // die nur im Client steht, ist keine Regel.
-    const ort = pruefeOrtsanforderung(after);
-    if (!ort.ok) {
-      // AUSDRÜCKLICH ins Dokument schreiben, nicht nur loggen. Ein still
-      // ausbleibender Betrag ist genau das Muster, das schon einmal zu
-      // „144 freigegeben, 0 Cent ausgezahlt" geführt hat: niemand sieht
-      // einen Fehler, der Nutzer wartet, und es fällt monatelang nicht auf.
-      logger.warn('[crowd-reward] ohne Ortsangabe — keine Vergütung', {
-        uploadId,
-        uid,
-        grund: ort.grund,
-      });
-      // `rewardSkipped` bleibt der Ortsregel vorbehalten — die ausgelieferte
-      // App leitet daraus ihren Standort-Hinweis ab. Für die Invariante kommt
-      // `rewardResult` dazu (src/ergebnis.js).
-      await markiere({ result: 'not_credited', reason: ort.grund, extra: { rewardSkipped: true, rewardSkippedReason: ort.grund } });
-      return;
-    }
-
-    // Orts-Audit 05.09.2026: der ok-GRUND wurde bisher verworfen — 731
-    // Gnadenfrist- und 54 GPS-Ausnahme-Zahlungen waren in Firestore von
-    // regulären nicht unterscheidbar. Ab jetzt steht die angewandte Regel am
-    // Doc (rewardLocationRule), ebenso das Buchungsergebnis (rewardResult /
-    // rewardCents / rewardNotCreditedReason) — ein still ausbleibender Betrag
-    // ist genau das Muster, das niemand merkt.
-    const rewardLocationRule = ort.grund || 'ort_vorhanden';
-
-    // Regionale Aktionen (06.09.2026). Produktfotos liefern selbst keine PLZ:
-    // die Ortsbestätigung trägt nur einen Ortsnamen, GPS nur Koordinaten.
-    // Belegte Quellen sind deshalb (1) ein Kassenbon, den der Nutzer als
-    // Preisbild eingereicht hat, und (2) die aus den eigenen Bons abgeleitete
-    // Nutzer-Region. Ist beides unbekannt, entscheidet die Aktion selbst
-    // (onUnknown, Standard: vergüten — niemand wird für eine fehlende Angabe
-    // bestraft).
-    let region = resolveRegion({
-      bonFotoZip: after.priceReceipt?.zip ?? null,
-      country: after.priceReceipt?.country ?? after.marketLand ?? null,
-    });
-    if (!region.zip) {
-      try {
-        const uSnap = await db.doc(`users/${uid}`).get();
-        const r = uSnap.exists ? uSnap.data().region : null;
-        if (r && r.zip) region = resolveRegion({ profilZip: r.zip, country: r.country ?? null });
-      } catch (e) {
-        logger.warn('[crowd-reward] Nutzer-Region nicht lesbar', { uploadId, err: e.message });
-      }
-    }
-
-    // Aktion + Region prüfen, bevor gebucht wird. Passt das Gebiet nicht,
-    // wird NICHT gebucht — und der Grund steht am Dokument, nie nur im Log.
-    try {
-      const campSnap = await db.collection(CAMPAIGNS_COL).doc(cid).get();
-      const camp = campSnap.exists ? { id: campSnap.id, ...campSnap.data() } : null;
-      const treffer = matchesTargeting(camp || {}, region);
-      if (!treffer.ok) {
-        logger.warn('[crowd-reward] ausserhalb des Aktionsgebiets — keine Vergütung', { uploadId, uid, cid, zip: region.zip, grund: treffer.grund });
-        await markiere({
-          result: 'not_credited',
-          reason: 'ausserhalb_aktionsgebiet',
-          extra: {
-            rewardSkipped: true,
-            rewardSkippedReason: 'ausserhalb_aktionsgebiet',
-            rewardRegion: { zip: region.zip, source: region.source, grund: treffer.grund },
-          },
-        });
-        return;
-      }
-    } catch (e) {
-      // Ein Fehler beim Prüfen ist keine Aussage über die Einreichung:
-      // weiterlaufen (fail-open) statt jemanden ohne Grund leer ausgehen lassen.
-      logger.warn('[crowd-reward] Regionsprüfung fehlgeschlagen — wird vergütet', { uploadId, err: e.message });
-    }
-
-    const campRef = db.collection(CAMPAIGNS_COL).doc(cid);
-
-    try {
-      const outcome = await db.runTransaction(async (tx) => {
-        // ── Reads zuerst (Firestore-Transaktionsregel) ──
-        const [ledgerSnap, userSnap, campSnap] = await Promise.all([
-          tx.get(ledgerRef),
-          tx.get(userRef),
-          tx.get(campRef),
-        ]);
-
-        // Sicherung gegen zwei gleichzeitige Zustellungen: der Vorab-Check
-        // oben fängt den Normalfall, diese Prüfung das Rennen zweier Läufe.
-        if (ledgerSnap.exists) return { cents: 0, reason: 'already_booked' };
-        if (!campSnap.exists) return { cents: 0, reason: 'campaign_missing' };
-
-        const camp = campSnap.data();
-        let pay = Number(camp.cashbackPerBonCents) || 0;
-        if (pay <= 0) return { cents: 0, reason: 'no_reward_configured' };
-
-        const u = userSnap.exists ? userSnap.data() : {};
-        const balance = u.cashback_balance_cents || 0;
-        const lifetime = u.cashback_lifetime_cents || 0;
-
-        // Per-User-Gesamtdeckel der Aktion — gleiche Rechnung wie die
-        // Bon-Pipeline (cappt auf den verbleibenden Spielraum).
-        const perUserCap = Number(camp.maxPerUserCents) || 0;
-        if (perUserCap > 0) {
-          const earned = (u.cashback_campaign_totals || {})[cid] || 0;
-          pay = Math.min(pay, Math.max(0, perUserCap - earned));
-          if (pay <= 0) return { cents: 0, reason: 'per_user_cap_reached' };
+      // Aktionskennzeichen. Fehlt es, hat der Client es nicht auflösen können
+      // (86cbet2nw) — das heißt NICHT, dass keine Aktion lief. Der Server schaut
+      // deshalb selbst nach, und zwar für den ZEITPUNKT DER EINREICHUNG.
+      let cid = after.campaignId;
+      let campaignQuelle = null;
+      let campaignZeitQuelle = null;
+      if (!cid) {
+        try {
+          const alle = await db.collection(CAMPAIGNS_COL).get();
+          // Maßgeblich ist die AUFNAHME, nicht der Moment, in dem die
+          // Warteschlange das Dokument schrieb: offline erfasste Einreichungen
+          // laden Tage später hoch (gemessen bis 68 Stunden), und genau die sind
+          // es, bei denen der Client keine Aktion auflösen konnte.
+          const aufnahme = after.capture?.capturedAt?.toMillis?.() ?? null;
+          const geschrieben = after.createdAt?.toMillis?.() ?? null;
+          campaignZeitQuelle = aufnahme != null ? 'capturedAt' : 'createdAt';
+          const treffer = campaignZurAufnahmezeit(
+            alle.docs.map((d) => ({ id: d.id, ...d.data() })),
+            aufnahme ?? geschrieben,
+          );
+          if (treffer.campaignId) {
+            cid = treffer.campaignId;
+            campaignQuelle = 'server_fallback';
+            logger.warn('[crowd-reward] Aktion serverseitig aufgelöst', { uploadId, uid, cid });
+          } else {
+            logger.info('[crowd-reward] keine Aktion zur Aufnahmezeit', { uploadId, uid, grund: treffer.grund });
+            await markiere({ result: 'not_credited', reason: treffer.grund });
+            return;
+          }
+        } catch (e) {
+          // Ein Lesefehler ist keine Aussage über die Einreichung: erneut zustellen.
+          logger.error('[crowd-reward] Aktions-Rückfall fehlgeschlagen', { uploadId, err: e.message });
+          throw e;
         }
-
-        // Budget frisch IN der Transaktion lesen — sonst überzieht ein
-        // zweiter paralleler Trigger den letzten Budget-Rest.
-        const remaining = Number(camp.budgetRemainingCents);
-        if (Number.isFinite(remaining)) {
-          pay = Math.min(pay, Math.max(0, remaining));
-          if (pay <= 0) return { cents: 0, reason: 'campaign_budget_exhausted' };
-        }
-
-        const inc = admin.firestore.FieldValue.increment;
-        tx.set(ledgerRef, {
-          type: 'earn',
-          cents: pay,
-          campaignId: cid,
-          crowdUploadId: uploadId,
-          balanceAfterCents: balance + pay,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          reason: 'product_photos',
-        });
-        tx.set(
-          userRef,
-          {
-            cashback_balance_cents: balance + pay,
-            cashback_lifetime_cents: lifetime + pay,
-            cashback_campaign_totals: { [cid]: inc(pay) },
-          },
-          { merge: true },
-        );
-        tx.set(campRef, { budgetRemainingCents: inc(-pay) }, { merge: true });
-
-        // Guthaben vor/nach nur als RÜCKGABE — für die Zahltag-Erkennung der
-        // Nachricht (src/push.js). Am Schreibweg des Geldes ändert das nichts.
-        return { cents: pay, reason: null, guthabenVorher: balance, guthabenNachher: balance + pay };
-      });
-
-      const credited = outcome.cents;
-      if (credited > 0) {
-        logger.info('[crowd-reward] gutgeschrieben', { uploadId, uid, cid, cents: credited, rewardLocationRule });
-      } else if (outcome.reason === 'campaign_missing') {
-        logger.warn('[crowd-reward] Aktion existiert nicht', { uploadId, cid });
-      } else {
-        logger.info('[crowd-reward] nichts zu buchen', { uploadId, uid, cid, reason: outcome.reason });
       }
-      // Ergebnis ans Doc — messbar, nicht nur im Log. `already_booked` kann
-      // hier nicht mehr auftreten: das Ledger wird ganz oben gelesen und der
-      // Fall dort abschließend behandelt.
-      // Die serverseitig ergänzte `campaignId` wird NUR bei einer echten Buchung
-      // ans Dokument geschrieben. Die ausgelieferte App liest bei „angenommen"
-      // allein dieses Feld und verspricht daraufhin „die Vergütung liegt in
-      // deinem Guthaben" (productSubmissionCopy.ts:80-84) — stünde es auch ohne
-      // Buchung dort, wäre das eine Zusage, die niemand einlöst. Für die
-      // Nachvollziehbarkeit reicht `campaignQuelle` plus der Grund; beide liest
-      // keine App-Version.
-      const extra = { rewardLocationRule };
-      if (campaignQuelle) {
-        extra.campaignQuelle = campaignQuelle;
-        extra.campaignIdServer = cid;
-        if (campaignZeitQuelle) extra.campaignZeitQuelle = campaignZeitQuelle;
-      }
-      await markiere(
-        credited > 0
-          ? { result: 'credited', cents: credited, extra: campaignQuelle ? { ...extra, campaignId: cid } : extra }
-          : { result: 'not_credited', reason: outcome.reason, extra },
-      );
 
-      // Die Gutschrift meldet sich von selbst (12487v2akvp) — und NUR sie.
-      // Eine Ablehnung bleibt bewusst leise: ihr Grund steht in der Liste der
-      // Einreichungen und wird dort gelesen, wenn jemand von sich aus nachsieht.
-      // Hier wird nur VORGEMERKT; verschickt wird gesammelt im Zeitplan-Lauf
-      // unten, damit zehn Freigaben aus einer Prüfrunde EINE Nachricht werden.
-      // Der Aufruf wirft nie und liegt bewusst NICHT im catch unten: das Geld
-      // ist gebucht, eine erneute Zustellung wegen einer misslungenen
-      // Vormerkung wäre der teurere Fehler.
-      if (credited > 0) {
-        await zurSammlungHinzufuegen({
-          uploadRef,
+      // Ortsanforderung des Reward-Programms. Der Wizard verlangt den Ort
+      // verpflichtend, aber nur bei aktualisierten Apps — eine Geld-Regel,
+      // die nur im Client steht, ist keine Regel.
+      const ort = pruefeOrtsanforderung(after);
+      if (!ort.ok) {
+        // AUSDRÜCKLICH ins Dokument schreiben, nicht nur loggen. Ein still
+        // ausbleibender Betrag ist genau das Muster, das schon einmal zu
+        // „144 freigegeben, 0 Cent ausgezahlt" geführt hat: niemand sieht
+        // einen Fehler, der Nutzer wartet, und es fällt monatelang nicht auf.
+        logger.warn('[crowd-reward] ohne Ortsangabe — keine Vergütung', {
           uploadId,
           uid,
-          cents: credited,
-          guthabenVorher: outcome.guthabenVorher,
-          guthabenNachher: outcome.guthabenNachher,
+          grund: ort.grund,
         });
+        // `rewardSkipped` bleibt der Ortsregel vorbehalten — die ausgelieferte
+        // App leitet daraus ihren Standort-Hinweis ab. Für die Invariante kommt
+        // `rewardResult` dazu (src/ergebnis.js).
+        await markiere({ result: 'not_credited', reason: ort.grund, extra: { rewardSkipped: true, rewardSkippedReason: ort.grund } });
+        return;
       }
-    } catch (e) {
-      // Werfen, damit Firestore erneut zustellt — die Idempotenz über die
-      // feste Doc-ID macht einen Retry gefahrlos.
-      logger.error('[crowd-reward] Transaktion fehlgeschlagen', {
-        uploadId,
-        uid,
-        err: e.message,
+
+      // Orts-Audit 05.09.2026: der ok-GRUND wurde bisher verworfen — 731
+      // Gnadenfrist- und 54 GPS-Ausnahme-Zahlungen waren in Firestore von
+      // regulären nicht unterscheidbar. Ab jetzt steht die angewandte Regel am
+      // Doc (rewardLocationRule), ebenso das Buchungsergebnis (rewardResult /
+      // rewardCents / rewardNotCreditedReason) — ein still ausbleibender Betrag
+      // ist genau das Muster, das niemand merkt.
+      const rewardLocationRule = ort.grund || 'ort_vorhanden';
+
+      // Regionale Aktionen (06.09.2026). Produktfotos liefern selbst keine PLZ:
+      // die Ortsbestätigung trägt nur einen Ortsnamen, GPS nur Koordinaten.
+      // Belegte Quellen sind deshalb (1) ein Kassenbon, den der Nutzer als
+      // Preisbild eingereicht hat, und (2) die aus den eigenen Bons abgeleitete
+      // Nutzer-Region. Ist beides unbekannt, entscheidet die Aktion selbst
+      // (onUnknown, Standard: vergüten — niemand wird für eine fehlende Angabe
+      // bestraft).
+      let region = resolveRegion({
+        bonFotoZip: after.priceReceipt?.zip ?? null,
+        country: after.priceReceipt?.country ?? after.marketLand ?? null,
       });
-      throw e;
+      if (!region.zip) {
+        try {
+          const uSnap = await db.doc(`users/${uid}`).get();
+          const r = uSnap.exists ? uSnap.data().region : null;
+          if (r && r.zip) region = resolveRegion({ profilZip: r.zip, country: r.country ?? null });
+        } catch (e) {
+          logger.warn('[crowd-reward] Nutzer-Region nicht lesbar', { uploadId, err: e.message });
+        }
+      }
+
+      // Aktion + Region prüfen, bevor gebucht wird. Passt das Gebiet nicht,
+      // wird NICHT gebucht — und der Grund steht am Dokument, nie nur im Log.
+      try {
+        const campSnap = await db.collection(CAMPAIGNS_COL).doc(cid).get();
+        const camp = campSnap.exists ? { id: campSnap.id, ...campSnap.data() } : null;
+        const treffer = matchesTargeting(camp || {}, region);
+        if (!treffer.ok) {
+          logger.warn('[crowd-reward] ausserhalb des Aktionsgebiets — keine Vergütung', { uploadId, uid, cid, zip: region.zip, grund: treffer.grund });
+          await markiere({
+            result: 'not_credited',
+            reason: 'ausserhalb_aktionsgebiet',
+            extra: {
+              rewardSkipped: true,
+              rewardSkippedReason: 'ausserhalb_aktionsgebiet',
+              rewardRegion: { zip: region.zip, source: region.source, grund: treffer.grund },
+            },
+          });
+          return;
+        }
+      } catch (e) {
+        // Ein Fehler beim Prüfen ist keine Aussage über die Einreichung:
+        // weiterlaufen (fail-open) statt jemanden ohne Grund leer ausgehen lassen.
+        logger.warn('[crowd-reward] Regionsprüfung fehlgeschlagen — wird vergütet', { uploadId, err: e.message });
+      }
+
+      // Ein gescheiterter Vermerk NACH der Buchung soll wiederholt werden (der
+      // Wiederholungslauf findet die Buchung und trägt den Vermerk nach). Der
+      // Wurf kommt erst nach der Vormerkung der Nachricht — die ist idempotent.
+      let vermerkFehlt = false;
+      try {
+        const campRef = db.collection(CAMPAIGNS_COL).doc(cid);
+        const outcome = await db.runTransaction(async (tx) => {
+          // ── Reads zuerst (Firestore-Transaktionsregel) ──
+          const [ledgerSnap, userSnap, campSnap, uploadSnap] = await Promise.all([
+            tx.get(ledgerRef),
+            tx.get(userRef),
+            tx.get(campRef),
+            tx.get(uploadRef),
+          ]);
+
+          // Sicherung gegen zwei gleichzeitige Zustellungen: der Vorab-Check
+          // oben fängt den Normalfall, diese Prüfung das Rennen zweier Läufe.
+          if (ledgerSnap.exists) return { cents: 0, reason: 'already_booked' };
+          // Eine Wiederholung wertet das URSPRÜNGLICHE Ereignis aus, womöglich
+          // Stunden später. Ist die Einreichung inzwischen nicht mehr freigegeben,
+          // wird nicht gebucht.
+          if (!uploadSnap.exists) return { cents: 0, reason: 'geloescht' };
+          if (uploadSnap.get('status') !== 'approved') return { cents: 0, reason: 'status_geaendert' };
+          if (!campSnap.exists) return { cents: 0, reason: 'campaign_missing' };
+
+          const camp = campSnap.data();
+          let pay = Number(camp.cashbackPerBonCents) || 0;
+          if (pay <= 0) return { cents: 0, reason: 'no_reward_configured' };
+
+          const u = userSnap.exists ? userSnap.data() : {};
+          const balance = u.cashback_balance_cents || 0;
+          const lifetime = u.cashback_lifetime_cents || 0;
+
+          // Per-User-Gesamtdeckel der Aktion — gleiche Rechnung wie die
+          // Bon-Pipeline (cappt auf den verbleibenden Spielraum).
+          const perUserCap = Number(camp.maxPerUserCents) || 0;
+          if (perUserCap > 0) {
+            const earned = (u.cashback_campaign_totals || {})[cid] || 0;
+            pay = Math.min(pay, Math.max(0, perUserCap - earned));
+            if (pay <= 0) return { cents: 0, reason: 'per_user_cap_reached' };
+          }
+
+          // Budget frisch IN der Transaktion lesen — sonst überzieht ein
+          // zweiter paralleler Trigger den letzten Budget-Rest.
+          const remaining = Number(camp.budgetRemainingCents);
+          if (Number.isFinite(remaining)) {
+            pay = Math.min(pay, Math.max(0, remaining));
+            if (pay <= 0) return { cents: 0, reason: 'campaign_budget_exhausted' };
+          }
+
+          const inc = admin.firestore.FieldValue.increment;
+          tx.set(ledgerRef, {
+            type: 'earn',
+            cents: pay,
+            campaignId: cid,
+            crowdUploadId: uploadId,
+            balanceAfterCents: balance + pay,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            reason: 'product_photos',
+          });
+          tx.set(
+            userRef,
+            {
+              cashback_balance_cents: balance + pay,
+              cashback_lifetime_cents: lifetime + pay,
+              cashback_campaign_totals: { [cid]: inc(pay) },
+            },
+            { merge: true },
+          );
+          tx.set(campRef, { budgetRemainingCents: inc(-pay) }, { merge: true });
+
+          // Guthaben vor/nach nur als RÜCKGABE — für die Zahltag-Erkennung der
+          // Nachricht (src/push.js). Am Schreibweg des Geldes ändert das nichts.
+          return { cents: pay, reason: null, guthabenVorher: balance, guthabenNachher: balance + pay };
+        });
+
+        // Eine gleichzeitige zweite Zustellung hat schon gebucht: Ergebnis und
+        // Nachricht gehören dem Lauf, der gebucht hat. Bisher überschrieb dieser
+        // Zweig dessen „credited" mit „not_credited / already_booked".
+        if (outcome.reason === 'already_booked') {
+          logger.info('[crowd-reward] parallel schon gebucht — nichts zu tun', { uploadId, uid });
+          return;
+        }
+        // Inzwischen gelöscht: nichts buchen und kein Rest-Dokument anlegen
+        // (markiere schreibt per merge und würde es neu erzeugen).
+        if (outcome.reason === 'geloescht') {
+          logger.warn('[crowd-reward] Einreichung inzwischen gelöscht — nichts gebucht', { uploadId, uid });
+          return;
+        }
+
+        const credited = outcome.cents;
+        if (credited > 0) {
+          logger.info('[crowd-reward] gutgeschrieben', { uploadId, uid, cid, cents: credited, rewardLocationRule });
+        } else if (outcome.reason === 'campaign_missing') {
+          logger.warn('[crowd-reward] Aktion existiert nicht', { uploadId, cid });
+        } else {
+          logger.info('[crowd-reward] nichts zu buchen', { uploadId, uid, cid, reason: outcome.reason });
+        }
+        // Ergebnis ans Doc — messbar, nicht nur im Log.
+        // Die serverseitig ergänzte `campaignId` wird NUR bei einer echten Buchung
+        // ans Dokument geschrieben. Die ausgelieferte App liest bei „angenommen"
+        // allein dieses Feld und verspricht daraufhin „die Vergütung liegt in
+        // deinem Guthaben" (productSubmissionCopy.ts:80-84) — stünde es auch ohne
+        // Buchung dort, wäre das eine Zusage, die niemand einlöst. Für die
+        // Nachvollziehbarkeit reicht `campaignQuelle` plus der Grund; beide liest
+        // keine App-Version.
+        const extra = { rewardLocationRule };
+        if (campaignQuelle) {
+          extra.campaignQuelle = campaignQuelle;
+          extra.campaignIdServer = cid;
+          if (campaignZeitQuelle) extra.campaignZeitQuelle = campaignZeitQuelle;
+        }
+        const vermerkt = await markiere(
+          credited > 0
+            ? { result: 'credited', cents: credited, extra: campaignQuelle ? { ...extra, campaignId: cid } : extra }
+            : { result: 'not_credited', reason: outcome.reason, extra },
+        );
+        vermerkFehlt = credited > 0 && !vermerkt;
+
+        // Die Gutschrift meldet sich von selbst (12487v2akvp) — und NUR sie.
+        // Eine Ablehnung bleibt bewusst leise: ihr Grund steht in der Liste der
+        // Einreichungen und wird dort gelesen, wenn jemand von sich aus nachsieht.
+        // Hier wird nur VORGEMERKT; verschickt wird gesammelt im Zeitplan-Lauf
+        // unten, damit zehn Freigaben aus einer Prüfrunde EINE Nachricht werden.
+        // Der Aufruf wirft nie und liegt bewusst NICHT im catch unten: das Geld
+        // ist gebucht, eine erneute Zustellung wegen einer misslungenen
+        // Vormerkung wäre der teurere Fehler.
+        if (credited > 0) {
+          await zurSammlungHinzufuegen({
+            uploadRef,
+            uploadId,
+            uid,
+            cents: credited,
+            guthabenVorher: outcome.guthabenVorher,
+            guthabenNachher: outcome.guthabenNachher,
+          });
+        }
+      } catch (e) {
+        // Werfen, damit Firestore erneut zustellt — die Idempotenz über die
+        // feste Doc-ID macht einen Retry gefahrlos.
+        logger.error('[crowd-reward] Transaktion fehlgeschlagen', {
+          uploadId,
+          uid,
+          err: e.message,
+        });
+        throw e;
+      }
+      if (vermerkFehlt) throw new Error('Ergebnis-Vermerk nach der Buchung nicht geschrieben');
+    } catch (e) {
+      await technischerFehler(e);
     }
   },
 );

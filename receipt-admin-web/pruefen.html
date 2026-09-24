@@ -205,6 +205,8 @@
         storniert: 'Buchung wurde storniert',
         no_location: 'ohne Ortsangabe eingereicht',
         ausserhalb_aktionsgebiet: 'außerhalb des Aktionsgebiets',
+        technischer_fehler: 'Buchung scheiterte auch nach Wiederholung (Technik) — bitte melden',
+        status_geaendert: 'beim Buchen nicht mehr freigegeben',
       };
       const REASON_DE = Object.fromEntries([...REASONS_PHOTO, ...REASONS_RECEIPT, ...NO_REWARD, ...[
         // Antworten des Servers, die keine Ablehngründe sind, aber erscheinen
@@ -242,6 +244,8 @@
         no_cashback_computed: 'für diesen Bon wurde kein Betrag berechnet',
         not_found: 'der Bon wurde nicht gefunden',
         receipt_missing: 'der Bon wurde nicht gefunden',
+        decision_in_progress: 'über diesen Bon entscheidet gerade jemand anderes — gleich neu laden',
+        processing_in_progress: 'dieser Bon wird gerade automatisch verarbeitet — in einer Minute erneut versuchen',
         forbidden: 'der Zugang zum Resolver wurde abgelehnt',
       };
 
@@ -261,6 +265,8 @@
         per_user_cap_reached: 'dieser Nutzer hat das Maximum der Aktion erreicht',
         monthly_cap_reached: 'das Monatslimit dieses Nutzers ist erreicht',
         campaign_budget_exhausted: 'das Budget der Aktion ist aufgebraucht',
+        technischer_fehler: 'die Buchung scheiterte auch nach Wiederholung an einem technischen Fehler — bitte melden',
+        status_geaendert: 'die Einreichung war beim Buchen nicht mehr freigegeben',
       };
       const PREISBILD_DE = {
         preisschild: 'vom Preisschild',

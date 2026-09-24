@@ -238,6 +238,21 @@ describe('Sammeln und Versenden', () => {
     expect(global.__versand[0].notification.title).toBe('Ka-ching! 🎉 10,10 € zum Auszahlen');
   });
 
+  it('Zahltag vorgemerkt, aber im Sammelfenster schon ausgezahlt → normaler Text statt „0,00 € zum Auszahlen"', async () => {
+    await freigeben('up1', 16, 'u1', [994, 1010]); // überschreitet die Schwelle
+    global.__store.set('users/u1', { cashback_balance_cents: 0 }); // Auszahlung dazwischen
+    await gesammelteSenden({ jetztMs: T0 + 2 * MINUTE });
+    expect(global.__versand[0].notification.title).toBe('Ka-ching! 💰 +0,16 € für dich');
+  });
+
+  it('Zahltag-Grenze kommt aus der Konfiguration', async () => {
+    global.__store.set('cashback_config/v1', { payoutThresholdCents: 500 });
+    await freigeben('up1', 16, 'u1', [490, 506]);
+    global.__store.set('users/u1', { cashback_balance_cents: 506 });
+    await gesammelteSenden({ jetztMs: T0 + 2 * MINUTE });
+    expect(global.__versand[0].notification.title).toBe('Ka-ching! 🎉 5,06 € zum Auszahlen');
+  });
+
   it('kein zweiter Zahltag: Bon hat die Schwelle schon überschritten, das Foto im Sammler nicht', async () => {
     // Foto bucht 980 → 996 (darunter), dann bucht ein Bon 996 → 1006 und
     // meldet selbst den Zahltag. Der Sammler darf ihn NICHT noch einmal melden.

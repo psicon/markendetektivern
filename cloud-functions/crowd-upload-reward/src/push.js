@@ -105,13 +105,17 @@ function auszahlbarGeworden(guthabenNachher, cents, schwelle) {
  * (`schwelleUeberschritten`), nicht erst beim Senden: der Sammler wartet bis
  * zu zwei Minuten, und eine Bon-Gutschrift in diesem Fenster würde ein
  * Nachrechnen zum Sendezeitpunkt verfälschen — mal zwei Zahltage, mal keiner.
- * `guthabenNachher` ist nur noch der angezeigte Betrag.
+ * `guthabenNachher` ist der angezeigte Betrag — und er muss beim Senden noch
+ * über der Schwelle liegen (`schwelle`). Wer im Sammelfenster schon ausgezahlt
+ * hat, bekäme sonst „Ka-ching! 🎉 0,00 € zum Auszahlen" (Push-Prüfung
+ * 24.09.2026); dann kommt der normale Text.
  *
  * Bewusst NICHT behauptet: dass das Produkt „jetzt im Katalog" ist. Die
  * Freigabe bucht Geld, über die Aufnahme in den Katalog sagt sie nichts.
  */
-function nachricht({ cents, guthabenNachher, schwelleUeberschritten }) {
-  if (schwelleUeberschritten && Number.isFinite(Number(guthabenNachher))) {
+function nachricht({ cents, guthabenNachher, schwelleUeberschritten, schwelle }) {
+  const grenze = Number(schwelle) > 0 ? Number(schwelle) : SCHWELLE_STANDARD;
+  if (schwelleUeberschritten && Number.isFinite(Number(guthabenNachher)) && Number(guthabenNachher) >= grenze) {
     return {
       title: `Ka-ching! 🎉 ${betragText(guthabenNachher)} zum Auszahlen`,
       body: 'Deine Produktfotos sind freigegeben – dein Guthaben kannst du dir jetzt auszahlen lassen.',
@@ -304,7 +308,7 @@ async function sammlerAbholen(ref, grenzeMs) {
 }
 
 /** Schickt EINE Nachricht für die gesammelten Gutschriften eines Nutzers. */
-async function sendeAnNutzer(uid, { cents, anzahl, uploadIds, schwelleUeberschritten }) {
+async function sendeAnNutzer(uid, { cents, anzahl, uploadIds, schwelleUeberschritten, schwelle }) {
   const { entries, nutzerDaten } = await getUserTokens(uid);
   if (!entries.length) {
     logger.info('[crowd-reward.push] keine Token / abbestellt', { uid, anzahl });
@@ -317,7 +321,7 @@ async function sendeAnNutzer(uid, { cents, anzahl, uploadIds, schwelleUeberschri
   // und ins Send-Log push_log/{pushId}.
   const pushId = `p_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`;
   const guthabenNachher = nutzerDaten ? nutzerDaten.cashback_balance_cents : undefined;
-  const { title, body } = nachricht({ cents, guthabenNachher, schwelleUeberschritten });
+  const { title, body } = nachricht({ cents, guthabenNachher, schwelleUeberschritten, schwelle });
 
   const message = {
     notification: { title, body },
@@ -423,6 +427,8 @@ async function gesammelteSenden(opts = {}) {
     return { ...ergebnis, abgeschaltet: true };
   }
 
+  const schwelle = await schwelleLesen();
+
   // In kleinen Gruppen parallel: seriell passten 200 Nutzer nicht sicher in
   // das Zeitlimit, voll parallel wäre ein unnötiger Lastspitzen-Schub.
   const GRUPPE = 10;
@@ -433,7 +439,7 @@ async function gesammelteSenden(opts = {}) {
           const d = await sammlerAbholen(doc.ref, grenzeMs);
           if (!d) return;
           ergebnis.reif += 1;
-          const r = await sendeAnNutzer(d.uid || doc.id, d);
+          const r = await sendeAnNutzer(d.uid || doc.id, { ...d, schwelle });
           if (r.sent > 0) ergebnis.gesendet += 1;
         } catch (e) {
           ergebnis.fehler += 1;

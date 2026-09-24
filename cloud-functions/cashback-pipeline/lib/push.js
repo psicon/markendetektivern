@@ -23,6 +23,7 @@ const { logger } = require('firebase-functions');
 const { pushErlaubt } = require('./pushPolicy');
 const { bonDeepLink } = require('./pushLinks');
 const { bonNachricht } = require('./pushTexte');
+const { gutschriftPushBeanspruchen } = require('./pushMerker');
 
 /**
  * Token EINES Nutzers — und zwar nur, wenn er Nachrichten überhaupt will.
@@ -118,6 +119,19 @@ async function pruneInvalidTokens(uid, entries, results) {
  * @param {string} [payload.deepLink]
  */
 async function sendCashbackReady(uid, payload) {
+  // Höchstens eine Nachricht je Bon — Merker in einer Transaktion (lib/pushMerker.js).
+  const merker = await gutschriftPushBeanspruchen({
+    db: admin.firestore(),
+    FieldValue: admin.firestore.FieldValue,
+    cashbackId: payload.cashbackId,
+    cents: payload.cents,
+  });
+  if (!merker.darf) {
+    const log = merker.grund === 'fehler' ? logger.warn : logger.info;
+    log('[cashback.push] kein Versand', { uid, cashbackId: payload.cashbackId, grund: merker.grund, err: merker.fehler });
+    return { sent: 0, skipped: merker.grund };
+  }
+
   const { entries, nutzerDaten } = await getUserTokens(uid);
   if (!entries.length) {
     logger.info('[cashback.push] no FCM tokens', { uid });
