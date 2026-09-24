@@ -50,4 +50,19 @@ function aktionZumZeitpunkt(kampagnen, zeitpunkt, kind = 'receipt') {
   return passend[0] || null;
 }
 
-module.exports = { aktionZumZeitpunkt };
+/**
+ * Welche Aktion gilt für einen Bon im Prüf-Resolver? Die vom SERVER
+ * angewandte (`campaignIdAngewandt`, geschrieben von processCashback nach
+ * Monatswechsel- und Regionskorrektur), sonst die in der App gewählte.
+ * Ohne das buchte eine Freigabe in der Prüfkonsole einen umgeleiteten Bon
+ * gegen die abgelaufene Aktion — bei leerem Budget 0 ct / 409 (Hinweis
+ * APP_ORIGINAL 24.09.). `null` ist eine gültige Antwort des Servers („keine
+ * Aktion passt"), nur ein FEHLENDES Feld (Altbestand) fällt auf die Wahl der App zurück.
+ */
+function wirksameAktionId(receipt) {
+  if (!receipt) return null;
+  if (Object.prototype.hasOwnProperty.call(receipt, 'campaignIdAngewandt')) return receipt.campaignIdAngewandt || null;
+  return receipt.campaignId || null;
+}
+
+module.exports = { aktionZumZeitpunkt, wirksameAktionId };

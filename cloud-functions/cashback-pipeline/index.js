@@ -71,7 +71,7 @@ const { runReferee } = require('./lib/ocr_referee');
 const { extractReceiptDocAI, isConfigured: isDocAIConfigured } = require('./lib/ocr_docai');
 const { deriveStoreAddress } = require('./lib/storeAddress');
 const { resolveRegion, pickCampaignForRegion, matchesTargeting, targetingStamp } = require('./lib/targeting');
-const { aktionZumZeitpunkt } = require('./lib/campaignZeit');
+const { aktionZumZeitpunkt, wirksameAktionId } = require('./lib/campaignZeit');
 const { resolveMerchant } = require('./lib/merchant');
 const { sendCashbackReady } = require('./lib/push');
 const {
@@ -1960,11 +1960,14 @@ exports.processCashback = onMessagePublished(
             } catch (e) {
               logger.warn('campaign-counters-read-failed', { cashbackId, err: e.message });
             }
-            // Wochenlimit der Aktion (pro User, Mo–So Berlin).
+            // Wochenlimit der Aktion (pro User, Mo–So Berlin). Gezählt gegen die
+            // TATSÄCHLICH geltende Aktion (selectedCampaign.id), nicht gegen die
+            // Wahl der App (cid) — nach Monatswechsel- oder Regionskorrektur
+            // unterscheiden sich beide (Hinweis APP_ORIGINAL 24.09.).
             const weeklyCap = Number(selectedCampaign.weeklyBonCap) || 0;
             if (!alreadyCredited && weeklyCap > 0) {
               const wk = isoWeekKey(ocr.parsed.bonDate || todayBerlin());
-              const used = (((uData.cashback_campaign_weekly || {})[cid] || {})[wk] || {}).count || 0;
+              const used = (((uData.cashback_campaign_weekly || {})[selectedCampaign.id] || {})[wk] || {}).count || 0;
               if (used >= weeklyCap) {
                 reward = 0;
                 zeroReason = 'weekly_cap_reached';
@@ -1974,7 +1977,7 @@ exports.processCashback = onMessagePublished(
             if (!alreadyCredited && reward > 0) {
               const perUserCap = Number(selectedCampaign.maxPerUserCents) || 0;
               if (perUserCap > 0) {
-                const earned = (uData.cashback_campaign_totals || {})[cid] || 0;
+                const earned = (uData.cashback_campaign_totals || {})[selectedCampaign.id] || 0;
                 const headroom = Math.max(0, perUserCap - earned);
                 if (reward > headroom) {
                   reward = headroom;
@@ -2486,6 +2489,9 @@ exports.processCashback = onMessagePublished(
         // keine laufende Aktion ein Gebiet einschränkt.
         targeting: targeting ?? null,
         aktionZeitKorrektur: aktionZeitKorrektur ?? null,
+        // Die vom Server angewandte Aktion (nach Monatswechsel-/Regionskorrektur).
+        // Der Prüf-Resolver bucht gegen DIESE, nicht gegen die Wahl der App.
+        campaignIdAngewandt: config.campaignsEnabled ? (selectedCampaign?.id ?? null) : null,
         // Filialadresse laut Bon-Kopf (05.09.2026): {street, zip, city,
         // country, source: 'ocr'|'subtitle'|'merchant', complete}. Unabhängig
         // vom Merchant-Resolver — auch ein unbekannter Markt hat eine Anschrift.
@@ -3107,9 +3113,10 @@ exports.resolveCashbackReview = onRequest(
       // evtl. vorhandenen Earn (z.B. Wiederanlauf nach Teilfehler NACH der
       // Transaktion), genau wie die Pipeline bei nicht-approved Status.
       const config = await loadConfig({ strict: true });
-      const campaign = r.campaignId ? await loadCampaignById(r.campaignId) : null;
-      if (r.campaignId && !campaign) {
-        res.status(409).json({ code: 'campaign_missing', campaignId: r.campaignId });
+      const wirksameAktion = wirksameAktionId(r);
+      const campaign = wirksameAktion ? await loadCampaignById(wirksameAktion) : null;
+      if (wirksameAktion && !campaign) {
+        res.status(409).json({ code: 'campaign_missing', campaignId: wirksameAktion });
         return;
       }
       const campaignMode = !!config.campaignsEnabled && !!campaign;

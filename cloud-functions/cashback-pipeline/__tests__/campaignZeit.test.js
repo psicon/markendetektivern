@@ -1,5 +1,5 @@
 'use strict';
-const { aktionZumZeitpunkt } = require('../lib/campaignZeit');
+const { aktionZumZeitpunkt, wirksameAktionId } = require('../lib/campaignZeit');
 
 // Die echten Grenzen der September-/Oktober-Aktionen 2026.
 const SEP = { id: 'september-2026', kind: 'receipt', active: true, startAt: Date.parse('2026-08-31T21:59:59Z'), endAt: Date.parse('2026-09-30T21:59:59Z'), budgetRemainingCents: 14000 };
@@ -32,5 +32,18 @@ describe('aktionZumZeitpunkt', () => {
   it('mehrere passende → frühestes Ende zuerst', () => {
     const kurz = { ...OKT, id: 'aktionswoche', endAt: Date.parse('2026-10-07T21:59:59Z') };
     expect(aktionZumZeitpunkt([OKT, kurz], Date.parse('2026-10-05T10:00:00Z'))?.id).toBe('aktionswoche');
+  });
+});
+
+describe('wirksameAktionId (Prüf-Resolver)', () => {
+  it('vom Server angewandte Aktion hat Vorrang', () => {
+    expect(wirksameAktionId({ campaignId: 'september-2026', campaignIdAngewandt: 'oktober-2026' })).toBe('oktober-2026');
+  });
+  it('Server sagt ausdrücklich „keine Aktion" → null, nicht die Wahl der App', () => {
+    expect(wirksameAktionId({ campaignId: 'september-2026', campaignIdAngewandt: null })).toBeNull();
+  });
+  it('Altbestand ohne Feld → Wahl der App', () => {
+    expect(wirksameAktionId({ campaignId: 'september-2026' })).toBe('september-2026');
+    expect(wirksameAktionId({})).toBeNull();
   });
 });
