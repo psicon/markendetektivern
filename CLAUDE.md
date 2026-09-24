@@ -3857,9 +3857,10 @@ Regeln:
   Wiederholung bei 429/5xx/Netz/abgeschnittenem JSON und bei endgültigem
   Scheitern einen Fehler-VERMERK (`productNameOcrFehler`) — nie „leer" als
   Ergebnis speichern. Sonst sieht ein technischer Fehler aus wie „nicht lesbar".
-- Noch mit `thinkingBudget: 0` (zeigten den Fehler bis 24.09. nicht, sind aber
-  derselben Umstellung ausgesetzt): `receipt-matcher/matcher.js`,
-  `ai-product-comparison/src/{comparator,assessor,manufacturer}.js`.
+- Seit 24.09. ebenfalls auf `thinkingLevel: 'LOW'` umgestellt (vorsorglich,
+  sie zeigten den Fehler noch nicht): `receipt-matcher/matcher.js`,
+  `ai-product-comparison/src/{comparator,assessor,manufacturer}.js`. Im Repo
+  steht kein `thinkingBudget: 0` mehr — nicht wieder einführen.
 - Diagnose-Rezept: `gcloud logging read '"Thinking budget"'` über alle Dienste;
   eine Stunden-Zeitreihe der Fehler gegen die Erfolge zeigt, ab wann Google
   umgestellt hat.

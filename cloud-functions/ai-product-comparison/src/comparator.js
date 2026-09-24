@@ -372,8 +372,12 @@ async function callGemini({ apiKey, snapshot, model = DEFAULT_MODEL }) {
       responseMimeType: 'application/json',
       responseSchema: RESPONSE_SCHEMA,
       temperature: 0.2,
-      thinkingConfig: { thinkingBudget: 0 },
-      maxOutputTokens: 1024,
+      // thinkingLevel statt thinkingBudget (24.09.2026): Vertex lehnt seit
+      // 22.09. einen Teil der Anfragen mit thinkingBudget: 0 ab (400 „Thinking
+      // budget is not supported for this model"; beim Produktfoto-Namer
+      // gemessen, siehe CLAUDE.md). Die Denk-Token zählen zu maxOutputTokens.
+      thinkingConfig: { thinkingLevel: 'LOW' },
+      maxOutputTokens: 4096,
     },
   });
 

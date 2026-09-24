@@ -305,8 +305,12 @@ async function geminiPick(itemName, marktSlug, priceCents, cands, bonSize) {
       responseMimeType: 'application/json',
       responseSchema: PICK_SCHEMA,
       temperature: 0.1,
-      thinkingConfig: { thinkingBudget: 0 },
-      maxOutputTokens: 200,
+      // thinkingLevel statt thinkingBudget (24.09.2026): Vertex lehnt seit
+      // 22.09. einen Teil der Anfragen mit thinkingBudget: 0 ab (400 „Thinking
+      // budget is not supported for this model"; beim Produktfoto-Namer
+      // gemessen, siehe CLAUDE.md). Die Denk-Token zählen zu maxOutputTokens.
+      thinkingConfig: { thinkingLevel: 'LOW' },
+      maxOutputTokens: 2048,
     },
   });
   let t = null;

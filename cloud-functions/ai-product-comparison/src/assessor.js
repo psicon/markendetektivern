@@ -20,8 +20,8 @@
  * den Chips eher ungesund ist. Eine "5" für Chips heißt: relativ
  * gesehen eine bessere Chips-Wahl (z.B. weniger Fett, kein Aroma).
  *
- * Modell + Konfig identisch zum Comparator (Gemini 2.5 Flash,
- * thinkingBudget=0, niedrige Temperature).
+ * Modell + Konfig identisch zum Comparator (Gemini 3.5 Flash,
+ * thinkingLevel LOW, niedrige Temperature).
  */
 
 const { Type } = require('@google/genai');
@@ -238,8 +238,12 @@ async function callGeminiAssessment({ apiKey, snapshot, category, model = DEFAUL
       responseMimeType: 'application/json',
       responseSchema: RESPONSE_SCHEMA,
       temperature: 0.2,
-      thinkingConfig: { thinkingBudget: 0 },
-      maxOutputTokens: 1024,
+      // thinkingLevel statt thinkingBudget (24.09.2026): Vertex lehnt seit
+      // 22.09. einen Teil der Anfragen mit thinkingBudget: 0 ab (400 „Thinking
+      // budget is not supported for this model"; beim Produktfoto-Namer
+      // gemessen, siehe CLAUDE.md). Die Denk-Token zählen zu maxOutputTokens.
+      thinkingConfig: { thinkingLevel: 'LOW' },
+      maxOutputTokens: 4096,
     },
   });
 
