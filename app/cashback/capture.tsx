@@ -52,6 +52,8 @@ import {
 } from 'bon-edge-detector';
 
 import { fontFamilyVariants, fontWeight } from '@/constants/tokens';
+import { StandortPflichtHinweis } from '@/components/rewards/StandortPflichtHinweis';
+import { useStandortPflicht } from '@/hooks/useStandortPflicht';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { getCashbackConfig, hasValidCashbackConsent } from '@/lib/services/cashbackService';
@@ -153,6 +155,10 @@ export default function CashbackCaptureScreen() {
   const { theme } = useTokens();
 
   const [permission, requestPermission] = useCameraPermissions();
+  // Standortpflicht des Reward-Programms (6.0.20): vor dem Scanner, nicht
+  // erst beim Hochladen — wer ohne Freigabe fotografiert, hätte die Arbeit
+  // umsonst gemacht.
+  const pflicht = useStandortPflicht();
   const [cameraReady, setCameraReady] = useState(false);
   const [flashOn, setFlashOn] = useState(false);
   const [capturing, setCapturing] = useState(false);
@@ -333,9 +339,12 @@ export default function CashbackCaptureScreen() {
   // expo-camera branch handles its own gate below).
   useEffect(() => {
     if (scannerState !== 'live') return;
+    // Erst die Standort-Sperre, dann die Kamera-Abfrage — nie zwei
+    // Systemdialoge übereinander.
+    if (pflicht.stand !== 'erfuellt') return;
     if (permission?.granted) return;
     ensurePermission();
-  }, [scannerState, permission?.granted, ensurePermission]);
+  }, [scannerState, pflicht.stand, permission?.granted, ensurePermission]);
 
   const handleCaptureFallback = useCallback(async () => {
     if (capturing || !cameraRef.current) return;
@@ -437,9 +446,33 @@ export default function CashbackCaptureScreen() {
     router.navigate('/(tabs)/rewards');
   }, []);
 
+  // ─── Render: Standortpflicht vor allem anderen ────────────────────
+
+  if (pflicht.stand !== null && pflicht.stand !== 'erfuellt') {
+    return (
+      <View style={[styles.permGate, { backgroundColor: theme.bg ?? '#fff' }]}>
+        <StatusBar barStyle="dark-content" />
+        <View style={[styles.topBar, { paddingTop: insets.top + 8, backgroundColor: 'transparent' }]}>
+          <Pressable onPress={handleBack} style={styles.iconButton} hitSlop={10}>
+            <MaterialCommunityIcons name="close" size={26} color={theme.text} />
+          </Pressable>
+        </View>
+        <View style={{ flex: 1, justifyContent: 'center' }}>
+          <StandortPflichtHinweis
+            stand={pflicht.stand}
+            art="bon"
+            laeuft={pflicht.laeuft}
+            onErfuellen={() => void pflicht.erfuellen()}
+            onZurueck={handleBack}
+          />
+        </View>
+      </View>
+    );
+  }
+
   // ─── Render: primary state is a thin "opening scanner" splash ─────
 
-  if (scannerState === 'unknown') {
+  if (scannerState === 'unknown' || pflicht.stand === null) {
     return (
       <View style={[styles.permGate, { backgroundColor: theme.bg ?? '#fff' }]}>
         <StatusBar barStyle="dark-content" />

@@ -9,6 +9,7 @@ import React, {
 import { Pressable, Text, View } from 'react-native';
 
 import { FilterSheet } from '@/components/design/FilterSheet';
+import { StandortPflichtHinweis } from '@/components/rewards/StandortPflichtHinweis';
 import { SurveyRunner } from '@/components/survey/SurveyRunner';
 import {
   bannerDataFromCashbackPayout,
@@ -16,6 +17,7 @@ import {
 } from '@/components/ui/GamificationProvider';
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useStandortPflicht } from '@/hooks/useStandortPflicht';
 import { useTokens } from '@/hooks/useTokens';
 import { router } from 'expo-router';
 
@@ -28,6 +30,7 @@ import {
   markDismissed,
   snoozeActionSurveysToday,
 } from '@/lib/services/surveyService';
+import { pruefeStandortPflicht } from '@/lib/services/standortPflicht';
 import { setSurveyPrompter } from '@/lib/services/surveyPromptBus';
 import { isAnySheetOpen, setSurveyVisible, whenSheetsIdle } from '@/lib/services/sheetPresence';
 import {
@@ -52,6 +55,15 @@ import { pollTriggerOf, type Poll, type PollAnswer } from '@/lib/types/survey';
  * Antwort → submitResponse (fire-and-forget Write + lokales answered-
  * Flag); Reward kommt server-seitig (CF survey-reward).
  */
+
+/** Vergütet diese Umfrage überhaupt? (Dieselbe Regel wie beim Abschluss.) */
+function zahltPraemie(p: Poll): boolean {
+  return (
+    (p.rewardTrigger ?? 'completion') !== 'none' &&
+    typeof p.rewardCents === 'number' &&
+    p.rewardCents > 0
+  );
+}
 
 interface SurveyContextValue {
   /** Öffnet das Umfrage-Sheet mit einer konkreten Umfrage. */
@@ -129,7 +141,14 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
 
   // Bus-Prompter (action-getriggert): entscheidet Sheet vs. Hinweis.
   const promptFromAction = useCallback(
-    (p: Poll) => {
+    async (p: Poll) => {
+      // Standortpflicht (6.0.20): eine vergütete Umfrage, die nach einer
+      // Aktion UNGEFRAGT aufgeht, soll nicht mit einer Sperre beginnen.
+      // Ohne Freigabe entfällt der Vorschlag still; über die Umfrage-Liste
+      // bleibt sie erreichbar, dort erklärt der Sperrhinweis den Weg.
+      if (zahltPraemie(p) && user?.uid && !isAnonymous) {
+        if ((await pruefeStandortPflicht()) !== 'erfuellt') return;
+      }
       const display = p.actionDisplay ?? 'immediate';
       if (display === 'hint') {
         const reward =
@@ -145,7 +164,7 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
         showSurvey(p);
       }
     },
-    [showSurvey, scheme],
+    [showSurvey, scheme, user?.uid, isAnonymous],
   );
 
   // Am Bus registrieren (Action-getriggerte Umfragen).
@@ -198,10 +217,7 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
       // Reward-Text NUR wenn die Umfrage vergütet. Berechtigt → "unterwegs".
       // Nicht berechtigt → freundlicher Hinweis MIT "Zum Cashback"-Button
       // (führt zur Aktivierung). Positiver Ton, kein Frust.
-      const pays =
-        (p.rewardTrigger ?? 'completion') !== 'none' &&
-        typeof p.rewardCents === 'number' &&
-        p.rewardCents > 0;
+      const pays = zahltPraemie(p);
       if (pays && eligible) {
         // Berechtigt → dieselbe Cashback-Gutschrift-Feier wie bei Bons:
         // Glow-Banner statt grauem Mini-Toast (ClickUp 86ca8hqt8). Der CF
@@ -242,6 +258,13 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
 
   const isActionPoll = poll ? pollTriggerOf(poll).type === 'action' : false;
 
+  // Standortpflicht (6.0.20): vergütete Umfrage + registriertes Konto →
+  // erst die Freigabe, dann die Fragen. Die Sperre ersetzt den Inhalt DIESES
+  // Sheets — ein zweites Modal darüber würde iOS einfrieren.
+  const brauchtFreigabe = !!poll && zahltPraemie(poll) && !!user?.uid && !isAnonymous;
+  const pflicht = useStandortPflicht(visible && brauchtFreigabe);
+  const gesperrt = brauchtFreigabe && pflicht.stand !== 'erfuellt';
+
   return (
     <SurveyContext.Provider value={{ showSurvey, activityNonce }}>
       {children}
@@ -251,7 +274,20 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
         onClose={handleClose}
         registerPresence={false}
       >
-        {poll ? (
+        {poll && gesperrt ? (
+          pflicht.stand === null || pflicht.stand === 'erfuellt' ? (
+            <View style={{ height: 160 }} />
+          ) : (
+            <StandortPflichtHinweis
+              stand={pflicht.stand}
+              art="umfrage"
+              laeuft={pflicht.laeuft}
+              onErfuellen={() => void pflicht.erfuellen()}
+              onZurueck={handleClose}
+              zurueckLabel="Später"
+            />
+          )
+        ) : poll ? (
           <View>
             <SurveyRunner poll={poll} onComplete={handleComplete} />
             {isActionPoll ? (

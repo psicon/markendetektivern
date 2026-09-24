@@ -59,11 +59,9 @@ import {
   type ProductPhotoStep,
 } from '@/lib/services/productSubmit';
 import { isOnline } from '@/lib/services/network';
-import {
-  clientVersion,
-  erfasseCaptureContext,
-  standortStatus,
-} from '@/lib/services/captureContext';
+import { StandortPflichtHinweis } from '@/components/rewards/StandortPflichtHinweis';
+import { useStandortPflicht } from '@/hooks/useStandortPflicht';
+import { clientVersion, erfasseCaptureContext } from '@/lib/services/captureContext';
 import { enqueueProductUpload } from '@/lib/services/uploadQueue';
 import { showInfoToast } from '@/lib/services/ui/toast';
 
@@ -144,26 +142,16 @@ export default function ProductWizardScreen() {
   const [ortHinweis, setOrtHinweis] = useState<string | null>(null);
   const submitNachOrtRef = useRef(false);
   /**
-   * Ob die Standortfreigabe steht. `null` = noch nicht geprüft.
-   *
-   * Ist sie erteilt, wird der Ort beim Einreichen ohnehin still erfasst —
-   * dann ist die Nachfrage im Wizard reine Reibung und entfällt. Der
-   * Schritt bleibt aber für die Fälle, in denen sie fehlt: Ohne laufende
-   * Aktion ist die Produkt-Einreichung NICHT consent-gegatet (auch anonym
-   * möglich, siehe product-submit/index.tsx), und eine Berechtigung kann
-   * jederzeit in den Einstellungen entzogen werden.
+   * Standortpflicht des Reward-Programms (6.0.20, `lib/services/standortPflicht.ts`).
+   * Ohne Freigabe zeigt der Wizard nur den Sperrhinweis — der Freitext-Ort
+   * ist KEIN Ersatz für die Freigabe mehr, sondern nur noch der Ausweg, wenn
+   * bei erteilter Freigabe der GPS-Fix ausbleibt (Filiale, Keller).
+   * Der Stand wird bei jedem Vordergrund-Wechsel neu gelesen: iOS „Einmal
+   * erlauben" verfällt, eine Freigabe kann jederzeit entzogen werden.
    */
-  const [standortFrei, setStandortFrei] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    let lebt = true;
-    void standortStatus().then((s) => {
-      if (lebt) setStandortFrei(s === 'granted_precise' || s === 'granted_coarse');
-    });
-    return () => {
-      lebt = false;
-    };
-  }, []);
+  const pflicht = useStandortPflicht();
+  /** Einreichung wartet auf die Freigabe und läuft danach von selbst weiter. */
+  const submitNachFreigabeRef = useRef(false);
   const [stepIdx, setStepIdx] = useState(0);
   const [capturing, setCapturing] = useState(false);
   // expo-camera MUSS bereit sein, bevor takePictureAsync aufgerufen wird —
@@ -563,15 +551,19 @@ export default function ProductWizardScreen() {
       resolveProductCampaignForSubmit(campaign),
     ]);
 
-    // Kein Ort auf beiden Wegen → einmal nachfragen, Fotos bleiben erhalten.
-    // Nach der Ortsangabe reicht der Effekt unten automatisch ein.
+    // Kein GPS und kein bestätigter Ort. Zwei Fälle, streng getrennt:
+    //  - Freigabe fehlt (entzogen, „Einmal erlauben" verfallen, Dienste
+    //    aus) → Sperrhinweis; nach der Freigabe reicht der Effekt unten
+    //    von selbst ein. Fotos bleiben erhalten.
+    //  - Freigabe steht, nur der Fix blieb aus → einmal den Ort erfragen.
     if (!capture.gps && !confirmedPlace) {
+      const stand = await pflicht.pruefen();
+      if (stand !== 'erfuellt') {
+        submitNachFreigabeRef.current = true;
+        return;
+      }
       submitNachOrtRef.current = true;
-      setOrtHinweis(
-        capture.gpsStatus === 'denied' || capture.gpsStatus === 'not_asked'
-          ? 'Ohne Standortfreigabe brauchen wir einmal kurz den Ort, damit die Aufnahmen dem Markt zugeordnet werden.'
-          : 'Dein Standort ließ sich gerade nicht ermitteln — bitte kurz den Ort angeben, dann geht es direkt weiter.',
-      );
+      setOrtHinweis('Dein Standort ließ sich gerade nicht ermitteln — bitte kurz den Ort angeben, dann geht es direkt weiter.');
       setPhase('place');
       return;
     }
@@ -662,7 +654,7 @@ export default function ProductWizardScreen() {
     // Ort, der beim letzten Deps-Wechsel galt — bei einem korrigierten Ort
     // also den alten. Genau diese Klasse von Fehler ist unsichtbar, weil
     // das Feld gefüllt aussieht.
-  }, [user?.uid, allCaptured, photos, sessionId, productIndex, marketId, marketName, marketLand, productName, eanCode, campaign, confirmedPlace]);
+  }, [user?.uid, allCaptured, photos, sessionId, productIndex, marketId, marketName, marketLand, productName, eanCode, campaign, confirmedPlace, pflicht.pruefen]);
 
   // Orts-Schritt aus dem Submit-Gate abgeschlossen → Einreichung fortsetzen.
   useEffect(() => {
@@ -670,6 +662,14 @@ export default function ProductWizardScreen() {
     submitNachOrtRef.current = false;
     void doSubmit();
   }, [confirmedPlace, doSubmit]);
+
+  // Freigabe aus dem Submit-Gate erteilt → Einreichung fortsetzen. Der Merker
+  // fällt VOR dem Aufruf, damit ein erneut fehlender Fix nicht kreist.
+  useEffect(() => {
+    if (!submitNachFreigabeRef.current || pflicht.stand !== 'erfuellt') return;
+    submitNachFreigabeRef.current = false;
+    void doSubmit();
+  }, [pflicht.stand, doSubmit]);
 
   // ─── Render ───────────────────────────────────────────────────────
 
@@ -684,6 +684,32 @@ export default function ProductWizardScreen() {
       </View>
     </View>
   );
+
+  // Standortpflicht vor jeder Phase. Die Fotos bleiben im State — nach der
+  // Freigabe geht es genau dort weiter, wo der Nutzer war.
+  if (pflicht.stand === null) {
+    return <View style={{ flex: 1, backgroundColor: theme.bg }} />;
+  }
+  if (pflicht.stand !== 'erfuellt') {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.bg }}>
+        <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} />
+        <Header title="Standort" sub={marketName || undefined} />
+        <View style={{ flex: 1, justifyContent: 'center' }}>
+          <StandortPflichtHinweis
+            stand={pflicht.stand}
+            art="foto"
+            laeuft={pflicht.laeuft}
+            onErfuellen={() => void pflicht.erfuellen()}
+            onZurueck={() => {
+              submitNachFreigabeRef.current = false;
+              close();
+            }}
+          />
+        </View>
+      </View>
+    );
+  }
 
   if (phase === 'market') {
     // App-wide market picker with the country (Land) filter.
@@ -708,26 +734,12 @@ export default function ProductWizardScreen() {
             setMarketName(m.name);
             setMarketId(m.id);
             setMarketLand((m as any).land ?? null);
-            // Nachfragen nur, wenn es nötig ist: Mit erteilter Freigabe wird
-            // der Ort beim Einreichen still erfasst, dann wäre der Schritt
-            // reine Reibung. Und nur einmal je Sitzung — wer mehrere
-            // Produkte im selben Markt einreicht, steht am selben Ort.
-            //
-            // `standortFrei === null` (Prüfung noch nicht durch) führt
-            // bewusst IN den Schritt: lieber einmal zu viel fragen als die
-            // Pflichtangabe still überspringen. Der Status wird HIER frisch
-            // gelesen (nicht nur beim Mount): iOS „Einmal erlauben" erlischt
-            // mit dem nächsten Hintergrund-Wechsel, Ortungsdienste können
-            // inzwischen aus sein (Orts-Audit 05.09.2026).
-            if (confirmedPlace) {
-              setPhase('intro');
-            } else {
-              void standortStatus().then((st) => {
-                const frei = st === 'granted_precise' || st === 'granted_coarse';
-                setStandortFrei(frei);
-                setPhase(frei ? 'intro' : 'place');
-              });
-            }
+            // Die Freigabe ist hier schon geprüft (Sperrhinweis oben) — der
+            // Ort wird beim Einreichen still erfasst. Frisch nachlesen, weil
+            // der Markt-Picker lange offen sein kann; fehlt sie inzwischen,
+            // übernimmt der Sperrhinweis.
+            void pflicht.pruefen();
+            setPhase('intro');
           }}
         />
       </View>
@@ -742,6 +754,7 @@ export default function ProductWizardScreen() {
         <LocationConfirmStep
           marketName={marketName}
           hinweis={ortHinweis}
+          onFreigabeFehlt={() => void pflicht.pruefen()}
           onConfirm={(place) => {
             setConfirmedPlace(place);
             setOrtHinweis(null);
