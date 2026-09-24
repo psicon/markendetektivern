@@ -49,6 +49,7 @@ const { pruefeOrtsanforderung } = require('./src/locationGate');
 const { resolveRegion, matchesTargeting } = require('./src/targeting');
 const { ergebnisFelder } = require('./src/ergebnis');
 const { campaignZurAufnahmezeit } = require('./src/campaignFallback');
+const { sendeVerguetungPush } = require('./src/push');
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -315,6 +316,16 @@ exports.onCrowdUploadApproved = onDocumentUpdated(
           ? { result: 'credited', cents: credited, extra: campaignQuelle ? { ...extra, campaignId: cid } : extra }
           : { result: 'not_credited', reason: outcome.reason, extra },
       );
+
+      // Die Gutschrift meldet sich von selbst (12487v2akvp) — und NUR sie.
+      // Eine Ablehnung bleibt bewusst leise: ihr Grund steht in der Liste der
+      // Einreichungen und wird dort gelesen, wenn jemand von sich aus nachsieht.
+      // Der Aufruf wirft nie und wird bewusst NICHT in den catch unten geführt:
+      // das Geld ist an dieser Stelle gebucht, eine erneute Zustellung wegen
+      // einer misslungenen Benachrichtigung wäre der teurere Fehler.
+      if (credited > 0) {
+        await sendeVerguetungPush({ uploadRef, uploadId, uid, cents: credited });
+      }
     } catch (e) {
       // Werfen, damit Firestore erneut zustellt — die Idempotenz über die
       // feste Doc-ID macht einen Retry gefahrlos.

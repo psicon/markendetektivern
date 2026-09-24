@@ -28,12 +28,14 @@ let _cache = { at: 0, list: null };
 // Per-merchant alias hints. Each entry: { id, tokens (literal substrings
 // or RegExp) }. Iterated in order — first match wins.
 const ALIASES = [
-  { id: 'rewe',      tokens: ['rewe'] },
+  { id: 'rewe',      tokens: ['rewe', 'nahkauf'] },
   { id: 'lidl',      tokens: ['lidl'] },
   { id: 'aldi-sued', tokens: ['aldi süd', 'aldi sued', 'aldi-süd', 'aldisued'] },
   { id: 'aldi-nord', tokens: ['aldi nord'] },
   { id: 'aldi',      tokens: ['aldi'] },
-  { id: 'edeka',     tokens: ['edeka', 'e center', 'e-center', 'e neukauf'] },
+  // Vertriebslinien der EDEKA-Gruppe: auf dem Bonkopf steht oft nur die
+  // Linie, nicht "EDEKA". ACHTUNG: "nahkauf" gehört zu REWE, nicht hierher.
+  { id: 'edeka',     tokens: ['edeka', 'e center', 'e-center', 'e neukauf', 'marktkauf', 'nah & gut', 'nah und gut', 'nahundgut', 'e aktiv', 'e-aktiv', 'neukauf'] },
   { id: 'kaufland',  tokens: ['kaufland'] },
   { id: 'penny',     tokens: ['penny'] },
   { id: 'netto',     tokens: ['netto'] },
@@ -46,6 +48,54 @@ const ALIASES = [
   { id: 'spar',      tokens: ['eurospar', 'interspar', /\bspar\b/] },
   { id: 'billa',     tokens: ['billa'] },
 ];
+
+
+// ─── Eigenmarken als Ketten-Signal (Stufe 4) ─────────────────────
+//
+// Viele EDEKA-, REWE- und SPAR-Märkte werden von selbstständigen Kaufleuten
+// geführt: Im Bonkopf steht die Firma des Inhabers ("Peter Frauen GmbH & Co.KG"),
+// nicht die Kette. Tokens helfen da nicht — die Namen sind beliebig.
+//
+// Eigenmarken sind dagegen KETTENEXKLUSIV: "G&G" gibt es nur in der
+// EDEKA-Gruppe, "K-Classic" nur bei Kaufland, "Milbona" nur bei Lidl. Steht
+// so ein Artikel auf dem Bon, ist die Kette damit bestimmt.
+//
+// Ein einziger Treffer genügt (auf kleinen Bons steht oft nur eine Eigenmarke),
+// ABER nur, wenn keine zweite Kette widerspricht — dann lieber nichts erkennen.
+const STORE_BRANDS = [
+  { id: 'edeka',    patterns: [/\bg\s*&\s*g\b/, /\bgut\s*&\s*g[üu]nstig\b/, /\bgut\s+und\s+g[üu]nstig\b/] },
+  { id: 'rewe',     patterns: [/\brewe\s+(bio|beste\s+wahl|feine\s+welt)\b/] },
+  { id: 'kaufland', patterns: [/\bk-?classic\b/, /\bk-?bio\b/, /\bk-?favourites\b/, /\bk-?purland\b/] },
+  { id: 'lidl',     patterns: [/\bmilbona\b/, /\bfreshona\b/, /\bvemondo\b/, /\bcombino\b/, /\balesto\b/, /\bdulano\b/, /\bpilos\b/, /\bcrownfield\b/, /\bsolevita\b/, /\bgelatelli\b/, /\bsondey\b/, /\bbelbake\b/, /\bmetzgerfrisch\b/, /\bfavorina\b/] },
+  { id: 'aldi',     patterns: [/\bmilsani\b/, /\bsun\s+snacks\b/, /\bmoser\s+roth\b/, /\bchoceur\b/, /\bmamia\b/, /\btandil\b/, /\bombia\b/, /\bfin\s+carr[ée]\b/, /\bback\s+family\b/, /\bwintertraum\b/] },
+  { id: 'netto',    patterns: [/\belkos\b/, /\bbiobio\b/] },
+];
+
+/**
+ * Kette aus den Artikelnamen ableiten. Nur eindeutige Treffer zählen.
+ * @param {Array<{name?:string}>|null|undefined} items
+ * @returns {{id:string, hits:number, brand:string}|null}
+ */
+function chainFromItems(items) {
+  if (!Array.isArray(items) || !items.length) return null;
+  const hits = new Map();
+  for (const it of items) {
+    // NICHT normalize(): das entfernt "&" und macht aus "G&G" ein "g g".
+    // Eigenmarken brauchen die Sonderzeichen, deshalb nur klein + entspannte
+    // Leerzeichen.
+    const name = String((it && it.name) || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    if (!name) continue;
+    for (const brand of STORE_BRANDS) {
+      if (brand.patterns.some((re) => re.test(name))) {
+        const cur = hits.get(brand.id) || { id: brand.id, hits: 0, brand: name };
+        cur.hits += 1;
+        hits.set(brand.id, cur);
+      }
+    }
+  }
+  if (hits.size !== 1) return null; // 0 = kein Signal, >1 = widersprüchlich
+  return [...hits.values()][0];
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
@@ -197,12 +247,11 @@ function substringMatch(norm, all) {
  *   id, name, displayName, logoUrl, land, eligible, matchVia
  * } | null>}
  */
-async function resolveMerchant(rawMerchant, bonCountry) {
+async function resolveMerchant(rawMerchant, bonCountry, items) {
   const norm = normalize(rawMerchant);
-  if (!norm) return null;
-
   const all = await loadDiscounters();
   if (!all.length) return null;
+  if (!norm && !Array.isArray(items)) return null;
 
   let doc = null;
   let matchVia = null;
@@ -232,6 +281,24 @@ async function resolveMerchant(rawMerchant, bonCountry) {
     if (sub) {
       doc = sub;
       matchVia = 'substring';
+    }
+  }
+
+  // 4) Eigenmarke auf dem Bon → Kette (selbstständige Kaufleute, deren
+  //    Bonkopf die Kette nicht nennt).
+  if (!doc) {
+    const chain = chainFromItems(items);
+    if (chain) {
+      const candidates = discountersForAliasId(chain.id, all);
+      const picked = pickByCountry(candidates, bonCountry);
+      if (picked) {
+        doc = picked;
+        aliasId = chain.id;
+        matchVia = 'eigenmarke';
+        logger.info('[merchant] über Eigenmarke erkannt', {
+          raw: rawMerchant || null, chain: chain.id, hits: chain.hits,
+        });
+      }
     }
   }
 
@@ -270,4 +337,4 @@ async function resolveMerchant(rawMerchant, bonCountry) {
   };
 }
 
-module.exports = { resolveMerchant, normalize, levenshtein };
+module.exports = { resolveMerchant, normalize, levenshtein, chainFromItems, aliasMatch };

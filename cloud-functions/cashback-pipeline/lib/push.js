@@ -21,6 +21,7 @@ const crypto = require('crypto');
 const admin = require('firebase-admin');
 const { logger } = require('firebase-functions');
 const { pushErlaubt } = require('./pushPolicy');
+const { bonDeepLink } = require('./pushLinks');
 
 /**
  * Token EINES Nutzers — und zwar nur, wenn er Nachrichten überhaupt will.
@@ -120,7 +121,9 @@ async function sendCashbackReady(uid, payload) {
   // (admin-only). Auswertung „wer hat nach Push X gehandelt": push_log ×
   // push_events × receipts/crowd_uploads über uid + Zeitfenster joinen.
   const pushId = `p_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`;
-  const deepLink = payload.deepLink || `markendetektivern://cashback/pending/${payload.cashbackId}`;
+  // Ein Pfad, den jede tap-fähige App-Version auflöst — siehe pushLinks.js,
+  // warum das bis 17.09.2026 ein Schema-Link war, den die App nie verstand.
+  const deepLink = payload.deepLink || bonDeepLink(payload.cashbackId);
   const message = {
     notification: { title: payload.title, body: payload.body },
     data: {

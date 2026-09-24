@@ -11,7 +11,7 @@
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRouter } from 'expo-router';
-import React, { useLayoutEffect, useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import {
   Alert,
   Linking,
@@ -43,7 +43,6 @@ export default function NotificationSettingsScreen() {
     enablePushNotifications,
     disablePushNotifications,
     sendTestNotification,
-    refreshPermissionStatus,
   } = usePushNotifications();
 
   const [sheetVisible, setSheetVisible] = useState(false);
@@ -52,21 +51,45 @@ export default function NotificationSettingsScreen() {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
 
+  /**
+   * Kam das Sheet aus dem Zustand „abgelehnt"? Nur dann darf nach der Antwort
+   * der Umweg über die Systemeinstellungen folgen — und auch nur, wenn Android
+   * weiterhin endgültig ablehnt. Nach einer ersten, frischen Ablehnung wäre
+   * „in den Geräte-Einstellungen ausgeschaltet" falsch und drängend.
+   */
+  const sheetAusAbgelehnt = useRef(false);
+  /** Wiedereintritt: ein zweiter Tipp auf „Aktivieren" startet nichts Neues. */
+  const erlaubenLaeuft = useRef(false);
+
+  const zeigeEinstellungsUmweg = () => {
+    Alert.alert(
+      'Kurzer Umweg über die Einstellungen',
+      'Benachrichtigungen für MarkenDetektive sind in den Geräte-Einstellungen ausgeschaltet. Dort einschalten — danach greift der Schalter hier wieder.',
+      [
+        { text: 'Abbrechen', style: 'cancel' },
+        {
+          text: 'Einstellungen öffnen',
+          onPress: () => Linking.openSettings(),
+        },
+      ],
+    );
+  };
+
   const handleToggle = async (value: boolean) => {
     if (value) {
       if (permissionStatus === 'denied') {
+        if (Platform.OS === 'android') {
+          // Android: ein weggewischter Dialog gilt dem System nicht als
+          // Entscheidung, expo meldet ihn trotzdem als endgültig. Also auch
+          // hier erst das erklärende Sheet — dessen Ja ist die Einwilligung —,
+          // dann fragen. Ist die Sperre wirklich endgültig, antwortet Android
+          // ohne Dialog, und erst dann geht es in die Einstellungen.
+          sheetAusAbgelehnt.current = true;
+          setSheetVisible(true);
+          return;
+        }
         // System hat schon geantwortet — User muss in die Settings
-        Alert.alert(
-          'Kurzer Umweg über die Einstellungen',
-          'Benachrichtigungen für MarkenDetektive sind in den Geräte-Einstellungen ausgeschaltet. Dort einschalten — danach greift der Schalter hier wieder.',
-          [
-            { text: 'Abbrechen', style: 'cancel' },
-            {
-              text: 'Einstellungen öffnen',
-              onPress: () => Linking.openSettings(),
-            },
-          ],
-        );
+        zeigeEinstellungsUmweg();
         return;
       }
       if (
@@ -77,6 +100,7 @@ export default function NotificationSettingsScreen() {
         permissionStatus === 'provisional'
       ) {
         // Pre-Permission-Sheet zeigen
+        sheetAusAbgelehnt.current = false;
         setSheetVisible(true);
         return;
       }
@@ -88,9 +112,17 @@ export default function NotificationSettingsScreen() {
   };
 
   const handleAllow = async () => {
-    // System-Dialog triggern + Token holen
-    await enablePushNotifications();
-    await refreshPermissionStatus();
+    if (erlaubenLaeuft.current) return;
+    erlaubenLaeuft.current = true;
+    try {
+      // System-Dialog + FCM-Token (enablePushNotifications liest den Stand
+      // danach selbst neu ein).
+      const stand = await enablePushNotifications();
+      if (sheetAusAbgelehnt.current && stand === 'denied') zeigeEinstellungsUmweg();
+    } finally {
+      sheetAusAbgelehnt.current = false;
+      erlaubenLaeuft.current = false;
+    }
   };
 
   // Zwei Fragen, zwei Antworten (86cbfdq5j): das System erlaubt es — und

@@ -22,8 +22,36 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules, Platform, TurboModuleRegistry } from 'react-native';
 import { doc, getDoc, setDoc, serverTimestamp } from '@react-native-firebase/firestore';
 import { db } from '@/lib/firebase';
+import { berechtigungAusExpo } from './pushPermissionStatus';
 
 let _registered = false;
+
+/**
+ * Der EINE onTokenRefresh-Hörer dieses Geräts.
+ *
+ * Bis 17.09.2026 legte jeder erfolgreiche Aufruf einen weiteren Hörer an:
+ * einen beim Start (AuthContext), einen nach dem Frage-Sheet (Provider, dessen
+ * Aufräumfunktion verworfen wurde). Nach einem Kontowechsel schrieb der alte
+ * Hörer einen erneuerten Token weiter unter die ALTE uid. Jetzt gilt: höchstens
+ * ein Hörer, immer für die zuletzt registrierte uid.
+ */
+let tokenHoerer: { uid: string; abbestellen: () => void } | null = null;
+
+/**
+ * Die uid des zuletzt BEGONNENEN Aufrufs. Eine Registrierung hängt teils lange
+ * in Netz-Wartezeiten; wechselt währenddessen das Konto, darf der verspätete
+ * Aufruf den Hörer des neuen Kontos nicht mehr ersetzen.
+ */
+let zuletztAngefragteUid: string | null = null;
+
+function hoererEntfernen(): void {
+  try {
+    tokenHoerer?.abbestellen();
+  } catch {
+    /* Aufräumen darf nie werfen */
+  }
+  tokenHoerer = null;
+}
 
 /**
  * Warum die Registrierung endete — und zwar SERVERSEITIG sichtbar.
@@ -197,6 +225,31 @@ export async function persistToken(uid: string, token: string): Promise<void> {
 }
 
 /**
+ * Ohne Erlaubnis: echte Ablehnung — oder kann noch gefragt werden?
+ *
+ * RNFB kennt auf Android nur 1 oder 0 (`areNotificationsEnabled()`). Eine nie
+ * angefragte Berechtigung unter Android 13+ stand deshalb bis 17.09.2026 als
+ * `permission_denied` in der Datenbank — 7.362 Konten, von denen keines je
+ * gefragt worden war. expo liefert mit `canAskAgain` die Unterscheidung
+ * (pushPermissionStatus.ts); auf Android heißt `permission_not_determined`
+ * damit: „Android würde den Dialog noch zeigen".
+ */
+async function ablehnungEinordnen(rnfbSagtAbgelehnt: boolean): Promise<FcmState> {
+  const ausRnfb: FcmState = rnfbSagtAbgelehnt ? 'permission_denied' : 'permission_not_determined';
+  if (Platform.OS !== 'android') return ausRnfb;
+  try {
+    // Gleiche Ladeart wie in `harteBerechtigungAnfragen` unten.
+    const Notifications = require('expo-notifications');
+    const perm = await Notifications.getPermissionsAsync();
+    return berechtigungAusExpo(perm, Platform.OS, Platform.Version) === 'denied'
+      ? 'permission_denied'
+      : 'permission_not_determined';
+  } catch {
+    return ausRnfb;
+  }
+}
+
+/**
  * Token registrieren — ABER NUR, wenn die Erlaubnis schon vorliegt.
  *
  * Fragt selbst nichts und holt ohne Erlaubnis auch keinen Token (§ 25
@@ -209,6 +262,12 @@ export async function persistToken(uid: string, token: string): Promise<void> {
  * Rückgabe: Aufräumfunktion für den onTokenRefresh-Hörer.
  */
 export async function registerFcmTokenForUser(uid: string): Promise<() => void> {
+  // Ein Hörer für eine ANDERE uid gehört weg, auch wenn diese Registrierung
+  // gleich ohne Erlaubnis aussteigt — sonst schriebe ein erneuerter Token
+  // weiter unter das vorige Konto.
+  if (tokenHoerer && tokenHoerer.uid !== uid) hoererEntfernen();
+  zuletztAngefragteUid = uid;
+
   const Messaging = await getMessagingModule();
   if (!Messaging) {
     void recordState(uid, 'no_module');
@@ -246,9 +305,7 @@ export async function registerFcmTokenForUser(uid: string): Promise<() => void> 
       if (!erlaubt) {
         void recordState(
           uid,
-          authStatus === Messaging.AuthorizationStatus.DENIED
-            ? 'permission_denied'
-            : 'permission_not_determined',
+          await ablehnungEinordnen(authStatus === Messaging.AuthorizationStatus.DENIED),
           `beim_start authStatus=${authStatus}`,
         );
         return () => {};
@@ -297,6 +354,14 @@ export async function registerFcmTokenForUser(uid: string): Promise<() => void> 
     // das ist der bekannte fehlende Retry (Handover Punkt 4), bewusst
     // noch nicht angefasst, bis die Telemetrie zeigt, ob der Fall
     // uberhaupt eintritt.
+    //
+    // Höchstens EIN Hörer (siehe `tokenHoerer`): steht schon einer für diese
+    // uid, bleibt es bei ihm.
+    if (tokenHoerer?.uid === uid) return () => {};
+    // Inzwischen läuft eine Registrierung für ein anderes Konto — die
+    // entscheidet über den Hörer, nicht dieser verspätete Aufruf.
+    if (zuletztAngefragteUid !== uid) return () => {};
+    hoererEntfernen();
     const unsubscribe = Messaging().onTokenRefresh(async (newToken: string) => {
       if (!newToken) return;
       try {
@@ -307,8 +372,17 @@ export async function registerFcmTokenForUser(uid: string): Promise<() => void> 
         void recordState(uid, 'write_failed', `refresh: ${String(e?.message ?? e).slice(0, 180)}`);
       }
     });
+    const dieser = {
+      uid,
+      abbestellen: typeof unsubscribe === 'function' ? unsubscribe : () => {},
+    };
+    tokenHoerer = dieser;
 
-    return typeof unsubscribe === 'function' ? unsubscribe : () => {};
+    // Aufräumen nur, solange es noch DIESER Hörer ist — ein späterer Aufrufer
+    // kann ihn inzwischen ersetzt haben.
+    return () => {
+      if (tokenHoerer === dieser) hoererEntfernen();
+    };
   } catch (e: any) {
     // Alles, was oberhalb noch werfen kann — im Wesentlichen
     // requestPermission(). Vorher endete das hier stumm.
@@ -346,20 +420,30 @@ export async function harteBerechtigungAnfragen(uid: string): Promise<boolean> {
     // oben). iOS: über RNFB, weil dort auch die provisorische Stufe hängt.
     if (Platform.OS === 'android') {
       const Notifications = require('expo-notifications');
-      const { status } = await Notifications.requestPermissionsAsync();
-      const erteilt = status === 'granted';
-      if (!erteilt) {
+      const antwort = await Notifications.requestPermissionsAsync();
+      // Dieselbe Einordnung wie beim Start (ablehnungEinordnen): nach der
+      // ersten Ablehnung würde Android noch einmal fragen — das ist nicht
+      // 'permission_denied'. Sonst wechselte das Feld für dasselbe Gerät bei
+      // jedem Start zwischen zwei Werten.
+      const stand = berechtigungAusExpo(antwort, Platform.OS, Platform.Version);
+      if (stand !== 'granted') {
         void recordState(
           uid,
-          status === 'denied' ? 'permission_denied' : 'permission_not_determined',
-          `android nach_sheet status=${status}`,
+          stand === 'denied' ? 'permission_denied' : 'permission_not_determined',
+          `android nach_sheet status=${antwort?.status}`,
         );
         return false;
       }
       try {
         const token = await Messaging().getToken();
-        if (token) await persistToken(uid, token);
-        void recordState(uid, 'ok', 'android nach_sheet');
+        if (token) {
+          await persistToken(uid, token);
+          void recordState(uid, 'ok', 'android nach_sheet');
+        } else {
+          // Vorher stand hier auch ohne Token 'ok' — ein 'ok' ohne
+          // Token-Dokument hat die Diagnose am 17.09.2026 in die Irre geführt.
+          void recordState(uid, 'token_failed', 'android nach_sheet: empty_token');
+        }
       } catch (e: any) {
         void recordState(uid, 'token_failed', `android nach_sheet: ${String(e?.message ?? e).slice(0, 140)}`);
       }
@@ -384,8 +468,14 @@ export async function harteBerechtigungAnfragen(uid: string): Promise<boolean> {
     }
     try {
       const token = await Messaging().getToken();
-      if (token) await persistToken(uid, token);
-      void recordState(uid, 'ok', 'nach_sheet');
+      if (token) {
+        await persistToken(uid, token);
+        void recordState(uid, 'ok', 'nach_sheet');
+      } else {
+        // Auf iOS möglich, solange der APNs-Token fehlt. Der Hörer, den der
+        // Provider danach über registerFcmTokenForUser anlegt, holt ihn nach.
+        void recordState(uid, 'token_failed', 'nach_sheet: empty_token');
+      }
     } catch (e: any) {
       void recordState(uid, 'token_failed', `nach_sheet: ${String(e?.message ?? e).slice(0, 160)}`);
     }

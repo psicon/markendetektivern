@@ -118,6 +118,14 @@ export interface FrageLage {
   berechtigung: 'offen' | 'erteilt' | 'abgelehnt';
   /** Ist gerade ein anderes Sheet oder eine Umfrage sichtbar? */
   etwasOffen: boolean;
+  /**
+   * Hat der Nutzer in der App ausdrücklich abbestellt? Dann wird nicht
+   * nachgehakt (Projektregel: jede Verweigerung braucht einen Leser). Seit
+   * 17.09.2026 wichtig, weil Android-13+-Nutzer ohne Systemerlaubnis jetzt als
+   * „offen" gelten — vorher schloss der Status „denied" sie zufällig mit aus.
+   * Optional, damit bestehende Aufrufer ohne Angabe wie bisher fragen.
+   */
+  abbestellt?: boolean;
   jetzt: number;
 }
 
@@ -128,6 +136,7 @@ export type FrageUrteil =
       grund:
         | 'berechtigung_erteilt'
         | 'berechtigung_abgelehnt'
+        | 'nutzer_hat_abbestellt'
         | 'anderes_sheet_offen'
         | 'kein_interesse'
         | 'zu_frueh_nach_letzter_frage'
@@ -149,6 +158,7 @@ export function darfFragen(
   // Frage ohne Wirkung.
   if (lage.berechtigung === 'erteilt') return { fragen: false, grund: 'berechtigung_erteilt' };
   if (lage.berechtigung === 'abgelehnt') return { fragen: false, grund: 'berechtigung_abgelehnt' };
+  if (lage.abbestellt) return { fragen: false, grund: 'nutzer_hat_abbestellt' };
 
   // Zwei Sheets gleichzeitig lassen iOS hart einfrieren (CLAUDE.md,
   // 86ca8g2p9). Die Frage kann warten, ein eingefrorenes Gerät nicht.
