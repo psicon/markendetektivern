@@ -18,6 +18,7 @@ import {
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useStandortPflicht } from '@/hooks/useStandortPflicht';
+import type { StandortPflicht } from '@/lib/services/standortPflicht';
 import { useTokens } from '@/hooks/useTokens';
 import { router } from 'expo-router';
 
@@ -249,10 +250,20 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
   // Sheets — ein zweites Modal darüber würde iOS einfrieren.
   const brauchtFreigabe = !!poll && pollZahltPraemie(poll) && !!user?.uid && !isAnonymous;
   const pflicht = useStandortPflicht(visible && brauchtFreigabe);
-  // Nur solange das Sheet offen ist: beim Schließen setzt der Hook den Stand
-  // zurück (null) — ohne `visible` klappte das Sheet während der
-  // Ausblend-Animation sichtbar auf den Platzhalter zusammen.
-  const gesperrt = visible && brauchtFreigabe && pflicht.stand !== 'erfuellt';
+  // Was das Sheet zeigt. Während der Ausblend-Animation (visible=false, das
+  // Modal bleibt ~260 ms eingehängt) bleibt die zuletzt gezeigte Ansicht
+  // stehen — sonst sprang es beim Schließen aus der Sperre auf die Fragen
+  // bzw. klappte auf den Platzhalter zusammen (der Hook setzt den Stand
+  // beim Deaktivieren auf null).
+  const liveAnsicht: 'runner' | 'platzhalter' | Exclude<StandortPflicht, 'erfuellt'> =
+    !brauchtFreigabe || pflicht.stand === 'erfuellt'
+      ? 'runner'
+      : pflicht.stand === null
+        ? 'platzhalter'
+        : pflicht.stand;
+  const letzteAnsichtRef = useRef(liveAnsicht);
+  if (visible) letzteAnsichtRef.current = liveAnsicht;
+  const ansicht = visible ? liveAnsicht : letzteAnsichtRef.current;
 
   return (
     <SurveyContext.Provider value={{ showSurvey, activityNonce }}>
@@ -263,13 +274,12 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
         onClose={handleClose}
         registerPresence={false}
       >
-        {poll && gesperrt ? (
-          // 'erfuellt' kommt hier nicht vor (gesperrt) — nur für den Typ.
-          pflicht.stand === null || pflicht.stand === 'erfuellt' ? (
+        {poll && ansicht !== 'runner' ? (
+          ansicht === 'platzhalter' ? (
             <View style={{ height: 160 }} />
           ) : (
             <StandortPflichtHinweis
-              stand={pflicht.stand}
+              stand={ansicht}
               art="umfrage"
               laeuft={pflicht.laeuft}
               onErfuellen={() => void pflicht.erfuellen()}
