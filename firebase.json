@@ -65,7 +65,13 @@
         ".git",
         "firebase-debug.log",
         "firebase-debug.*.log",
-        "*.local"
+        "*.local",
+        ".*.js",
+        ".*.json",
+        ".*.jsonl",
+        ".*.log",
+        ".*.txt",
+        ".*.csv"
       ]
     },
     {
@@ -209,7 +215,13 @@
         ".git",
         "firebase-debug.log",
         "firebase-debug.*.log",
-        "*.local"
+        "*.local",
+        ".*.js",
+        ".*.json",
+        ".*.jsonl",
+        ".*.log",
+        ".*.txt",
+        ".*.csv"
       ]
     },
     {
@@ -297,7 +309,13 @@
         ".git",
         "firebase-debug.log",
         "firebase-debug.*.log",
-        "*.local"
+        "*.local",
+        ".*.js",
+        ".*.json",
+        ".*.jsonl",
+        ".*.log",
+        ".*.txt",
+        ".*.csv"
       ]
     }
   ],

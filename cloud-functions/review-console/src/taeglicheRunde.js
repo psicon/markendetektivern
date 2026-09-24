@@ -502,8 +502,11 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     warnungen: warn,
   };
   await db.collection(BERICHTE).doc(lauf).set(bericht);
-  // `aktuell` liest der Morgen-Chat — nur echte Läufe, nie ein Trockenlauf.
-  if (!dryRun) await db.collection(BERICHTE).doc('aktuell').set(bericht);
+  // `aktuell` liest der Morgen-Chat. Geschrieben von jedem ZEITPLAN-Lauf, auch
+  // als Trockenlauf (mit dryRun:true) — sonst meldete der Chat bei
+  // ausgeschaltetem Schalter jeden Morgen „nicht gelaufen" und die Warnungen des
+  // Laufs kämen nie an (Gegenprüfung 24.09.). Manuelle Läufe schreiben es nie.
+  if (ausloeser === 'zeitplan') await db.collection(BERICHTE).doc('aktuell').set(bericht);
   logger.info('Morgenrunde fertig', { lauf, geprueft: bericht.geprueft, freigegeben: bericht.freigegeben, abgelehnt: bericht.abgelehnt, offen: bericht.offen, warnungen: warn.length });
   return { ...bericht, laufAt: new Date().toISOString() };
 }
