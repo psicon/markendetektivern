@@ -42,7 +42,11 @@ export function useStandortPflicht(aktiv: boolean = true) {
     const sub = AppState.addEventListener('change', (s) => {
       if (s === 'active') void pruefen();
     });
-    return () => sub.remove();
+    return () => {
+      sub.remove();
+      // Bei der nächsten Aktivierung nicht den alten Stand aufblitzen lassen.
+      setStand(null);
+    };
   }, [aktiv, pruefen]);
 
   const erfuellen = useCallback(async () => {
@@ -52,8 +56,14 @@ export function useStandortPflicht(aktiv: boolean = true) {
     try {
       const vorher = await pruefeStandortPflicht();
       const nachher = await standortPflichtErfuellen(vorher);
-      epoche.current += 1;
-      setStand(nachher);
+      // null = der Nutzer ist in die Einstellungen gewechselt; den Stand
+      // liefert die Prüfung beim Zurückkehren (AppState). Hier nichts setzen,
+      // sonst überschriebe ein spät zurückkehrendes openSettings() die
+      // frische Prüfung.
+      if (nachher !== null) {
+        epoche.current += 1;
+        setStand(nachher);
+      }
     } finally {
       laeuftRef.current = false;
       setLaeuft(false);

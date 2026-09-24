@@ -63,13 +63,12 @@ export async function pruefeStandortPflicht(): Promise<StandortPflicht> {
 }
 
 /**
- * Führt den nächsten Schritt aus und liefert den Stand danach.
- *
- * Nach dem Wechsel in die Einstellungen ändert sich der Stand erst, wenn
- * die App wieder aktiv wird — das fängt `useStandortPflicht` über den
+ * Führt den nächsten Schritt aus und liefert den Stand danach — oder `null`,
+ * wenn der Nutzer in die Einstellungen gewechselt ist. Dann ändert sich der
+ * Stand erst beim Zurückkehren; das fängt `useStandortPflicht` über den
  * AppState ab.
  */
-export async function standortPflichtErfuellen(stand: StandortPflicht): Promise<StandortPflicht> {
+export async function standortPflichtErfuellen(stand: StandortPflicht): Promise<StandortPflicht | null> {
   if (stand === 'erfuellt') return stand;
   if (stand === 'fragen') {
     try {
@@ -88,7 +87,7 @@ export async function standortPflichtErfuellen(stand: StandortPflicht): Promise<
       // Abgelehnt oder ohne Play-Dienste → Systemseite der Ortung.
       try {
         await Linking.sendIntent('android.settings.LOCATION_SOURCE_SETTINGS');
-        return stand;
+        return null;
       } catch {
         // letzter Ausweg unten
       }
@@ -96,6 +95,10 @@ export async function standortPflichtErfuellen(stand: StandortPflicht): Promise<
   }
   // iOS erlaubt nur den Sprung in die App-Einstellungen (Datenschutz-Seiten
   // sind private URLs und führen zur Ablehnung im Review).
-  await Linking.openSettings().catch(() => {});
-  return stand;
+  try {
+    await Linking.openSettings();
+    return null;
+  } catch {
+    return stand;
+  }
 }

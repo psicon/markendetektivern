@@ -37,6 +37,7 @@ import {
   isPollEligible,
   type SurveyUserContext,
 } from '@/lib/services/surveyTargeting';
+import { pruefeStandortPflicht } from '@/lib/services/standortPflicht';
 import type { ActionType } from '@/lib/types/achievements';
 import {
   extractRefId,
@@ -384,6 +385,15 @@ async function isSnoozed(): Promise<boolean> {
   }
 }
 
+/** Vergütet diese Umfrage überhaupt? (EINE Regel für Abschluss und Standortpflicht.) */
+export function pollZahltPraemie(p: Poll): boolean {
+  return (
+    (p.rewardTrigger ?? 'completion') !== 'none' &&
+    typeof p.rewardCents === 'number' &&
+    p.rewardCents > 0
+  );
+}
+
 export async function getActionSurvey(
   uid: string,
   action: ActionType,
@@ -414,6 +424,13 @@ export async function getActionSurvey(
   // Marken-ID des betroffenen Produkts wird nur bei Bedarf (Poll mit
   // targetBrandIds) aufgelöst — ein gecachter Read, lazy.
   let brandIdResolved: string | null | undefined; // undefined = noch nicht versucht
+  // Standortpflicht (6.0.20): eine vergütete Umfrage, die nach einer Aktion
+  // UNGEFRAGT aufgeht, soll nicht mit einer Sperre beginnen. Ohne Freigabe
+  // wird sie HIER übersprungen — vor Session-Sperre und Cooldown, damit eine
+  // nie gezeigte Umfrage weder das Kontingent verbraucht noch die nächste
+  // passende (z. B. unvergütete) verdrängt. Über die Umfrage-Liste bleibt sie
+  // erreichbar; dort erklärt der Sperrhinweis den Weg. Lazy, einmal je Aufruf.
+  let standortOk: boolean | undefined;
   for (const p of polls) {
     const trig = pollTriggerOf(p);
     if (trig.type !== 'action' || trig.action !== action) continue;
@@ -449,6 +466,10 @@ export async function getActionSurvey(
     // nach einem Neustart nicht sofort wieder kommt. Erst NACH dem Anzeigen
     // (nicht schon bei reiner Eligibility) — sonst würde eine geöffnete,
     // aber nie angezeigte Umfrage fälschlich gesperrt.
+    if (pollZahltPraemie(p)) {
+      if (standortOk === undefined) standortOk = (await pruefeStandortPflicht()) === 'erfuellt';
+      if (!standortOk) continue;
+    }
     actionPromptedThisSession = true;
     void markDismissed(p.id);
     return p;

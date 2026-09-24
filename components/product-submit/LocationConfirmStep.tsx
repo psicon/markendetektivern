@@ -13,6 +13,7 @@ import {
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import type { CaptureContext } from '@/lib/services/captureContext';
+import { pruefeStandortPflicht } from '@/lib/services/standortPflicht';
 
 /**
  * Fragt im Wizard nach dem Ort, wenn beim Einreichen kein GPS-Fix vorliegt.
@@ -68,9 +69,12 @@ export function LocationConfirmStep({ marketName, onConfirm, onBack, hinweis, on
    */
   const standortVerwenden = useCallback(async () => {
     setStatus('ermittelt');
+    let zeitlimit: ReturnType<typeof setTimeout> | undefined;
     try {
-      const p = await Location.getForegroundPermissionsAsync();
-      if (!p.granted) {
+      // Freigabe UND Ortungsdienste — auf Android lassen sich die Dienste
+      // über die Schnelleinstellungen abschalten, ohne dass die App den
+      // Vordergrund verlässt.
+      if ((await pruefeStandortPflicht()) !== 'erfuellt') {
         setStatus('frage');
         onFreigabeFehlt();
         return;
@@ -78,8 +82,11 @@ export function LocationConfirmStep({ marketName, onConfirm, onBack, hinweis, on
 
       const pos = await Promise.race([
         Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('fix_zeitlimit')), FIX_ZEITLIMIT_MS)),
+        new Promise<never>((_, reject) => {
+          zeitlimit = setTimeout(() => reject(new Error('fix_zeitlimit')), FIX_ZEITLIMIT_MS);
+        }),
       ]);
+      clearTimeout(zeitlimit);
 
       // Ortsnamen nachschlagen, damit der Nutzer BESTÄTIGEN kann, was wir
       // ermittelt haben. Eine rohe Koordinate kann niemand prüfen — und
@@ -110,6 +117,7 @@ export function LocationConfirmStep({ marketName, onConfirm, onBack, hinweis, on
       });
       setStatus('gefunden');
     } catch {
+      clearTimeout(zeitlimit);
       setStatus('eingabe');
     }
   }, [onFreigabeFehlt]);
@@ -281,7 +289,7 @@ export function LocationConfirmStep({ marketName, onConfirm, onBack, hinweis, on
       )}
 
       <Pressable onPress={onBack} style={{ alignItems: 'center', paddingVertical: 10 }}>
-        <Text style={T.klein}>Markt ändern</Text>
+        <Text style={T.klein}>Zurück zur Übersicht</Text>
       </Pressable>
     </ScrollView>
   );
