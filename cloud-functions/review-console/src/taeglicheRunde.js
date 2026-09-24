@@ -321,7 +321,16 @@ async function aktionsLage(db) {
 
 /* ─────────────────────────── Der Lauf ─────────────────────────── */
 
-async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser = 'zeitplan' } = {}) {
+/**
+ * @param {object} opts
+ * @param {string[]} [opts.vergleich]  REIN RECHNEN über schon entschiedene Fälle:
+ *   diese IDs gelten als offen (nur im Speicher), es wird nichts nachgelesen,
+ *   nichts geschrieben und kein Bericht angelegt; zurück kommt der Plan.
+ *   Zweck: eine Regel- oder Prompt-Änderung gegen echte Entscheidungen prüfen
+ *   (erstmals 24.09.2026: Runde gegen die Handrunde desselben Tages).
+ */
+async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser = 'zeitplan', vergleich = null } = {}) {
+  if (vergleich) dryRun = true;
   const db = admin.firestore();
   const bucket = bucketName || `${projekt}.appspot.com`;
   const ai = new GoogleGenAI({ vertexai: true, project: projekt, location: 'global' });
@@ -331,12 +340,26 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   const lauf = `${tag}_${berlinZeit(start)}${dryRun ? '_trocken' : ''}`;
 
   const alle = (await db.collection(COL).get()).docs.map((d) => ({ id: d.id, ref: d.ref, x: d.data() }));
-  const pending = alle.filter((d) => d.x.status === 'pending').sort((a, b) => (ms(a.x.createdAt) ?? 0) - (ms(b.x.createdAt) ?? 0));
+  if (vergleich) {
+    const ids = new Set(vergleich);
+    // Die Entscheidung von damals ausblenden: Status wieder offen, Entscheidungs-
+    // felder weg — nur im Speicher. Nachgelesene Angaben (*RescueOcr) bleiben,
+    // die hätte die Runde genauso erzeugt.
+    alle.forEach((d) => {
+      if (!ids.has(d.id)) return;
+      d.vorher = { status: d.x.status, rejectReason: d.x.rejectReason || null };
+      d.x = { ...d.x, status: 'pending' };
+      delete d.x.rejectReason; delete d.x.reviewedAt; delete d.x.review;
+    });
+  }
+  const pending = alle
+    .filter((d) => d.x.status === 'pending' && (!vergleich || d.vorher))
+    .sort((a, b) => (ms(a.x.createdAt) ?? 0) - (ms(b.x.createdAt) ?? 0));
 
   // 1) Fehlende Angaben nachlesen
   const nachgelesen = { name: 0, ean: 0, preis: 0, hersteller: 0 };
   const rettungFehler = new Map();
-  const nichtNachgelesen = await arbeite(pending, async (d) => {
+  const nichtNachgelesen = vergleich ? [] : await arbeite(pending, async (d) => {
     try {
       const { patch, fehler } = await rettungFuer(ai, bucket, d.ref, d.x);
       if (Object.keys(fehler).length) rettungFehler.set(d.id, fehler);
@@ -420,6 +443,18 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
 
   // 6) Notbremse
   const bremse = notbremse(plan, { schnittQuote: schnittQuote(alle, start) });
+
+  if (vergleich) {
+    return {
+      notbremse: bremse,
+      plan: plan.map((p) => ({
+        id: p.id, name: String(nameOf(p.x) || '?').slice(0, 60), markt: p.x.marketName || null,
+        entscheidung: p.entscheidung, grund: p.grund, loseWare: !!p.loseWare, zurueckgehalten: p.zurueckgehaltenGrund || null,
+        audit: p.audit || null, auditFehler: auditFehler.get(p.id) || null,
+        vorher: p.vorher,
+      })),
+    };
+  }
 
   // 7) Schreiben
   if (!dryRun) {
