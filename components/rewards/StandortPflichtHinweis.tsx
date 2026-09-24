@@ -53,6 +53,15 @@ function tastenText(stand: Exclude<StandortPflicht, 'erfuellt'>): string {
   return TEXTE[stand].taste;
 }
 
+/**
+ * Vor dem SYSTEMDIALOG (Stand „fragen") heißt die Taste neutral „Weiter" und
+ * es gibt keinen eigenen Ausstieg — App Review lehnt Vorab-Hinweise ab, die
+ * das Ablehnen vorwegnehmen (5.1.1(iv), „Continue"/„Next" statt „Allow"/
+ * „Later"). Verlassen geht weiter über das X im Kopf bzw. im Sheet; die
+ * Wahl selbst trifft der Nutzer im Systemdialog.
+ */
+const VOR_SYSTEMDIALOG: Exclude<StandortPflicht, 'erfuellt'> = 'fragen';
+
 interface Props {
   stand: Exclude<StandortPflicht, 'erfuellt'>;
   art: RewardArt;
@@ -140,7 +149,7 @@ export function StandortPflichtHinweis({ stand, art, laeuft, onErfuellen, onZuru
           <ActivityIndicator color="#fff" />
         ) : (
           <Text style={{ color: '#fff', fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 15 }}>
-            {tastenText(stand)}
+            {stand === VOR_SYSTEMDIALOG ? 'Weiter' : tastenText(stand)}
           </Text>
         )}
       </Pressable>
@@ -157,11 +166,13 @@ export function StandortPflichtHinweis({ stand, art, laeuft, onErfuellen, onZuru
         Der Standort wird nur zu deinen Einreichungen gespeichert — nicht im Hintergrund verfolgt.
       </Text>
 
-      <Pressable onPress={onZurueck} hitSlop={10} style={{ paddingVertical: 6 }}>
-        <Text style={{ fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 14, color: theme.textSub }}>
-          {zurueckLabel}
-        </Text>
-      </Pressable>
+      {stand === VOR_SYSTEMDIALOG ? null : (
+        <Pressable onPress={onZurueck} hitSlop={10} style={{ paddingVertical: 6 }}>
+          <Text style={{ fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 14, color: theme.textSub }}>
+            {zurueckLabel}
+          </Text>
+        </Pressable>
+      )}
     </View>
   );
 }

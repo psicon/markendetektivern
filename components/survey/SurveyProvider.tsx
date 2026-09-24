@@ -249,7 +249,10 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
   // Sheets — ein zweites Modal darüber würde iOS einfrieren.
   const brauchtFreigabe = !!poll && pollZahltPraemie(poll) && !!user?.uid && !isAnonymous;
   const pflicht = useStandortPflicht(visible && brauchtFreigabe);
-  const gesperrt = brauchtFreigabe && pflicht.stand !== 'erfuellt';
+  // Nur solange das Sheet offen ist: beim Schließen setzt der Hook den Stand
+  // zurück (null) — ohne `visible` klappte das Sheet während der
+  // Ausblend-Animation sichtbar auf den Platzhalter zusammen.
+  const gesperrt = visible && brauchtFreigabe && pflicht.stand !== 'erfuellt';
 
   return (
     <SurveyContext.Provider value={{ showSurvey, activityNonce }}>
