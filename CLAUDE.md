@@ -3839,6 +3839,31 @@ in der App — Metro/TestFlight/App-Version beeinflussen die Erkennung NICHT.
 - **Testen:** ein NEU fotografierter Bon läuft frisch; exakt dasselbe Bild-File
   trifft per Dedup (`receipts` contentHash) das alte gecachte Ergebnis.
 
+## `thinkingBudget` bei gemini-3.5-flash nicht mehr nutzen — `thinkingLevel` (24.09.2026)
+
+Vertex lehnt seit dem 22.09.2026 ~13 Uhr UTC einen TEIL der Anfragen mit
+`thinkingConfig: { thinkingBudget: 0 }` ab: 400 „Thinking budget is not
+supported for this model" (gemessen 4 von 15 Anfragen mit denselben Bildern —
+eine schrittweise ausgerollte Modellversion, bei uns hatte sich nichts
+geändert). Der Produktfoto-Namer (`crowd-upload-namer`) speicherte jeden Fehler
+als „kein Name, kein Preis, kein Hersteller", ohne zweiten Versuch: 47
+Einreichungen mit einwandfrei lesbaren Fotos, in der Konsole „(ohne Name)",
+und die Morgenrunde lehnte bei uneiniger Nachlesung mit `kein_produktname` ab.
+Regeln:
+- Denken über `thinkingConfig: { thinkingLevel: 'LOW' }` steuern (Namer und
+  Morgenrunde tun das; 15/15 Anfragen ok). Denk-Token zählen zu
+  `maxOutputTokens` — 512 ist dafür zu knapp.
+- Ein KI-Aufruf, dessen Ergebnis dauerhaft am Dokument landet, braucht
+  Wiederholung bei 429/5xx/Netz/abgeschnittenem JSON und bei endgültigem
+  Scheitern einen Fehler-VERMERK (`productNameOcrFehler`) — nie „leer" als
+  Ergebnis speichern. Sonst sieht ein technischer Fehler aus wie „nicht lesbar".
+- Noch mit `thinkingBudget: 0` (zeigten den Fehler bis 24.09. nicht, sind aber
+  derselben Umstellung ausgesetzt): `receipt-matcher/matcher.js`,
+  `ai-product-comparison/src/{comparator,assessor,manufacturer}.js`.
+- Diagnose-Rezept: `gcloud logging read '"Thinking budget"'` über alle Dienste;
+  eine Stunden-Zeitreihe der Fehler gegen die Erfolge zeigt, ab wann Google
+  umgestellt hat.
+
 ## Gemini läuft über VERTEX AI, nicht AI Studio (Incident 19.08.2026)
 
 **Was passiert ist:** Der AI-Studio-Monatsdeckel („monthly spending cap",
