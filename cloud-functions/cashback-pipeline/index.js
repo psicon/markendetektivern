@@ -71,6 +71,7 @@ const { runReferee } = require('./lib/ocr_referee');
 const { extractReceiptDocAI, isConfigured: isDocAIConfigured } = require('./lib/ocr_docai');
 const { deriveStoreAddress } = require('./lib/storeAddress');
 const { resolveRegion, pickCampaignForRegion, matchesTargeting, targetingStamp } = require('./lib/targeting');
+const { aktionZumZeitpunkt } = require('./lib/campaignZeit');
 const { resolveMerchant } = require('./lib/merchant');
 const { sendCashbackReady } = require('./lib/push');
 const {
@@ -442,6 +443,17 @@ async function loadActiveCampaigns(kind = 'receipt') {
       .filter((c) => now >= toMs(c.startAt) && now <= toMs(c.endAt));
   } catch (e) {
     logger.warn('active-campaigns-failed', { err: e.message });
+    return [];
+  }
+}
+
+/** Alle Aktionen (kleine Sammlung) — für die Frage „was galt zum Zeitpunkt X". */
+async function loadAllCampaigns() {
+  try {
+    const snap = await db.collection(CAMPAIGNS_COL).get();
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    logger.warn('all-campaigns-failed', { err: e.message });
     return [];
   }
 }
@@ -1820,6 +1832,27 @@ exports.processCashback = onMessagePublished(
       const cid = config.campaignsEnabled ? (receipt.campaignId || null) : null;
       let selectedCampaign = cid ? await loadCampaignById(cid) : null;
 
+      // 5b) Monatswechsel (Gegenprüfung 24.09.2026). Die App merkt sich die
+      //     Aktion beim Öffnen der Erfassung; wer um 23:58 startet und um 00:01
+      //     absendet, schickt die abgelaufene Monatsaktion mit. Liegt die
+      //     gewählte Aktion zum EINGANG außerhalb ihres Zeitraums, gilt die
+      //     Bon-Aktion, die zu diesem Zeitpunkt lief (lib/campaignZeit.js).
+      //     Nur das Zeitfenster wird korrigiert — eine vor dem Eingang
+      //     GESTOPPTE Aktion bleibt ein Ausschluss (bewusster Stopp).
+      let aktionZeitKorrektur = null;
+      if (config.campaignsEnabled && selectedCampaign) {
+        const eingang = uploadedAt.getTime();
+        const imZeitraum = toMs(selectedCampaign.startAt) <= eingang && eingang <= toMs(selectedCampaign.endAt);
+        if (!imZeitraum) {
+          const ersatz = aktionZumZeitpunkt(await loadAllCampaigns(), eingang, 'receipt');
+          if (ersatz && ersatz.id !== selectedCampaign.id) {
+            aktionZeitKorrektur = { von: selectedCampaign.id, nach: ersatz.id, eingangAt: new Date(eingang).toISOString() };
+            logger.info('campaign-zeit-korrigiert', { cashbackId, ...aktionZeitKorrektur });
+            selectedCampaign = ersatz;
+          }
+        }
+      }
+
       // 5c) Regionale Aktionen (06.09.2026). Die App wählt die Aktion, BEVOR
       //     irgendjemand die Filialadresse kennt — die steht erst nach der
       //     Texterkennung fest. Passt die gewählte Aktion nicht zum Gebiet des
@@ -2452,6 +2485,7 @@ exports.processCashback = onMessagePublished(
         // Welche Aktion galt regional und warum (06.09.2026). null, solange
         // keine laufende Aktion ein Gebiet einschränkt.
         targeting: targeting ?? null,
+        aktionZeitKorrektur: aktionZeitKorrektur ?? null,
         // Filialadresse laut Bon-Kopf (05.09.2026): {street, zip, city,
         // country, source: 'ocr'|'subtitle'|'merchant', complete}. Unabhängig
         // vom Merchant-Resolver — auch ein unbekannter Markt hat eine Anschrift.
