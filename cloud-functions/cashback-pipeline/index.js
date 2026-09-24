@@ -2089,15 +2089,24 @@ exports.processCashback = onMessagePublished(
         });
       }
 
-      if (status === 'approved' && cashbackCents > 0) {
+      if (status === 'approved' && cashbackCents > 0 && !alreadyCredited) {
         // 8) Push — echt, seit b00c71a (Mai 2026). Der alte Kommentar an
         //    dieser Stelle sagte „stub-logs" und stimmte danach nie wieder;
         //    wer nur ihn las, hielt den Aufruf für wirkungslos (86cbfdq5j).
+        //    `!alreadyCredited`: wird ein schon gutgeschriebener Bon erneut
+        //    verarbeitet (PubSub-Redelivery, Kehrlauf, Nachverarbeitung), kam
+        //    bisher eine zweite Nachricht über dasselbe Geld. Brach ein früherer
+        //    Lauf NACH der Buchung, aber VOR dem Push ab, fehlt die Nachricht
+        //    jetzt — die fehlende ist der kleinere Schaden.
+        //    Das `.catch` hält jeden Push-Fehler aus dem Geld-Zweig heraus: ein
+        //    Wurf hier würde sonst im umgebenden try landen und einen längst
+        //    gutgeschriebenen Bon in die Wiederholung schicken.
         await sendCashbackReady(uid, {
-          title: '🎉 Cashback bereit!',
-          body: `Du hast ${(cashbackCents / 100).toFixed(2).replace('.', ',')} € Cashback erhalten.`,
           cashbackId,
-        });
+          cents: cashbackCents,
+          markt: merchantInfo?.name,
+          schwelle: config?.payoutThresholdCents,
+        }).catch((e) => logger.warn('cashback-push-failed', { cashbackId, err: e.message }));
       }
 
       logger.info('process-done', {
@@ -2771,10 +2780,11 @@ exports.resolveCashbackReview = onRequest(
       }
       if (credited > 0) {
         await sendCashbackReady(uid, {
-          title: '🎉 Cashback bereit!',
-          body: `Du hast ${(credited / 100).toFixed(2).replace('.', ',')} € Cashback erhalten.`,
           cashbackId: receiptId,
-        });
+          cents: credited,
+          markt: r.merchant?.name,
+          schwelle: config?.payoutThresholdCents,
+        }).catch((e) => logger.warn('cashback-push-failed', { receiptId, err: e.message }));
       }
       logger.info('cashback-review-approved', { receiptId, uid, credited, finalStatus, capReason: settle?.capReason || null });
       res.json({ ok: true, status: finalStatus, creditedCents: credited, capReason: settle?.capReason || null });

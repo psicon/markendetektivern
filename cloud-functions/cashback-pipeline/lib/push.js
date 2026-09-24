@@ -22,6 +22,7 @@ const admin = require('firebase-admin');
 const { logger } = require('firebase-functions');
 const { pushErlaubt } = require('./pushPolicy');
 const { bonDeepLink } = require('./pushLinks');
+const { bonNachricht } = require('./pushTexte');
 
 /**
  * Token EINES Nutzers — und zwar nur, wenn er Nachrichten überhaupt will.
@@ -34,6 +35,9 @@ const { bonDeepLink } = require('./pushLinks');
  * Beide Lesungen laufen parallel; die Nutzer-Abfrage kostet einen Read je
  * Push und hat ihr EIGENES catch: scheitert sie, wird gesendet. Ein
  * Firestore-Fehler darf nicht wie eine Abbestellung wirken.
+ *
+ * Die Nutzerdaten werden mit zurückgegeben, weil der Ka-ching-Text das
+ * Guthaben nach der Buchung braucht (Zahltag bei 10 €) — ohne zweite Lesung.
  */
 async function getUserTokens(uid) {
   try {
@@ -56,16 +60,17 @@ async function getUserTokens(uid) {
     const urteil = pushErlaubt(nutzerDaten);
     if (!urteil.erlaubt) {
       logger.info('[cashback.push] abbestellt — kein Versand', { uid, grund: urteil.grund });
-      return [];
+      return { entries: [], nutzerDaten };
     }
 
-    return snap.docs.map((d) => ({
+    const entries = snap.docs.map((d) => ({
       docId: d.id,
       token: String(d.get('token') || ''),
     })).filter((x) => x.token);
+    return { entries, nutzerDaten };
   } catch (e) {
-    logger.warn('[cashback.push] getUserTokens failed', { uid, err: e.message });
-    return [];
+    logger.warn('[cashback.push] Empfänger nicht lesbar', { uid, err: e.message });
+    return { entries: [], nutzerDaten: null };
   }
 }
 
@@ -98,17 +103,22 @@ async function pruneInvalidTokens(uid, entries, results) {
 }
 
 /**
- * Send a "cashback ready" push.
+ * „Ka-ching!"-Nachricht für einen vergüteten Bon.
+ *
+ * Den Text baut diese Funktion selbst (lib/pushTexte.js): sie braucht dafür
+ * das Guthaben nach der Buchung, und das liegt erst hier vor — im
+ * Nutzerdokument, das für die Abbestellung ohnehin gelesen wird.
  *
  * @param {string} uid
  * @param {object} payload
- * @param {string} payload.title
- * @param {string} payload.body
  * @param {string} payload.cashbackId
+ * @param {number} payload.cents       gutgeschriebener Betrag in Cent
+ * @param {string} [payload.markt]     Marktname vom Bon, für „Dein Bon von …"
+ * @param {number} [payload.schwelle]  Auszahlungsschwelle aus der Config
  * @param {string} [payload.deepLink]
  */
 async function sendCashbackReady(uid, payload) {
-  const entries = await getUserTokens(uid);
+  const { entries, nutzerDaten } = await getUserTokens(uid);
   if (!entries.length) {
     logger.info('[cashback.push] no FCM tokens', { uid });
     return { sent: 0, skipped: true };
@@ -124,8 +134,14 @@ async function sendCashbackReady(uid, payload) {
   // Ein Pfad, den jede tap-fähige App-Version auflöst — siehe pushLinks.js,
   // warum das bis 17.09.2026 ein Schema-Link war, den die App nie verstand.
   const deepLink = payload.deepLink || bonDeepLink(payload.cashbackId);
+  const { title, body } = bonNachricht({
+    cents: payload.cents,
+    markt: payload.markt,
+    guthabenNachher: nutzerDaten ? nutzerDaten.cashback_balance_cents : undefined,
+    schwelle: payload.schwelle,
+  });
   const message = {
-    notification: { title: payload.title, body: payload.body },
+    notification: { title, body },
     data: {
       cashbackId: String(payload.cashbackId),
       deepLink,
@@ -181,7 +197,8 @@ async function sendCashbackReady(uid, payload) {
       kind: 'cashback_ready',
       cashbackId: String(payload.cashbackId),
       deepLink,
-      title: payload.title,
+      title,
+      cents: Number(payload.cents) || 0,
       sentAt: admin.firestore.FieldValue.serverTimestamp(),
       tokens: tokens.length,
       success: response.successCount,

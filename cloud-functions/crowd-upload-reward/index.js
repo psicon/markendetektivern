@@ -42,6 +42,7 @@
  */
 
 const { onDocumentUpdated } = require('firebase-functions/v2/firestore');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
 const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
 
@@ -49,7 +50,7 @@ const { pruefeOrtsanforderung } = require('./src/locationGate');
 const { resolveRegion, matchesTargeting } = require('./src/targeting');
 const { ergebnisFelder } = require('./src/ergebnis');
 const { campaignZurAufnahmezeit } = require('./src/campaignFallback');
-const { sendeVerguetungPush } = require('./src/push');
+const { zurSammlungHinzufuegen, gesammelteSenden } = require('./src/push');
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -103,6 +104,15 @@ exports.onCrowdUploadApproved = onDocumentUpdated(
             ? { result: 'not_credited', reason: 'storniert' }
             : { result: 'credited', cents: gebucht },
         );
+        // Nachricht nachholen, falls der erste Lauf nach der Buchung, aber vor
+        // der Vormerkung abbrach. Der Merker `rewardPushSentAt` verhindert das
+        // doppelte Zählen. Nur für frische Buchungen: nach „ablehnen →
+        // zurückholen → freigeben" einer alten Nachbuchung käme sonst Tage
+        // später eine Ka-ching-Nachricht für längst bekanntes Geld.
+        const gebuchtAm = vorhanden.data().createdAt?.toMillis?.() ?? 0;
+        if (!storniert && gebucht > 0 && Date.now() - gebuchtAm < 24 * 60 * 60 * 1000) {
+          await zurSammlungHinzufuegen({ uploadRef, uploadId, uid, cents: gebucht });
+        }
         return;
       }
     } catch (e) {
@@ -284,7 +294,9 @@ exports.onCrowdUploadApproved = onDocumentUpdated(
         );
         tx.set(campRef, { budgetRemainingCents: inc(-pay) }, { merge: true });
 
-        return { cents: pay, reason: null };
+        // Guthaben vor/nach nur als RÜCKGABE — für die Zahltag-Erkennung der
+        // Nachricht (src/push.js). Am Schreibweg des Geldes ändert das nichts.
+        return { cents: pay, reason: null, guthabenVorher: balance, guthabenNachher: balance + pay };
       });
 
       const credited = outcome.cents;
@@ -320,11 +332,20 @@ exports.onCrowdUploadApproved = onDocumentUpdated(
       // Die Gutschrift meldet sich von selbst (12487v2akvp) — und NUR sie.
       // Eine Ablehnung bleibt bewusst leise: ihr Grund steht in der Liste der
       // Einreichungen und wird dort gelesen, wenn jemand von sich aus nachsieht.
-      // Der Aufruf wirft nie und wird bewusst NICHT in den catch unten geführt:
-      // das Geld ist an dieser Stelle gebucht, eine erneute Zustellung wegen
-      // einer misslungenen Benachrichtigung wäre der teurere Fehler.
+      // Hier wird nur VORGEMERKT; verschickt wird gesammelt im Zeitplan-Lauf
+      // unten, damit zehn Freigaben aus einer Prüfrunde EINE Nachricht werden.
+      // Der Aufruf wirft nie und liegt bewusst NICHT im catch unten: das Geld
+      // ist gebucht, eine erneute Zustellung wegen einer misslungenen
+      // Vormerkung wäre der teurere Fehler.
       if (credited > 0) {
-        await sendeVerguetungPush({ uploadRef, uploadId, uid, cents: credited });
+        await zurSammlungHinzufuegen({
+          uploadRef,
+          uploadId,
+          uid,
+          cents: credited,
+          guthabenVorher: outcome.guthabenVorher,
+          guthabenNachher: outcome.guthabenNachher,
+        });
       }
     } catch (e) {
       // Werfen, damit Firestore erneut zustellt — die Idempotenz über die
@@ -336,5 +357,25 @@ exports.onCrowdUploadApproved = onDocumentUpdated(
       });
       throw e;
     }
+  },
+);
+
+/**
+ * Verschickt die gesammelten „Ka-ching!"-Nachrichten (12487v2akvp).
+ *
+ * Läuft jede Minute und schickt jedem Nutzer, bei dem seit einer Minute keine
+ * Freigabe mehr dazukam, EINE Nachricht mit der Summe. Begründung und
+ * Ablauf stehen in src/push.js. Die Nachricht kommt damit ein bis zwei
+ * Minuten nach der Freigabe — für eine Gutschrift unerheblich, und dafür
+ * bekommt niemand zehn Nachrichten, wenn zehn Einreichungen auf einmal
+ * freigegeben werden.
+ */
+exports.sendeGesammelteGutschriften = onSchedule(
+  // 300 s statt der 60 s Standard: bei großem Rückstand (bis 200 Nutzer je
+  // Lauf) reicht eine Minute nicht sicher. Überlappende Läufe sind harmlos —
+  // jeder Sammler wird in einer Transaktion abgeholt und gelöscht.
+  { schedule: 'every 1 minutes', region: REGION, timeZone: 'Europe/Berlin', timeoutSeconds: 300 },
+  async () => {
+    await gesammelteSenden();
   },
 );
