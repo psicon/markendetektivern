@@ -168,26 +168,8 @@ async function rettungFuer(ai, bucket, ref, x) {
     } catch (e) { fehler.ean = String(e.message).slice(0, 120); }
   }
   if (offenPreis || offenHersteller) {
-    const p = [
-      'Lies zwei Angaben, sonst nichts. JSON: {"priceCents":0,"priceImageKind":"","manufacturer":""}.',
-      'priceCents: Verkaufspreis DIESES Produkts in Cent (1,99 € → 199), vom Regal-Preisschild oder der Bon-Zeile.',
-      'NICHT den Grundpreis (€/kg), NICHT den durchgestrichenen Preis, NICHT die Bon-Endsumme. Kein Preis sichtbar → 0.',
-      'priceImageKind: "preisschild" | "kassenbon" | "beides" | "produktfoto" | "sonstiges".',
-      'manufacturer: Inverkehrbringer laut Verpackung als Firmenname ohne Adresse. Nicht lesbar → leer.',
-      'Nichts raten — ein erfundener Wert ist schlechter als ein leeres Feld.',
-    ].join('\n');
-    const slots = ['preis', 'hersteller', 'rueckseite', 'front'];
     try {
-      const [a, b] = [await frage(ai, bucket, x.images, slots, p), await frage(ai, bucket, x.images, slots, p)];
-      const ca = Number.isFinite(a.priceCents) && a.priceCents > 0 ? Math.round(a.priceCents) : null;
-      const cb = Number.isFinite(b.priceCents) && b.priceCents > 0 ? Math.round(b.priceCents) : null;
-      // Bei ~40 % der Einreichungen zeigt das „Preis"-Foto nur nochmal das Produkt.
-      if (offenPreis && ca && ca === cb && ca <= 20000 && ['preisschild', 'kassenbon', 'beides'].includes(String(a.priceImageKind || '').toLowerCase())) {
-        patch.priceRescueOcr = { priceCents: ca, currency: 'EUR', priceImageKind: String(a.priceImageKind).toLowerCase() };
-      }
-      if (offenHersteller && a.manufacturer && norm(a.manufacturer) === norm(b.manufacturer)) {
-        patch.manufacturerRescueOcr = { name: String(a.manufacturer).slice(0, 140) };
-      }
+      Object.assign(patch, await preisUndHersteller(ai, bucket, x, { preis: offenPreis, hersteller: offenHersteller }));
     } catch (e) { fehler.preis = String(e.message).slice(0, 120); }
   }
   if (!Object.keys(patch).length) return { patch: null, fehler };
@@ -195,6 +177,34 @@ async function rettungFuer(ai, bucket, ref, x) {
   patch.rescueQuelle = `${MODELL}/vertex mit Denken, zwei übereinstimmende Lesungen (Morgenrunde)`;
   await ref.set(patch, { merge: true });
   return { patch, fehler };
+}
+
+/**
+ * Preis und/oder Hersteller nachlesen — zwei Lesungen, übernommen nur bei
+ * Übereinstimmung. Wirft bei technischen Fehlern (der Aufrufer entscheidet).
+ */
+async function preisUndHersteller(ai, bucket, x, { preis, hersteller }) {
+  const patch = {};
+  const p = [
+    'Lies zwei Angaben, sonst nichts. JSON: {"priceCents":0,"priceImageKind":"","manufacturer":""}.',
+    'priceCents: Verkaufspreis DIESES Produkts in Cent (1,99 € → 199), vom Regal-Preisschild oder der Bon-Zeile.',
+    'NICHT den Grundpreis (€/kg), NICHT den durchgestrichenen Preis, NICHT die Bon-Endsumme. Kein Preis sichtbar → 0.',
+    'priceImageKind: "preisschild" | "kassenbon" | "beides" | "produktfoto" | "sonstiges".',
+    'manufacturer: Inverkehrbringer laut Verpackung als Firmenname ohne Adresse. Nicht lesbar → leer.',
+    'Nichts raten — ein erfundener Wert ist schlechter als ein leeres Feld.',
+  ].join('\n');
+  const slots = ['preis', 'hersteller', 'rueckseite', 'front'];
+  const [a, b] = [await frage(ai, bucket, x.images || {}, slots, p), await frage(ai, bucket, x.images || {}, slots, p)];
+  const ca = Number.isFinite(a.priceCents) && a.priceCents > 0 ? Math.round(a.priceCents) : null;
+  const cb = Number.isFinite(b.priceCents) && b.priceCents > 0 ? Math.round(b.priceCents) : null;
+  // Bei ~40 % der Einreichungen zeigt das „Preis"-Foto nur nochmal das Produkt.
+  if (preis && ca && ca === cb && ca <= 20000 && ['preisschild', 'kassenbon', 'beides'].includes(String(a.priceImageKind || '').toLowerCase())) {
+    patch.priceRescueOcr = { priceCents: ca, currency: 'EUR', priceImageKind: String(a.priceImageKind).toLowerCase() };
+  }
+  if (hersteller && a.manufacturer && norm(a.manufacturer) === norm(b.manufacturer)) {
+    patch.manufacturerRescueOcr = { name: String(a.manufacturer).slice(0, 140) };
+  }
+  return patch;
 }
 
 /** Bildprüfung: sieht alle sieben Fotos an. */
@@ -278,8 +288,10 @@ async function bonLage(db, jetzt) {
     if (g) gruende[g] = (gruende[g] || 0) + 1;
     if (g === 'no_active_campaign') ohneAktion++;
   });
-  // Zweitprüfung: Nutzungszähler je UTC-Tag (cashback_referee_usage/{YYYY-MM-DD}).
-  const tage = [0, 1].map((i) => new Date(jetzt - i * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
+  // Zweitprüfung: die Bon-Pipeline zählt je BERLINER Tag
+  // (cashback_referee_usage/{todayBerlin()}). Drei Tage lesen, damit das
+  // Fenster wirklich mindestens 48 h abdeckt (um 08:00 wären zwei Tage nur ~32 h).
+  const tage = [0, 1, 2].map((i) => berlinTag(jetzt - i * 24 * 60 * 60 * 1000));
   const nutzung = await Promise.all(tage.map((t) => db.doc(`cashback_referee_usage/${t}`).get()));
   const schalter = cfg.get('ocrReferee');
   return {
@@ -341,6 +353,34 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   }, PARALLEL_KI, frist);
   nichtNachgelesen.forEach((d) => rettungFehler.set(d.id, { name: 'zeit_abgelaufen', ean: 'zeit_abgelaufen' }));
 
+  // 1b) Preis auch bei der REFERENZ nachlesen. Fehlende Vergleichswerte gelten
+  //     als gleich (fail-closed) — fehlt der Preis nur bei der schon
+  //     freigegebenen Einreichung, entschiede sonst, auf welcher Seite die
+  //     Texterkennung zufällig versagt hat (Regel 20.09., WISSEN). Nur die
+  //     Paare, die die Doppel-Regel überhaupt sperren kann: gleiche Person,
+  //     gleiche EAN, freigegeben, binnen 24 h.
+  const TAG_MS = 24 * 60 * 60 * 1000;
+  const referenzen = new Map();
+  for (const d of pending) {
+    const e = eanOf(d.x); const t = ms(d.x.createdAt) || 0;
+    if (!e) continue;
+    for (const r of alle) {
+      if (r.x.status !== 'approved' || r.x.userId !== d.x.userId || eanOf(r.x) !== e || preisOf(r.x)) continue;
+      if (Math.abs((ms(r.x.createdAt) || 0) - t) < TAG_MS) referenzen.set(r.id, r);
+    }
+  }
+  const referenzFehler = new Map();
+  await arbeite([...referenzen.values()].slice(0, 40), async (r) => {
+    try {
+      const patch = await preisUndHersteller(ai, bucket, r.x, { preis: true, hersteller: false });
+      if (patch.priceRescueOcr) {
+        await r.ref.set({ ...patch, rescueAt: FieldValue.serverTimestamp(), rescueQuelle: `${MODELL}/vertex mit Denken, zwei übereinstimmende Lesungen (Morgenrunde, als Referenz)` }, { merge: true });
+        Object.assign(r.x, patch);
+        nachgelesen.preis++;
+      }
+    } catch (e) { referenzFehler.set(r.id, String(e.message).slice(0, 120)); }
+  }, PARALLEL_KI, frist);
+
   // 2) Bilddateien: leer, unlesbar, oder aus einer früheren Einreichung bekannt
   const storage = admin.storage().bucket(bucket);
   const metaVon = new Map();
@@ -392,9 +432,13 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     const v = vor.get(d.id);
     const andere = (byEan.get(eanOf(d.x)) || []).filter((o) => o.id !== d.id).map((o) => ({ ...o, status: statusJetzt.get(o.id) || o.status }));
     const dup = eanOf(d.x) ? evaluateDuplicate(policyOf(d.id, d.x), andere) : { verdict: 'ok', reason: null, lockUntil: null };
+    const refDoc = dup.priorId ? alle.find((a) => a.id === dup.priorId) : null;
+    const preisFehlt = !preisOf(d.x) || (refDoc ? !preisOf(refDoc.x) : false);
+    const rf = { ...(rettungFehler.get(d.id) || {}) };
+    if (refDoc && referenzFehler.has(refDoc.id)) rf.preis = rf.preis || referenzFehler.get(refDoc.id);
     const e = entscheideFall({
       comp: v.comp, dup, leer: v.leer, unlesbar: v.unlesbar, wiederverwendet: wiederverwendet.has(d.id),
-      audit: audit.get(d.id) || null, auditFehler: auditFehler.get(d.id) || null, rettungFehler: rettungFehler.get(d.id) || {},
+      audit: audit.get(d.id) || null, auditFehler: auditFehler.get(d.id) || null, rettungFehler: rf, preisFehlt,
     });
     plan.push({ ...d, ...e, comp: v.comp, dup, audit: audit.get(d.id) || null });
     if (e.entscheidung === 'freigeben') statusJetzt.set(d.id, 'approved');
@@ -410,6 +454,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       if (p.entscheidung === 'offen') continue;
       const precheck = { verdict: p.comp.ok ? (p.dup.verdict === 'ok' ? 'ok' : p.dup.verdict) : 'incomplete', reasons: [...p.comp.problems, ...(p.dup.reason ? [p.dup.reason] : [])] };
       const bild = p.audit ? { echt: p.audit.echt, loseWare: p.audit.loseWare, gleicheAnsicht: p.audit.gleicheAnsicht, grund: p.audit.grund } : null;
+      try {
       await db.runTransaction(async (tx) => {
         const s = await tx.get(p.ref);
         if (!s.exists || s.data().status !== 'pending') { p.uebersprungen = true; return; }
@@ -431,6 +476,16 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
           });
         }
       });
+      } catch (e) {
+        // Ein einzelner Schreibfehler darf die Runde nicht abbrechen (kein
+        // Bericht, restliche Fälle unentschieden, retryCount 0). Der Fall
+        // bleibt pending und ist morgen wieder dran; der Bericht warnt rot.
+        logger.warn('Entscheidung nicht geschrieben', { id: p.id, fehler: String(e.message).slice(0, 160) });
+        p.zurueckgehaltenGrund = p.grund;
+        p.entscheidung = 'offen';
+        p.grund = 'schreib_fehler';
+        p.ctx = { ...(p.ctx || {}), hinweis: String(e.message).slice(0, 120) };
+      }
     }
   }
 
@@ -465,6 +520,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     geprueft: pending.length, offen: offen.length,
     auditVersucht: zuPruefen.length - nichtGeprueft.length, auditFehler: [...auditFehler.values()].filter((f) => f !== 'zeit_abgelaufen').length,
     nichtGeschafft: new Set([...nichtNachgelesen, ...nichtGeprueft].map((d) => d.id)).size,
+    schreibFehler: plan.filter((p) => p.grund === 'schreib_fehler').length,
   };
   const warn = warnungen({
     jetzt: start, aktionen, zweitpruefung: lage.zweitpruefung, bons: lage.bons, runde, notbremse: bremse,
@@ -493,6 +549,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     offenGruende: zaehle(offen, 'grund'),
     bildpruefung: { versucht: runde.auditVersucht, gescheitert: runde.auditFehler, unpassend: plan.filter((p) => BILD_GRUENDE.has(p.grund) || BILD_GRUENDE.has(p.zurueckgehaltenGrund)).length },
     nichtGeschafft: runde.nichtGeschafft,
+    schreibFehler: runde.schreibFehler,
     notbremse: { bild: bremse.bild, gesamt: bremse.gesamt },
     wartetAufDich: offen.slice(0, 100).map(fall),
     abgelehntListe: abgelehnt.slice(0, 100).map(fall),

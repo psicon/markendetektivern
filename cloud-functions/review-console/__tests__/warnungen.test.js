@@ -62,3 +62,9 @@ describe('warnungen', () => {
     expect(codes(w)).toEqual(expect.arrayContaining(['rot:notbremse', 'gelb:regeln_geaendert']));
   });
 });
+
+describe('Schreibfehler', () => {
+  it('nicht gespeicherte Entscheidungen → rot', () => {
+    expect(codes(warnungen(basis({ runde: { geprueft: 50, offen: 2, auditFehler: 0, auditVersucht: 48, nichtGeschafft: 0, schreibFehler: 2 } })))).toContain('rot:schreibfehler');
+  });
+});

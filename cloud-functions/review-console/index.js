@@ -968,7 +968,8 @@ const PROJEKT = process.env.GCLOUD_PROJECT || 'markendetektive-895f7';
 
 // 30 Minuten: die Runde beginnt nach 18 Minuten nichts Neues mehr und wartet
 // danach höchstens 5 Minuten auf die Buchungen.
-const RUNDE_OPTS = { region: REGION, timeoutSeconds: 1800, memory: '1GiB' };
+// maxInstances 1: nie zwei Läufe desselben Wegs parallel (Kosten, Google-Limit).
+const RUNDE_OPTS = { region: REGION, timeoutSeconds: 1800, memory: '1GiB', maxInstances: 1 };
 
 exports.fotoRundeTaeglich = onSchedule(
   { ...RUNDE_OPTS, schedule: '0 8 * * *', timeZone: 'Europe/Berlin', retryCount: 0 },
@@ -998,7 +999,10 @@ exports.fotoRundeManuell = onRequest(
     const cfg = (await db.doc('cashback_config/v1').get()).data() || {};
     const scharf = req.query.scharf === '1' && cfg.fotoWorker === true;
     const bericht = await taeglicheRunde({ dryRun: !scharf, projekt: PROJEKT, ausloeser: 'manuell' });
-    res.json(bericht);
+    // Nur Zahlen zurück — die Listen (Einreichungs-IDs beginnen mit der uid)
+    // stehen im Bericht in Firestore und im Dashboard, nicht in einer HTTP-Antwort.
+    const { lauf, dryRun, geprueft, freigegeben, abgelehnt, offen, gebuchtCents, warnungen: warn } = bericht;
+    res.json({ lauf, dryRun, geprueft, freigegeben, abgelehnt, offen, gebuchtCents, warnungen: (warn || []).map((w) => w.text) });
   },
 );
 

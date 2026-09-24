@@ -30,7 +30,8 @@ const BILD_GRUENDE = new Set(['fotos_unpassend', 'gleiche_ansicht_mehrfach']);
  * @param {boolean} f.wiederverwendet  Identitätsfoto stammt aus einer älteren Einreichung
  * @param {{echt:boolean, loseWare:boolean, gleicheAnsicht:boolean, grund:string}|null} f.audit
  * @param {string|null} f.auditFehler   Fehlermeldung, wenn die Bildprüfung scheiterte
- * @param {{name?:string, ean?:string}} f.rettungFehler  Nachlesen ist an unserer Technik gescheitert
+ * @param {{name?:string, ean?:string, preis?:string, alles?:string}} f.rettungFehler  Nachlesen ist an unserer Technik gescheitert
+ * @param {boolean} [f.preisFehlt]  Kandidat oder Referenz der Doppel-Regel hat keinen Preis
  * @returns {{entscheidung:'freigeben'|'ablehnen'|'offen', grund:string|null, ctx:object, loseWare?:boolean}}
  */
 function entscheideFall(f) {
@@ -46,7 +47,13 @@ function entscheideFall(f) {
   if ((f.leer || []).length) return ablehnen('unvollstaendig', { missing: f.leer });
 
   // Doppel-Regel (Konsolen-Regel, gleiche Datei wie dort).
-  if (dup.verdict === 'locked') return ablehnen(dup.reason || SAME_USER, { lockUntil: dup.lockUntil });
+  if (dup.verdict === 'locked') {
+    // Fehlende Preise gelten als gleich (fail-closed). Scheiterte das Nachlesen
+    // des Preises an unserer Technik, wäre die Sperre ein Urteil aus einem
+    // Werkzeugfehler — dann offen lassen (Gegenprüfung 24.09.).
+    if (f.preisFehlt && (rf.preis || rf.alles)) return offen('nachlesen_gescheitert', { hinweis: rf.preis || rf.alles });
+    return ablehnen(dup.reason || SAME_USER, { lockUntil: dup.lockUntil });
+  }
   if (dup.verdict === 'hold') return offen(PENDING_OLDER);
   if (f.wiederverwendet) return ablehnen('bilder_wiederverwendet');
 
@@ -54,8 +61,9 @@ function entscheideFall(f) {
   const audit = f.audit || null;
 
   if (comp.problems.includes('kein_produktname')) {
-    // Scheiterte das Nachlesen an einem Limit, ist das kein Beleg für „kein Name".
-    if (rf.name) return offen('nachlesen_gescheitert', { hinweis: rf.name });
+    // Scheiterte das Nachlesen (Limit ODER das Speichern des Ergebnisses), ist
+    // das kein Beleg für „kein Name".
+    if (rf.name || rf.alles) return offen('nachlesen_gescheitert', { hinweis: rf.name || rf.alles });
     return ablehnen('kein_produktname');
   }
 
@@ -64,7 +72,7 @@ function entscheideFall(f) {
     // Lose Ware wird angenommen (Entscheidung Patrick 20.09.2026): Waage-Etiketten
     // tragen keinen Produkt-Barcode, das ist kein Fehler der Einreichung.
     if (audit.loseWare && audit.echt && !audit.gleicheAnsicht) return { entscheidung: 'freigeben', grund: null, ctx: {}, loseWare: true };
-    if (rf.ean) return offen('nachlesen_gescheitert', { hinweis: rf.ean });
+    if (rf.ean || rf.alles) return offen('nachlesen_gescheitert', { hinweis: rf.ean || rf.alles });
     return ablehnen('ean_fehlt');
   }
 

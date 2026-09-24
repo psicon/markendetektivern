@@ -114,3 +114,20 @@ describe('notbremse', () => {
     expect(notbremse(p, { schnittQuote: 0.01 }).gesamt).toBe(false);
   });
 });
+
+describe('Nachlese-Fehler sind kein Urteil (Gegenprüfung 24.09.)', () => {
+  it('Speichern der Nachlesung gescheitert → kein Name führt NICHT zur Ablehnung', () => {
+    const comp = { ok: false, problems: ['kein_produktname'], missing: [] };
+    expect(entscheideFall(fall({ comp, rettungFehler: { alles: 'UNAVAILABLE' } })).entscheidung).toBe('offen');
+  });
+  it('dasselbe für den Barcode', () => {
+    const comp = { ok: false, problems: ['ean_fehlt'], missing: [] };
+    expect(entscheideFall(fall({ comp, rettungFehler: { alles: 'DEADLINE_EXCEEDED' } })).entscheidung).toBe('offen');
+  });
+  it('Sperre hängt am fehlenden Preis und das Preis-Nachlesen scheiterte → offen', () => {
+    const dup = { verdict: 'locked', reason: 'sperre_30_tage_gleicher_nutzer', lockUntil: 1 };
+    expect(entscheideFall(fall({ dup, preisFehlt: true, rettungFehler: { preis: '429' } })).entscheidung).toBe('offen');
+    expect(entscheideFall(fall({ dup, preisFehlt: true })).entscheidung).toBe('ablehnen');
+    expect(entscheideFall(fall({ dup, preisFehlt: false, rettungFehler: { preis: '429' } })).entscheidung).toBe('ablehnen');
+  });
+});
