@@ -45,6 +45,16 @@ async function diensteAn(): Promise<boolean> {
   }
 }
 
+/**
+ * Kam eine Absage schneller, als ein Mensch tippen kann, wurde gar kein
+ * Systemdialog gezeigt. Nur dann ist der Umweg über die Einstellungen der
+ * richtige nächste Schritt — wer einen Dialog gesehen und abgelehnt hat,
+ * wird nicht ungefragt in die Einstellungen geschickt.
+ */
+const OHNE_DIALOG_MS = 400;
+
+const schlafen = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 export async function pruefeStandortPflicht(): Promise<StandortPflicht> {
   let p: Location.LocationPermissionResponse;
   try {
@@ -52,25 +62,34 @@ export async function pruefeStandortPflicht(): Promise<StandortPflicht> {
   } catch {
     return 'erfuellt';
   }
-  if (p.status === 'granted') {
-    return (await diensteAn()) ? 'erfuellt' : 'dienste_aus';
+  // Dienste zuerst: bei global ausgeschalteten Diensten erscheint auf iOS
+  // kein Freigabe-Dialog (die Anfrage bliebe unbeantwortet), und iOS meldet
+  // die Freigabe dann als „abgelehnt".
+  if (!(await diensteAn())) return 'dienste_aus';
+  if (p.status === 'granted') return 'erfuellt';
+  return p.canAskAgain ? 'fragen' : 'einstellungen';
+}
+
+async function einstellungenOeffnen(stand: StandortPflicht): Promise<StandortPflicht | null> {
+  // iOS erlaubt nur den Sprung in die App-Einstellungen (Datenschutz-Seiten
+  // sind private URLs und führen zur Ablehnung im Review).
+  try {
+    await Linking.openSettings();
+    return null;
+  } catch {
+    return stand;
   }
-  if (p.canAskAgain) return 'fragen';
-  // iOS meldet bei global ausgeschalteten Ortungsdiensten „abgelehnt" —
-  // dann ist das Einschalten der Dienste der richtige nächste Schritt,
-  // nicht die App-Freigabe.
-  return (await diensteAn()) ? 'einstellungen' : 'dienste_aus';
 }
 
 /**
- * Führt den nächsten Schritt aus und liefert den Stand danach.
- *
- * Nach dem Wechsel in die Einstellungen ändert sich der Stand erst, wenn
- * die App wieder aktiv wird — das fängt `useStandortPflicht` über den
+ * Führt den nächsten Schritt aus und liefert den Stand danach — oder `null`,
+ * wenn der Nutzer in die Einstellungen gewechselt ist. Dann ändert sich der
+ * Stand erst beim Zurückkehren; das fängt `useStandortPflicht` über den
  * AppState ab.
  */
-export async function standortPflichtErfuellen(stand: StandortPflicht): Promise<StandortPflicht> {
+export async function standortPflichtErfuellen(stand: StandortPflicht): Promise<StandortPflicht | null> {
   if (stand === 'erfuellt') return stand;
+
   if (stand === 'fragen') {
     try {
       await Location.requestForegroundPermissionsAsync();
@@ -79,23 +98,45 @@ export async function standortPflichtErfuellen(stand: StandortPflicht): Promise<
     }
     return pruefeStandortPflicht();
   }
+
+  if (stand === 'einstellungen' && Platform.OS === 'android') {
+    // Android meldet canAskAgain=false auch nach einem weggetippten
+    // Erstdialog oder einer verfallenen „Nur dieses Mal"-Freigabe — dann
+    // käme der Dialog noch. Erst versuchen; nur ohne Dialog in die
+    // Einstellungen.
+    const t0 = Date.now();
+    try {
+      const r = await Location.requestForegroundPermissionsAsync();
+      if (r.granted) return pruefeStandortPflicht();
+    } catch {
+      // wie „ohne Dialog" behandeln
+    }
+    if (Date.now() - t0 >= OHNE_DIALOG_MS) return pruefeStandortPflicht();
+    return einstellungenOeffnen(stand);
+  }
+
   if (stand === 'dienste_aus' && Platform.OS === 'android') {
+    const t0 = Date.now();
     try {
       // Googles Einschalt-Dialog: ein Tipp, kein Umweg über die Einstellungen.
       await Location.enableNetworkProviderAsync();
+      const danach = await pruefeStandortPflicht();
+      if (danach !== 'dienste_aus') return danach;
+      // Der Anbieter meldet sich nach „OK" manchmal einen Moment verspätet.
+      await schlafen(600);
       return pruefeStandortPflicht();
     } catch {
-      // Abgelehnt oder ohne Play-Dienste → Systemseite der Ortung.
+      // „Nein danke" im Dialog → nicht ungefragt weiterleiten.
+      if (Date.now() - t0 >= OHNE_DIALOG_MS) return pruefeStandortPflicht();
+      // Kein Dialog möglich (etwa ohne Play-Dienste) → Systemseite der Ortung.
       try {
         await Linking.sendIntent('android.settings.LOCATION_SOURCE_SETTINGS');
-        return stand;
+        return null;
       } catch {
-        // letzter Ausweg unten
+        return einstellungenOeffnen(stand);
       }
     }
   }
-  // iOS erlaubt nur den Sprung in die App-Einstellungen (Datenschutz-Seiten
-  // sind private URLs und führen zur Ablehnung im Review).
-  await Linking.openSettings().catch(() => {});
-  return stand;
+
+  return einstellungenOeffnen(stand);
 }

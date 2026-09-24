@@ -84,9 +84,8 @@ const LABEL_TUNING: ScannerTuning = {
   minReadableHeight: 0.44,
 };
 
-// `place` liegt bewusst direkt hinter `market`: beides beantwortet dieselbe
-// Frage („wo bist du"), und beides steht VOR dem ersten Foto. Eine
-// Ortsabfrage nach der Aufnahme würde fertige Arbeit gefährden.
+// `place` kommt nur noch aus dem Einreich-Gate (Freigabe steht, GPS-Fix blieb
+// aus). Die Freigabe selbst sichert die Standort-Sperre vor jeder Phase.
 type Phase = 'market' | 'place' | 'intro' | 'capture' | 'review';
 
 export default function ProductWizardScreen() {
@@ -236,12 +235,15 @@ export default function ProductWizardScreen() {
   }, [stepIdx]);
 
   // Kamera-Bereitschaft zurücksetzen, sobald die expo-CameraView abgebaut
-  // wird (iOS: nativ↔expo-Handoff pro EAN-Step; auch beim Verlassen der
-  // Capture-Phase). Die neu gemountete Kamera muss onCameraReady erneut
-  // feuern, bevor wieder ausgelöst werden darf — sonst Stale-Frame.
+  // wird (iOS: nativ↔expo-Handoff pro EAN-Step; beim Verlassen der
+  // Capture-Phase; beim Sperrhinweis der Standortpflicht). Die neu gemountete
+  // Kamera muss onCameraReady erneut feuern, bevor wieder ausgelöst werden
+  // darf — sonst Stale-Frame. An der TATSÄCHLICHEN Mount-Bedingung hängen,
+  // nicht nur an showExpoCam: auf Android ist das immer true.
+  const expoCamGemountet = pflicht.stand === 'erfuellt' && phase === 'capture' && showExpoCam;
   useEffect(() => {
-    if (!showExpoCam) setCameraReady(false);
-  }, [showExpoCam]);
+    if (!expoCamGemountet) setCameraReady(false);
+  }, [expoCamGemountet]);
 
   // Keep the active step's pill scrolled into view (centered) so the user
   // always sees where they are in the strip.
@@ -508,6 +510,9 @@ export default function ProductWizardScreen() {
     // Dieser Slot ist bereits eingereiht — ein weiterer Tipp (etwa über den
     // noch offenen Erfolgs-Dialog) darf keine zweite Einreichung erzeugen.
     if (eingereichteSlotsRef.current.has(productIndex)) return;
+    // Ein alter Merker aus einer überholten Prüfung darf später nicht
+    // ungefragt einreichen — er wird unten bei Bedarf neu gesetzt.
+    submitNachFreigabeRef.current = false;
     submitLaeuftRef.current = true;
     setSubmitZustand('laeuft');
     try {
@@ -543,6 +548,13 @@ export default function ProductWizardScreen() {
     // Versuch beim Mounten vergiftete sonst die ganze Sitzung, weil „konnte
     // nicht nachsehen" von „es läuft keine Aktion" nicht zu unterscheiden war
     // (86cbet2nw: 58 unvergütete Einreichungen aus Juli und August).
+    // Freigabe direkt vor dem Einreichen frisch prüfen: über die
+    // Android-Schnelleinstellungen lassen sich die Ortungsdienste abschalten,
+    // ohne dass die App den Vordergrund verlässt (kein AppState-Wechsel).
+    if ((await pflicht.pruefen()) !== 'erfuellt') {
+      submitNachFreigabeRef.current = true;
+      return;
+    }
     const [capture, aktion] = await Promise.all([
       erfasseCaptureContext({
         capturedAt: firstCaptureAtRef.current ?? Date.now(),
@@ -551,17 +563,9 @@ export default function ProductWizardScreen() {
       resolveProductCampaignForSubmit(campaign),
     ]);
 
-    // Kein GPS und kein bestätigter Ort. Zwei Fälle, streng getrennt:
-    //  - Freigabe fehlt (entzogen, „Einmal erlauben" verfallen, Dienste
-    //    aus) → Sperrhinweis; nach der Freigabe reicht der Effekt unten
-    //    von selbst ein. Fotos bleiben erhalten.
-    //  - Freigabe steht, nur der Fix blieb aus → einmal den Ort erfragen.
+    // Kein GPS und kein bestätigter Ort, obwohl die Freigabe steht (oben
+    // geprüft): nur der Fix blieb aus → einmal den Ort erfragen.
     if (!capture.gps && !confirmedPlace) {
-      const stand = await pflicht.pruefen();
-      if (stand !== 'erfuellt') {
-        submitNachFreigabeRef.current = true;
-        return;
-      }
       submitNachOrtRef.current = true;
       setOrtHinweis('Dein Standort ließ sich gerade nicht ermitteln — bitte kurz den Ort angeben, dann geht es direkt weiter.');
       setPhase('place');
@@ -629,6 +633,7 @@ export default function ProductWizardScreen() {
           setStepIdx(0);
           // Neuer Slot, neuer Anlauf — der neue Index steht nicht im Merker.
           setSubmitZustand('idle');
+          submitNachFreigabeRef.current = false;
           // Ohne diesen Reset trüge das ZWEITE Produkt die Aufnahmezeit des
           // ersten — bei mehreren Einreichungen hintereinander wäre die
           // Zeitangabe damit systematisch zu früh.
@@ -701,10 +706,10 @@ export default function ProductWizardScreen() {
             art="foto"
             laeuft={pflicht.laeuft}
             onErfuellen={() => void pflicht.erfuellen()}
-            onZurueck={() => {
-              submitNachFreigabeRef.current = false;
-              close();
-            }}
+            // Merker NICHT hier löschen: close() fragt nach, und wer dort
+            // „Abbrechen" wählt, soll nach der Freigabe automatisch weiter
+            // einreichen. Verlässt er den Assistenten, stirbt der Merker mit.
+            onZurueck={close}
           />
         </View>
       </View>
@@ -759,12 +764,12 @@ export default function ProductWizardScreen() {
             setConfirmedPlace(place);
             setOrtHinweis(null);
             // Aus dem Submit-Gate: zurück zur Übersicht, der Effekt oben
-            // reicht ein. Sonst regulär weiter zum Intro.
-            setPhase(submitNachOrtRef.current ? 'review' : 'intro');
+            // reicht ein.
+            setPhase('review');
           }}
           onBack={() => {
             setOrtHinweis(null);
-            setPhase(submitNachOrtRef.current ? 'review' : 'market');
+            setPhase('review');
             submitNachOrtRef.current = false;
           }}
         />

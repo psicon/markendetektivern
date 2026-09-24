@@ -20,6 +20,8 @@ import {
  * Hintergrundwechsel verfallen lässt. Ein Zähler sorgt dafür, dass nur die
  * zuletzt gestartete Prüfung den Stand setzt.
  */
+const ZEITLIMIT_MS = 20000;
+
 export function useStandortPflicht(aktiv: boolean = true) {
   const [stand, setStand] = useState<StandortPflicht | null>(null);
   const [laeuft, setLaeuft] = useState(false);
@@ -42,7 +44,11 @@ export function useStandortPflicht(aktiv: boolean = true) {
     const sub = AppState.addEventListener('change', (s) => {
       if (s === 'active') void pruefen();
     });
-    return () => sub.remove();
+    return () => {
+      sub.remove();
+      // Bei der nächsten Aktivierung nicht den alten Stand aufblitzen lassen.
+      setStand(null);
+    };
   }, [aktiv, pruefen]);
 
   const erfuellen = useCallback(async () => {
@@ -51,14 +57,30 @@ export function useStandortPflicht(aktiv: boolean = true) {
     setLaeuft(true);
     try {
       const vorher = await pruefeStandortPflicht();
-      const nachher = await standortPflichtErfuellen(vorher);
-      epoche.current += 1;
-      setStand(nachher);
+      // Zeitlimit: native Anfragen antworten auf manchen Wegen nie (iOS nur
+      // bei Statuswechsel, Android bei einer schon hängenden Anfrage). Ohne
+      // Limit bliebe der Knopf für immer im Ladezustand.
+      const nachher = await Promise.race([
+        standortPflichtErfuellen(vorher),
+        new Promise<'zeitlimit'>((r) => setTimeout(() => r('zeitlimit'), ZEITLIMIT_MS)),
+      ]);
+      if (nachher === 'zeitlimit') {
+        void pruefen();
+        return;
+      }
+      // null = der Nutzer ist in die Einstellungen gewechselt; den Stand
+      // liefert die Prüfung beim Zurückkehren (AppState). Hier nichts setzen,
+      // sonst überschriebe ein spät zurückkehrendes openSettings() die
+      // frische Prüfung.
+      if (nachher !== null) {
+        epoche.current += 1;
+        setStand(nachher);
+      }
     } finally {
       laeuftRef.current = false;
       setLaeuft(false);
     }
-  }, []);
+  }, [pruefen]);
 
   return { stand, laeuft, pruefen, erfuellen };
 }

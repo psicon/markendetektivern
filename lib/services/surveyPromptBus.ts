@@ -13,7 +13,7 @@ import { getActionSurvey } from '@/lib/services/surveyService';
 import type { ActionType } from '@/lib/types/achievements';
 import type { Poll } from '@/lib/types/survey';
 
-type Prompter = (poll: Poll) => void;
+type Prompter = (poll: Poll) => void | Promise<void>;
 
 let prompter: Prompter | null = null;
 
@@ -38,7 +38,7 @@ export async function requestActionSurvey(
   try {
     const poll = await getActionSurvey(uid, action, metadata ?? undefined);
     if (poll && prompter) {
-      prompter(poll);
+      await prompter(poll);
     }
   } catch {
     /* fire-and-forget: darf trackAction nie beeinflussen */

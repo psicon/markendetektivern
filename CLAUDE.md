@@ -3426,6 +3426,44 @@ Fehlt `targeting` (oder ist leer), gilt die Aktion überall — Bestandskampagne
   Anschrift einreicht, hat nichts falsch gemacht; `onUnknown:'deny'` ist die
   bewusste Ausnahme für Aktionen, die ein Gebiet strikt einhalten müssen.
 
+## Standortpflicht im Reward-Programm + Ortsrangfolge (24.09.2026, ab 6.0.20)
+
+Gründerentscheidung, endgültig: Wer am Reward-Programm teilnimmt (Bons,
+Produktfotos, vergütete Umfragen), MUSS die Standortfreigabe erteilt haben,
+auch auf iOS. Die Kopplung ist geklärt, nicht neu aufmachen. Das Datenschema
+bleibt unverändert: nur Logik innerhalb bestehender Felder und Werte.
+
+- **Rangfolge des geltenden Orts:** 1) Filialadresse vom Kassenbon auf dem
+  Preisfoto (`priceReceipt`), 2) GPS, 3) Ortsangabe, 4) IP. Die Stufen 3
+  und 4 gelten nur, wenn GPS bei ERTEILTER Freigabe technisch scheitert.
+- **App (`lib/services/standortPflicht.ts`, `useStandortPflicht`):** Die
+  Sperre steht am ZIEL (Bon-Scanner, Foto-Assistent, Umfrage-Sheet), nicht
+  am Einstieg. So deckt sie jeden Pfad ab, auch Deep-Links, und wird bei
+  jedem Wechsel in den Vordergrund neu geprüft. Der Freitext-Ort im
+  Assistenten erscheint nur noch bei fehlendem Fix, nie als Ersatz für die
+  Freigabe. Die Sperre ersetzt den Inhalt und ist nie ein zweites Modal.
+- **Server (`crowd-upload-reward/src/locationGate.js`, Kopie in
+  review-console):** `STANDORTPFLICHT_AB_BUILD = { android: 1244, ios: 1270 }`.
+  Ältere Builds bieten „Ort eintippen“ noch an und werden weiter vergütet.
+  Stufe 4 zahlt auch bei gescheiterter IP-Abfrage (`source: 'fallback'`),
+  weil das ein Infrastrukturfehler ist.
+- **Bedeutungswechsel ab Deploy 24.09.2026:** `rewardLocationRule:
+  'ort_aus_kassenbon'` steht jetzt an JEDER Einreichung mit vollständigem
+  Bon-Kopf, auch wenn GPS vorliegt. Bis dahin stand der Wert nur, wenn der
+  Bon die letzte verbliebene Quelle war. Wer auswertet, trennt nach
+  Deploy-Datum; GPS gegen Bon unterscheidet man über `capture.gps` und
+  `priceReceipt`.
+- **Ortsschätzer ploc-v2:** `receipt_address` ist Rang 1, aber NUR mit
+  aufgelöster PLZ-Koordinate (sonst wäre keine Widerspruchsprüfung gegen
+  GPS möglich). Der Update-Trigger `onCrowdUploadBonAdresse` (retry) ist
+  nötig, weil der Namer `priceReceipt` erst Sekunden NACH der Anlage
+  schreibt. Einziger Leser von `probableLocation` ist review-console
+  (`ort.js`). Deshalb muss review-console VOR crowd-upload-location live
+  sein, sonst fallen die Bon-Orte von der Karte.
+- **Die IP steht trotzdem an fast jedem Dokument** (`journeyLocation`,
+  `journey.location`). Das ist ein Rohsignal und wird nirgends als Ort
+  angezeigt. Wer „überall IP“ sieht, schaut auf Rohdaten.
+
 ## Der Ortsschätzer entscheidet — nicht ein zweites Modul (07.09.2026)
 
 **`probableLocation` ist die Autorität für „welcher Ort gilt".** Geschrieben von

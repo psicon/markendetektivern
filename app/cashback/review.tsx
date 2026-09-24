@@ -31,7 +31,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 
+import { StandortPflichtHinweis } from '@/components/rewards/StandortPflichtHinweis';
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
+import { useStandortPflicht } from '@/hooks/useStandortPflicht';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { enqueueBon } from '@/lib/services/bonUploadQueue';
@@ -144,6 +146,12 @@ export default function CashbackReviewScreen() {
   const navigation = useNavigation();
   const { theme, shadows } = useTokens();
   const { user } = useAuth();
+  // Standortpflicht (6.0.20): der Scanner prüft beim Öffnen, hier wird vor dem
+  // Einreichen erneut geprüft — die Freigabe kann zwischendurch entzogen oder
+  // die Ortung über die Schnelleinstellungen abgeschaltet worden sein. Das
+  // Bild bleibt erhalten (Routen-Parameter), nach der Freigabe geht es hier
+  // weiter.
+  const pflicht = useStandortPflicht();
 
   const [checks, setChecks] = useState<Record<'corners' | 'date' | 'items', boolean>>({
     corners: false,
@@ -218,6 +226,8 @@ export default function CashbackReviewScreen() {
       setSubmitError('Bitte melde dich an, um Bons einzureichen.');
       return;
     }
+    // Fehlt die Freigabe, zeigt der Screen den Sperrhinweis (Render unten).
+    if ((await pflicht.pruefen()) !== 'erfuellt') return;
     setSubmitting(true);
     // Hash-Fallback (86cb6twnp): schlug das Hashen beim Aufnehmen fehl
     // (Heap/IO), einmal nachziehen statt hart zu blockieren. Der Server
@@ -264,7 +274,7 @@ export default function CashbackReviewScreen() {
         uploadUri: bon.uri, // local preview while the upload runs
       },
     });
-  }, [bon, canSubmit, user?.uid, params.source]);
+  }, [bon, canSubmit, user?.uid, params.source, pflicht.pruefen]);
 
   const verdictColor = (ok: boolean) => (ok ? theme.primary ?? '#0d8575' : '#d6603a');
 
@@ -385,6 +395,28 @@ export default function CashbackReviewScreen() {
       }),
     [theme, shadows, canSubmit, insets.top, insets.bottom],
   );
+
+  if (pflicht.stand !== null && pflicht.stand !== 'erfuellt') {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.bg ?? '#fff', paddingTop: insets.top + 8 }}>
+        <StatusBar barStyle="dark-content" />
+        <View style={{ paddingHorizontal: 12 }}>
+          <Pressable onPress={handleDismiss} hitSlop={10} style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>
+            <MaterialCommunityIcons name="close" size={26} color={theme.text} />
+          </Pressable>
+        </View>
+        <View style={{ flex: 1, justifyContent: 'center' }}>
+          <StandortPflichtHinweis
+            stand={pflicht.stand}
+            art="bon"
+            laeuft={pflicht.laeuft}
+            onErfuellen={() => void pflicht.erfuellen()}
+            onZurueck={handleDismiss}
+          />
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: '#000' }}>

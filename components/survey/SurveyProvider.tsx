@@ -29,8 +29,8 @@ import {
   submitResponse,
   markDismissed,
   snoozeActionSurveysToday,
+  pollZahltPraemie,
 } from '@/lib/services/surveyService';
-import { pruefeStandortPflicht } from '@/lib/services/standortPflicht';
 import { setSurveyPrompter } from '@/lib/services/surveyPromptBus';
 import { isAnySheetOpen, setSurveyVisible, whenSheetsIdle } from '@/lib/services/sheetPresence';
 import {
@@ -55,15 +55,6 @@ import { pollTriggerOf, type Poll, type PollAnswer } from '@/lib/types/survey';
  * Antwort → submitResponse (fire-and-forget Write + lokales answered-
  * Flag); Reward kommt server-seitig (CF survey-reward).
  */
-
-/** Vergütet diese Umfrage überhaupt? (Dieselbe Regel wie beim Abschluss.) */
-function zahltPraemie(p: Poll): boolean {
-  return (
-    (p.rewardTrigger ?? 'completion') !== 'none' &&
-    typeof p.rewardCents === 'number' &&
-    p.rewardCents > 0
-  );
-}
 
 interface SurveyContextValue {
   /** Öffnet das Umfrage-Sheet mit einer konkreten Umfrage. */
@@ -141,14 +132,9 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
 
   // Bus-Prompter (action-getriggert): entscheidet Sheet vs. Hinweis.
   const promptFromAction = useCallback(
-    async (p: Poll) => {
-      // Standortpflicht (6.0.20): eine vergütete Umfrage, die nach einer
-      // Aktion UNGEFRAGT aufgeht, soll nicht mit einer Sperre beginnen.
-      // Ohne Freigabe entfällt der Vorschlag still; über die Umfrage-Liste
-      // bleibt sie erreichbar, dort erklärt der Sperrhinweis den Weg.
-      if (zahltPraemie(p) && user?.uid && !isAnonymous) {
-        if ((await pruefeStandortPflicht()) !== 'erfuellt') return;
-      }
+    (p: Poll) => {
+      // Standortpflicht: vergütete Umfragen ohne Freigabe filtert schon
+      // getActionSurvey heraus (vor Session-Sperre und Cooldown).
       const display = p.actionDisplay ?? 'immediate';
       if (display === 'hint') {
         const reward =
@@ -164,7 +150,7 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
         showSurvey(p);
       }
     },
-    [showSurvey, scheme, user?.uid, isAnonymous],
+    [showSurvey, scheme],
   );
 
   // Am Bus registrieren (Action-getriggerte Umfragen).
@@ -217,7 +203,7 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
       // Reward-Text NUR wenn die Umfrage vergütet. Berechtigt → "unterwegs".
       // Nicht berechtigt → freundlicher Hinweis MIT "Zum Cashback"-Button
       // (führt zur Aktivierung). Positiver Ton, kein Frust.
-      const pays = zahltPraemie(p);
+      const pays = pollZahltPraemie(p);
       if (pays && eligible) {
         // Berechtigt → dieselbe Cashback-Gutschrift-Feier wie bei Bons:
         // Glow-Banner statt grauem Mini-Toast (ClickUp 86ca8hqt8). Der CF
@@ -261,7 +247,7 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
   // Standortpflicht (6.0.20): vergütete Umfrage + registriertes Konto →
   // erst die Freigabe, dann die Fragen. Die Sperre ersetzt den Inhalt DIESES
   // Sheets — ein zweites Modal darüber würde iOS einfrieren.
-  const brauchtFreigabe = !!poll && zahltPraemie(poll) && !!user?.uid && !isAnonymous;
+  const brauchtFreigabe = !!poll && pollZahltPraemie(poll) && !!user?.uid && !isAnonymous;
   const pflicht = useStandortPflicht(visible && brauchtFreigabe);
   const gesperrt = brauchtFreigabe && pflicht.stand !== 'erfuellt';
 
@@ -275,6 +261,7 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
         registerPresence={false}
       >
         {poll && gesperrt ? (
+          // 'erfuellt' kommt hier nicht vor (gesperrt) — nur für den Typ.
           pflicht.stand === null || pflicht.stand === 'erfuellt' ? (
             <View style={{ height: 160 }} />
           ) : (
