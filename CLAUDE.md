@@ -444,6 +444,21 @@ werden sollten. Andere "Don't"-Regeln stehen verteilt im File
 `USE_FLYING_TABS`-Legacy etc.) — hier nur die Learnings aus
 Recent-Sessions.
 
+- **Eine Codebase von einem Zweig ausrollen, dem Änderungen eines anderen
+  Zweigs fehlen, die schon live sind (Vorfall 23./24.09.2026).** Die
+  Zweitprüfung unsicherer Bons (19.09., von Patrick eingeschaltet) lag nur im
+  Session-Zweig; am 23.09. um 10:07 wurde `cashback-pipeline` aus
+  `feat/rnfirebase-migration` ausgerollt (EDEKA-Fix) — dort fehlte der Code, die
+  Zweitprüfung war still weg (letzte Nutzung 22.09.), Bons mit Warenkorb-Rabatt
+  wurden wieder abgelehnt. Umgekehrt hätte ein Ausrollen aus dem Session-Zweig
+  den EDEKA-Fix und den Vergütungs-Push entfernt. Firebase ERSETZT die Codebase
+  komplett, es gibt kein Zusammenführen. Regel: **vor jedem Functions-Deploy**
+  `git log <deploy-zweig>..<jeder-andere-aktive-zweig> -- cloud-functions/<codebase>`
+  prüfen — nicht leer = erst zusammenführen, dann ausrollen. Session-Zweige
+  nach dem Ausrollen zeitnah in den Arbeitszweig mergen, sonst wiederholt es
+  sich. Absicherung im Betrieb: der Tagesbericht der Morgenrunde warnt rot,
+  wenn die Zweitprüfung eingeschaltet ist, aber 48 h nicht lief.
+
 - **expo-camera `takePictureAsync` aufrufen, BEVOR `onCameraReady` gefeuert
   hat.** Verletzt den dokumentierten expo-camera-Vertrag (CameraView-Doc:
   „wait for the onCameraReady callback before calling this method"). Auf
@@ -3115,6 +3130,19 @@ Lesungen, eigenes Feld (`priceRescueOcr`/`manufacturerRescueOcr`), nie in
 6 abgelehnt (1 Barcode-Foto zeigt den Boden, 3 lose Ware ohne Produkt-Barcode,
 1 siebenmal dieselbe Ansicht, 1 Eigen-Doppel binnen einer Minute), 0 ohne
 Buchung, 0 ohne Grund am Dokument, Warteschlange leer.
+
+## Morgenrunde Produktfotos (seit 24.09.2026)
+
+Täglich 08:00 prüft und entscheidet `fotoRundeTaeglich` (Codebase
+review-console) alle offenen Produktfoto-Einreichungen — Freigaben UND
+Ablehnungen automatisch (Entscheidung Patrick 24.09.), eine Push-Nachricht pro
+Person, Bericht mit Warnungen in `ops_tagesberichte`. Dashboard:
+md-receipt-admin.web.app/tagesbericht.html; Meldung im eigenen Claude-Chat +
+ClickUp (geplante Aufgabe `morgenrunde-bericht`). Scharf nur mit
+`cashback_config/v1.fotoWorker === true`. **Alles Weitere — Regeln, Notbremse,
+Vorfälle — steht in `cloud-functions/review-console/WISSEN-FOTORUNDE.md`.**
+Handrunden mit den `.crowd-*-DDMM.js`-Skripten sind damit überholt; wer doch
+von Hand prüft, nutzt dieselben Regeln (Datei `review-console/src/fotoRundeRegeln.js`).
 
 ## Bons nachverarbeiten / Review auflösen — Regeln (Money-Ops 02.09.2026)
 

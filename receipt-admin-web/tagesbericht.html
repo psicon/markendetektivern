@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MarkenDetektive — Tagesbericht</title>
+    <style>
+      :root{
+        --bg:#0e1113; --panel:#171c1f; --panel2:#1e2528; --line:#2b3438; --line2:#3a4549;
+        --fg:#e9eff1; --fg2:#9fadb2; --fg3:#6f7d82;
+        --ok:#2fb389; --nein:#e0655a; --offen:#e0a520; --geld:#3ba0e8; --foto:#5b4f9c; --bon:#0d8575;
+      }
+      *{box-sizing:border-box}
+      html,body{margin:0}
+      body{background:var(--bg);color:var(--fg);font:14.5px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+      a{color:var(--geld)}
+      button{font:inherit;cursor:pointer;border:1px solid var(--line2);border-radius:9px;padding:6px 12px;background:var(--panel2);color:var(--fg)}
+      button:hover{border-color:var(--fg3)}
+      button.on{background:var(--geld);border-color:var(--geld);color:#06121c;font-weight:700}
+      input{font:inherit;background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:9px;padding:8px 10px}
+      .hidden{display:none!important}
+
+      #login{max-width:320px;margin:12vh auto;display:flex;flex-direction:column;gap:10px;padding:0 16px}
+
+      header{position:sticky;top:0;display:flex;align-items:center;gap:14px;padding:0 16px;height:52px;background:var(--panel);border-bottom:1px solid var(--line);z-index:10;overflow-x:auto}
+      header h1{font-size:14px;font-weight:800;margin:0;white-space:nowrap}
+      header a{color:var(--fg3);font-size:12.5px;text-decoration:none;white-space:nowrap}
+      header a:hover{color:var(--fg)}
+      .grow{flex:1}
+
+      main{max-width:1180px;margin:0 auto;padding:18px 16px 60px}
+      .lauf{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 16px;margin-bottom:14px}
+      .lauf h2{margin:0;font-size:22px;font-weight:800;letter-spacing:-.3px}
+      .lauf .meta{color:var(--fg3);font-size:13px}
+      .pill{display:inline-block;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:800;letter-spacing:.3px;background:var(--panel2);border:1px solid var(--line2);color:var(--fg2)}
+      .pill.trocken{border-color:var(--offen);color:var(--offen)}
+      .pill.scharf{border-color:var(--ok);color:var(--ok)}
+
+      .warn{border-radius:12px;padding:10px 14px;margin-bottom:8px;display:flex;gap:10px;align-items:flex-start;font-size:14px}
+      .warn.rot{background:rgba(224,101,90,.13);border:1px solid rgba(224,101,90,.55)}
+      .warn.gelb{background:rgba(224,165,32,.11);border:1px solid rgba(224,165,32,.45)}
+      .warn b{white-space:nowrap}
+      .allesgut{border:1px solid rgba(47,179,137,.45);background:rgba(47,179,137,.1);border-radius:12px;padding:10px 14px;margin-bottom:8px;font-size:14px}
+
+      .kacheln{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:16px 0 22px}
+      .kachel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+      .kachel .z{font-size:26px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.5px}
+      .kachel .l{font-size:12px;color:var(--fg3);margin-top:2px}
+
+      .raster{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+      @media (max-width:820px){.raster{grid-template-columns:1fr}}
+      section.box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;min-width:0}
+      section.box h3{margin:0 0 10px;font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--fg3)}
+      .zeile{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+      .zeile:last-child{border-bottom:0}
+      .zeile span:last-child{font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap}
+      .leer{color:var(--fg3);font-size:13px}
+      .fall{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+      .fall:last-child{border-bottom:0}
+      .fall .g{color:var(--fg3);font-size:12px;grid-column:1/-1}
+      .fall a{text-decoration:none}
+      .liste{max-height:340px;overflow-y:auto}
+
+      .diagramm{width:100%;overflow-x:auto}
+      .legende{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--fg2);margin-top:6px}
+      .legende i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+
+      table{width:100%;border-collapse:collapse;font-size:13px}
+      th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+      th{color:var(--fg3);font-weight:700;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px}
+      td.n{text-align:right;font-variant-numeric:tabular-nums}
+      .tabwrap{overflow-x:auto}
+      .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line2);padding:9px 14px;border-radius:10px;opacity:0;transition:opacity .2s;pointer-events:none}
+      .toast.show{opacity:1}
+    </style>
+  </head>
+  <body>
+    <div id="login" class="hidden">
+      <h1 style="margin:0;font-size:19px">Tagesbericht</h1>
+      <p style="color:var(--fg3);margin:0">Admin-Login</p>
+      <input id="loginEmail" type="email" placeholder="E-Mail" autocomplete="username" />
+      <input id="loginPw" type="password" placeholder="Passwort" autocomplete="current-password" />
+      <button id="loginBtn" style="background:var(--geld);border-color:var(--geld);color:#06121c;font-weight:700;padding:9px 18px">Anmelden</button>
+      <div id="loginMsg" style="color:var(--fg3)"></div>
+    </div>
+
+    <div id="app" class="hidden">
+      <header>
+        <h1>Tagesbericht</h1>
+        <div class="grow"></div>
+        <button id="trockenBtn" title="Auch Trockenläufe anzeigen" style="padding:5px 10px;font-size:12.5px">Trockenläufe</button>
+        <a href="pruefen.html">Prüfen</a>
+        <a href="karte.html">Karte</a>
+        <a href="index.html">Bon-Matching</a>
+        <button id="logoutBtn" style="padding:6px 12px;font-size:13px">Abmelden</button>
+      </header>
+      <main>
+        <div id="inhalt"><p class="leer">Lade Berichte …</p></div>
+      </main>
+    </div>
+
+    <script type="module">
+      import { $, call, esc, euro, fmtDateTime, initAdmin, toast } from './admin-common.js';
+
+      // Gründe in Klartext. Die Codes kommen aus review-console/src/fotoRundeRegeln.js
+      // und der Bon-Pipeline; ein unbekannter Code wird einfach als Code angezeigt.
+      const GRUND = {
+        unvollstaendig: 'Ansichten fehlten',
+        ean_fehlt: 'Barcode fehlt',
+        kein_produktname: 'Name nicht lesbar',
+        sperre_30_tage_gleicher_nutzer: 'Doppelt (dieselbe Person)',
+        bilder_wiederverwendet: 'Fotos wiederverwendet',
+        fotos_unpassend: 'Fotos unpassend',
+        gleiche_ansicht_mehrfach: 'Immer dieselbe Ansicht',
+        bild_nicht_lesbar_infrastruktur: 'Datei nicht abrufbar (Technik)',
+        doppelt_eingereicht: 'Ältere Einreichung noch offen',
+        nachlesen_gescheitert: 'Nachlesen gescheitert (Google-Limit)',
+        bild_audit_gescheitert: 'Bildprüfung gescheitert (Google-Limit)',
+        kein_bild_audit: 'Nicht geprüft (Zeit)',
+        bild_defekt: 'Datei beschädigt angekommen',
+        notbremse_bildpruefung: 'Notbremse Bildprüfung',
+        notbremse_quote: 'Notbremse Ablehnungsquote',
+        below_min_items: 'Zu wenige Artikel',
+        unknown_merchant: 'Markt unbekannt',
+        bon_too_old: 'Bon zu alt',
+        daily_cap_reached: 'Tageslimit',
+        weekly_cap_reached: 'Wochenlimit',
+        per_user_cap_reached: 'Pro-Kopf-Deckel',
+        campaign_budget_exhausted: 'Budget leer',
+        duplicate_content_self: 'Doppelt (dieselbe Person)',
+        duplicate_content_cross_user: 'Doppelt (andere Person)',
+        reconciliation_delta: 'Summe passt nicht',
+        no_bon_date: 'Kein Datum',
+        no_active_campaign: 'Keine Aktion',
+        not_a_receipt: 'Kein Kassenbon',
+        not_credited: 'Nicht gebucht',
+      };
+      const g = (c) => GRUND[c] || c;
+      const STATUS = { approved: 'Freigegeben', no_reward: 'Ohne Prämie', rejected: 'Abgelehnt', review: 'In Prüfung', ocr_pending: 'In Arbeit' };
+      const TAG_MS = 86400000;
+
+      let berichte = [];
+      let mitTrocken = false;
+
+      const zeilen = (obj, leer = 'nichts') => {
+        const e = Object.entries(obj || {}).sort((a, b) => b[1] - a[1]);
+        if (!e.length) return `<div class="leer">${leer}</div>`;
+        return e.map(([k, v]) => `<div class="zeile"><span>${esc(g(k))}</span><span>${v}</span></div>`).join('');
+      };
+      const faelle = (liste, leer) => {
+        if (!liste || !liste.length) return `<div class="leer">${leer}</div>`;
+        return `<div class="liste">${liste.map((f) => `
+          <div class="fall">
+            <a href="pruefen.html?id=${encodeURIComponent(f.id)}">${esc(f.name || '?')}</a>
+            <span class="leer">${esc(f.markt || '')}</span>
+            <span class="g">${esc(g(f.grund))}${f.zurueckgehalten ? ` — zurückgehalten: ${esc(g(f.zurueckgehalten))}` : ''}${f.hinweis ? ` · ${esc(String(f.hinweis).slice(0, 110))}` : ''}</span>
+          </div>`).join('')}</div>`;
+      };
+
+      /** Verlauf als gestapelte Balken je Lauf (echte Läufe), dazu der gebuchte Betrag. */
+      function diagramm(liste) {
+        const l = liste.slice().reverse();
+        if (l.length < 2) return '<div class="leer">Der Verlauf erscheint ab dem zweiten Lauf.</div>';
+        const B = 26, L = 8, H = 150, oben = 12, unten = 28;
+        const max = Math.max(1, ...l.map((b) => (b.freigegeben || 0) + (b.abgelehnt || 0) + (b.offen || 0)));
+        const maxCent = Math.max(1, ...l.map((b) => b.gebuchtCents || 0));
+        const w = l.length * (B + L) + 40;
+        let s = `<svg width="${w}" height="${H + oben + unten}" role="img" aria-label="Verlauf der Morgenrunden">`;
+        const y = (v) => oben + H - (v / max) * H;
+        s += `<line x1="0" x2="${w}" y1="${oben + H}" y2="${oben + H}" stroke="var(--line2)"/>`;
+        const punkte = [];
+        l.forEach((b, i) => {
+          const x = 20 + i * (B + L);
+          let basis = 0;
+          for (const [wert, farbe, name] of [[b.freigegeben || 0, 'var(--ok)', 'freigegeben'], [b.abgelehnt || 0, 'var(--nein)', 'abgelehnt'], [b.offen || 0, 'var(--offen)', 'offen']]) {
+            if (!wert) continue;
+            s += `<rect x="${x}" y="${y(basis + wert)}" width="${B}" height="${y(basis) - y(basis + wert)}" fill="${farbe}" rx="2"><title>${esc(b.tag)}: ${wert} ${name}</title></rect>`;
+            basis += wert;
+          }
+          punkte.push([x + B / 2, oben + H - ((b.gebuchtCents || 0) / maxCent) * H, b]);
+          s += `<text x="${x + B / 2}" y="${oben + H + 16}" fill="var(--fg3)" font-size="10" text-anchor="middle">${esc(String(b.tag).slice(8, 10))}.${esc(String(b.tag).slice(5, 7))}</text>`;
+        });
+        s += `<polyline points="${punkte.map((p) => p[0] + ',' + p[1]).join(' ')}" fill="none" stroke="var(--geld)" stroke-width="2"/>`;
+        punkte.forEach(([px, py, b]) => { s += `<circle cx="${px}" cy="${py}" r="3" fill="var(--geld)"><title>${esc(b.tag)}: ${euro(b.gebuchtCents || 0)} gebucht</title></circle>`; });
+        return `<div class="diagramm">${s}</svg></div>
+          <div class="legende"><span><i style="background:var(--ok)"></i>freigegeben</span><span><i style="background:var(--nein)"></i>abgelehnt</span><span><i style="background:var(--offen)"></i>offen</span><span><i style="background:var(--geld)"></i>gebucht (€, eigene Skala)</span></div>`;
+      }
+
+      function zeige() {
+        const sichtbar = berichte.filter((b) => mitTrocken || !b.dryRun);
+        const echte = berichte.filter((b) => !b.dryRun);
+        if (!sichtbar.length) {
+          $('inhalt').innerHTML = '<p class="leer">Noch kein Lauf. Die Morgenrunde läuft täglich um 8:00 Uhr.</p>';
+          return;
+        }
+        const b = sichtbar[0];
+        const letzterEchter = echte[0];
+        const warn = [...(b.warnungen || [])];
+        // Die wichtigste Warnung erzeugt die Runde nicht selbst: dass sie heute gar nicht lief.
+        if (!letzterEchter || Date.now() - (letzterEchter.laufAt || 0) > 26 * 60 * 60 * 1000) {
+          warn.unshift({ stufe: 'rot', code: 'runde_fehlt', text: letzterEchter ? `Die Morgenrunde ist seit ${fmtDateTime(letzterEchter.laufAt)} nicht mehr scharf gelaufen.` : 'Die Morgenrunde ist noch nie scharf gelaufen (Schalter fotoWorker?).' });
+        }
+        const bons = b.bons || {};
+        const zp = b.zweitpruefung || {};
+        const aktionen = (b.aktionen || []).slice().sort((x, y) => (x.startAt || 0) - (y.startAt || 0));
+
+        $('inhalt').innerHTML = `
+          <div class="lauf">
+            <h2>${esc(new Date(b.laufAt || Date.now()).toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: 'long' }))}</h2>
+            <span class="pill ${b.dryRun ? 'trocken' : 'scharf'}">${b.dryRun ? 'TROCKENLAUF' : 'SCHARF'}</span>
+            <span class="meta">${esc(fmtDateTime(b.laufAt))} · ${esc(b.ausloeser || '')} · ${Math.round((b.dauerSekunden || 0) / 60)} min · Regeln ${esc(b.regelVersion || '?')}</span>
+          </div>
+          ${warn.length ? warn.map((w) => `<div class="warn ${w.stufe}"><b>${w.stufe === 'rot' ? 'Handeln' : 'Im Blick'}</b><span>${esc(w.text)}</span></div>`).join('') : '<div class="allesgut">Keine Warnungen — alles im normalen Rahmen.</div>'}
+
+          <div class="kacheln">
+            <div class="kachel"><div class="z">${b.geprueft ?? 0}</div><div class="l">geprüft</div></div>
+            <div class="kachel"><div class="z" style="color:var(--ok)">${b.freigegeben ?? 0}</div><div class="l">freigegeben${b.loseWare ? ` · ${b.loseWare} lose Ware` : ''}</div></div>
+            <div class="kachel"><div class="z" style="color:var(--nein)">${b.abgelehnt ?? 0}</div><div class="l">abgelehnt</div></div>
+            <div class="kachel"><div class="z" style="color:var(--offen)">${b.offen ?? 0}</div><div class="l">wartet auf dich</div></div>
+            <div class="kachel"><div class="z" style="color:var(--geld)">${euro(b.gebuchtCents || 0)}</div><div class="l">gebucht${b.buchungAusstehend ? ` · ${b.buchungAusstehend} ausstehend` : ''}</div></div>
+            <div class="kachel"><div class="z">${b.personenBezahlt ?? 0}</div><div class="l">Personen bezahlt · ${b.nachrichten ?? 0} Nachrichten</div></div>
+          </div>
+
+          <div class="raster">
+            <section class="box"><h3>Wartet auf dich (${(b.wartetAufDich || []).length})</h3>${faelle(b.wartetAufDich, 'Nichts offen.')}</section>
+            <section class="box"><h3>Automatisch abgelehnt (${(b.abgelehntListe || []).length})</h3>${faelle(b.abgelehntListe, 'Keine Ablehnungen.')}</section>
+            <section class="box"><h3>Ablehngründe</h3>${zeilen(b.ablehnGruende, 'keine')}
+              ${Object.keys(b.nichtGebucht || {}).length ? `<h3 style="margin-top:14px">Freigegeben, aber nicht gebucht</h3>${zeilen(b.nichtGebucht)}` : ''}</section>
+            <section class="box"><h3>Nachgelesen &amp; Bildprüfung</h3>
+              <div class="zeile"><span>Name</span><span>${b.nachgelesen?.name ?? 0}</span></div>
+              <div class="zeile"><span>Barcode</span><span>${b.nachgelesen?.ean ?? 0}</span></div>
+              <div class="zeile"><span>Preis</span><span>${b.nachgelesen?.preis ?? 0}</span></div>
+              <div class="zeile"><span>Hersteller</span><span>${b.nachgelesen?.hersteller ?? 0}</span></div>
+              <div class="zeile"><span>Bildprüfungen</span><span>${b.bildpruefung?.versucht ?? 0}</span></div>
+              <div class="zeile"><span>davon gescheitert (Technik)</span><span>${b.bildpruefung?.gescheitert ?? 0}</span></div>
+              <div class="zeile"><span>davon unpassend</span><span>${b.bildpruefung?.unpassend ?? 0}</span></div>
+            </section>
+            <section class="box"><h3>Bons — letzte 24 Stunden (${bons.letzte24h?.gesamt ?? 0})</h3>
+              ${Object.entries(bons.letzte24h?.status || {}).map(([k, v]) => `<div class="zeile"><span>${esc(STATUS[k] || k)}</span><span>${v}</span></div>`).join('') || '<div class="leer">keine</div>'}
+              <h3 style="margin-top:14px">Gründe ohne Prämie / abgelehnt</h3>${zeilen(bons.letzte24h?.gruende, 'keine')}
+            </section>
+            <section class="box"><h3>Bons — Prüfung &amp; Zweitprüfung</h3>
+              <div class="zeile"><span>Warten auf Entscheidung</span><span>${bons.inPruefung ?? 0}</span></div>
+              <div class="zeile"><span>ältester</span><span>${bons.aeltesteTage == null ? '—' : bons.aeltesteTage + ' Tage'}</span></div>
+              <div class="zeile"><span>Zweitprüfung</span><span>${zp.eingeschaltet ? (zp.modus === 'shadow' ? 'Beobachtung' : 'an') : 'aus'}</span></div>
+              <div class="zeile"><span>Zweitprüfungen letzte 48 h</span><span style="color:${zp.eingeschaltet && !zp.laeufeLetzte48h ? 'var(--nein)' : 'inherit'}">${zp.laeufeLetzte48h ?? 0}</span></div>
+            </section>
+          </div>
+
+          <section class="box" style="margin-top:14px"><h3>Aktionen</h3>
+            <div class="tabwrap"><table>
+              <tr><th>Aktion</th><th>Art</th><th>Zeitraum</th><th class="n">Prämie</th><th class="n">Budget übrig</th></tr>
+              ${aktionen.map((a) => {
+                const quote = a.budgetTotalCents ? Math.round((100 * (a.budgetRemainingCents || 0)) / a.budgetTotalCents) : null;
+                const zustand = (a.startAt || 0) > Date.now() ? 'geplant' : (a.endAt || 0) < Date.now() ? 'beendet' : '';
+                // Aktionen beginnen um 23:59:59 des Vortags (Muster seit Juli) — angezeigt wird der erste volle Tag.
+                const tag = (t) => new Date(t).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Berlin' });
+                return `<tr><td>${esc(a.id)}${zustand ? ` <span class="pill">${zustand}</span>` : ''}</td><td>${a.kind === 'receipt' ? 'Bon' : 'Foto'}</td>
+                  <td>${esc(tag((a.startAt || 0) + 1000))} – ${esc(tag(a.endAt))}</td>
+                  <td class="n">${a.cashbackPerBonCents != null ? a.cashbackPerBonCents + ' ct' : '—'}</td>
+                  <td class="n">${euro(a.budgetRemainingCents)}${quote != null ? ` (${quote} %)` : ''}</td></tr>`;
+              }).join('')}
+            </table></div>
+          </section>
+
+          <section class="box" style="margin-top:14px"><h3>Verlauf (echte Läufe)</h3>${diagramm(echte.slice(0, 30))}</section>
+
+          <section class="box" style="margin-top:14px"><h3>Alle Läufe</h3>
+            <div class="tabwrap"><table>
+              <tr><th>Lauf</th><th>Art</th><th class="n">geprüft</th><th class="n">frei</th><th class="n">abgelehnt</th><th class="n">offen</th><th class="n">gebucht</th><th class="n">Warnungen</th></tr>
+              ${sichtbar.map((x) => `<tr><td>${esc(fmtDateTime(x.laufAt))}</td><td>${x.dryRun ? 'Trocken' : 'Scharf'} · ${esc(x.ausloeser || '')}</td>
+                <td class="n">${x.geprueft ?? 0}</td><td class="n">${x.freigegeben ?? 0}</td><td class="n">${x.abgelehnt ?? 0}</td><td class="n">${x.offen ?? 0}</td>
+                <td class="n">${euro(x.gebuchtCents || 0)}</td><td class="n" style="color:${(x.warnungen || []).some((w) => w.stufe === 'rot') ? 'var(--nein)' : 'inherit'}">${(x.warnungen || []).length}</td></tr>`).join('')}
+            </table></div>
+          </section>`;
+      }
+
+      async function lade() {
+        try {
+          const r = await call('reviewTagesberichte')({ anzahl: 60 });
+          berichte = r.data.berichte || [];
+          zeige();
+        } catch (e) {
+          $('inhalt').innerHTML = `<p class="leer">Berichte konnten nicht geladen werden: ${esc(e.message)}</p>`;
+          toast('Laden fehlgeschlagen', 'err');
+        }
+      }
+
+      $('trockenBtn').onclick = () => { mitTrocken = !mitTrocken; $('trockenBtn').classList.toggle('on', mitTrocken); zeige(); };
+      initAdmin(() => lade());
+    </script>
+  </body>
+</html>

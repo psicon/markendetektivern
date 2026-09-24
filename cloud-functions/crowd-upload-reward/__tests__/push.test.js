@@ -35,7 +35,7 @@ jest.mock('firebase-admin', () => {
     batch: () => ({ delete: () => {}, commit: async () => {} }),
     runTransaction: async (fn) =>
       fn({
-        get: async () => ({ get: (feld) => (feld === 'rewardPushSentAt' ? global.__merker : undefined) }),
+        get: async () => ({ get: (feld) => (feld === 'rewardPushSentAt' || feld === 'gesendetAt' ? global.__merker : undefined) }),
         set: () => {
           global.__merker = '__ts__';
         },
@@ -57,7 +57,7 @@ jest.mock('firebase-admin', () => {
   };
 });
 
-const { sendeVerguetungPush, betragText, nachricht } = require('../src/push');
+const { sendeVerguetungPush, sendeSammelPush, sammelNachricht, betragText, nachricht } = require('../src/push');
 
 const uploadRef = { id: 'up1' };
 
@@ -148,5 +148,53 @@ describe('sendeVerguetungPush', () => {
     await sendeVerguetungPush({ uploadRef, uploadId: 'up1', uid: 'u1', cents: 15 });
     expect(global.__versand).toHaveLength(0);
     expect(global.__merker).toBeUndefined();
+  });
+});
+
+/**
+ * Sammelnachricht der Morgenrunde (Entscheidung Patrick 24.09.2026): eine
+ * Nachricht pro Person und Lauf, statt eine pro Freigabe. Gleiche Regeln wie
+ * die Einzelnachricht — die Payload läuft durch denselben Versand-Kern.
+ */
+describe('sendeSammelPush', () => {
+  const buendelRef = { id: 'lauf_u1' };
+
+  it('mehrere Gutschriften: EIN Versand mit Summe und Anzahl', async () => {
+    const r = await sendeSammelPush({ buendelRef, uid: 'u1', cents: 180, anzahl: 12, lauf: 'lauf' });
+    expect(global.__versand).toHaveLength(1);
+    expect(r.sent).toBe(1);
+    const m = global.__versand[0];
+    expect(m.notification.title).toBe('1,80 € sind da');
+    expect(m.notification.body).toMatch(/^12 deiner Produkt-Einreichungen/);
+    expect(m.data.kind).toBe('crowd_reward');
+    expect(m.data.deepLink).toBe('/product-submit');
+    expect(m.data.sammel).toBe('1');
+    expect(m.apns.payload.aps.badge).toBeUndefined();
+    expect(m.android.notification.channelId).toBe('cashback');
+    expect(global.__merker).toBe('__ts__');
+  });
+
+  it('eine Gutschrift: derselbe Text wie die Einzelnachricht', () => {
+    expect(sammelNachricht(12, 1)).toEqual(nachricht(12));
+  });
+
+  it('Redelivery des Bündels: kein zweiter Versand', async () => {
+    await sendeSammelPush({ buendelRef, uid: 'u1', cents: 180, anzahl: 12, lauf: 'lauf' });
+    await sendeSammelPush({ buendelRef, uid: 'u1', cents: 180, anzahl: 12, lauf: 'lauf' });
+    expect(global.__versand).toHaveLength(1);
+  });
+
+  it('abbestellt: kein Versand, Merker nicht verbraucht', async () => {
+    global.__nutzer = { pushNotificationsEnabled: false };
+    const r = await sendeSammelPush({ buendelRef, uid: 'u1', cents: 180, anzahl: 12, lauf: 'lauf' });
+    expect(global.__versand).toHaveLength(0);
+    expect(global.__merker).toBeUndefined();
+    expect(r.skipped).toBe('keine_empfaenger');
+  });
+
+  it('nichts gebucht: kein Versand', async () => {
+    const r = await sendeSammelPush({ buendelRef, uid: 'u1', cents: 0, anzahl: 3, lauf: 'lauf' });
+    expect(global.__versand).toHaveLength(0);
+    expect(r.skipped).toBe('nichts_gebucht');
   });
 });

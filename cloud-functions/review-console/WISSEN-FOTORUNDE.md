@@ -1,28 +1,52 @@
-# Wissen des Morgen-Workers (Produktfoto-Prüfrunde)
+# Wissen der Morgenrunde (Produktfotos)
 
-Diese Datei IST das Gedächtnis des Workers. Sie ersetzt den Chat-Verlauf:
-alles, was in den Prüfrunden vom 09.–20.09.2026 Geld oder Nutzer gekostet
-hat, steht hier als Regel. Wer die Function ändert, ändert zuerst diese Datei.
+Diese Datei IST das Gedächtnis der Morgenrunde. Sie ersetzt einen Chat-Verlauf:
+alles, was in den Prüfrunden vom 09.–24.09.2026 Geld oder Nutzer gekostet
+hat, steht hier als Regel. Wer die Runde ändert, ändert zuerst diese Datei.
+
+## Was wo liegt
+
+| Teil | Ort |
+|---|---|
+| Ablauf | `src/taeglicheRunde.js` (Cloud Function `fotoRundeTaeglich`, 08:00 Europe/Berlin) |
+| Entscheidungsregeln, Notbremse, Bündeln | `src/fotoRundeRegeln.js` (+ Tests) |
+| Doppel-Regel | `src/duplicatePolicy.js` — DIESELBE Datei wie die Prüfkonsole |
+| Warnungen | `src/warnungen.js` (+ Tests) |
+| Buchung + Push | `crowd-upload-reward` (Trigger bei `approved`; Sammelnachricht `onCrowdPushBuendel`) |
+| Bericht | Firestore `ops_tagesberichte/{lauf}` und `ops_tagesberichte/aktuell` |
+| Dashboard | https://md-receipt-admin.web.app/tagesbericht.html (Callable `reviewTagesberichte`) |
+| Morgen-Chat | geplante Aufgabe `morgenrunde-bericht` in der Claude-App (08:35/08:48), postet in ClickUp |
+| Schalter | `cashback_config/v1.fotoWorker === true` → scharf, sonst Trockenlauf |
+| Von Hand anstoßen | HTTP `fotoRundeManuell` (europe-west1) — ohne `key` + `scharf=1` immer Trockenlauf |
+
+Die Runde liegt bewusst in der Prüfkonsole und nicht in einer eigenen
+Codebase: eine Kopie der Doppel-Regel wäre genau der Fehler vom 20.09.
 
 ## Auftrag
 
-Jeden Morgen um 8 Uhr (Europe/Berlin) alle offenen Produktfoto-Einreichungen
-(`crowd_uploads`, `status: 'pending'`) prüfen, entscheiden, das Ergebnis
-festhalten und melden. Freigaben UND Ablehnungen laufen automatisch
-(Entscheidung Patrick, 20.09.2026).
+Jeden Morgen um 8 Uhr alle offenen Produktfoto-Einreichungen
+(`crowd_uploads`, `status: 'pending'`) prüfen, entscheiden, melden.
+Freigaben UND Ablehnungen laufen automatisch (Entscheidung Patrick,
+24.09.2026). Liegen bleibt nur, was an unserer Technik hängt oder was die
+Notbremse zurückhält — das steht im Bericht unter `wartetAufDich`.
 
 ## Reihenfolge des Laufs
 
-1. **Offene Einreichungen laden**, älteste zuerst. Chronologisch entscheiden
-   ist Pflicht: sonst blockiert eine jüngere Einreichung an einer älteren, die
-   im selben Lauf noch entschieden wird.
-2. **Rettungsläufe** für fehlende Felder (Name, EAN, Preis, Hersteller) —
-   siehe unten. Erst danach urteilen.
-3. **Vollständigkeit + Doppel-Regel** (Kopie der Konsolen-Regel, `src/regeln.js`).
-4. **Bildprüfung** (Vision) — zeigt das Foto wirklich das behauptete Produkt.
-5. **Entscheiden + buchen.** Die Buchung macht NICHT dieser Worker, sondern
-   der bestehende Trigger `crowd-upload-reward` beim Übergang auf `approved`.
-6. **Ergebnis schreiben** nach `crowd_review_runs/{YYYY-MM-DD}` und melden.
+1. **Offene Einreichungen laden**, älteste zuerst.
+2. **Nachlesen** fehlender Angaben (Name, EAN, Preis, Hersteller) — siehe unten.
+3. **Dateien prüfen**: leer (0 Byte) = Mangel; nicht abrufbar = unsere Technik;
+   Identitätsfoto schon in einer älteren Einreichung = Wiederverwendung.
+4. **Bildprüfung** aller Fälle, denen kein Foto fehlt.
+5. **Chronologisch entscheiden** (`entscheideFall`) — eine im selben Lauf
+   entschiedene Einreichung ist für die nächste derselben EAN Referenz bzw.
+   kein offener Vorgänger mehr.
+6. **Notbremse** prüfen, dann schreiben.
+7. **Auf die Buchungen warten** (höchstens 5 Minuten), dann EINE Nachricht
+   pro Person (`crowd_push_buendel/{lauf}_{uid}` → Trigger in crowd-upload-reward).
+8. **Bericht** mit Bon-Lage, Aktionen und Warnungen schreiben.
+
+Zeitbudget: nach 18 Minuten beginnt die Runde nichts Neues mehr; der Rest ist
+am nächsten Morgen dran (Warnung „nicht geschafft").
 
 ## Regeln, die nicht verhandelbar sind
 
@@ -70,21 +94,42 @@ Fotos (am 13./19./20.09. je zweistellig viele Fälle).
 - Bei EANs zusätzlich die Prüfziffer verlangen. Lose Ware verleitet das Modell
   sonst dazu, die Nummer vom Waage-Etikett zu liefern.
 
-## Notbremse (Warnungen, die den Lauf anhalten)
+## Notbremse (so gebaut)
 
-Der Lauf hält an und meldet, statt weiterzumachen, wenn:
+Freigaben laufen IMMER — sie sind die harmlose Richtung. Zurückgehalten
+(nicht geschrieben, bleiben offen, rote Warnung) werden Ablehnungen, wenn:
 
-- die Ablehnungsquote des Tages über dem Doppelten des 30-Tage-Schnitts liegt,
-- mehr als ein Viertel der Bildprüfungen an einem Limit scheitert,
-- die zugeordnete Aktion ausgelaufen ist oder ihr Budget auf 0 steht
-  (im September zwei Tage lang 119 Bons ohne Prämie),
-- die Regeldatei sich seit dem letzten Lauf geändert hat (dann erst ansehen).
+- **Bildprüfung kippt:** mindestens 5 und mehr als 10 % der geprüften Fälle
+  gelten als unpassend / „immer dieselbe Ansicht" → nur diese Ablehnungen
+  (Handrunden 09.–24.09.: 0–2 %).
+- **Gesamtquote springt:** mindestens 10 Ablehnungen und mehr als das Doppelte
+  der Ablehnungsquote der letzten 30 Tage → alle Ablehnungen des Laufs.
 
-Angehaltene Läufe entscheiden nichts. Die Fälle bleiben offen.
+## Warnungen im Bericht
 
-## Meldung
+Jede steht für einen Ausfall, der schon einmal unbemerkt blieb:
+Aktion läuft aus ohne Nachfolger (01.09.), keine laufende Aktion, Budget leer
+oder knapp, **Zweitprüfung eingeschaltet aber 48 h nicht gelaufen** (23.09.:
+ein Ausrollen von einem Zweig ohne diesen Code nahm sie still raus), Bons
+hängen ≥ 3 Tage in der Prüfung, > 5 % Bons ohne Aktion, Bildprüfung
+scheitert reihenweise, Runde nicht fertig geworden, Notbremse, Regeln
+seit dem letzten Lauf geändert. Dass die Runde gar nicht lief, erkennen
+Dashboard und Morgen-Chat selbst (Bericht älter als 26 h bzw. nicht von heute).
 
-Eine Nachricht pro Lauf mit: Anzahl entschieden, freigegeben, abgelehnt (nach
-Gründen), gebuchter Betrag, offen geblieben, Warnungen. Geht an den
-ClickUp-Chat und in den eigenen Claude-Chat; die Zahlen stehen zusätzlich im
-Dashboard der Prüfkonsole.
+## Nachricht an die Nutzer
+
+Eine Nachricht pro Person und Lauf, mit der tatsächlich gebuchten Summe
+(„1,80 € sind da — 12 deiner Produkt-Einreichungen sind freigegeben").
+Nie eine Nachricht bei Ablehnung (Entscheidung 20.09.). Die Freigabe setzt
+`rewardPushGebuendelt`, damit der Buchungs-Trigger keine Einzelnachricht
+schickt; `rewardPushSentAt` ist die Sicherung für einen älteren Trigger-Stand.
+Vorfall, der das nötig machte: 24.09. hätte die aktivste Person 20 Pushes in
+wenigen Minuten bekommen.
+
+## Meldung an Patrick
+
+Bericht → Dashboard → Morgen-Chat (liest `ops_tagesberichte/aktuell`, postet
+im ClickUp-Kanal MarkenDetektive_DevBacklog). Der Chat läuft nur, wenn die
+Claude-App auf Patricks Mac offen ist; sonst beim nächsten Start. Die Cloud
+Function hat keinen ClickUp-Zugang (kein Token im Secret Manager) — deshalb
+postet der Chat, nicht die Function.

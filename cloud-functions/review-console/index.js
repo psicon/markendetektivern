@@ -952,37 +952,59 @@ exports.reviewMapPoints = onCall({ region: REGION, memory: '1GiB', timeoutSecond
   return { ...kartenCache, ausCache: false };
 });
 
-/* ─── Tägliche Produktfoto-Runde (vorbereitet 20.09.2026) ───────────────────
+/* ─── Morgenrunde Produktfotos + Tagesbericht ───────────────────────────────
  *
- * Läuft um 08:00 und macht, was bisher von Hand lief. ZWEI Sicherungen:
- *  1. Sie entscheidet nur scharf, wenn `cashback_config/v1.fotoWorker === true`
- *     steht. Sonst läuft sie als Trockenlauf und schreibt nur den Bericht —
- *     ein Deploy schaltet also nichts still scharf (gleiche Bauart wie der
- *     Schalter `ocrReferee`).
- *  2. Sie lehnt nur mechanisch eindeutige Fälle ab. Alles, wofür man die Bilder
- *     ansehen muss, landet in `ops_tagesberichte/{tag}.wartetAufDich`.
+ * Läuft täglich um 08:00 (Europe/Berlin), Logik in src/taeglicheRunde.js,
+ * Wissen dahinter in WISSEN-FOTORUNDE.md.
+ *
+ * Scharf NUR, wenn `cashback_config/v1.fotoWorker === true` — sonst Trockenlauf,
+ * der nur den Bericht schreibt. Ein Deploy schaltet also nichts still scharf
+ * (gleiche Bauart wie der Schalter `ocrReferee`).
  */
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { onRequest } = require('firebase-functions/v2/https');
 const { taeglicheRunde } = require('./src/taeglicheRunde');
 const PROJEKT = process.env.GCLOUD_PROJECT || 'markendetektive-895f7';
 
+// 30 Minuten: die Runde beginnt nach 18 Minuten nichts Neues mehr und wartet
+// danach höchstens 5 Minuten auf die Buchungen.
+const RUNDE_OPTS = { region: REGION, timeoutSeconds: 1800, memory: '1GiB' };
+
 exports.fotoRundeTaeglich = onSchedule(
-  { region: REGION, schedule: '0 8 * * *', timeZone: 'Europe/Berlin', timeoutSeconds: 3600, memory: '1GiB' },
+  { ...RUNDE_OPTS, schedule: '0 8 * * *', timeZone: 'Europe/Berlin', retryCount: 0 },
   async () => {
     const cfg = (await db.doc('cashback_config/v1').get()).data() || {};
     const scharf = cfg.fotoWorker === true;
-    const bericht = await taeglicheRunde({ dryRun: !scharf, projekt: PROJEKT });
-    logger.info(scharf ? 'Fotorunde scharf gelaufen' : 'Fotorunde als Trockenlauf gelaufen (Schalter fotoWorker steht nicht auf true)', bericht);
+    const bericht = await taeglicheRunde({ dryRun: !scharf, projekt: PROJEKT, ausloeser: 'zeitplan' });
+    logger.info(scharf ? 'Morgenrunde scharf gelaufen' : 'Morgenrunde als Trockenlauf (Schalter fotoWorker steht nicht auf true)', { lauf: bericht.lauf });
   },
 );
 
-/** Manueller Anstoß zum Prüfen — ohne Schlüssel immer nur Trockenlauf. */
+/**
+ * Manueller Anstoß. Ohne Schlüssel IMMER Trockenlauf. Scharf nur mit Schlüssel
+ * UND `scharf=1` UND eingeschaltetem Schalter — der Schalter gilt für beide Wege.
+ */
 exports.fotoRundeManuell = onRequest(
-  { region: REGION, secrets: [CASHBACK_ADMIN_KEY], timeoutSeconds: 3600, memory: '1GiB' },
+  { ...RUNDE_OPTS, secrets: [CASHBACK_ADMIN_KEY] },
   async (req, res) => {
-    const scharf = req.query.key === CASHBACK_ADMIN_KEY.value() && req.query.scharf === '1';
-    const bericht = await taeglicheRunde({ dryRun: !scharf, projekt: PROJEKT });
+    const cfg = (await db.doc('cashback_config/v1').get()).data() || {};
+    const scharf = req.query.key === CASHBACK_ADMIN_KEY.value() && req.query.scharf === '1' && cfg.fotoWorker === true;
+    const bericht = await taeglicheRunde({ dryRun: !scharf, projekt: PROJEKT, ausloeser: 'manuell' });
     res.json(bericht);
   },
 );
+
+/** Tagesberichte fürs Dashboard (tagesbericht.html), neueste zuerst. */
+exports.reviewTagesberichte = onCall({ region: REGION, timeoutSeconds: 30 }, async (req) => {
+  assertAdmin(req);
+  const anzahl = Math.min(Math.max(Number(req.data?.anzahl) || 45, 1), 120);
+  const snap = await db.collection('ops_tagesberichte').orderBy('laufAt', 'desc').limit(anzahl + 1).get();
+  const berichte = snap.docs
+    .filter((d) => d.id !== 'aktuell')
+    .slice(0, anzahl)
+    .map((d) => {
+      const x = d.data();
+      return { ...x, id: d.id, laufAt: x.laufAt && x.laufAt.toMillis ? x.laufAt.toMillis() : null };
+    });
+  return { berichte };
+});

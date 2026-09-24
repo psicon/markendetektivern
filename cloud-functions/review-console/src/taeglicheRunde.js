@@ -1,65 +1,70 @@
 'use strict';
 /**
- * Tägliche Produktfoto-Runde (vorbereitet 20.09.2026, NOCH NICHT eingeplant).
+ * Morgenrunde Produktfotos — jeden Tag 08:00 (Europe/Berlin).
  *
- * Macht einmal am Morgen das, was bisher von Hand lief: fehlende Angaben aus
- * den Fotos nachlesen, die Regeln der Prüfkonsole anwenden, die Bilder ansehen,
- * entscheiden — und eine Zusammenfassung hinterlassen.
+ * Macht, was bis zum 24.09.2026 von Hand lief: fehlende Angaben aus den Fotos
+ * nachlesen, die Regeln der Prüfkonsole anwenden, die Bilder ansehen,
+ * entscheiden, eine Nachricht pro Person verschicken lassen und einen
+ * Tagesbericht mit Warnungen schreiben. Das Wissen dahinter steht in
+ * WISSEN-FOTORUNDE.md — wer hier etwas ändert, ändert zuerst dort.
  *
- * WARUM DAS HIER LIEGT und nicht als eigene Codebase: die Regeln
- * (`duplicatePolicy.js`) werden hier gepflegt. Ein Worker mit eigener Kopie
- * hätte genau den Fehler wiederholt, der am 20.09. fast passiert wäre — ein
- * Ops-Skript entschied nach einer Regelfassung, die Stunden zuvor überholt
- * worden war (8 von 14 Ablehnungen wären falsch gewesen).
+ * WARUM DAS IN DER PRÜFKONSOLE LIEGT und nicht in einer eigenen Codebase: die
+ * Doppel-Regel (`duplicatePolicy.js`) wird hier gepflegt. Ein Worker mit
+ * eigener Kopie hätte den Fehler vom 20.09. wiederholt — ein Skript entschied
+ * nach einer Regelfassung, die Stunden zuvor überholt war (8 von 14
+ * Ablehnungen wären falsch gewesen).
  *
- * WAS ER ALLEIN ENTSCHEIDET
- *  • Freigeben: alles, was die Regeln sauber passiert UND im Bild-Audit echt ist.
- *    Das ist die harmlose Richtung — Geld fließt für Arbeit, die geleistet wurde.
- *  • Ablehnen NUR bei mechanisch eindeutigen Fällen (Entscheidung Patrick
- *    20.09.): ein Pflichtfoto fehlt oder ist leer, kein Barcode auffindbar,
- *    derselbe Artikel vom selben Nutzer binnen 24 h, identische Bilddatei aus
- *    einer früheren Einreichung.
+ * WAS ER ENTSCHEIDET (Entscheidung Patrick 24.09.: „beides automatisch")
+ *   Freigaben und Ablehnungen, nach `fotoRundeRegeln.entscheideFall`.
+ * WAS ER LIEGEN LÄSST (`wartetAufDich` im Bericht)
+ *   Alles, was an unserer Technik hängt: Storage nicht lesbar, Bildprüfung
+ *   oder Nachlesen am Google-Limit gescheitert, beschädigte Datei — und alles,
+ *   was die Notbremse zurückhält.
+ * WAS ER NIE TUT
+ *   Geld buchen. Eine Freigabe setzt nur den Status; buchen tut
+ *   `crowd-upload-reward`, wie bei jeder anderen Freigabe.
  *
- * WAS ER LIEGEN LÄSST (Morgenliste, Patrick entscheidet)
- *  • Der Bild-Audit hält etwas für unecht — am 20.09. hat genau hier das
- *    Hinsehen den Unterschied gemacht: siebenmal dieselbe Ansicht war ein
- *    Mangel, dreimal dieselbe Datei auf einer Käse-Rückseite dagegen völlig
- *    in Ordnung (Zutaten, Nährwerte und Anschrift stehen dort zusammen).
- *  • Der Bild-Audit ist an einem Infrastrukturfehler gescheitert. Ein 429 ist
- *    kein Urteil über eine Einreichung — aber eben auch keine Freigabe.
- *
- * Der Lauf schreibt NIE Geld selbst: eine Freigabe setzt nur den Status, buchen
- * tut `crowd-upload-reward` (eine Quelle fürs Ledger, wie überall).
+ * Schalter: `cashback_config/v1.fotoWorker === true` → scharf. Sonst
+ * Trockenlauf: liest, prüft, schreibt nur den Bericht (plus nachgelesene
+ * Angaben in die eigenen *RescueOcr-Felder, die nichts entscheiden).
  */
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const admin = require('firebase-admin');
 const { FieldValue } = require('firebase-admin/firestore');
 const logger = require('firebase-functions/logger');
 const { GoogleGenAI } = require('@google/genai');
-const { evaluateDuplicate, completenessCheck, REASON } = require('./duplicatePolicy');
+const { evaluateDuplicate, completenessCheck } = require('./duplicatePolicy');
+const { entscheideFall, notbremse, buendelProPerson, BILD_GRUENDE } = require('./fotoRundeRegeln');
+const { warnungen } = require('./warnungen');
 
 const COL = 'crowd_uploads';
 const BERICHTE = 'ops_tagesberichte';
+const BUENDEL = 'crowd_push_buendel';
 const REQUIRED = ['front', 'rueckseite', 'hersteller', 'ean', 'naehrwerte', 'zutaten', 'preis'];
 // Bild-Wiederverwendung zählt nur für die produkt-identifizierenden Fotos:
 // ein gemeinsames Regal-Preisschild zweier Sorten ist plausibel (Befund 13.09.).
 const IDENTITY_SLOTS = new Set(['front', 'rueckseite', 'hersteller', 'ean', 'naehrwerte', 'zutaten']);
 const MODELL = 'gemini-3.5-flash';
-const PARALLEL = 8;
+// 4 parallel: mit 8 liefen am 24.09. zwei Durchgänge zu je ~8 % ins Google-Limit.
+const PARALLEL_KI = 4;
 const ENTSCHEIDER = 'worker-fotorunde';
-
-// Diese Gründe darf der Worker allein schreiben. Alles andere wartet auf einen
-// Menschen. Die Liste ist bewusst kurz: jeder Eintrag muss ohne Ansehen der
-// Bilder entscheidbar sein.
-const EINDEUTIG = new Set(['unvollstaendig', 'ean_fehlt', 'ean_fehlt_lose_ware', 'bilder_wiederverwendet', REASON.SAME_USER]);
+// Nach dieser Zeit beginnt die Runde nichts Neues mehr; der Rest ist morgen dran.
+// Die Function darf 30 Minuten laufen — Luft für Schreiben und Buchungs-Abwarten.
+const ARBEITSZEIT_MS = 18 * 60 * 1000;
+const BUCHUNG_WARTEN_MS = 5 * 60 * 1000;
 
 const ms = (v) => (v && typeof v.toMillis === 'function' ? v.toMillis() : typeof v === 'number' ? v : null);
-const fmtDate = (m) => (m ? new Date(m).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) : null);
+const fmtDate = (m) => (m ? new Date(m).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Berlin' }) : null);
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const schlafe = (t) => new Promise((r) => setTimeout(r, t));
+const berlinTag = (t) => new Date(t).toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
+const berlinZeit = (t) => new Date(t).toLocaleTimeString('sv-SE', { timeZone: 'Europe/Berlin' }).replace(/:/g, '');
 
-/** Geretteter Wert zählt wie ein gelesener — aber NUR beim Preis, nie beim
- *  Hersteller: „Kaufland Stiftung & Co." (Markeninhaber) und „DMK Deutsches
- *  Milchkontor" (Produzent) stehen auf derselben Packung; als „andere Daten"
- *  gewertet gäbe das eine echte Dublette frei (gemessen 20.09.). */
+/** Geretteter Wert zählt wie ein gelesener — beim Preis ja, beim Hersteller für
+ *  die Doppel-Regel NICHT: „Kaufland Stiftung & Co." (Markeninhaber) und „DMK"
+ *  (Produzent) stehen auf derselben Packung (gemessen 20.09.). */
 const eanOf = (x) => x.ean || x.eanRescueOcr || null;
 const nameOf = (x) => x.productName || x.productNameOcr || x.productNameRescueOcr || null;
 const preisOf = (x) => (x.priceOcr && Number.isFinite(x.priceOcr.priceCents) && x.priceOcr.priceCents > 0 ? x.priceOcr : x.priceRescueOcr || null);
@@ -68,41 +73,53 @@ const policyOf = (id, x) => ({
   status: x.status, createdAt: ms(x.createdAt), priceOcr: preisOf(x), manufacturerOcr: x.manufacturerOcr ?? null,
 });
 
+/** Interner Vermerk am Dokument. Was der NUTZER liest, steht in
+ *  lib/utils/productSubmissionCopy.ts (REASON_COPY) — jeder Grund hier braucht dort einen Eintrag. */
 function noteFor(reason, ctx = {}) {
   const until = fmtDate(ctx.lockUntil);
   switch (reason) {
-    case REASON.SAME_USER: return `Dieses Produkt liegt uns von dir schon vor — die erste Einreichung zählt. Ab ${until || 'morgen'} zählt derselbe Artikel wieder, und mit neuem Preis, Hersteller oder Markt sofort.`;
-    case REASON.PENDING_OLDER: return 'Doppelt eingereicht — die frühere Einreichung zählt.';
+    case 'sperre_30_tage_gleicher_nutzer': return `Dieses Produkt liegt uns von dir schon vor — die erste Einreichung zählt. Ab ${until || 'morgen'} zählt derselbe Artikel wieder, und mit neuem Preis, Hersteller oder Markt sofort.`;
     case 'unvollstaendig': return `Es fehlen Fotos (${(ctx.missing || []).join(', ') || 'siehe Liste'}). Mit allen sieben Ansichten klappt es beim nächsten Mal.`;
     case 'ean_fehlt': return 'Der Barcode (EAN, 8–14 Ziffern) ordnet das Produkt eindeutig zu — beim nächsten Mal bitte scannen oder eintippen.';
-    case 'ean_fehlt_lose_ware': return 'Lose Ware wie Kräuterbunde oder Frischetheken-Artikel hat keinen Produkt-Barcode — die Waage-Etiketten sind händlerintern. Mit verpackten Artikeln mit Barcode zählt deine Einreichung sofort.';
     case 'kein_produktname': return 'Der Produktname war nicht erkennbar — Vorderseite gut ausgeleuchtet und ohne Spiegelung, dann passt es.';
     case 'bilder_wiederverwendet': return 'Dieselben Fotos wurden schon für eine andere Einreichung verwendet — jedes Produkt braucht eigene Aufnahmen.';
+    case 'fotos_unpassend': return 'Die Fotos zeigen nicht das erwartete Produkt oder nicht die verlangten Ansichten.';
+    case 'gleiche_ansicht_mehrfach': return 'Fast alle Fotos zeigen dieselbe Ansicht — Zutaten, Nährwerte, Hersteller und Preis brauchen wir einzeln.';
     default: return 'Danke fürs Einreichen — beim nächsten Datensatz geht es weiter.';
   }
 }
 
 /* ─────────────────────────── Bilder lesen ─────────────────────────── */
 
-function ki(projekt) {
-  return new GoogleGenAI({ vertexai: true, project: projekt, location: 'global' });
-}
 const teil = (bucket, slot, pfad) => [{ text: `— Foto "${slot}":` }, { fileData: { fileUri: `gs://${bucket}/${pfad}`, mimeType: 'image/jpeg' } }];
 
-async function frage(ai, bucket, images, slots, text, mitDenken = true) {
+/** Google-Limits sind der Normalfall, kein Ausnahmefall (24.09.: 18 von 229
+ *  Bildprüfungen im ersten Durchgang). Wiederholen mit Pause; ein 400
+ *  („Bild nicht lesbar") wird NICHT wiederholt, das wird nicht besser. */
+async function mitWiederholung(fn) {
+  const pausen = [4000, 10000, 25000];
+  for (let i = 0; ; i++) {
+    try { return await fn(); }
+    catch (e) {
+      const t = String(e && (e.message || e));
+      const voruebergehend = /429|RESOURCE_EXHAUSTED|500|503|INTERNAL|UNAVAILABLE|deadline|ECONNRESET|fetch failed/i.test(t) && !/decode|INVALID_ARGUMENT/i.test(t);
+      if (!voruebergehend || i >= pausen.length) throw e;
+      await schlafe(pausen[i] + Math.floor(Math.random() * 1500));
+    }
+  }
+}
+
+async function frage(ai, bucket, images, slots, text) {
   const parts = [];
   for (const s of slots) if (images[s]) parts.push(...teil(bucket, s, images[s]));
   parts.push({ text });
-  const r = await ai.models.generateContent({
+  const r = await mitWiederholung(() => ai.models.generateContent({
     model: MODELL,
     contents: [{ role: 'user', parts }],
-    config: {
-      responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 8000,
-      // MIT Denken. Der Namer liest mit thinkingBudget 0 und übersieht dabei
-      // genau die Angaben, die hier fehlen (ClickUp 12487v2akpm).
-      ...(mitDenken ? { thinkingConfig: { thinkingLevel: 'LOW' } } : {}),
-    },
-  });
+    // MIT Denken: der Namer liest mit thinkingBudget 0 und übersieht dabei
+    // genau die Angaben, die hier fehlen.
+    config: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 8000, thinkingConfig: { thinkingLevel: 'LOW' } },
+  }));
   return JSON.parse(String(r.text ?? '').replace(/^```json\s*|```\s*$/g, ''));
 }
 
@@ -117,33 +134,38 @@ function pruefzifferOk(code) {
 }
 
 /**
- * Fehlende Angaben aus den Fotos nachlesen. Übernommen wird nur, was ZWEI
- * unabhängige Lesungen gleich lesen; alles landet in EIGENEN Feldern, damit
- * messbar bleibt, wie gut der Namer selbst liest.
+ * Fehlende Angaben nachlesen. Übernommen wird nur, was ZWEI unabhängige
+ * Lesungen gleich lesen; alles landet in EIGENEN Feldern, damit messbar
+ * bleibt, wie gut die Ersterkennung liest. Gibt zurück, was übernommen wurde
+ * und woran das Nachlesen technisch scheiterte (das ist kein Urteil).
  */
 async function rettungFuer(ai, bucket, ref, x) {
   const patch = {};
+  const fehler = {};
   const offenName = !nameOf(x);
   const offenEan = !eanOf(x) && !!x.images?.ean;
   const offenPreis = !preisOf(x);
   const offenHersteller = !(x.manufacturerOcr && String(x.manufacturerOcr.name || '').trim()) && !x.manufacturerRescueOcr;
-  if (!offenName && !offenEan && !offenPreis && !offenHersteller) return null;
+  if (!offenName && !offenEan && !offenPreis && !offenHersteller) return { patch: null, fehler };
 
   if (offenName) {
-    const [a, b] = [
-      await frage(ai, bucket, x.images, ['front', 'rueckseite'], 'Lies den PRODUKTNAMEN von der Verpackung. JSON: {"name":"…","sicher":true|false}. name = Marke + Bezeichnung + Sorte, ohne Menge und Preis. Nicht zweifelsfrei lesbar → name leer, sicher false.'),
-      await frage(ai, bucket, x.images, ['front', 'rueckseite'], 'Lies den PRODUKTNAMEN von der Verpackung. JSON: {"name":"…","sicher":true|false}. name = Marke + Bezeichnung + Sorte, ohne Menge und Preis. Nicht zweifelsfrei lesbar → name leer, sicher false.'),
-    ];
-    if (a.name && a.sicher !== false && norm(a.name) === norm(b.name)) patch.productNameRescueOcr = String(a.name).slice(0, 120);
+    const p = 'Lies den PRODUKTNAMEN von der Verpackung. JSON: {"name":"…","sicher":true|false}. name = Marke + Bezeichnung + Sorte, ohne Menge und Preis. Nicht zweifelsfrei lesbar → name leer, sicher false.';
+    try {
+      const [a, b] = [await frage(ai, bucket, x.images, ['front', 'rueckseite'], p), await frage(ai, bucket, x.images, ['front', 'rueckseite'], p)];
+      if (a.name && a.sicher !== false && norm(a.name) === norm(b.name)) patch.productNameRescueOcr = String(a.name).slice(0, 120);
+    } catch (e) { fehler.name = String(e.message).slice(0, 120); }
   }
   if (offenEan) {
     const p = 'Lies die EAN/GTIN unter dem Strichcode. JSON: {"ean":"nur Ziffern","sicher":true|false}. Vollständig und in gedruckter Reihenfolge. Nicht zweifelsfrei lesbar oder kein Strichcode → leer. Nichts raten.';
-    const [a, b] = [await frage(ai, bucket, x.images, ['ean', 'rueckseite', 'front'], p), await frage(ai, bucket, x.images, ['ean', 'rueckseite', 'front'], p)];
-    const ea = String(a.ean || '').replace(/\D/g, '');
-    // Streng, weil unter den EAN-losen Einreichungen viel lose Ware ist: ein
-    // Modell, das nach einer Nummer gefragt wird, liefert dort gern die vom
-    // Waage-Etikett (Befund 19.09.).
-    if (ea && ea === String(b.ean || '').replace(/\D/g, '') && a.sicher !== false && b.sicher !== false && pruefzifferOk(ea)) patch.eanRescueOcr = ea;
+    try {
+      const [a, b] = [await frage(ai, bucket, x.images, ['ean', 'rueckseite', 'front'], p), await frage(ai, bucket, x.images, ['ean', 'rueckseite', 'front'], p)];
+      const ea = String(a.ean || '').replace(/\D/g, '');
+      // Streng: unter den EAN-losen Einreichungen ist viel lose Ware, und ein
+      // Modell, das nach einer Nummer gefragt wird, liefert dort gern die vom
+      // Waage-Etikett (Befund 19.09.). Händlerinterne Codes (02, 20–29) bestehen
+      // die Prüfziffer — deshalb die zweite Lesung.
+      if (ea && ea === String(b.ean || '').replace(/\D/g, '') && a.sicher !== false && b.sicher !== false && pruefzifferOk(ea)) patch.eanRescueOcr = ea;
+    } catch (e) { fehler.ean = String(e.message).slice(0, 120); }
   }
   if (offenPreis || offenHersteller) {
     const p = [
@@ -155,80 +177,169 @@ async function rettungFuer(ai, bucket, ref, x) {
       'Nichts raten — ein erfundener Wert ist schlechter als ein leeres Feld.',
     ].join('\n');
     const slots = ['preis', 'hersteller', 'rueckseite', 'front'];
-    const [a, b] = [await frage(ai, bucket, x.images, slots, p), await frage(ai, bucket, x.images, slots, p)];
-    const ca = Number.isFinite(a.priceCents) && a.priceCents > 0 ? Math.round(a.priceCents) : null;
-    const cb = Number.isFinite(b.priceCents) && b.priceCents > 0 ? Math.round(b.priceCents) : null;
-    // Preis nur aus einer Quelle, die überhaupt einen Preis zeigt. Bei 40 % der
-    // Einreichungen ist das „Preis"-Foto nur nochmal das Produkt (ClickUp 12487v2akq0).
-    if (offenPreis && ca && ca === cb && ca <= 20000 && ['preisschild', 'kassenbon', 'beides'].includes(String(a.priceImageKind || '').toLowerCase())) {
-      patch.priceRescueOcr = { priceCents: ca, currency: 'EUR', priceImageKind: String(a.priceImageKind).toLowerCase() };
-    }
-    if (offenHersteller && a.manufacturer && norm(a.manufacturer) === norm(b.manufacturer)) {
-      patch.manufacturerRescueOcr = { name: String(a.manufacturer).slice(0, 140) };
-    }
+    try {
+      const [a, b] = [await frage(ai, bucket, x.images, slots, p), await frage(ai, bucket, x.images, slots, p)];
+      const ca = Number.isFinite(a.priceCents) && a.priceCents > 0 ? Math.round(a.priceCents) : null;
+      const cb = Number.isFinite(b.priceCents) && b.priceCents > 0 ? Math.round(b.priceCents) : null;
+      // Bei ~40 % der Einreichungen zeigt das „Preis"-Foto nur nochmal das Produkt.
+      if (offenPreis && ca && ca === cb && ca <= 20000 && ['preisschild', 'kassenbon', 'beides'].includes(String(a.priceImageKind || '').toLowerCase())) {
+        patch.priceRescueOcr = { priceCents: ca, currency: 'EUR', priceImageKind: String(a.priceImageKind).toLowerCase() };
+      }
+      if (offenHersteller && a.manufacturer && norm(a.manufacturer) === norm(b.manufacturer)) {
+        patch.manufacturerRescueOcr = { name: String(a.manufacturer).slice(0, 140) };
+      }
+    } catch (e) { fehler.preis = String(e.message).slice(0, 120); }
   }
-  if (!Object.keys(patch).length) return null;
+  if (!Object.keys(patch).length) return { patch: null, fehler };
   patch.rescueAt = FieldValue.serverTimestamp();
-  patch.rescueQuelle = `${MODELL}/vertex mit Denken, zwei übereinstimmende Lesungen`;
+  patch.rescueQuelle = `${MODELL}/vertex mit Denken, zwei übereinstimmende Lesungen (Morgenrunde)`;
   await ref.set(patch, { merge: true });
-  return patch;
+  return { patch, fehler };
 }
 
-/** Bild-Audit: sieht alle sieben Fotos an. Zusätzlich die Frage nach loser Ware,
- *  damit ein fehlender Barcode den richtigen Text bekommt. */
+/** Bildprüfung: sieht alle sieben Fotos an. */
 async function bildAudit(ai, bucket, x) {
   const parts = [];
   for (const s of REQUIRED) if (x.images?.[s]) parts.push(...teil(bucket, s, x.images[s]));
   parts.push({
     text: [
-      `Du prüfst eine Produkt-Einreichung (die Fotos sind oben je Schritt benannt).`,
+      'Du prüfst eine Produkt-Einreichung (die Fotos sind oben je Schritt benannt).',
       `Erwartet: echtes Einzelhandels-Produkt "${nameOf(x) || 'unbekannt'}" (EAN ${eanOf(x) || 'unbekannt'}).`,
-      `Erwartung je Schritt: front=Vorderseite, rueckseite=Rückseite, hersteller=Hersteller-/Adressangabe, ean=Barcode, naehrwerte=Nährwerttabelle, zutaten=Zutatenliste, preis=Preisschild oder Bon.`,
-      `JSON: {"echt":true|false,"loseWare":true|false,"gleicheAnsicht":true|false,"grund":"kurz"}.`,
-      `echt=false NUR bei eindeutigem Ausschluss: kein reales Produkt, abfotografierter Bildschirm, fremde Motive, Schritte grob falsch belegt.`,
-      `Unscharf, angeschnitten oder zwei vertauschte Schritte = trotzdem echt=true.`,
-      `WICHTIG: Ein und dasselbe Foto darf mehrere Schritte abdecken, wenn dort wirklich mehrere Angaben stehen — auf vielen Rückseiten stehen Zutaten, Nährwerte und Anschrift zusammen. Das ist KEIN Mangel.`,
-      `gleicheAnsicht=true nur, wenn ALLE Fotos dieselbe Ansicht zeigen und die verlangten Angaben dadurch fehlen.`,
-      `loseWare=true bei unverpackter Ware ohne Produkt-Barcode (Kräuterbund, Obst, Frischetheke mit Waage-Etikett).`,
+      'Erwartung je Schritt: front=Vorderseite, rueckseite=Rückseite, hersteller=Hersteller-/Adressangabe, ean=Barcode, naehrwerte=Nährwerttabelle, zutaten=Zutatenliste, preis=Preisschild oder Bon.',
+      'JSON: {"echt":true|false,"loseWare":true|false,"gleicheAnsicht":true|false,"grund":"kurz"}.',
+      'echt=false NUR bei eindeutigem Ausschluss: kein reales Produkt, abfotografierter Bildschirm, fremde Motive, Schritte grob falsch belegt.',
+      'Unscharf, angeschnitten oder zwei vertauschte Schritte = trotzdem echt=true.',
+      // 24.09.2026: Das Preisfoto zeigte eine Tischdecke, alles andere war
+      // vollständig — die alte Prüfung hielt das für „unecht". Ein fehlender
+      // Preis ist seit den Runden im September kein Ablehngrund.
+      'Das Preis-Foto darf ohne Preis sein (z. B. nochmal das Produkt, der Tisch, der Einkaufswagen) — das allein ist KEIN Ausschluss.',
+      'Ein und dasselbe Foto darf mehrere Schritte abdecken, wenn dort wirklich mehrere Angaben stehen — auf vielen Rückseiten stehen Zutaten, Nährwerte und Anschrift zusammen. Das ist KEIN Mangel.',
+      // 24.09.2026: fünf von sieben Fotos zeigten nur den Barcode am Becherboden.
+      'gleicheAnsicht=true, wenn mindestens fünf Fotos dasselbe Motiv zeigen und dadurch Zutaten, Nährwerte UND Herstellerangabe auf keinem Foto zu sehen sind.',
+      'loseWare=true bei unverpackter Ware ohne Produkt-Barcode (Kräuterbund, Obst, Frischetheke mit Waage-Etikett).',
     ].join('\n'),
   });
-  const r = await ai.models.generateContent({
+  const r = await mitWiederholung(() => ai.models.generateContent({
     model: MODELL, contents: [{ role: 'user', parts }],
     config: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 8000, thinkingConfig: { thinkingLevel: 'LOW' } },
-  });
+  }));
   const p = JSON.parse(String(r.text ?? '').replace(/^```json\s*|```\s*$/g, ''));
+  if (typeof p.echt !== 'boolean') throw new Error('Bildprüfung ohne verwertbare Antwort');
   return { echt: p.echt !== false, loseWare: p.loseWare === true, gleicheAnsicht: p.gleicheAnsicht === true, grund: String(p.grund || '').slice(0, 140) };
 }
 
-/* ─────────────────────────── Der Lauf ─────────────────────────── */
+/* ─────────────────────────── Hilfen ─────────────────────────── */
 
-async function arbeite(liste, arbeiter, gleichzeitig = PARALLEL) {
+/** Arbeitet eine Liste parallel ab; nach `frist` wird nichts Neues begonnen. */
+async function arbeite(liste, arbeiter, gleichzeitig, frist) {
   const queue = [...liste];
+  const liegen = [];
   await Promise.all(Array.from({ length: Math.min(gleichzeitig, queue.length || 1) }, async () => {
     for (;;) {
       const e = queue.shift();
       if (!e) return;
+      if (frist && Date.now() > frist) { liegen.push(e); continue; }
       await arbeiter(e);
     }
   }));
+  return liegen;
 }
 
-async function taeglicheRunde({ dryRun = false, projekt, bucketName } = {}) {
+function regelVersion() {
+  const h = crypto.createHash('sha1');
+  for (const f of ['duplicatePolicy.js', 'fotoRundeRegeln.js']) h.update(fs.readFileSync(path.join(__dirname, f)));
+  return h.digest('hex').slice(0, 10);
+}
+
+/** Ablehnungsquote der letzten 30 Tage (nach Entscheidungszeit). */
+function schnittQuote(alle, jetzt) {
+  const ab = jetzt - 30 * 24 * 60 * 60 * 1000;
+  let fr = 0; let ab2 = 0;
+  for (const d of alle) {
+    const t = ms(d.x.reviewedAt);
+    if (!t || t < ab) continue;
+    if (d.x.status === 'approved') fr++;
+    else if (d.x.status === 'rejected') ab2++;
+  }
+  return fr + ab2 >= 30 ? ab2 / (fr + ab2) : null;
+}
+
+async function bonLage(db, jetzt) {
+  const [review, letzte, cfg] = await Promise.all([
+    db.collection('receipts').where('status', '==', 'review').select('createdAt').get(),
+    db.collection('receipts').where('createdAt', '>=', admin.firestore.Timestamp.fromMillis(jetzt - 24 * 60 * 60 * 1000)).select('status', 'rejectReason', 'noRewardReason').get(),
+    db.doc('cashback_config/v1').get(),
+  ]);
+  const aeltester = review.docs.map((d) => ms(d.get('createdAt'))).filter(Boolean).sort((a, b) => a - b)[0];
+  const status = {}; const gruende = {}; let ohneAktion = 0;
+  letzte.docs.forEach((d) => {
+    const s = d.get('status') || '?'; status[s] = (status[s] || 0) + 1;
+    const g = d.get('rejectReason') || d.get('noRewardReason');
+    if (g) gruende[g] = (gruende[g] || 0) + 1;
+    if (g === 'no_active_campaign') ohneAktion++;
+  });
+  // Zweitprüfung: Nutzungszähler je UTC-Tag (cashback_referee_usage/{YYYY-MM-DD}).
+  const tage = [0, 1].map((i) => new Date(jetzt - i * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
+  const nutzung = await Promise.all(tage.map((t) => db.doc(`cashback_referee_usage/${t}`).get()));
+  const schalter = cfg.get('ocrReferee');
+  return {
+    bons: {
+      inPruefung: review.size,
+      aeltesteTage: aeltester ? Math.floor((jetzt - aeltester) / (24 * 60 * 60 * 1000)) : null,
+      letzte24h: { gesamt: letzte.size, status, gruende, ohneAktion },
+    },
+    zweitpruefung: {
+      eingeschaltet: schalter === true || schalter === 'shadow',
+      modus: schalter ?? null,
+      laeufeLetzte48h: nutzung.reduce((s, d) => s + (Number(d.get('runs')) || 0), 0),
+    },
+    fotoWorkerScharf: cfg.get('fotoWorker') === true,
+  };
+}
+
+async function aktionsLage(db) {
+  const s = await db.collection('cashback_campaigns').get();
+  return s.docs.map((d) => ({
+    id: d.id, kind: d.get('kind') || null, active: d.get('active') === true,
+    startAt: ms(d.get('startAt')) || 0, endAt: ms(d.get('endAt')) || 0,
+    budgetRemainingCents: d.get('budgetRemainingCents') ?? null, budgetTotalCents: d.get('budgetTotalCents') ?? null,
+    cashbackPerBonCents: d.get('cashbackPerBonCents') ?? null,
+  }));
+}
+
+/* ─────────────────────────── Der Lauf ─────────────────────────── */
+
+async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser = 'zeitplan' } = {}) {
   const db = admin.firestore();
   const bucket = bucketName || `${projekt}.appspot.com`;
-  const ai = ki(projekt);
+  const ai = new GoogleGenAI({ vertexai: true, project: projekt, location: 'global' });
   const start = Date.now();
+  const frist = start + ARBEITSZEIT_MS;
+  const tag = berlinTag(start);
+  const lauf = `${tag}_${berlinZeit(start)}${dryRun ? '_trocken' : ''}`;
 
   const alle = (await db.collection(COL).get()).docs.map((d) => ({ id: d.id, ref: d.ref, x: d.data() }));
   const pending = alle.filter((d) => d.x.status === 'pending').sort((a, b) => (ms(a.x.createdAt) ?? 0) - (ms(b.x.createdAt) ?? 0));
-  if (!pending.length) return { geprueft: 0, freigegeben: 0, abgelehnt: 0, offen: 0, hinweise: ['nichts zu tun'] };
 
   // 1) Fehlende Angaben nachlesen
-  let gerettet = 0;
-  await arbeite(pending, async (d) => {
-    try { if (await rettungFuer(ai, bucket, d.ref, d.x)) { gerettet++; Object.assign(d.x, (await d.ref.get()).data()); } }
-    catch (e) { logger.warn('Rettung gescheitert', { id: d.id, fehler: String(e.message).slice(0, 120) }); }
-  });
+  const nachgelesen = { name: 0, ean: 0, preis: 0, hersteller: 0 };
+  const rettungFehler = new Map();
+  const nichtNachgelesen = await arbeite(pending, async (d) => {
+    try {
+      const { patch, fehler } = await rettungFuer(ai, bucket, d.ref, d.x);
+      if (Object.keys(fehler).length) rettungFehler.set(d.id, fehler);
+      if (patch) {
+        Object.assign(d.x, patch);
+        if (patch.productNameRescueOcr) nachgelesen.name++;
+        if (patch.eanRescueOcr) nachgelesen.ean++;
+        if (patch.priceRescueOcr) nachgelesen.preis++;
+        if (patch.manufacturerRescueOcr) nachgelesen.hersteller++;
+      }
+    } catch (e) {
+      rettungFehler.set(d.id, { alles: String(e.message).slice(0, 120) });
+    }
+  }, PARALLEL_KI, frist);
+  nichtNachgelesen.forEach((d) => rettungFehler.set(d.id, { name: 'zeit_abgelaufen', ean: 'zeit_abgelaufen' }));
 
   // 2) Bilddateien: leer, unlesbar, oder aus einer früheren Einreichung bekannt
   const storage = admin.storage().bucket(bucket);
@@ -239,7 +350,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName } = {}) {
       catch { return { k, p, md5: null, size: -1 }; }
     }));
     metaVon.set(d.id, metas);
-  });
+  }, 20, null);
   const alterVon = new Map(alle.map((d) => [d.id, ms(d.x.createdAt) ?? 0]));
   const gruppen = new Map();
   const merke = (key, id) => { if (!gruppen.has(key)) gruppen.set(key, new Set()); gruppen.get(key).add(id); };
@@ -253,102 +364,159 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName } = {}) {
     [...ids].sort((a, b) => (alterVon.get(a) ?? 0) - (alterVon.get(b) ?? 0)).slice(1).forEach((i) => wiederverwendet.add(i));
   }
 
-  // 3) Regeln anwenden
+  // 3) Vorprüfung, die ohne Reihenfolge auskommt
+  const vor = new Map();
+  for (const d of pending) {
+    const x = d.x;
+    const comp = completenessCheck({ images: x.images, ean: eanOf(x), productName: x.productName, productNameOcr: x.productNameOcr || x.productNameRescueOcr }, REQUIRED);
+    const metas = metaVon.get(d.id) || [];
+    vor.set(d.id, { comp, leer: metas.filter((m) => m.size === 0).map((m) => m.k), unlesbar: metas.filter((m) => m.size < 0).map((m) => m.k) });
+  }
+
+  // 4) Bildprüfung für alles, dem nicht schon ein Foto fehlt
+  const zuPruefen = pending.filter((d) => { const v = vor.get(d.id); return !v.comp.problems.includes('unvollstaendig') && !v.leer.length && !v.unlesbar.length; });
+  const audit = new Map(); const auditFehler = new Map();
+  const nichtGeprueft = await arbeite(zuPruefen, async (d) => {
+    try { audit.set(d.id, await bildAudit(ai, bucket, d.x)); }
+    catch (e) { auditFehler.set(d.id, String(e.message).slice(0, 140)); }
+  }, PARALLEL_KI, frist);
+  nichtGeprueft.forEach((d) => auditFehler.set(d.id, 'zeit_abgelaufen'));
+
+  // 5) Chronologisch entscheiden — eine im selben Lauf entschiedene Einreichung
+  //    ist für die nächste derselben EAN Referenz bzw. kein offener Vorgänger mehr.
   const byEan = new Map();
   alle.forEach((d) => { const e = eanOf(d.x); if (!e) return; if (!byEan.has(e)) byEan.set(e, []); byEan.get(e).push(policyOf(d.id, d.x)); });
   const statusJetzt = new Map(alle.map((d) => [d.id, d.x.status]));
   const plan = [];
   for (const d of pending) {
-    const x = d.x;
-    const comp = completenessCheck({ images: x.images, ean: eanOf(x), productName: x.productName, productNameOcr: x.productNameOcr || x.productNameRescueOcr }, REQUIRED);
-    const andere = (byEan.get(eanOf(x)) || []).filter((o) => o.id !== d.id).map((o) => ({ ...o, status: statusJetzt.get(o.id) || o.status }));
-    const dup = eanOf(x) ? evaluateDuplicate(policyOf(d.id, x), andere) : { verdict: 'ok', reason: null, lockUntil: null };
-    const metas = metaVon.get(d.id) || [];
-    const leer = metas.filter((m) => m.size === 0).map((m) => m.k);
-    // Ein Storage-Lesefehler ist eine Aussage über UNSERE Technik, nie über die
-    // Einreichung — der darf nicht zur Ablehnung führen.
-    const unlesbar = metas.filter((m) => m.size < 0).map((m) => m.k);
-
-    let entscheidung = 'freigeben'; let grund = null; let ctx = {};
-    if (!comp.ok) { entscheidung = 'ablehnen'; grund = comp.problems[0]; ctx = { missing: comp.missing }; }
-    else if (leer.length) { entscheidung = 'ablehnen'; grund = 'unvollstaendig'; ctx = { missing: leer }; }
-    else if (unlesbar.length) { entscheidung = 'offen'; grund = 'bild_nicht_lesbar_infrastruktur'; }
-    else if (dup.verdict === 'locked') { entscheidung = 'ablehnen'; grund = dup.reason; ctx = { lockUntil: dup.lockUntil }; }
-    else if (dup.verdict === 'hold') { entscheidung = 'offen'; grund = REASON.PENDING_OLDER; }
-    else if (wiederverwendet.has(d.id)) { entscheidung = 'ablehnen'; grund = 'bilder_wiederverwendet'; }
-    plan.push({ ...d, entscheidung, grund, ctx, comp, dup });
-    if (entscheidung === 'ablehnen') statusJetzt.set(d.id, 'rejected');
+    const v = vor.get(d.id);
+    const andere = (byEan.get(eanOf(d.x)) || []).filter((o) => o.id !== d.id).map((o) => ({ ...o, status: statusJetzt.get(o.id) || o.status }));
+    const dup = eanOf(d.x) ? evaluateDuplicate(policyOf(d.id, d.x), andere) : { verdict: 'ok', reason: null, lockUntil: null };
+    const e = entscheideFall({
+      comp: v.comp, dup, leer: v.leer, unlesbar: v.unlesbar, wiederverwendet: wiederverwendet.has(d.id),
+      audit: audit.get(d.id) || null, auditFehler: auditFehler.get(d.id) || null, rettungFehler: rettungFehler.get(d.id) || {},
+    });
+    plan.push({ ...d, ...e, comp: v.comp, dup, audit: audit.get(d.id) || null });
+    if (e.entscheidung === 'freigeben') statusJetzt.set(d.id, 'approved');
+    else if (e.entscheidung === 'ablehnen') statusJetzt.set(d.id, 'rejected');
   }
 
-  // 4) Bild-Audit für alles, was freigegeben würde
-  const kandidaten = plan.filter((p) => p.entscheidung === 'freigeben');
-  await arbeite(kandidaten, async (p) => {
-    try {
-      p.audit = await bildAudit(ai, bucket, p.x);
-    } catch (e) {
-      // Ein gescheiterter Audit ist kein Urteil — aber auch keine Freigabe.
-      p.audit = null;
-      p.auditFehler = String(e.message).slice(0, 120);
-    }
-  });
-  for (const p of kandidaten) {
-    if (!p.audit) { p.entscheidung = 'offen'; p.grund = 'bild_audit_gescheitert'; continue; }
-    if (!p.audit.echt || p.audit.gleicheAnsicht) { p.entscheidung = 'offen'; p.grund = p.audit.gleicheAnsicht ? 'gleiche_ansicht_mehrfach' : 'fotos_unpassend'; p.auditGrund = p.audit.grund; }
-  }
-  // Fehlender Barcode bei loser Ware bekommt den passenden Text.
-  for (const p of plan) {
-    if (p.grund !== 'ean_fehlt') continue;
-    try {
-      const a = p.audit || await bildAudit(ai, bucket, p.x);
-      if (a && a.loseWare) { p.grund = 'ean_fehlt_lose_ware'; p.audit = a; }
-    } catch { /* Text bleibt der allgemeine */ }
-  }
+  // 6) Notbremse
+  const bremse = notbremse(plan, { schnittQuote: schnittQuote(alle, start) });
 
-  // 5) Nur Eindeutiges ablehnen, alles andere in die Morgenliste
-  for (const p of plan) {
-    if (p.entscheidung === 'ablehnen' && !EINDEUTIG.has(p.grund)) p.entscheidung = 'offen';
-  }
-
-  // 6) Schreiben
-  const zahl = { freigegeben: 0, abgelehnt: 0, offen: 0 };
-  const offenListe = [];
+  // 7) Schreiben
   if (!dryRun) {
     for (const p of plan) {
       if (p.entscheidung === 'offen') continue;
+      const precheck = { verdict: p.comp.ok ? (p.dup.verdict === 'ok' ? 'ok' : p.dup.verdict) : 'incomplete', reasons: [...p.comp.problems, ...(p.dup.reason ? [p.dup.reason] : [])] };
+      const bild = p.audit ? { echt: p.audit.echt, loseWare: p.audit.loseWare, gleicheAnsicht: p.audit.gleicheAnsicht, grund: p.audit.grund } : null;
       await db.runTransaction(async (tx) => {
         const s = await tx.get(p.ref);
-        if (!s.exists || s.data().status !== 'pending') return;
-        const precheck = { verdict: p.comp.ok ? (p.dup.verdict === 'ok' ? 'ok' : p.dup.verdict) : 'incomplete', reasons: [...p.comp.problems, ...(p.dup.reason ? [p.dup.reason] : [])] };
+        if (!s.exists || s.data().status !== 'pending') { p.uebersprungen = true; return; }
         if (p.entscheidung === 'freigeben') {
-          tx.update(p.ref, { status: 'approved', reviewedAt: FieldValue.serverTimestamp(), reviewedBy: ENTSCHEIDER, updatedAt: FieldValue.serverTimestamp(), review: { precheck, decidedBy: ENTSCHEIDER, forced: false, bildAudit: true }, holdReasons: FieldValue.delete(), rejectReason: FieldValue.delete() });
+          tx.update(p.ref, {
+            status: 'approved', reviewedAt: FieldValue.serverTimestamp(), reviewedBy: ENTSCHEIDER, updatedAt: FieldValue.serverTimestamp(),
+            review: { precheck, decidedBy: ENTSCHEIDER, forced: false, bildAudit: bild, lauf },
+            holdReasons: FieldValue.delete(), rejectReason: FieldValue.delete(),
+            // Eine Nachricht pro Person statt einer pro Freigabe: die Einzel-
+            // nachricht des Buchungs-Triggers unterbleibt, der Lauf legt danach
+            // das Bündel an. `rewardPushSentAt` ist die Sicherung für einen
+            // Trigger-Stand, der `rewardPushGebuendelt` noch nicht kennt.
+            rewardPushGebuendelt: { lauf }, rewardPushSentAt: FieldValue.serverTimestamp(),
+            ...(p.loseWare ? { loseWare: { art: 'vom_bildaudit_erkannt', markiertAm: FieldValue.serverTimestamp() } } : {}),
+          });
         } else {
-          tx.update(p.ref, { status: 'rejected', rejectReason: p.grund, holdReasons: [...new Set([...(s.data().holdReasons || []), p.grund])], reviewNote: noteFor(p.grund, p.ctx), reviewedAt: FieldValue.serverTimestamp(), reviewedBy: ENTSCHEIDER, updatedAt: FieldValue.serverTimestamp(), review: { precheck, decidedBy: ENTSCHEIDER, reason: p.grund, lockUntil: p.ctx.lockUntil || null } });
+          tx.update(p.ref, {
+            status: 'rejected', rejectReason: p.grund, holdReasons: [...new Set([...(s.data().holdReasons || []), p.grund])],
+            reviewNote: noteFor(p.grund, p.ctx), reviewedAt: FieldValue.serverTimestamp(), reviewedBy: ENTSCHEIDER, updatedAt: FieldValue.serverTimestamp(),
+            review: { precheck, decidedBy: ENTSCHEIDER, reason: p.grund, lockUntil: p.ctx.lockUntil || null, bildAudit: bild, lauf },
+          });
         }
       });
     }
   }
-  for (const p of plan) {
-    if (p.entscheidung === 'freigeben') zahl.freigegeben++;
-    else if (p.entscheidung === 'ablehnen') zahl.abgelehnt++;
-    else {
-      zahl.offen++;
-      offenListe.push({ id: p.id, name: String(nameOf(p.x) || '?').slice(0, 60), markt: p.x.marketName || null, grund: p.grund, hinweis: p.auditGrund || p.auditFehler || null });
+
+  // 8) Auf die Buchungen warten, dann EINE Nachricht pro Person
+  const freigegeben = plan.filter((p) => p.entscheidung === 'freigeben' && !p.uebersprungen);
+  let gebucht = [];
+  let buchungAusstehend = 0;
+  let nachrichten = 0;
+  if (!dryRun && freigegeben.length) {
+    const bis = Date.now() + BUCHUNG_WARTEN_MS;
+    let stand = [];
+    for (;;) {
+      stand = [];
+      for (let i = 0; i < freigegeben.length; i += 100) {
+        const snaps = await db.getAll(...freigegeben.slice(i, i + 100).map((p) => p.ref));
+        snaps.forEach((s) => stand.push({ id: s.id, uid: s.get('userId'), rewardResult: s.get('rewardResult'), rewardCents: s.get('rewardCents'), grund: s.get('rewardNotCreditedReason') || null }));
+      }
+      if (stand.every((s) => s.rewardResult) || Date.now() > bis) break;
+      await schlafe(15000);
+    }
+    gebucht = stand;
+    buchungAusstehend = stand.filter((s) => !s.rewardResult).length;
+    for (const b of buendelProPerson(stand)) {
+      try {
+        await db.doc(`${BUENDEL}/${lauf}_${b.uid}`).create({ ...b, lauf, createdAt: FieldValue.serverTimestamp() });
+        nachrichten++;
+      } catch (e) {
+        if (!/already exists/i.test(e.message)) logger.warn('Bündel nicht angelegt', { uid: b.uid, fehler: e.message });
+      }
     }
   }
 
+  // 9) Lage bei Bons und Aktionen, Warnungen
+  const [lage, aktionen, vorher] = await Promise.all([bonLage(db, start), aktionsLage(db), db.doc(`${BERICHTE}/aktuell`).get()]);
+  const version = regelVersion();
+  const zaehle = (liste, feld) => liste.reduce((a, p) => { const k = p[feld] || '?'; a[k] = (a[k] || 0) + 1; return a; }, {});
+  const abgelehnt = plan.filter((p) => p.entscheidung === 'ablehnen' && !p.uebersprungen);
+  const offen = plan.filter((p) => p.entscheidung === 'offen');
+  const runde = {
+    geprueft: pending.length, offen: offen.length,
+    auditVersucht: zuPruefen.length - nichtGeprueft.length, auditFehler: [...auditFehler.values()].filter((f) => f !== 'zeit_abgelaufen').length,
+    nichtGeschafft: new Set([...nichtNachgelesen, ...nichtGeprueft].map((d) => d.id)).size,
+  };
+  const warn = warnungen({
+    jetzt: start, aktionen, zweitpruefung: lage.zweitpruefung, bons: lage.bons, runde, notbremse: bremse,
+    regelVersion: { alt: vorher.exists ? vorher.get('regelVersion') || null : null, neu: version },
+  });
+  const gebuchtCents = gebucht.filter((s) => s.rewardResult === 'credited').reduce((s, g) => s + (Number(g.rewardCents) || 0), 0);
+  const fall = (p) => ({ id: p.id, name: String(nameOf(p.x) || '?').slice(0, 60), markt: p.x.marketName || null, grund: p.grund, hinweis: p.ctx?.hinweis || null, zurueckgehalten: p.zurueckgehaltenGrund || null });
+
   const bericht = {
-    tag: new Date(start).toISOString().slice(0, 10),
+    lauf, tag, ausloeser, dryRun,
     laufAt: FieldValue.serverTimestamp(),
     dauerSekunden: Math.round((Date.now() - start) / 1000),
+    regelVersion: version, modell: MODELL,
     geprueft: pending.length,
-    ...zahl,
-    nachgelesen: gerettet,
-    wartetAufDich: offenListe,
-    dryRun,
+    freigegeben: dryRun ? plan.filter((p) => p.entscheidung === 'freigeben').length : freigegeben.length,
+    abgelehnt: abgelehnt.length,
+    offen: offen.length,
+    loseWare: plan.filter((p) => p.loseWare).length,
+    gebuchtCents, buchungAusstehend,
+    personenBezahlt: new Set(gebucht.filter((s) => s.rewardResult === 'credited').map((s) => s.uid)).size,
+    // Freigegeben, aber nicht gebucht (Pro-Kopf-Deckel, Budget leer …) — der
+    // Grund steht am Dokument; hier nur gezählt, damit es im Bericht auffällt.
+    nichtGebucht: zaehle(gebucht.filter((s) => s.rewardResult && s.rewardResult !== 'credited'), 'grund'),
+    nachrichten,
+    nachgelesen,
+    ablehnGruende: zaehle(abgelehnt, 'grund'),
+    offenGruende: zaehle(offen, 'grund'),
+    bildpruefung: { versucht: runde.auditVersucht, gescheitert: runde.auditFehler, unpassend: plan.filter((p) => BILD_GRUENDE.has(p.grund) || BILD_GRUENDE.has(p.zurueckgehaltenGrund)).length },
+    nichtGeschafft: runde.nichtGeschafft,
+    notbremse: { bild: bremse.bild, gesamt: bremse.gesamt },
+    wartetAufDich: offen.slice(0, 100).map(fall),
+    abgelehntListe: abgelehnt.slice(0, 100).map(fall),
+    bons: lage.bons,
+    zweitpruefung: lage.zweitpruefung,
+    aktionen: aktionen.filter((a) => a.active && a.endAt > start - 7 * 24 * 60 * 60 * 1000).map(({ id, kind, startAt, endAt, budgetRemainingCents, budgetTotalCents, cashbackPerBonCents }) => ({ id, kind, startAt, endAt, budgetRemainingCents, budgetTotalCents, cashbackPerBonCents })),
+    warnungen: warn,
   };
-  if (!dryRun) await db.collection(BERICHTE).doc(bericht.tag).set(bericht, { merge: true });
-  logger.info('Fotorunde fertig', { ...zahl, geprueft: pending.length, nachgelesen: gerettet });
-  return bericht;
+  await db.collection(BERICHTE).doc(lauf).set(bericht);
+  // `aktuell` liest der Morgen-Chat — nur echte Läufe, nie ein Trockenlauf.
+  if (!dryRun) await db.collection(BERICHTE).doc('aktuell').set(bericht);
+  logger.info('Morgenrunde fertig', { lauf, geprueft: bericht.geprueft, freigegeben: bericht.freigegeben, abgelehnt: bericht.abgelehnt, offen: bericht.offen, warnungen: warn.length });
+  return { ...bericht, laufAt: new Date().toISOString() };
 }
 
-module.exports = { taeglicheRunde, EINDEUTIG, noteFor };
+module.exports = { taeglicheRunde, noteFor, pruefzifferOk };
