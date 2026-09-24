@@ -78,7 +78,10 @@ export const PRODUCT_PHOTO_STEPS: ProductPhotoStepDef[] = [
   { key: 'ean', label: 'EAN / Barcode', hint: 'Strichcode in den Rahmen halten.', icon: 'barcode', mode: 'barcode' },
   { key: 'naehrwerte', label: 'Nährwerte', hint: 'Nährwerttabelle vollständig.', icon: 'nutrition', mode: 'document' },
   { key: 'zutaten', label: 'Zutaten', hint: 'Zutatenliste vollständig.', icon: 'format-list-bulleted', mode: 'document' },
-  { key: 'preis', label: 'Preisschild', hint: 'Preisschild am Regal.', icon: 'tag', mode: 'document' },
+  // Der Bon ist ausdrücklich erwünscht: sein Kopf trägt die Filialadresse, die
+  // beste Ortsquelle (Rang 1, Entscheidung 24.09.2026). Der Server nimmt ihn
+  // als Preisfoto an (crowd-upload-namer liest Preis und Adresse daraus).
+  { key: 'preis', label: 'Preisschild', hint: 'Preisschild am Regal oder dein Kassenbon — am besten mit Filialadresse.', icon: 'tag', mode: 'document' },
 ];
 
 export const REQUIRED_STEPS: ProductPhotoStep[] = PRODUCT_PHOTO_STEPS.map((s) => s.key);
