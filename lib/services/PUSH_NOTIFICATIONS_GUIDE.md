@@ -96,13 +96,28 @@ mit dem App-Resolver ist per Test festgenagelt
 (`lib/services/__tests__/pushDeepLinkVertrag.test.ts`).
 
 **Zweiter automatischer Sendeweg seit 20.09.2026 (12487v2akvp):**
-`crowd-upload-reward/src/push.js` schickt eine Nachricht, sobald eine
-Produktfoto-Einreichung freigegeben **und das Geld gebucht** ist — und nur
-dann. Eine Ablehnung bleibt bewusst leise (ihr Grund steht in der Liste der
-Einreichungen). Ziel `/product-submit`, `kind: 'crowd_reward'`, Merker
-`rewardPushSentAt` am Upload-Dokument gegen doppelte Zustellung. Das Modul
-ist eine KOPIE des Bon-Senders: bei Änderungen an Tokenlesung, Abbestellung
-oder Payload beide nachziehen.
+`crowd-upload-reward/src/push.js` meldet Produktfoto-Gutschriften — nur wenn
+Geld gebucht wurde, eine Ablehnung bleibt bewusst leise (ihr Grund steht in
+der Liste der Einreichungen). Seit 24.09. **gesammelt**: der Trigger merkt
+nur vor (`crowd_push_sammler/{uid}`), der Zeitplan-Lauf
+`sendeGesammelteGutschriften` schickt jede Minute EINE Nachricht je Nutzer,
+sobald 60 s keine Freigabe mehr dazukam. Aus zehn Freigaben einer Prüfrunde
+wird so eine Nachricht mit der Summe. Ziel `/product-submit`,
+`kind: 'crowd_reward'`. Not-Aus ohne Deploy:
+`cashback_config/v1.crowdPushAus = true`.
+
+**Texte (Entscheidung Patrick, 24.09.2026) — gleich für Fotos und Bons:**
+Das Geld steht in der Überschrift, die Detektiv-Sprache darunter.
+
+| Fall | Titel | Text |
+|---|---|---|
+| Produktfotos | `Ka-ching! 💰 +0,16 € für dich` | `Deine Produktfotos sind freigegeben. Starke Detektivarbeit!` |
+| Bon | `Ka-ching! 💰 +0,08 € für dich` | `Dein Bon von Lidl ist geprüft. Weiter so, Spürnase!` |
+| 10 € erreicht | `Ka-ching! 🎉 10,06 € zum Auszahlen` | `… dein Guthaben kannst du dir jetzt auszahlen lassen.` |
+
+Die Texte stehen zweimal: `cashback-pipeline/lib/pushTexte.js` und
+`crowd-upload-reward/src/push.js` (die Codebases teilen keinen Code). Wer
+den Ton ändert, zieht beide nach.
 
 Testen im Debug-Client: Der Entwickler-Client startet sich nach einem
 Nachrichten-Tap mit seiner eigenen Adresse neu und verwirft dabei die
