@@ -3135,8 +3135,10 @@ Buchung, 0 ohne Grund am Dokument, Warteschlange leer.
 
 Täglich 08:00 prüft und entscheidet `fotoRundeTaeglich` (Codebase
 review-console) alle offenen Produktfoto-Einreichungen — Freigaben UND
-Ablehnungen automatisch (Entscheidung Patrick 24.09.), eine Push-Nachricht pro
-Person, Bericht mit Warnungen in `ops_tagesberichte`. Dashboard:
+Ablehnungen automatisch (Entscheidung Patrick 24.09.), Bericht mit Warnungen
+in `ops_tagesberichte`. Die Nachricht an die Nutzer schickt NICHT die Runde,
+sondern der Sammler in crowd-upload-reward (eine pro Person) — die Runde darf
+deshalb keinen Push-Merker (`rewardPushSentAt`) setzen. Dashboard:
 md-receipt-admin.web.app/tagesbericht.html; Meldung im eigenen Claude-Chat +
 ClickUp (geplante Aufgabe `morgenrunde-bericht`). Scharf nur mit
 `cashback_config/v1.fotoWorker === true`. **Alles Weitere — Regeln, Notbremse,

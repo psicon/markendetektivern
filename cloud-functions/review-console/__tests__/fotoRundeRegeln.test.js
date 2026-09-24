@@ -3,7 +3,7 @@
  * Regeln der Morgenrunde. Jeder Fall hier ist einer, der in den Handrunden
  * 09.–24.09.2026 vorkam und dort von Hand entschieden werden musste.
  */
-const { entscheideFall, notbremse, buendelProPerson } = require('../src/fotoRundeRegeln');
+const { entscheideFall, notbremse } = require('../src/fotoRundeRegeln');
 
 const ok = { ok: true, problems: [], missing: [] };
 const echt = { echt: true, loseWare: false, gleicheAnsicht: false, grund: '' };
@@ -112,21 +112,5 @@ describe('notbremse', () => {
   it('wenige Ablehnungen lösen nie aus', () => {
     const p = plan(3, 0, 4);
     expect(notbremse(p, { schnittQuote: 0.01 }).gesamt).toBe(false);
-  });
-});
-
-describe('buendelProPerson', () => {
-  it('eine Nachricht pro Person, nur gebuchte zählen', () => {
-    const b = buendelProPerson([
-      { id: 'a', uid: 'u1', rewardResult: 'credited', rewardCents: 12 },
-      { id: 'b', uid: 'u1', rewardResult: 'credited', rewardCents: 16 },
-      { id: 'c', uid: 'u1', rewardResult: 'not_credited', rewardCents: 0 },
-      { id: 'd', uid: 'u2', rewardResult: 'credited', rewardCents: 12 },
-      { id: 'e', uid: 'u3' },
-    ]);
-    expect(b).toEqual([
-      { uid: 'u1', cents: 28, anzahl: 2, uploadIds: ['a', 'b'] },
-      { uid: 'u2', cents: 12, anzahl: 1, uploadIds: ['d'] },
-    ]);
   });
 });

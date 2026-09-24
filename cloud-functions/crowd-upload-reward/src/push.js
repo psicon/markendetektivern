@@ -132,82 +132,6 @@ async function ungueltigeTokenEntfernen(uid, entries, results) {
 }
 
 /**
- * Der eigentliche Versand an die Geräte EINES Nutzers — gemeinsam für die
- * Einzelnachricht (Freigabe in der Konsole) und die Sammelnachricht der
- * Morgenrunde. Payload-Regeln an genau einer Stelle: kein `badge`, Android-
- * Kanal `cashback`, `kind: 'crowd_reward'` (die App wertet nur Ziel und Art
- * aus, ein neuer Wert wäre für ausgelieferte Versionen unbekannt), Push-ID
- * fürs Konversions-Tracking, Eintrag in push_log.
- */
-async function versendeAn(uid, entries, { title, body, data = {}, log = {} }) {
-  const tokens = entries.map((e) => e.token);
-  // Eindeutige Push-ID fürs Konversions-Tracking: wandert in die data-Payload
-  // (der Client protokolliert den Tap als users/{uid}/push_events/{pushId})
-  // und ins Send-Log push_log/{pushId}.
-  const pushId = `p_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`;
-  const message = {
-    notification: { title, body },
-    data: {
-      ...data,
-      deepLink: DEEP_LINK,
-      kind: 'crowd_reward',
-      pushId,
-    },
-    apns: {
-      // KEIN `badge`. Ein hart gesetztes `badge: 1` hat am 07.09.2026 eine
-      // 1★-Rezension gekostet: APNs SETZT diesen Wert, es zählt nichts hoch,
-      // und niemand schrieb je 0 zurück — die rote Eins blieb für immer am
-      // App-Symbol. Siehe denselben Kommentar im Original.
-      payload: { aps: { sound: 'default' } },
-    },
-    android: {
-      priority: 'high',
-      notification: { channelId: ANDROID_KANAL, sound: 'default' },
-    },
-  };
-
-  let response;
-  try {
-    response = await admin.messaging().sendEachForMulticast({ tokens, ...message });
-  } catch (e) {
-    logger.error('[crowd-reward.push] Versand fehlgeschlagen', { uid, ...log, err: e.message });
-    return { sent: 0, error: e.message };
-  }
-
-  await ungueltigeTokenEntfernen(uid, entries, response.responses);
-
-  await admin
-    .firestore()
-    .doc(`push_log/${pushId}`)
-    .set({
-      pushId,
-      uid,
-      kind: 'crowd_reward',
-      ...log,
-      deepLink: DEEP_LINK,
-      title,
-      sentAt: admin.firestore.FieldValue.serverTimestamp(),
-      tokens: tokens.length,
-      success: response.successCount,
-      failure: response.failureCount,
-    })
-    .catch((e) =>
-      logger.warn('[crowd-reward.push] push_log nicht geschrieben', { pushId, err: e.message }),
-    );
-
-  logger.info('[crowd-reward.push] verschickt', {
-    uid,
-    ...log,
-    pushId,
-    tokens: tokens.length,
-    success: response.successCount,
-    failure: response.failureCount,
-  });
-
-  return { sent: response.successCount, failed: response.failureCount, pushId };
-}
-
-/**
  * Genau EIN Push je Einreichung — der Merker wird VOR dem Senden gesetzt.
  *
  * Firestore-Trigger sind at-least-once. Der Hauptschutz ist zwar schon der
@@ -267,13 +191,75 @@ async function sendeVerguetungPush({ uploadRef, uploadId, uid, cents }) {
       return { sent: 0, skipped: 'schon_verschickt' };
     }
 
+    const tokens = entries.map((e) => e.token);
+    // Eindeutige Push-ID fürs Konversions-Tracking: wandert in die data-Payload
+    // (der Client protokolliert den Tap als users/{uid}/push_events/{pushId})
+    // und ins Send-Log push_log/{pushId}.
+    const pushId = `p_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`;
     const { title, body } = nachricht(cents);
-    return await versendeAn(uid, entries, {
-      title,
-      body,
-      data: { crowdUploadId: String(uploadId) },
-      log: { crowdUploadId: String(uploadId), cents: Number(cents) },
+
+    const message = {
+      notification: { title, body },
+      data: {
+        crowdUploadId: String(uploadId),
+        deepLink: DEEP_LINK,
+        kind: 'crowd_reward',
+        pushId,
+      },
+      apns: {
+        // KEIN `badge`. Ein hart gesetztes `badge: 1` hat am 07.09.2026 eine
+        // 1★-Rezension gekostet: APNs SETZT diesen Wert, es zählt nichts hoch,
+        // und niemand schrieb je 0 zurück — die rote Eins blieb für immer am
+        // App-Symbol. Siehe denselben Kommentar im Original.
+        payload: { aps: { sound: 'default' } },
+      },
+      android: {
+        priority: 'high',
+        notification: { channelId: ANDROID_KANAL, sound: 'default' },
+      },
+    };
+
+    let response;
+    try {
+      response = await admin.messaging().sendEachForMulticast({ tokens, ...message });
+    } catch (e) {
+      logger.error('[crowd-reward.push] Versand fehlgeschlagen', { uid, uploadId, err: e.message });
+      return { sent: 0, error: e.message };
+    }
+
+    await ungueltigeTokenEntfernen(uid, entries, response.responses);
+
+    await admin
+      .firestore()
+      .doc(`push_log/${pushId}`)
+      .set({
+        pushId,
+        uid,
+        kind: 'crowd_reward',
+        crowdUploadId: String(uploadId),
+        deepLink: DEEP_LINK,
+        title,
+        cents: Number(cents),
+        sentAt: admin.firestore.FieldValue.serverTimestamp(),
+        tokens: tokens.length,
+        success: response.successCount,
+        failure: response.failureCount,
+      })
+      .catch((e) =>
+        logger.warn('[crowd-reward.push] push_log nicht geschrieben', { pushId, err: e.message }),
+      );
+
+    logger.info('[crowd-reward.push] verschickt', {
+      uid,
+      uploadId,
+      pushId,
+      cents,
+      tokens: tokens.length,
+      success: response.successCount,
+      failure: response.failureCount,
     });
+
+    return { sent: response.successCount, failed: response.failureCount, pushId };
   } catch (e) {
     logger.error('[crowd-reward.push] unerwarteter Fehler — Buchung bleibt unberührt', {
       uploadId,
@@ -284,62 +270,4 @@ async function sendeVerguetungPush({ uploadRef, uploadId, uid, cents }) {
   }
 }
 
-
-/**
- * Text der Sammelnachricht. Eine Einreichung → derselbe Satz wie die
- * Einzelnachricht; mehrere → die Zahl nennen, damit niemand zwanzig Pushes
- * für zwanzig Freigaben bekommt (Entscheidung Patrick 24.09.2026).
- */
-function sammelNachricht(cents, anzahl) {
-  const n = Math.max(1, Math.round(Number(anzahl) || 1));
-  if (n === 1) return nachricht(cents);
-  return {
-    title: `${betragText(cents)} sind da`,
-    body: `${n} deiner Produkt-Einreichungen sind freigegeben — der Betrag liegt in deinem Guthaben.`,
-  };
-}
-
-/**
- * EINE Nachricht für alle Gutschriften eines Nutzers aus einem Lauf der
- * Morgenrunde. Der Lauf schreibt `crowd_push_buendel/{lauf}_{uid}` erst,
- * nachdem die Buchungen stehen; Betrag und Anzahl kommen von dort.
- *
- * Genau einmal: Merker `gesendetAt` am Bündel-Dokument, gesetzt in einer
- * Transaktion VOR dem Senden — gleiche Abwägung wie bei der Einzelnachricht
- * (eine fehlende Nachricht ist der kleinere Schaden als eine doppelte).
- * Wirft nie.
- */
-async function sendeSammelPush({ buendelRef, uid, cents, anzahl, lauf }) {
-  try {
-    if (!(Number(cents) > 0)) return { sent: 0, skipped: 'nichts_gebucht' };
-    const entries = await getUserTokens(uid);
-    if (!entries.length) return { sent: 0, skipped: 'keine_empfaenger' };
-
-    const frei = await admin
-      .firestore()
-      .runTransaction(async (tx) => {
-        const snap = await tx.get(buendelRef);
-        if (snap.get('gesendetAt')) return false;
-        tx.set(buendelRef, { gesendetAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-        return true;
-      })
-      .catch((e) => {
-        logger.warn('[crowd-reward.push] Bündel-Merker nicht setzbar — kein Versand', { uid, err: e.message });
-        return false;
-      });
-    if (!frei) return { sent: 0, skipped: 'schon_verschickt' };
-
-    const { title, body } = sammelNachricht(cents, anzahl);
-    return await versendeAn(uid, entries, {
-      title,
-      body,
-      data: { sammel: '1', anzahl: String(anzahl) },
-      log: { buendel: String(lauf || ''), cents: Number(cents), anzahl: Number(anzahl) },
-    });
-  } catch (e) {
-    logger.error('[crowd-reward.push] Sammelnachricht: unerwarteter Fehler', { uid, err: e.message });
-    return { sent: 0, error: e.message };
-  }
-}
-
-module.exports = { sendeVerguetungPush, sendeSammelPush, sammelNachricht, betragText, nachricht, DEEP_LINK, ANDROID_KANAL };
+module.exports = { sendeVerguetungPush, betragText, nachricht, DEEP_LINK, ANDROID_KANAL };

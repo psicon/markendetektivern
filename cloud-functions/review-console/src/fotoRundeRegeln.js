@@ -116,24 +116,4 @@ function notbremse(plan, { schnittQuote = null, bildMaxAnteil = 0.1, bildMin = 5
   return ergebnis;
 }
 
-/**
- * Gebuchte Freigaben → eine Sammelnachricht pro Person. Nur tatsächlich
- * gebuchte (`rewardResult === 'credited'`) zählen; der Betrag ist der gebuchte.
- *
- * @param {Array<{id:string, uid:string, rewardResult?:string, rewardCents?:number}>} freigaben
- * @returns {Array<{uid:string, cents:number, anzahl:number, uploadIds:string[]}>}
- */
-function buendelProPerson(freigaben) {
-  const je = new Map();
-  for (const f of freigaben) {
-    if (f.rewardResult !== 'credited' || !(Number(f.rewardCents) > 0) || !f.uid) continue;
-    const b = je.get(f.uid) || { uid: f.uid, cents: 0, anzahl: 0, uploadIds: [] };
-    b.cents += Math.round(Number(f.rewardCents));
-    b.anzahl += 1;
-    if (b.uploadIds.length < 50) b.uploadIds.push(f.id);
-    je.set(f.uid, b);
-  }
-  return [...je.values()];
-}
-
-module.exports = { entscheideFall, notbremse, buendelProPerson, BILD_GRUENDE };
+module.exports = { entscheideFall, notbremse, BILD_GRUENDE };

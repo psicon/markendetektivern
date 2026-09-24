@@ -218,7 +218,7 @@
             <div class="kachel"><div class="z" style="color:var(--nein)">${b.abgelehnt ?? 0}</div><div class="l">abgelehnt</div></div>
             <div class="kachel"><div class="z" style="color:var(--offen)">${b.offen ?? 0}</div><div class="l">wartet auf dich</div></div>
             <div class="kachel"><div class="z" style="color:var(--geld)">${euro(b.gebuchtCents || 0)}</div><div class="l">gebucht${b.buchungAusstehend ? ` · ${b.buchungAusstehend} ausstehend` : ''}</div></div>
-            <div class="kachel"><div class="z">${b.personenBezahlt ?? 0}</div><div class="l">Personen bezahlt · ${b.nachrichten ?? 0} Nachrichten</div></div>
+            <div class="kachel"><div class="z">${b.personenBezahlt ?? 0}</div><div class="l">Personen bezahlt</div></div>
           </div>
 
           <div class="raster">

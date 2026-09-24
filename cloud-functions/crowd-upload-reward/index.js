@@ -41,7 +41,7 @@
  * gilt: `status === 'approved'` ohne `rewardResult` = echter Fehler.
  */
 
-const { onDocumentUpdated, onDocumentCreated } = require('firebase-functions/v2/firestore');
+const { onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
 
@@ -49,7 +49,7 @@ const { pruefeOrtsanforderung } = require('./src/locationGate');
 const { resolveRegion, matchesTargeting } = require('./src/targeting');
 const { ergebnisFelder } = require('./src/ergebnis');
 const { campaignZurAufnahmezeit } = require('./src/campaignFallback');
-const { sendeVerguetungPush, sendeSammelPush } = require('./src/push');
+const { sendeVerguetungPush } = require('./src/push');
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -323,10 +323,7 @@ exports.onCrowdUploadApproved = onDocumentUpdated(
       // Der Aufruf wirft nie und wird bewusst NICHT in den catch unten geführt:
       // das Geld ist an dieser Stelle gebucht, eine erneute Zustellung wegen
       // einer misslungenen Benachrichtigung wäre der teurere Fehler.
-      // Kommt die Freigabe aus der Morgenrunde (`rewardPushGebuendelt`), schickt
-      // DIESE eine Nachricht für alle Gutschriften der Person — sonst bekäme die
-      // aktivste Person zwanzig Pushes in wenigen Minuten (gemessen 24.09.2026).
-      if (credited > 0 && !after.rewardPushGebuendelt) {
+      if (credited > 0) {
         await sendeVerguetungPush({ uploadRef, uploadId, uid, cents: credited });
       }
     } catch (e) {
@@ -339,33 +336,5 @@ exports.onCrowdUploadApproved = onDocumentUpdated(
       });
       throw e;
     }
-  },
-);
-
-/**
- * Sammelnachricht der Morgenrunde (review-console/src/taeglicheRunde.js).
- *
- * Die Runde legt `crowd_push_buendel/{lauf}_{uid}` an, NACHDEM sie gesehen hat,
- * dass die Buchungen stehen — Betrag und Anzahl sind also die tatsächlich
- * gebuchten, nicht die geplanten. Die feste Dokument-ID macht einen zweiten
- * Lauf desselben Tages harmlos; den doppelten Versand bei einer erneuten
- * Zustellung verhindert der Merker in sendeSammelPush.
- *
- * Der Versand liegt bewusst HIER und nicht in der Runde: es gibt genau eine
- * Stelle, die Push-Nachrichten zu Produktfotos baut (Abbestellung, kein
- * Badge, Kanal, Tracking).
- */
-exports.onCrowdPushBuendel = onDocumentCreated(
-  { document: 'crowd_push_buendel/{id}', region: REGION },
-  async (event) => {
-    const d = event.data?.data();
-    if (!d || !d.uid) return;
-    await sendeSammelPush({
-      buendelRef: event.data.ref,
-      uid: d.uid,
-      cents: d.cents,
-      anzahl: d.anzahl,
-      lauf: d.lauf,
-    });
   },
 );

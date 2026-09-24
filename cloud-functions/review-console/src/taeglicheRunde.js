@@ -4,8 +4,9 @@
  *
  * Macht, was bis zum 24.09.2026 von Hand lief: fehlende Angaben aus den Fotos
  * nachlesen, die Regeln der Prüfkonsole anwenden, die Bilder ansehen,
- * entscheiden, eine Nachricht pro Person verschicken lassen und einen
- * Tagesbericht mit Warnungen schreiben. Das Wissen dahinter steht in
+ * entscheiden und einen Tagesbericht mit Warnungen schreiben. Die Nachricht an
+ * die Nutzer verschickt der Sammler in crowd-upload-reward (eine pro Person,
+ * gebündelt über alle Freigaben — auch die aus der Prüfkonsole). Das Wissen dahinter steht in
  * WISSEN-FOTORUNDE.md — wer hier etwas ändert, ändert zuerst dort.
  *
  * WARUM DAS IN DER PRÜFKONSOLE LIEGT und nicht in einer eigenen Codebase: die
@@ -36,12 +37,11 @@ const { FieldValue } = require('firebase-admin/firestore');
 const logger = require('firebase-functions/logger');
 const { GoogleGenAI } = require('@google/genai');
 const { evaluateDuplicate, completenessCheck } = require('./duplicatePolicy');
-const { entscheideFall, notbremse, buendelProPerson, BILD_GRUENDE } = require('./fotoRundeRegeln');
+const { entscheideFall, notbremse, BILD_GRUENDE } = require('./fotoRundeRegeln');
 const { warnungen } = require('./warnungen');
 
 const COL = 'crowd_uploads';
 const BERICHTE = 'ops_tagesberichte';
-const BUENDEL = 'crowd_push_buendel';
 const REQUIRED = ['front', 'rueckseite', 'hersteller', 'ean', 'naehrwerte', 'zutaten', 'preis'];
 // Bild-Wiederverwendung zählt nur für die produkt-identifizierenden Fotos:
 // ein gemeinsames Regal-Preisschild zweier Sorten ist plausibel (Befund 13.09.).
@@ -418,11 +418,9 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
             status: 'approved', reviewedAt: FieldValue.serverTimestamp(), reviewedBy: ENTSCHEIDER, updatedAt: FieldValue.serverTimestamp(),
             review: { precheck, decidedBy: ENTSCHEIDER, forced: false, bildAudit: bild, lauf },
             holdReasons: FieldValue.delete(), rejectReason: FieldValue.delete(),
-            // Eine Nachricht pro Person statt einer pro Freigabe: die Einzel-
-            // nachricht des Buchungs-Triggers unterbleibt, der Lauf legt danach
-            // das Bündel an. `rewardPushSentAt` ist die Sicherung für einen
-            // Trigger-Stand, der `rewardPushGebuendelt` noch nicht kennt.
-            rewardPushGebuendelt: { lauf }, rewardPushSentAt: FieldValue.serverTimestamp(),
+            // KEINE Push-Merker setzen: die Nachricht schickt der Sammler in
+            // crowd-upload-reward. Ein hier gesetztes `rewardPushSentAt` hielte
+            // er für „schon verschickt" — die Person bekäme gar nichts.
             ...(p.loseWare ? { loseWare: { art: 'vom_bildaudit_erkannt', markiertAm: FieldValue.serverTimestamp() } } : {}),
           });
         } else {
@@ -436,11 +434,11 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     }
   }
 
-  // 8) Auf die Buchungen warten, dann EINE Nachricht pro Person
+  // 8) Auf die Buchungen warten — nur für die Zahlen im Bericht (gebucht,
+  //    Personen). Die Nachricht an die Nutzer verschickt der Sammler selbst.
   const freigegeben = plan.filter((p) => p.entscheidung === 'freigeben' && !p.uebersprungen);
   let gebucht = [];
   let buchungAusstehend = 0;
-  let nachrichten = 0;
   if (!dryRun && freigegeben.length) {
     const bis = Date.now() + BUCHUNG_WARTEN_MS;
     let stand = [];
@@ -455,14 +453,6 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     }
     gebucht = stand;
     buchungAusstehend = stand.filter((s) => !s.rewardResult).length;
-    for (const b of buendelProPerson(stand)) {
-      try {
-        await db.doc(`${BUENDEL}/${lauf}_${b.uid}`).create({ ...b, lauf, createdAt: FieldValue.serverTimestamp() });
-        nachrichten++;
-      } catch (e) {
-        if (!/already exists/i.test(e.message)) logger.warn('Bündel nicht angelegt', { uid: b.uid, fehler: e.message });
-      }
-    }
   }
 
   // 9) Lage bei Bons und Aktionen, Warnungen
@@ -498,7 +488,6 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     // Freigegeben, aber nicht gebucht (Pro-Kopf-Deckel, Budget leer …) — der
     // Grund steht am Dokument; hier nur gezählt, damit es im Bericht auffällt.
     nichtGebucht: zaehle(gebucht.filter((s) => s.rewardResult && s.rewardResult !== 'credited'), 'grund'),
-    nachrichten,
     nachgelesen,
     ablehnGruende: zaehle(abgelehnt, 'grund'),
     offenGruende: zaehle(offen, 'grund'),

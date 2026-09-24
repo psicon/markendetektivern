@@ -12,7 +12,7 @@ hat, steht hier als Regel. Wer die Runde ändert, ändert zuerst diese Datei.
 | Entscheidungsregeln, Notbremse, Bündeln | `src/fotoRundeRegeln.js` (+ Tests) |
 | Doppel-Regel | `src/duplicatePolicy.js` — DIESELBE Datei wie die Prüfkonsole |
 | Warnungen | `src/warnungen.js` (+ Tests) |
-| Buchung + Push | `crowd-upload-reward` (Trigger bei `approved`; Sammelnachricht `onCrowdPushBuendel`) |
+| Buchung + Push | `crowd-upload-reward` (Trigger bei `approved` bucht; der Sammler `crowd_push_sammler` verschickt EINE Nachricht pro Person) |
 | Bericht | Firestore `ops_tagesberichte/{lauf}` und `ops_tagesberichte/aktuell` |
 | Dashboard | https://md-receipt-admin.web.app/tagesbericht.html (Callable `reviewTagesberichte`) |
 | Morgen-Chat | geplante Aufgabe `morgenrunde-bericht` in der Claude-App (08:35/08:48), postet in ClickUp |
@@ -41,8 +41,8 @@ Notbremse zurückhält — das steht im Bericht unter `wartetAufDich`.
    entschiedene Einreichung ist für die nächste derselben EAN Referenz bzw.
    kein offener Vorgänger mehr.
 6. **Notbremse** prüfen, dann schreiben.
-7. **Auf die Buchungen warten** (höchstens 5 Minuten), dann EINE Nachricht
-   pro Person (`crowd_push_buendel/{lauf}_{uid}` → Trigger in crowd-upload-reward).
+7. **Auf die Buchungen warten** (höchstens 5 Minuten) — nur für die Zahlen im
+   Bericht. Die Nachricht an die Nutzer schickt der Sammler in crowd-upload-reward.
 8. **Bericht** mit Bon-Lage, Aktionen und Warnungen schreiben.
 
 Zeitbudget: nach 18 Minuten beginnt die Runde nichts Neues mehr; der Rest ist
@@ -118,13 +118,18 @@ Dashboard und Morgen-Chat selbst (Bericht älter als 26 h bzw. nicht von heute).
 
 ## Nachricht an die Nutzer
 
-Eine Nachricht pro Person und Lauf, mit der tatsächlich gebuchten Summe
-(„1,80 € sind da — 12 deiner Produkt-Einreichungen sind freigegeben").
-Nie eine Nachricht bei Ablehnung (Entscheidung 20.09.). Die Freigabe setzt
-`rewardPushGebuendelt`, damit der Buchungs-Trigger keine Einzelnachricht
-schickt; `rewardPushSentAt` ist die Sicherung für einen älteren Trigger-Stand.
-Vorfall, der das nötig machte: 24.09. hätte die aktivste Person 20 Pushes in
-wenigen Minuten bekommen.
+Die Runde verschickt NICHTS selbst. Jede Buchung landet im Sammler von
+crowd-upload-reward (`crowd_push_sammler/{uid}`); der verschickt eine Minute
+nach der letzten Freigabe EINE Nachricht mit der Summe — für Freigaben aus
+der Runde genauso wie aus der Prüfkonsole. Nie eine Nachricht bei Ablehnung
+(Entscheidung 20.09.).
+
+Die Runde darf deshalb bei einer Freigabe KEINEN Push-Merker setzen
+(`rewardPushSentAt`): der Sammler hielte die Freigabe für „schon verschickt",
+und die Person bekäme gar nichts. Vorfall, der das Bündeln nötig machte:
+24.09. hätte die aktivste Person 20 Pushes in wenigen Minuten bekommen.
+Eine eigene Bündelung der Runde (crowd_push_buendel) gab es am 24.09. kurz —
+sie wurde zugunsten des Sammlers zurückgebaut, damit es genau einen Weg gibt.
 
 ## Meldung an Patrick
 
