@@ -806,10 +806,32 @@
           leisteAus();
           const zustand = c.row && c.row.status ? c.row.status : 'unbekannt';
           const wort = { approved: 'angenommen', rejected: 'abgelehnt', no_reward: 'angenommen, ohne Prämie', review: 'in Prüfung', pending: 'wartet' }[zustand] || zustand;
+          // Seit die Morgenrunde automatisch ablehnt (24.09.), muss eine
+          // Ablehnung von hier aus zurückholbar sein — der Server erlaubt
+          // „reopen" für jeden abgelehnten Produktfoto-Fall. Freigaben haben
+          // schon gebucht und werden nie per Klick zurückgenommen.
+          const zurueck = zustand === 'rejected' && S.type !== 'receipts';
           $('stage').insertAdjacentHTML('afterbegin',
-            `<div class="folge zahlt-nicht" style="margin:0 0 14px">Über die Karte geöffnet · dieser Fall ist bereits <b>${esc(wort)}</b> — hier wird nichts mehr entschieden.
-             <button id="zurueckZurListe" class="rchip" style="margin-left:10px">Zur Warteschlange</button></div>`);
+            `<div class="folge zahlt-nicht" style="margin:0 0 14px">Direkt geöffnet · dieser Fall ist bereits <b>${esc(wort)}</b>${zurueck ? '' : ' — hier wird nichts mehr entschieden'}.
+             ${zurueck ? '<button id="zurueckholen" class="rchip" style="margin-left:10px">Zurückholen und neu entscheiden</button>' : ''}
+             <button id="zurueckZurListe" class="rchip" style="margin-left:10px">Zur Warteschlange</button>
+             ${zurueck ? '<div style="margin-top:6px;font-size:12px">Danach bitte gleich entscheiden — sonst prüft die Morgenrunde den Fall am nächsten Morgen erneut.</div>' : ''}</div>`);
           $('zurueckZurListe').onclick = () => { history.replaceState({}, '', location.pathname + (S.type === 'receipts' ? '?tab=receipts' : '')); loadQueue(); };
+          if (zurueck) {
+            $('zurueckholen').onclick = async () => {
+              $('zurueckholen').disabled = true;
+              try {
+                await call('reviewDecideUploads')({ ids: [id], decision: 'reopen' });
+                S.done.delete(id); S.cache.delete(id);
+                toast('Zurückgeholt — jetzt entscheiden', 'good');
+                await loadQueue(true);
+                await oeffneEinzelfall(id);
+              } catch (e) {
+                $('zurueckholen').disabled = false;
+                toast('Zurückholen fehlgeschlagen: ' + e.message, 'bad');
+              }
+            };
+          }
         } catch (e) {
           zeigeFehler('Der Fall ließ sich nicht laden: ' + e.message, () => oeffneEinzelfall(id));
         }

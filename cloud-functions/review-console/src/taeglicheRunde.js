@@ -353,34 +353,6 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   }, PARALLEL_KI, frist);
   nichtNachgelesen.forEach((d) => rettungFehler.set(d.id, { name: 'zeit_abgelaufen', ean: 'zeit_abgelaufen' }));
 
-  // 1b) Preis auch bei der REFERENZ nachlesen. Fehlende Vergleichswerte gelten
-  //     als gleich (fail-closed) — fehlt der Preis nur bei der schon
-  //     freigegebenen Einreichung, entschiede sonst, auf welcher Seite die
-  //     Texterkennung zufällig versagt hat (Regel 20.09., WISSEN). Nur die
-  //     Paare, die die Doppel-Regel überhaupt sperren kann: gleiche Person,
-  //     gleiche EAN, freigegeben, binnen 24 h.
-  const TAG_MS = 24 * 60 * 60 * 1000;
-  const referenzen = new Map();
-  for (const d of pending) {
-    const e = eanOf(d.x); const t = ms(d.x.createdAt) || 0;
-    if (!e) continue;
-    for (const r of alle) {
-      if (r.x.status !== 'approved' || r.x.userId !== d.x.userId || eanOf(r.x) !== e || preisOf(r.x)) continue;
-      if (Math.abs((ms(r.x.createdAt) || 0) - t) < TAG_MS) referenzen.set(r.id, r);
-    }
-  }
-  const referenzFehler = new Map();
-  await arbeite([...referenzen.values()].slice(0, 40), async (r) => {
-    try {
-      const patch = await preisUndHersteller(ai, bucket, r.x, { preis: true, hersteller: false });
-      if (patch.priceRescueOcr) {
-        await r.ref.set({ ...patch, rescueAt: FieldValue.serverTimestamp(), rescueQuelle: `${MODELL}/vertex mit Denken, zwei übereinstimmende Lesungen (Morgenrunde, als Referenz)` }, { merge: true });
-        Object.assign(r.x, patch);
-        nachgelesen.preis++;
-      }
-    } catch (e) { referenzFehler.set(r.id, String(e.message).slice(0, 120)); }
-  }, PARALLEL_KI, frist);
-
   // 2) Bilddateien: leer, unlesbar, oder aus einer früheren Einreichung bekannt
   const storage = admin.storage().bucket(bucket);
   const metaVon = new Map();
@@ -434,8 +406,9 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     const dup = eanOf(d.x) ? evaluateDuplicate(policyOf(d.id, d.x), andere) : { verdict: 'ok', reason: null, lockUntil: null };
     const refDoc = dup.priorId ? alle.find((a) => a.id === dup.priorId) : null;
     const preisFehlt = !preisOf(d.x) || (refDoc ? !preisOf(refDoc.x) : false);
+    // Die Referenz (binnen 24 h freigegeben) lief selbst schon durch dieses
+    // Nachlesen, als sie offen war — deshalb hier nur der Fehler des Kandidaten.
     const rf = { ...(rettungFehler.get(d.id) || {}) };
-    if (refDoc && referenzFehler.has(refDoc.id)) rf.preis = rf.preis || referenzFehler.get(refDoc.id);
     const e = entscheideFall({
       comp: v.comp, dup, leer: v.leer, unlesbar: v.unlesbar, wiederverwendet: wiederverwendet.has(d.id),
       audit: audit.get(d.id) || null, auditFehler: auditFehler.get(d.id) || null, rettungFehler: rf, preisFehlt,

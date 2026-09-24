@@ -120,6 +120,7 @@
         bild_defekt: 'Datei beschädigt angekommen',
         notbremse_bildpruefung: 'Notbremse Bildprüfung',
         notbremse_quote: 'Notbremse Ablehnungsquote',
+        schreib_fehler: 'Speichern gescheitert (Technik)',
         below_min_items: 'Zu wenige Artikel',
         unknown_merchant: 'Markt unbekannt',
         bon_too_old: 'Bon zu alt',
@@ -187,8 +188,13 @@
       }
 
       function zeige() {
-        const sichtbar = berichte.filter((b) => mitTrocken || !b.dryRun);
         const echte = berichte.filter((b) => !b.dryRun);
+        // Gibt es noch keinen scharfen Lauf, zeigt die Seite den letzten
+        // Trockenlauf — samt roter Warnung, dass die Runde nichts entscheidet.
+        // Vorher stand hier „Noch kein Lauf", und der Hinweis auf den
+        // ausgeschalteten Schalter erschien nie (Gegenprüfung 24.09.).
+        let sichtbar = berichte.filter((b) => mitTrocken || !b.dryRun);
+        if (!sichtbar.length) sichtbar = berichte;
         if (!sichtbar.length) {
           $('inhalt').innerHTML = '<p class="leer">Noch kein Lauf. Die Morgenrunde läuft täglich um 8:00 Uhr.</p>';
           return;
@@ -222,8 +228,8 @@
           </div>
 
           <div class="raster">
-            <section class="box"><h3>Wartet auf dich (${(b.wartetAufDich || []).length})</h3>${faelle(b.wartetAufDich, 'Nichts offen.')}</section>
-            <section class="box"><h3>Automatisch abgelehnt (${(b.abgelehntListe || []).length})</h3>${faelle(b.abgelehntListe, 'Keine Ablehnungen.')}</section>
+            <section class="box"><h3>Wartet auf dich (${b.offen ?? 0}${(b.wartetAufDich || []).length < (b.offen || 0) ? `, erste ${(b.wartetAufDich || []).length} gezeigt` : ''})</h3>${faelle(b.wartetAufDich, 'Nichts offen.')}</section>
+            <section class="box"><h3>Automatisch abgelehnt (${b.abgelehnt ?? 0}${(b.abgelehntListe || []).length < (b.abgelehnt || 0) ? `, erste ${(b.abgelehntListe || []).length} gezeigt` : ''})</h3>${faelle(b.abgelehntListe, 'Keine Ablehnungen.')}</section>
             <section class="box"><h3>Ablehngründe</h3>${zeilen(b.ablehnGruende, 'keine')}
               ${Object.keys(b.nichtGebucht || {}).length ? `<h3 style="margin-top:14px">Freigegeben, aber nicht gebucht</h3>${zeilen(b.nichtGebucht)}` : ''}</section>
             <section class="box"><h3>Nachgelesen &amp; Bildprüfung</h3>

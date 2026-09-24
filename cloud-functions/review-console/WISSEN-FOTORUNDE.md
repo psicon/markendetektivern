@@ -72,8 +72,11 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   Ohne Eintrag liest der Nutzer einen Standardtext, der nicht zu seinem Fall
   passt (bis 20.09. bei 31 % der Abgelehnten so).
 - **Fehlende Vergleichswerte gelten als gleich** (fail-closed) — deshalb muss
-  bei fehlendem Preis BEIDE Seiten nachgelesen werden, Kandidat und Referenz.
-  Sonst entscheidet, auf welcher Seite die Texterkennung zufällig versagt hat.
+  bei fehlendem Preis BEIDE Seiten nachgelesen sein, Kandidat und Referenz.
+  Die Runde erfüllt das von selbst: die Referenz der Doppel-Regel ist eine
+  eigene Freigabe binnen 24 h und lief als offene Einreichung schon durch das
+  Nachlesen. Scheiterte das Nachlesen beim Kandidaten technisch und hängt die
+  Sperre nur am fehlenden Preis, bleibt der Fall offen statt abgelehnt.
 - **Ein geretteter Preis darf eine Sperre lösen, eine geretteter Herstellername
   nicht.** Markeninhaber und Produzent stehen beide auf der Packung; das ist
   kein Beleg für „andere Daten".
