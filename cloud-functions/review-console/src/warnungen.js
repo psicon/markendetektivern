@@ -26,7 +26,7 @@ const TAG_MS = 24 * 60 * 60 * 1000;
  * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number}} k.runde
  * @param {{bild:boolean, gesamt:boolean, text:string[]}} k.notbremse
  * @param {{alt:string|null, neu:string}} k.regelVersion
- * @param {{scharf:boolean, bericht:object|null, abgebrochen?:boolean, laeuftNoch?:boolean}} [k.bonRunde]
+ * @param {{scharf:boolean, bericht:object|null, abgebrochen?:boolean, laeuftNoch?:boolean, unbekannt?:boolean}} [k.bonRunde]
  * @returns {Array<{stufe:'rot'|'gelb', code:string, text:string}>}
  */
 function warnungen(k) {
@@ -88,7 +88,8 @@ function warnungen(k) {
   // ── Bon-Runde (07:45) ────────────────────────────────────────────────
   const br = k.bonRunde;
   if (br && !br.bericht) {
-    if (br.laeuftNoch && !br.abgebrochen) gelb('bonrunde_laeuft', 'Die Bon-Runde von 7:45 Uhr lief beim Schreiben dieses Berichts noch — ihr Ergebnis fehlt hier. Offene Bons in der Prüfkonsole ansehen.');
+    if (br.unbekannt) gelb('bonrunde_unbekannt', 'Der Bericht der Bon-Runde von 7:45 Uhr konnte nicht gelesen werden — offene Bons in der Prüfkonsole ansehen.');
+    else if (br.laeuftNoch && !br.abgebrochen) gelb('bonrunde_laeuft', 'Die Bon-Runde von 7:45 Uhr lief beim Schreiben dieses Berichts noch — ihr Ergebnis fehlt hier. Offene Bons in der Prüfkonsole ansehen.');
     else if (br.abgebrochen) {
       if (br.scharf) rot('bonrunde_abgebrochen', 'Die Bon-Runde von 7:45 Uhr ist nicht fertig geworden. Einzelne Bons können schon entschieden sein — Stand in der Prüfkonsole ansehen.');
       else gelb('bonrunde_abgebrochen', 'Der Trockenlauf der Bon-Runde von 7:45 Uhr ist nicht fertig geworden.');

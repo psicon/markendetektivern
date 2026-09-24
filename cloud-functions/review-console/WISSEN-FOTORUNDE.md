@@ -187,21 +187,29 @@ Lese-Sicherheit, `ocr_confidence_low|medium`).
   Lesungen, kein Vermerk, `none`): alle Felder gelten als uneinig; zusätzlich
   bleibt ein Bon liegen, dessen Artikelzahl knapp (≤ 1) über einer
   Betragsgrenze liegt, oder bei dem die Zweitlesung unter diese Grenze zählt.
-- **Markt**: verglichen mit id, Name UND Rohname vom Bonkopf (`merchant.raw`);
-  kurze Namen (dm) nur als ganzes Wort, sonst ein gemeinsames Wort ab 4 Zeichen.
-- **Datum:** nur Jahr falsch gelesen oder Tag↔Jahr vertauscht (23.09.26 →
-  2023-09-26) ist eine Fehllesung der Zweitlesung. Ein Jahr NACH dem Upload
-  ist immer eine. Zweifel (`jahr_unsicher`, Mensch) nur, wenn die Pipeline das
-  Datum korrigiert hat oder eine Erstlesung das andere Jahr hat.
+- **Markt**: nur ganze Wörter, ohne Gattungs- und Rechtsformwörter (GmbH,
+  Markt, Center, Drogerie, Tankstelle …). Passt, wenn ein Wort der Kette (id,
+  Katalogname) in der Lesung steht, oder die Mehrheit der Wörter des Rohnamens
+  vom Bonkopf (`merchant.raw`, für inhabergeführte Märkte). Ohne die Stoppwörter
+  galten 946 von 27.280 Paaren verschiedener Ketten als passend (Prüfrunde 4).
+- **Datum:** Schreibweisen werden vereinheitlicht (2026-9-23, 23.09.26). Nur
+  Jahr falsch gelesen oder Tag↔Jahr vertauscht (23.09.26 → 2023-09-26) ist eine
+  Fehllesung der Zweitlesung; ein Jahr NACH dem Upload ist immer eine. Zweifel
+  (`jahr_unsicher`, Mensch), wenn eine Erstlesung das andere Jahr hat — und
+  IMMER, wenn die Pipeline ein Vorjahres-Datum aufs Upload-Jahr korrigiert hat
+  (echter Vorjahres-Bon am Jahrestag). Eine alte Korrektur (2020 → 2026)
+  erklärt dieselbe Fehllesung und hält nicht an.
 - **Ablehnen** nur als Doppel gegen eine schon ENTSCHIEDENE Kopie
   (approved/paid/no_reward/matched). Pro Person wird die älteste zuerst
   entschieden; eine jüngere offene Kopie zählt nicht, eine ältere offene hält
   diesen Bon an (`zwilling_unentschieden`). Gleicher Markt/Tag/Endsumme bei
   einer anderen Person (`contentHash`) → Mensch.
-- **Budget:** vor jeder Freigabe die wirksame Aktion frisch lesen und den
-  Betrag für den Lauf reservieren (Personen laufen parallel); reicht es nicht,
-  bleibt der Bon liegen (`budget_leer`). Fehlendes Budgetfeld = 0 (wie der
-  Resolver). Sonst schlösse der Resolver ihn endgültig ohne Prämie ab.
+- **Budget:** vor jeder Freigabe die wirksame Aktion frisch lesen und gegen
+  min(frisch, Startstand im Lauf − Reservierungen des Laufs) prüfen; der Betrag
+  wird sofort reserviert und bleibt nach einer Buchung stehen (sonst zählte die
+  eigene Buchung doppelt, sobald sie im frischen Stand steckt). Reicht es
+  nicht, bleibt der Bon liegen (`budget_leer`). Fehlendes Budgetfeld = 0 (wie
+  der Resolver). Sonst schlösse der Resolver ihn endgültig ohne Prämie ab.
 - **Beanstandung merken** (`bonRundeBeanstandet` am Bon): konnte die
   Zweitlesung einen Bon nicht bestätigen (Widerspruch, nicht lesbar, Bild
   defekt, Jahr zweifelhaft), liest die Runde ihn nicht wieder nach — bis
@@ -217,8 +225,15 @@ Lese-Sicherheit, `ocr_confidence_low|medium`).
 - **Zeit** (900 s Function): nach 7 min kein neuer Bon, Lesen bis 11 min
   (jeder Versuch auf die Restzeit gekappt), Resolver nur bis 12½ min.
 - **Zeitüberschreitung beim Resolver** (Netz, 504): nachlesen; nur ein zum
-  Aufruf passender Endstatus zählt als Ergebnis.
+  Aufruf passender Endstatus zählt als Ergebnis, und nicht, wenn inzwischen
+  ein Mensch in der Konsole entschieden hat.
+- **„Bild defekt"** nur bei bildspezifischen Fehlertexten (decode, image
+  data). Ein anderer 400 von Google (z. B. Modell-Änderung wie am 22.09.) ist
+  Technik — sonst würde ein Infrastrukturfehler als Urteil über das Bild
+  dauerhaft am Bon gemerkt.
 - **Warnungen:** `bonrunde_fehlt` (scharf rot, Trockenlauf gelb),
+  `bonrunde_unbekannt` (Bericht nicht lesbar — die Foto-Runde schreibt ihren
+  Bericht trotzdem),
   `bonrunde_abgebrochen`, `bonrunde_laeuft`, `bonrunde_technik` (schon ab einem
   Bon, auch bei gescheiterter Zweitlesung), `bonrunde_budget`,
   `bonrunde_offen` (≥ 5), `bonrunde_kollision` (mehr Freigaben einer Person

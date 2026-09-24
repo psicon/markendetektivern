@@ -27,9 +27,15 @@ describe('datumVergleich — echte Fehllesungen der Zweitlesung', () => {
     expect(datumVergleich('2026-09-23', '2026-09-21')).toBe('anders');
     expect(datumVergleich('2026-09-23', '2026-08-23')).toBe('anders');
   });
-  it('leer oder deutsches Format → unlesbar, NICHT „passt"', () => {
+  it('leer oder Unsinn → unlesbar, NICHT „passt"', () => {
     expect(datumVergleich('2026-09-23', '')).toBe('unlesbar');
-    expect(datumVergleich('2026-09-23', '21.09.2026')).toBe('unlesbar');
+    expect(datumVergleich('2026-09-23', 'September')).toBe('unlesbar');
+  });
+  it('andere Schreibweisen desselben Datums werden verstanden', () => {
+    expect(datumVergleich('2026-09-23', '2026-9-23')).toBe('gleich');
+    expect(datumVergleich('2026-09-23', '23.09.26')).toBe('gleich');
+    expect(datumVergleich('2026-09-23', '23.9.2026')).toBe('gleich');
+    expect(datumVergleich('2026-09-23', '21.09.2026')).toBe('anders');
   });
 });
 
@@ -64,6 +70,17 @@ describe('marktPasst', () => {
     expect(marktPasst(dm, 'Admiral Getränke')).toBe(false);
     const edeka = bon({ merchant: { id: 'edeka', name: 'EDEKA', raw: 'FFFrische-Center Hochner' } });
     expect(marktPasst(edeka, 'HOCHNER FFFRISCHE')).toBe(true);
+  });
+  it('Gattungs- und Rechtsformwörter machen keine fremde Kette passend (Prüfrunde 4)', () => {
+    const rewe = bon({ merchant: { id: 'rewe', name: 'REWE', raw: 'REWE Markt GmbH' } });
+    expect(marktPasst(rewe, 'TEDi GmbH & Co. KG')).toBe(false);
+    expect(marktPasst(rewe, 'Aral Tankstelle GmbH')).toBe(false);
+    expect(marktPasst(rewe, 'Markt')).toBe(false);
+    expect(marktPasst(bon({ merchant: { id: 'dm', name: 'dm', raw: 'dm-drogerie markt' } }), 'Müller Drogerie Markt')).toBe(false);
+    expect(marktPasst(bon({ merchant: { id: 'rewe', name: 'REWE', raw: 'REWE CENTER' } }), 'E center HERKULES')).toBe(false);
+  });
+  it('ein gemeinsamer Vorname im Rohnamen reicht nicht', () => {
+    expect(marktPasst(bon({ merchant: { id: 'edeka', name: 'EDEKA', raw: 'Edeka Michael Müller' } }), 'REWE Michael Schmidt')).toBe(false);
   });
   it('anderer Markt / leer / zu kurz → nein', () => {
     expect(marktPasst(bon(), 'Lidl')).toBe(false);
@@ -100,6 +117,15 @@ describe('abgleich', () => {
   });
   it('nur Jahr anders, aber Pipeline hat das Datum korrigiert → jahr_unsicher', () => {
     expect(abgleich(bon({ bonDateCorrection: { from: '2025-09-23' } }), zweit({ datum: '2025-09-23' })).gruende).toContain('jahr_unsicher');
+  });
+  it('Vorjahres-Korrektur der Pipeline hält IMMER an — auch wenn die Zweitlesung das Upload-Jahr oder ein unmögliches liest', () => {
+    const b = bon({ bonDate: '2026-09-23', bonDateCorrection: { from: '2025-09-23', to: '2026-09-23', reason: 'year_misread_same_day' } });
+    expect(abgleich(b, zweit({ datum: '2026-09-23' })).gruende).toContain('jahr_unsicher');
+    expect(abgleich(b, zweit({ datum: '2028-09-23' })).gruende).toContain('jahr_unsicher');
+  });
+  it('alte Korrektur (2020 → 2026) erklärt dieselbe Fehllesung der Zweitlesung', () => {
+    const b = bon({ bonDateCorrection: { from: '2020-09-23', to: '2026-09-23' }, ocr: { robust: { reads: [{ bonDate: '2020-09-23' }, { bonDate: '2020-09-23' }] } } });
+    expect(abgleich(b, zweit({ datum: '2020-09-23' })).ok).toBe(true);
   });
   it('nur Jahr anders bei Datums-Konflikt im Feld-Gate → jahr_unsicher', () => {
     expect(abgleich(bon({ ocrFieldAgreement: fa(['bonDate']) }), zweit({ datum: '2025-09-23' })).gruende).toContain('jahr_unsicher');
@@ -232,6 +258,11 @@ describe('entscheideBon', () => {
   });
   it('Bild nicht dekodierbar → bild_defekt mit Merker-Grund, keine Technik', () => {
     expect(entscheideBon({ bon: bon(), zweitFehler: '400 INVALID_ARGUMENT: Failed to decode image data' })).toMatchObject({ entscheidung: 'offen', grund: 'bild_defekt', gruende: ['bild_defekt'] });
+  });
+  it('anderer 400 von Google (Modell-Änderung) → Technik, kein „Bild defekt"', () => {
+    const e = entscheideBon({ bon: bon(), zweitFehler: '400 INVALID_ARGUMENT: Thinking level is not supported for this model' });
+    expect(e).toMatchObject({ grund: 'zweitlesung_gescheitert', technik: true });
+    expect(e.gruende).toBeUndefined();
   });
   it('Widerspruch → offen, mit allen Gründen', () => {
     expect(entscheideBon({ bon: bon(), zweit: zweit({ datum: '2026-09-01', istKassenbon: false }) })).toMatchObject({ entscheidung: 'offen', grund: 'kein_kassenbon', gruende: ['kein_kassenbon', 'datum_widerspricht'] });

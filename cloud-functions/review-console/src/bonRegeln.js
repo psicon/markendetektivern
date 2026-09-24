@@ -125,6 +125,19 @@ function zwillingsUrteil(bon, zwillinge, { zeitUnsicher = false } = {}) {
 }
 
 /**
+ * Das Schema erzwingt kein Format: „2026-9-23" oder „23.09.26" sind lesbare
+ * Daten, kein „nicht gelesen" (Prüfrunde 4). Alles andere bleibt, wie es ist.
+ */
+function datumNormal(s) {
+  const t = String(s || '').trim();
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(t);
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  m = /^(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})$/.exec(t);
+  if (m) return `${m[3].length === 2 ? `20${m[3]}` : m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  return t;
+}
+
+/**
  * Datum der Zweitlesung gegen das gespeicherte.
  * @returns {'gleich'|'nur_jahr'|'vertauscht'|'anders'|'unlesbar'}
  *  - nur_jahr: Tag+Monat gleich, Jahr anders (2020/2023/2028 statt 2026 —
@@ -134,7 +147,7 @@ function zwillingsUrteil(bon, zwillinge, { zeitUnsicher = false } = {}) {
  */
 function datumVergleich(gespeichert, gelesen) {
   const g = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(gespeichert || ''));
-  const z = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(gelesen || ''));
+  const z = /^(\d{4})-(\d{2})-(\d{2})$/.exec(datumNormal(gelesen));
   if (!g || !z) return 'unlesbar';
   if (g[0] === z[0]) return 'gleich';
   if (g[2] !== z[2]) return 'anders';
@@ -165,9 +178,26 @@ function jahrGestuetzt(bon, gelesen) {
  *  - Keine Erstlesungen → der Datums-Konflikt entscheidet (vorsichtig).
  */
 function jahrZweifel(bon, gelesen, konflikte) {
-  if (bon.bonDateCorrection) return true;
+  const k = bon.bonDateCorrection;
+  // Eine alte Korrektur (2020 → 2026) erklärt genau diese Fehllesung.
+  if (k && String(k.from || '').slice(0, 4) === String(gelesen || '').slice(0, 4)) return false;
   if (erstJahre(bon).length) return jahrGestuetzt(bon, gelesen);
   return konflikte.includes('bonDate');
+}
+
+/**
+ * Hat die Pipeline ein VORJAHRES-Datum aufs Upload-Jahr korrigiert
+ * (2025-09-24 → 2026-09-24)? Genau das ist die Klasse „echter Vorjahres-Bon am
+ * Jahrestag" — sie bleibt immer beim Menschen, egal was die Zweitlesung liest
+ * (Prüfrunde 4; im Bestand 6 Fälle 2025 → 2026).
+ */
+function vorjahresKorrektur(bon) {
+  const k = bon.bonDateCorrection;
+  const up = msOf(bon.createdAt) ?? bon.createdMs;
+  if (!k || !up) return false;
+  const von = Number(String(k.from || '').slice(0, 4));
+  const upJahr = Number(new Date(up).toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' }).slice(0, 4));
+  return Boolean(von) && von >= upJahr - 1;
 }
 
 /**
@@ -184,29 +214,34 @@ function jahrUnmoeglich(bon, gelesen) {
 
 const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
 
-const woerter = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9]+/).filter(Boolean);
+// Gattungs- und Rechtsformwörter tragen keine Identität: „REWE Markt GmbH" und
+// „TEDi GmbH & Co. KG" sind nicht derselbe Markt (Prüfrunde 4: ohne diese Liste
+// galten 946 von 27.280 Paaren verschiedener Ketten als passend).
+const STOPP = new Set([
+  'gmbh', 'mbh', 'co', 'kg', 'ohg', 'ek', 'ag', 'se', 'ug', 'gbr', 'und', 'der', 'die', 'das', 'fuer', 'fur',
+  'markt', 'maerkte', 'markte', 'supermarkt', 'center', 'drogerie', 'discount', 'marken', 'filiale', 'tankstelle',
+  'apotheke', 'handel', 'handelshof', 'handelsgesellschaft', 'gesellschaft', 'stiftung', 'shop', 'store', 'e', 'k',
+]);
+const woerter = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .split(/[^a-z0-9]+/).filter((w) => w && !STOPP.has(w));
 
 /**
- * Markt der Zweitlesung passt zum aufgelösten Markt? Schreibweise egal.
- * Verglichen wird auch der ROHNAME vom Bonkopf (`merchant.raw`) — genau das,
- * was die Zweitlesung liest: inhabergeführte Märkte heißen dort anders als im
- * Katalog (EDEKA ↔ „FFFrische-Center Hochner"). Kurze Namen (dm) zählen nur
- * als ganzes Wort, nie als Bruchstück („K" ist kein Kaufland).
+ * Markt der Zweitlesung passt zum aufgelösten Markt? Verglichen werden nur
+ * ganze Wörter ohne Gattungs-/Rechtsformwörter:
+ *  - ein Wort der Kette (id, Katalogname) steht in der Lesung („dm", „netto"),
+ *  - oder die Mehrheit der Wörter des ROHNAMENS vom Bonkopf (`merchant.raw`)
+ *    steht darin — inhabergeführte Märkte heißen dort anders als im Katalog
+ *    (EDEKA ↔ „FFFrische-Center Hochner"). Ein einzelner gemeinsamer Vorname
+ *    („Edeka Michael Müller" ↔ „REWE Michael Schmidt") reicht dafür nicht.
  */
 function marktPasst(bon, gelesen) {
-  const z = norm(gelesen);
-  if (!z) return false;
-  const zWoerter = new Set(woerter(gelesen));
+  const z = new Set(woerter(gelesen));
+  if (!z.size) return false;
   const m = bon.merchant || {};
-  const quellen = [m.id, m.name, m.raw].filter(Boolean);
-  for (const q of quellen) {
-    const k = norm(q);
-    if (k.length >= 3 && z.length >= 3 && (z.includes(k) || k.includes(z))) return true;
-    if (k.length > 0 && k.length < 3 && zWoerter.has(k)) return true;
-    // gemeinsames Wort ab 4 Zeichen („hochner", „fffrische")
-    if (woerter(q).some((w) => w.length >= 4 && zWoerter.has(w))) return true;
-  }
-  return false;
+  const kette = new Set([...woerter(String(m.id || '').replace(/-/g, ' ')), ...woerter(m.name)]);
+  if ([...kette].some((w) => z.has(w))) return true;
+  const roh = [...new Set(woerter(m.raw))];
+  return roh.length > 0 && roh.filter((w) => z.has(w)).length * 2 >= roh.length && roh.some((w) => w.length >= 4 && z.has(w));
 }
 
 /**
@@ -224,7 +259,8 @@ function abgleich(bon, zweit, { grenzen = [] } = {}) {
   const { schwach, konflikte } = konfliktLage(bon);
 
   const dv = datumVergleich(bon.bonDate, zweit.datum);
-  if (dv === 'unlesbar') gruende.push('datum_nicht_gelesen');
+  if (vorjahresKorrektur(bon)) gruende.push('jahr_unsicher');
+  else if (dv === 'unlesbar') gruende.push('datum_nicht_gelesen');
   else if (dv === 'anders') gruende.push('datum_widerspricht');
   else if (dv !== 'gleich' && !jahrUnmoeglich(bon, zweit.datum) && jahrZweifel(bon, zweit.datum, konflikte)) gruende.push('jahr_unsicher');
 
@@ -267,15 +303,15 @@ function wirksameAktionId(bon) {
  * liegen, bis das Budget stimmt.
  * @returns {null|{entscheidung:'offen', grund:string, hinweis?:string}}
  */
-function budgetUrteil(bon, aktion, reserviertCents = 0) {
+function budgetUrteil(bon, aktion) {
   const cid = wirksameAktionId(bon);
   if (!cid) return { entscheidung: 'offen', grund: 'keine_aktion' };
   if (!aktion) return { entscheidung: 'offen', grund: 'keine_aktion', hinweis: cid };
   // Wie der Resolver: ein fehlendes/ungültiges Feld zählt als 0 (dort
   // `Number.isFinite(...) ? … : 0`) — also nicht als „unbegrenzt".
-  // Abzüglich dessen, was dieser Lauf schon für andere Bons derselben Aktion
-  // freigibt — die Personen laufen parallel, die Buchung kommt erst danach.
-  const rest = (Number.isFinite(aktion.budgetRemainingCents) ? aktion.budgetRemainingCents : 0) - (Number(reserviertCents) || 0);
+  // Was dieser Lauf schon für andere Bons reserviert hat, zieht bonRunde.js
+  // vorher ab (Startstand/Frischstand, siehe dort).
+  const rest = Number.isFinite(aktion.budgetRemainingCents) ? aktion.budgetRemainingCents : 0;
   if (rest < (Number(bon.cashbackCents) || 0)) {
     return { entscheidung: 'offen', grund: 'budget_leer', hinweis: `${cid}: ${rest} ct übrig` };
   }
@@ -313,7 +349,9 @@ function entscheideBon({ bon, zwilling = null, zweit = null, zweitFehler = null,
   if (zweitFehler) {
     // Ein Bild, das Gemini nicht dekodieren kann, wird morgen nicht besser —
     // eigener Grund mit Merker, kein Technikfehler (bon_mu1m6…: 512 KiB abgeschnitten).
-    if (/decode|INVALID_ARGUMENT/i.test(String(zweitFehler))) return { entscheidung: 'offen', grund: 'bild_defekt', gruende: ['bild_defekt'], hinweis: String(zweitFehler).slice(0, 120) };
+    // Nur bildspezifische Texte — ein 400 wegen einer Modell-Änderung bei Google
+    // („Thinking budget is not supported", 22.09.) ist Technik, kein Bildurteil.
+    if (/decode|image data|Unable to process input image/i.test(String(zweitFehler))) return { entscheidung: 'offen', grund: 'bild_defekt', gruende: ['bild_defekt'], hinweis: String(zweitFehler).slice(0, 120) };
     return { entscheidung: 'offen', grund: 'zweitlesung_gescheitert', technik: !/kein Bildpfad/.test(String(zweitFehler)), hinweis: String(zweitFehler).slice(0, 120) };
   }
   const a = abgleich(bon, zweit, { grenzen });

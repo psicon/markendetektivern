@@ -3195,7 +3195,9 @@ Review-Runden (29 Funde) haben Fallen gezeigt, die für JEDE Nacharbeit gelten:
   Client-Softcheck.
   `cashback_config/v1.dailyCap` ist jetzt semantisch ein Zähler — von 3 auf 1
   gesetzt, damit das gelebte Verhalten bleibt; 3 würde ab sofort 3 Bons/Tag
-  vergüten (kein Deploy nötig).
+  vergüten (kein Deploy nötig). **Seit 24.09.2026 steht er auf 3 (Entscheidung
+  Patrick, `dailyCapNote` am Dokument)** — Pipeline, Resolver und Bon-Runde
+  lesen denselben Wert.
 - **Der OCR-Cache-Pfad muss `ocr.robust` mitführen** (index.js Cache-Zweig).
   Ohne ihn ist das Review-Gate 6w bei jedem Retry/Reprocessing blind
   (conf=null → keine Prüfung) und der Final-Write löscht robust am Doc.

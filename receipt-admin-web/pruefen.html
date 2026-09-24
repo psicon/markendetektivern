@@ -247,6 +247,10 @@
         decision_in_progress: 'über diesen Bon entscheidet gerade jemand anderes — gleich neu laden',
         processing_in_progress: 'dieser Bon wird gerade automatisch verarbeitet — in einer Minute erneut versuchen',
         forbidden: 'der Zugang zum Resolver wurde abgelehnt',
+        // Keine Antwort: der Resolver kann trotzdem gebucht haben — nicht blind
+        // noch einmal klicken (ein zweiter Klick ergibt dann „nicht mehr in der Prüfung").
+        netzwerk: 'keine Antwort vom Server — das Ergebnis ist unklar, bitte den Bon neu laden, bevor du erneut entscheidest',
+        504: 'Zeitüberschreitung beim Server — das Ergebnis ist unklar, bitte den Bon neu laden, bevor du erneut entscheidest',
       };
 
       const FOLGE_DE = {

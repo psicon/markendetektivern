@@ -153,9 +153,14 @@ async function bonRunde({ dryRun = false, projekt, bucketName, schluessel = null
   const jePerson = new Map();
   bons.forEach((b) => { const u = b.userId || '?'; if (!jePerson.has(u)) jePerson.set(u, []); jePerson.get(u).push(b); });
   const plan = [];
-  // Budget, das dieser Lauf gerade freigibt, bis die Buchung in Firestore steht
-  // (Personen laufen parallel). Im Trockenlauf bleibt es stehen — dort bucht nichts.
+  // Budget je Aktion: Stand beim ersten Lesen im Lauf, davon alles abgezogen,
+  // was dieser Lauf freigibt (Personen laufen parallel). Die Reservierung bleibt
+  // nach einer Buchung stehen und fällt nur weg, wenn sicher nicht gebucht
+  // wurde. Geprüft wird gegen min(frisch gelesen, Startstand − reserviert):
+  // „frisch" sieht Buchungen der Pipeline, „Start − reserviert" die eigenen,
+  // auch solange der Resolver noch antwortet (Prüfrunde 4: sonst doppelt gezählt).
   const reserviert = new Map();
+  const budgetStart = new Map();
   const liegen = await arbeite([...jePerson.values()], async (liste) => {
     for (const b of liste) {
       const eintrag = { id: b.id, userId: b.userId || null, markt: b.merchant?.name || null, datum: b.bonDate || null, cents: Number(b.cashbackCents) || 0, vorher: b.vorher || null };
@@ -177,12 +182,20 @@ async function bonRunde({ dryRun = false, projekt, bucketName, schluessel = null
           aktion = cid ? (await db.doc(`cashback_campaigns/${cid}`).get()).data() || null : null;
         }
         let e = entscheideBon({ bon: b, zwilling: zw, zweit, zweitFehler, grenzen: betragsGrenzen(aktion, cfg) });
-        if (e.entscheidung === 'freigeben') e = budgetUrteil(b, aktion, reserviert.get(cid) || 0) || e;
+        if (aktion && cid && !budgetStart.has(cid)) budgetStart.set(cid, Number.isFinite(aktion.budgetRemainingCents) ? aktion.budgetRemainingCents : 0);
+        if (e.entscheidung === 'freigeben') {
+          const frisch = Number.isFinite(aktion?.budgetRemainingCents) ? aktion.budgetRemainingCents : 0;
+          const rest = Math.min(frisch, (budgetStart.get(cid) ?? frisch) - (reserviert.get(cid) || 0));
+          e = budgetUrteil(b, aktion ? { ...aktion, budgetRemainingCents: rest } : aktion) || e;
+        }
         // Reservieren SOFORT nach der Prüfung, vor dem nächsten await — sonst
         // besteht die parallel laufende Person dieselbe Prüfung mit demselben Rest.
         const reservierung = e.entscheidung === 'freigeben' ? Number(b.cashbackCents) || 0 : 0;
         if (reservierung) reserviert.set(cid, (reserviert.get(cid) || 0) + reservierung);
-        const freigeben = () => { if (reservierung && !dryRun) reserviert.set(cid, (reserviert.get(cid) || 0) - reservierung); };
+        // Gebucht (oder unklar, ob gebucht) → Reservierung bleibt. Sicher nicht
+        // gebucht → zurückgeben. Im Trockenlauf bleibt sie immer stehen.
+        let vielleichtGebucht = false;
+        const freigeben = () => { if (reservierung && !dryRun && !vielleichtGebucht) reserviert.set(cid, (reserviert.get(cid) || 0) - reservierung); };
         Object.assign(eintrag, e, { zweit: zweit ? { datum: zweit.datum, endsummeCent: zweit.endsummeCent, markt: zweit.markt, anzahlPositionen: zweit.anzahlPositionen } : null });
 
         // Scharf wird die Reservierung in jedem Fall wieder frei, auch bei Fehlern.
@@ -208,6 +221,7 @@ async function bonRunde({ dryRun = false, projekt, bucketName, schluessel = null
               const aufruf = e.entscheidung === 'freigeben' ? { decision: 'approve' }
                 : { decision: 'reject', reason: e.grund, duplicateOf: e.duplicateOf, priorStatus: e.priorStatus };
               const r = await resolverAufruf({ receiptId: b.id, schluessel, ...aufruf });
+              vielleichtGebucht = aufruf.decision === 'approve' && (r.ok ? r.status === 'approved' : (r.code === 'netzwerk' || r.http >= 500));
               if (r.ok) {
                 let grund = r.capReason || null;
                 if (r.status === 'no_reward' && !grund) grund = (await db.doc(`receipts/${b.id}`).get()).get('rejectReason') || null;
@@ -221,7 +235,10 @@ async function bonRunde({ dryRun = false, projekt, bucketName, schluessel = null
                 // Nur ein Endstatus, der zu UNSERER Entscheidung passt, gilt als
                 // Ergebnis — alles andere (neu verarbeitet, von Hand abgelehnt) ist
                 // ein veränderter Fall, kein Erfolg.
-                const passt = aufruf.decision === 'approve' ? ['approved', 'no_reward'].includes(nach.status) : nach.status === 'rejected';
+                // Hat inzwischen ein Mensch in der Konsole entschieden, ist es nicht
+                // unser Ergebnis — nicht mitzählen, seinen Vermerk nicht überschreiben.
+                const fremd = nach.reviewConsole && nach.reviewConsole.decidedBy && nach.reviewConsole.decidedBy !== 'worker-bonrunde';
+                const passt = !fremd && (aufruf.decision === 'approve' ? ['approved', 'no_reward'].includes(nach.status) : nach.status === 'rejected');
                 if (passt) {
                   eintrag.ergebnis = { http: 0, status: nach.status, grund: nach.rejectReason || null, gebuchtCents: nach.status === 'approved' ? Number(nach.cashbackCents) || 0 : 0, nachgelesen: true };
                   await db.doc(`receipts/${b.id}`).set({ reviewConsole: { decidedBy: 'worker-bonrunde', decision: aufruf.decision, reason: aufruf.reason || null, nachgelesen: true, at: FieldValue.serverTimestamp() } }, { merge: true }).catch(() => {});

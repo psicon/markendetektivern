@@ -356,6 +356,32 @@ describe('scharf — liegen lassen', () => {
     expect(offen[0].grund).toBe('budget_leer');
   });
 
+  it('eigene Buchung wird nicht doppelt abgezogen, wenn sie schon im frisch gelesenen Budget steckt (Prüfrunde 4)', async () => {
+    lege('cashback_campaigns/sep', { budgetRemainingCents: 20, minItems: 4 });
+    lege('receipts/a1', bon('a1', { userId: 'a' }));
+    lege('receipts/b1', bon('b1', { userId: 'b' }));
+    // Reihenfolge erzwingen: a1 bucht beim Resolver das Budget (20 → 12) und
+    // antwortet noch nicht; erst DANN liest b1 die Aktion frisch. Die
+    // Reservierung von a1 steht dann noch — die alte Rechnung „frisch −
+    // reserviert" ergab 4 ct und ließ b1 fälschlich liegen.
+    let a1Gebucht; const a1HatGebucht = new Promise((r) => { a1Gebucht = r; });
+    let a1Weiter; const a1Antwort = new Promise((r) => { a1Weiter = r; });
+    let lesungen = 0;
+    mockGenerate.mockImplementation(async () => {
+      if (++lesungen === 2) await a1HatGebucht; // die zweite Lesung (b1) wartet auf a1s Buchung
+      return antwort(zweit());
+    });
+    mockResolver.mockImplementation(async (a) => {
+      const c = mockStore.get('cashback_campaigns/sep');
+      mockStore.set('cashback_campaigns/sep', { ...c, budgetRemainingCents: c.budgetRemainingCents - 8 });
+      if (a.receiptId === 'a1') { a1Gebucht(); await a1Antwort; } else a1Weiter();
+      return resolverBucht(a);
+    });
+    await scharf();
+    expect(mockResolver.mock.calls.map(([a]) => a.receiptId).sort()).toEqual(['a1', 'b1']);
+    expect(['a1', 'b1'].map((id) => fall(id).entscheidung)).toEqual(['freigeben', 'freigeben']);
+  });
+
   it('Budget reicht nicht → offen „budget_leer", kein Resolver', async () => {
     lege('receipts/b1', bon('b1'));
     lege('cashback_campaigns/sep', { budgetRemainingCents: 5, minItems: 4 });
@@ -502,6 +528,18 @@ describe('Doppel', () => {
     expect(mockResolver).not.toHaveBeenCalled();
     expect(fall('b0')).toMatchObject({ entscheidung: 'offen', grund: 'summe_widerspricht' });
     expect(fall('b1')).toMatchObject({ entscheidung: 'offen', grund: 'zwilling_unentschieden', hinweis: 'b0' });
+  });
+
+  it('Nachlesen nach Zeitüberschreitung: hat inzwischen ein Mensch entschieden, ist es nicht unser Ergebnis', async () => {
+    lege('receipts/b1', bon('b1'));
+    mockResolver.mockImplementation(async ({ receiptId }) => {
+      const d = mockStore.get(`receipts/${receiptId}`);
+      mockStore.set(`receipts/${receiptId}`, { ...d, status: 'approved', reviewConsole: { decidedBy: 'patrick-uid', decision: 'approve' } });
+      return { ok: false, http: 0, code: 'netzwerk' };
+    });
+    await scharf();
+    expect(fall('b1')).toMatchObject({ entscheidung: 'offen', grund: 'veraendert_nach_aufruf' });
+    expect(mockStore.get('receipts/b1').reviewConsole.decidedBy).toBe('patrick-uid');
   });
 
   it('eine abgelehnte Kopie zählt nicht als Zwilling', async () => {
