@@ -151,3 +151,77 @@ im ClickUp-Kanal MarkenDetektive_DevBacklog). Der Chat läuft nur, wenn die
 Claude-App auf Patricks Mac offen ist; sonst beim nächsten Start. Die Cloud
 Function hat keinen ClickUp-Zugang (kein Token im Secret Manager) — deshalb
 postet der Chat, nicht die Function.
+
+## Bon-Runde (07:45, seit 24.09.2026)
+
+Anlass: Patrick, 24.09. — „Wieso entscheidet die Morgenrunde nicht über Bons?
+Dann laufen die ja wieder auf." Die Pipeline entscheidet fast alles selbst;
+übrig bleiben ~5 Bons am Tag in `review` (60 Tage: 296 von 299 wegen niedriger
+Lese-Sicherheit, `ocr_confidence_low|medium`).
+
+- **Code:** `src/bonRunde.js` (Ablauf), `src/bonRegeln.js` (Regeln),
+  `src/resolverAufruf.js` (der eine Weg zum Resolver, auch für die Konsole).
+  Tests: `__tests__/bonRegeln.test.js`, `__tests__/bonRunde.test.js` (Ablauf
+  gegen In-Memory-Firestore). Function `bonRundeTaeglich`, 07:45 Europe/Berlin.
+- **Schalter:** `cashback_config/v1.bonWorker === true` → scharf, sonst
+  Trockenlauf (liest nach, entscheidet nichts, schreibt nur den Bericht).
+- **Bericht:** `ops_bonrunden/{tag}` (letzter fertiger Lauf; die Foto-Runde
+  übernimmt ihn als `bonRunde` in den Tagesbericht) und
+  `ops_bonrunden/{tag}_{HHMMSS}` je Lauf, beim Start mit `laeuft: true`.
+- **Gemessen vor dem Ausrollen** (Vergleich mit 53 Handentscheidungen, nur
+  lesend): 45 gleich, 0 lockerer als der Mensch, 6 strenger (davon 3 knapp an
+  der Artikel-Grenze, je 1 Endsumme nicht im Bild / Bild defekt / Jahr
+  unsicher), 2 Tageslimit-Fälle (Vergleichs-Artefakt).
+
+**Regeln**
+- **Geld rechnet NIE die Runde.** Entschieden wird über `resolveCashbackReview`
+  (Deckel, Budget, Spiegel, Positionen mit `backfilled`, Push). Ergebnis nach
+  Status UND Betrag der Antwort werten (`creditedCents`).
+- **Freigeben** nur, wenn eine unabhängige Zweitlesung (gemini-3.5-flash,
+  thinkingLevel LOW) Datum UND Endsumme selbst liest und beides passt. Leere
+  oder halbe Lesung = nicht bestätigt.
+- **Feld-Gate der Pipeline** (`ocrFieldAgreement`): wo Uneinigkeit vermerkt
+  ist, wird genau dieses Feld strenger geprüft (Summe ±2 ct, Markt muss
+  passen, Artikelzahl uneinig → Mensch, Uhrzeit uneinig → Artikel-Treffer
+  zählen auch mit großem Zeitabstand). **Schwache Lage** (< 2 stimmige
+  Lesungen, kein Vermerk, `none`): alle Felder gelten als uneinig; zusätzlich
+  bleibt ein Bon liegen, dessen Artikelzahl knapp (≤ 1) über einer
+  Betragsgrenze liegt, oder bei dem die Zweitlesung unter diese Grenze zählt.
+- **Markt**: verglichen mit id, Name UND Rohname vom Bonkopf (`merchant.raw`);
+  kurze Namen (dm) nur als ganzes Wort, sonst ein gemeinsames Wort ab 4 Zeichen.
+- **Datum:** nur Jahr falsch gelesen oder Tag↔Jahr vertauscht (23.09.26 →
+  2023-09-26) ist eine Fehllesung der Zweitlesung. Ein Jahr NACH dem Upload
+  ist immer eine. Zweifel (`jahr_unsicher`, Mensch) nur, wenn die Pipeline das
+  Datum korrigiert hat oder eine Erstlesung das andere Jahr hat.
+- **Ablehnen** nur als Doppel gegen eine schon ENTSCHIEDENE Kopie
+  (approved/paid/no_reward/matched). Pro Person wird die älteste zuerst
+  entschieden; eine jüngere offene Kopie zählt nicht, eine ältere offene hält
+  diesen Bon an (`zwilling_unentschieden`). Gleicher Markt/Tag/Endsumme bei
+  einer anderen Person (`contentHash`) → Mensch.
+- **Budget:** vor jeder Freigabe die wirksame Aktion frisch lesen und den
+  Betrag für den Lauf reservieren (Personen laufen parallel); reicht es nicht,
+  bleibt der Bon liegen (`budget_leer`). Fehlendes Budgetfeld = 0 (wie der
+  Resolver). Sonst schlösse der Resolver ihn endgültig ohne Prämie ab.
+- **Beanstandung merken** (`bonRundeBeanstandet` am Bon): konnte die
+  Zweitlesung einen Bon nicht bestätigen (Widerspruch, nicht lesbar, Bild
+  defekt, Jahr zweifelhaft), liest die Runde ihn nicht wieder nach — bis
+  Patrick entscheidet oder die Pipeline den Bon neu verarbeitet
+  (`updatedAtMs`). Sonst würde ein Fall so lange gelesen, bis eine Lesung
+  zufällig passt. Grenzlage, Budget und Technik werden NICHT gemerkt.
+- **„Ohne Prämie" entscheidet die Runde nie** — die Pipeline hält wegen
+  niedriger Lese-Sicherheit nur Bons, die sonst einen Betrag hätten.
+- **Direkt vor der Entscheidung** wird der Bon frisch gelesen; hat er sich
+  seit dem Laden geändert (`updatedAt`, Status), bleibt er liegen.
+
+**Betrieb**
+- **Zeit** (900 s Function): nach 7 min kein neuer Bon, Lesen bis 11 min
+  (jeder Versuch auf die Restzeit gekappt), Resolver nur bis 12½ min.
+- **Zeitüberschreitung beim Resolver** (Netz, 504): nachlesen; nur ein zum
+  Aufruf passender Endstatus zählt als Ergebnis.
+- **Warnungen:** `bonrunde_fehlt` (scharf rot, Trockenlauf gelb),
+  `bonrunde_abgebrochen`, `bonrunde_laeuft`, `bonrunde_technik` (schon ab einem
+  Bon, auch bei gescheiterter Zweitlesung), `bonrunde_budget`,
+  `bonrunde_offen` (≥ 5), `bonrunde_kollision` (mehr Freigaben einer Person
+  für einen Tag als `dailyCap`).
+- **Rollback:** `bonWorker` auf false setzen (wirkt ab dem nächsten Lauf,
+  bricht einen laufenden nicht ab). Kein Deploy nötig.

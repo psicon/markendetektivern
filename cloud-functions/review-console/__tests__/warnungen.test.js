@@ -68,3 +68,31 @@ describe('Schreibfehler', () => {
     expect(codes(warnungen(basis({ runde: { geprueft: 50, offen: 2, auditFehler: 0, auditVersucht: 48, nichtGeschafft: 0, schreibFehler: 2 } })))).toContain('rot:schreibfehler');
   });
 });
+
+describe('Bon-Runde', () => {
+  it('scharf, aber kein Bericht von heute → rot', () => {
+    expect(codes(warnungen(basis({ bonRunde: { scharf: true, bericht: null } })))).toContain('rot:bonrunde_fehlt');
+  });
+  it('Trockenlauf ohne Bericht → gelb (sonst fällt ein Absturz in der Beobachtungsphase nicht auf)', () => {
+    expect(codes(warnungen(basis({ bonRunde: { scharf: false, bericht: null } })))).toEqual(['gelb:bonrunde_fehlt']);
+  });
+  it('angefangen, aber nicht fertig → rot, eigener Text', () => {
+    expect(codes(warnungen(basis({ bonRunde: { scharf: true, bericht: null, abgebrochen: true } })))).toEqual(['rot:bonrunde_abgebrochen']);
+  });
+  it('viele offene → gelb', () => {
+    expect(codes(warnungen(basis({ bonRunde: { scharf: true, bericht: { offen: 6 } } })))).toContain('gelb:bonrunde_offen');
+  });
+  it('technischer Fehler → rot, schon ab einem Bon', () => {
+    expect(codes(warnungen(basis({ bonRunde: { scharf: true, bericht: { offen: 1, technikFehler: 1 } } })))).toContain('rot:bonrunde_technik');
+  });
+  it('Budget leer (vorab erkannt oder vom Server gemeldet) → rot', () => {
+    expect(codes(warnungen(basis({ bonRunde: { scharf: true, bericht: { offen: 1, offenGruende: { budget_leer: 1 } } } })))).toContain('rot:bonrunde_budget');
+    expect(codes(warnungen(basis({ bonRunde: { scharf: true, bericht: { offen: 0, budgetEnde: 1 } } })))).toContain('rot:bonrunde_budget');
+  });
+  it('mehrere Bons desselben Tages → gelb', () => {
+    expect(codes(warnungen(basis({ bonRunde: { scharf: true, bericht: { offen: 0, tagesKollisionen: 1 } } })))).toContain('gelb:bonrunde_kollision');
+  });
+  it('sauberer Lauf → nichts', () => {
+    expect(warnungen(basis({ bonRunde: { scharf: true, bericht: { offen: 2, technikFehler: 0, budgetEnde: 0, tagesKollisionen: 0, offenGruende: { datum_widerspricht: 2 } } } }))).toEqual([]);
+  });
+});

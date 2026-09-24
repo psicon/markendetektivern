@@ -124,6 +124,37 @@
         notbremse_quote: 'Notbremse Ablehnungsquote',
         schreib_fehler: 'Speichern gescheitert (Technik)',
         lesung_unsicher: 'Name/Barcode unsicher gelesen',
+        pruefgrund_bon_date_future: 'Datum liegt in der Zukunft',
+        pruefgrund_ocr_unavailable: 'Bild nicht lesbar',
+        pruefgrund_forensics_software: 'Bearbeitungsspuren (Forensik)',
+        zweitlesung_gescheitert: 'Zweitlesung gescheitert (Technik)',
+        kein_kassenbon: 'Zweitlesung: kein Kassenbon',
+        manipulationsverdacht: 'Zweitlesung: Bearbeitungsspuren',
+        datum_widerspricht: 'Datum widerspricht',
+        summe_widerspricht: 'Summe widerspricht',
+        inhalt_wie_bon_anderer_person: 'Gleicher Inhalt wie Bon einer anderen Person',
+        kein_betrag: 'Kein Betrag (unklar warum)',
+        technik: 'Technischer Fehler',
+        datum_nicht_gelesen: 'Zweitlesung: Datum nicht lesbar',
+        summe_nicht_gelesen: 'Zweitlesung: Summe nicht lesbar',
+        jahr_unsicher: 'Jahr des Bons unsicher',
+        markt_widerspricht: 'Markt passt nicht',
+        betrag_uneinig: 'Artikelzahl uneinig (Betrag unsicher)',
+        zwilling_unentschieden: 'Kopie eines noch offenen Bons',
+        zwilling_unsicher: 'Mögliche Kopie (Uhrzeit unsicher)',
+        frueher_beanstandet: 'Früher schon beanstandet',
+        bild_defekt: 'Bild defekt (nicht lesbar)',
+        artikelzahl_nicht_gelesen: 'Zweitlesung: Artikelzahl nicht lesbar',
+        veraendert_nach_aufruf: 'Während der Entscheidung verändert',
+        budget_leer: 'Budget der Aktion leer',
+        keine_aktion: 'Keine Aktion zugeordnet',
+        veraendert: 'Bon wurde zwischendurch neu verarbeitet',
+        zeit_abgelaufen: 'Zeit abgelaufen — morgen wieder dran',
+        resolver_netzwerk: 'Server nicht erreicht',
+        resolver_504: 'Server-Zeitüberschreitung',
+        artikelzahl_knapp: 'Artikelzahl knapp an einer Betragsgrenze',
+        artikelzahl_widerspricht: 'Artikelzahl passt nicht',
+
         below_min_items: 'Zu wenige Artikel',
         unknown_merchant: 'Markt unbekannt',
         bon_too_old: 'Bon zu alt',
@@ -150,7 +181,11 @@
         max_retries_exceeded: 'Verarbeitung gescheitert',
         manual_review_rejected: 'Von Hand abgelehnt',
       };
-      const g = (c) => GRUND[c] || c;
+      // Unbekannte Codes der Bon-Runde mit Präfix trotzdem lesbar machen.
+      const g = (c) => GRUND[c] || (String(c || '').startsWith('resolver_') ? `Server: ${String(c).slice(9).replace(/_/g, ' ')}`
+        : String(c || '').startsWith('pruefgrund_') ? `Prüfgrund: ${String(c).slice(11).replace(/_/g, ' ')}` : c);
+      // Codes im Hinweistext übersetzen (z. B. „2026-09-24: kein_kassenbon, datum_widerspricht").
+      const gHinweis = (t) => String(t || '').replace(/[a-z]+(?:_[a-z0-9]+)+/g, (c) => GRUND[c] || c);
       const STATUS = { approved: 'Freigegeben', no_reward: 'Ohne Prämie', rejected: 'Abgelehnt', review: 'In Prüfung', ocr_pending: 'In Arbeit' };
       const TAG_MS = 86400000;
 
@@ -244,6 +279,7 @@
         // Oben Warnungen + Kacheln, darunter die Statistik, danach die Laufdetails.
         $('details').innerHTML = `
           <h2 style="margin:0 0 12px;font-size:18px">Details zum Lauf</h2>
+          ${'bonRunde' in b ? bonRundeBox(b.bonRunde) : ''}
           <div class="raster">
             <section class="box"><h3>Wartet auf dich (${b.offen ?? 0}${(b.wartetAufDich || []).length < (b.offen || 0) ? `, erste ${(b.wartetAufDich || []).length} gezeigt` : ''})</h3>${faelle(b.wartetAufDich, 'Nichts offen.')}</section>
             <section class="box"><h3>Automatisch abgelehnt (${b.abgelehnt ?? 0}${(b.abgelehntListe || []).length < (b.abgelehnt || 0) ? `, erste ${(b.abgelehntListe || []).length} gezeigt` : ''})</h3>${faelle(b.abgelehntListe, 'Keine Ablehnungen.')}</section>
@@ -296,6 +332,24 @@
                 <td class="n">${euro(x.gebuchtCents || 0)}</td><td class="n" style="color:${(x.warnungen || []).some((w) => w.stufe === 'rot') ? 'var(--nein)' : 'inherit'}">${(x.warnungen || []).length}</td></tr>`).join('')}
             </table></div>
           </section>`;
+      }
+
+      /* ─── Bon-Runde (07:45, src/bonRunde.js) ─── */
+      function bonRundeBox(br) {
+        if (!br) return '<section class="box" style="margin-bottom:14px"><h3>Bons — Morgenrunde (7:45)</h3><div class="leer">Heute kein Bericht der Bon-Runde.</div></section>';
+        const offen = (br.faelle || []).filter((f) => f.entscheidung === 'offen');
+        const wort = { freigeben: 'freigegeben', ablehnen: 'abgelehnt', offen: 'offen' };
+        return `<section class="box" style="margin-bottom:14px"><h3>Bons — Morgenrunde (7:45)${br.dryRun ? ' · TROCKENLAUF' : ''}</h3>
+          <div class="kacheln" style="margin:6px 0 10px">
+            ${kachel(br.geprueft ?? 0, 'in der Prüfung vorgefunden')}
+            ${kachel(br.freigegeben ?? 0, br.dryRun ? 'würde freigeben' : 'freigegeben und bezahlt', 'var(--ok)')}
+            ${kachel(br.abgelehnt ?? 0, `${br.dryRun ? 'würde ablehnen' : 'abgelehnt'} (doppelt)`, 'var(--nein)')}
+            ${kachel(br.offen ?? 0, 'wartet auf dich', 'var(--offen)')}
+            ${br.gedeckelt ? kachel(br.gedeckelt, 'freigegeben, aber ohne Prämie (Limit/Budget)') : ''}
+            ${kachel(euro(br.gebuchtCents || 0), 'gebucht', 'var(--geld)')}
+          </div>
+          ${offen.length ? `<div class="liste">${offen.map((f) => `<div class="fall"><a href="pruefen.html?tab=receipts&id=${encodeURIComponent(f.id)}">${esc(f.markt || 'Bon')} · ${esc(f.datum || '')}</a><span class="leer">${esc(wort[f.entscheidung] || f.entscheidung)}</span><span class="g">${esc(g(f.grund))}${f.hinweis ? ' · ' + esc(gHinweis(f.hinweis).slice(0, 140)) : ''}</span></div>`).join('')}</div>` : '<div class="leer">Nichts offen.</div>'}
+        </section>`;
       }
 
       /* ─── Statistik: letzte 60 Tage aus den echten Daten (reviewStatistik) ─── */

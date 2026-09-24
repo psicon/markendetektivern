@@ -402,9 +402,7 @@ exports.reviewDecideUploads = onCall({ region: REGION, timeoutSeconds: 120 }, as
 
 const { defineSecret } = require('firebase-functions/params');
 const CASHBACK_ADMIN_KEY = defineSecret('NUTRITION_SCRAPER_TRIGGER_KEY');
-const RESOLVER_URL = process.env.CASHBACK_RESOLVER_URL || 'https://europe-west3-markendetektive-895f7.cloudfunctions.net/resolveCashbackReview';
-const RECEIPT_REJECT_REASONS = new Set(['manual_review_rejected', 'duplicate_content_self', 'duplicate_content_cross_user']);
-const RECEIPT_NO_REWARD_REASONS = new Set(['daily_cap_reached', 'weekly_cap_reached', 'per_user_cap_reached']);
+const { resolverAufruf, gueltig: resolverEntscheidungGueltig } = require('./src/resolverAufruf');
 const RECEIPT_STATUSES = new Set(['ocr_pending', 'review', 'approved', 'no_reward', 'rejected', 'paid', 'matched', 'upload_failed', 'uploading']);
 const safeReceiptStatus = (v) => (RECEIPT_STATUSES.has(v) ? v : 'unknown');
 const RECEIPT_LIST_FIELDS = [
@@ -534,30 +532,13 @@ exports.reviewDecideReceipt = onCall({ region: REGION, timeoutSeconds: 90, secre
   const decision = String(p.decision || '');
   const reason = p.reason ? String(p.reason) : '';
   if (!receiptId) throw new HttpsError('invalid-argument', 'receiptId fehlt.');
-  const valid =
-    decision === 'approve'
-    || (decision === 'reject' && (!reason || RECEIPT_REJECT_REASONS.has(reason)))
-    || (decision === 'no_reward' && RECEIPT_NO_REWARD_REASONS.has(reason));
-  if (!valid) throw new HttpsError('invalid-argument', 'decision=approve|reject[&reason]|no_reward&reason=daily_cap_reached|weekly_cap_reached|per_user_cap_reached');
-
-  const url = new URL(RESOLVER_URL);
-  // Key NUR im Header — Query-Parameter landen in den Cloud-Run-Request-Logs.
-  url.searchParams.set('receiptId', receiptId);
-  url.searchParams.set('decision', decision);
-  if (reason) url.searchParams.set('reason', reason);
-  if (p.duplicateOf) url.searchParams.set('duplicateOf', String(p.duplicateOf));
-  if (p.priorStatus) url.searchParams.set('priorStatus', String(p.priorStatus));
-  const res = await fetch(url.toString(), { method: 'POST', headers: { 'x-admin-key': CASHBACK_ADMIN_KEY.value() } });
-  const text = await res.text();
-  let body;
-  try { body = JSON.parse(text); } catch { body = { raw: text.slice(0, 400) }; }
-  logger.info('[review-console] receipt decision', { adminUid, receiptId, decision, reason, http: res.status, code: body && body.code });
-  if (!res.ok) {
-    // 409 = fachlich (nicht in review / campaign_missing / no_cashback_computed) — als Ergebnis zurückgeben, kein Exception-Rauschen.
-    return { ok: false, http: res.status, ...body };
-  }
+  if (!resolverEntscheidungGueltig(decision, reason)) throw new HttpsError('invalid-argument', 'decision=approve|reject[&reason]|no_reward&reason=daily_cap_reached|weekly_cap_reached|per_user_cap_reached');
+  const r = await resolverAufruf({ receiptId, decision, reason, duplicateOf: p.duplicateOf || null, priorStatus: p.priorStatus || null, schluessel: CASHBACK_ADMIN_KEY.value() });
+  logger.info('[review-console] receipt decision', { adminUid, receiptId, decision, reason, http: r.http, code: r.code });
+  // 409 = fachlich (nicht in review / campaign_missing / no_cashback_computed) — als Ergebnis zurückgeben, kein Exception-Rauschen.
+  if (!r.ok) return r;
   await db.collection('receipts').doc(receiptId).set({ reviewConsole: { decidedBy: adminUid, decision, reason: reason || null, at: FieldValue.serverTimestamp() } }, { merge: true }).catch(() => {});
-  return { ok: true, http: res.status, ...body };
+  return r;
 });
 
 // ═══════════════════════════════════════════════════════════════════
@@ -968,8 +949,10 @@ const PROJEKT = process.env.GCLOUD_PROJECT || 'markendetektive-895f7';
 
 // 30 Minuten: die Runde beginnt nach 18 Minuten nichts Neues mehr und wartet
 // danach höchstens 5 Minuten auf die Buchungen.
-// maxInstances 1: nie zwei Läufe desselben Wegs parallel (Kosten, Google-Limit).
-const RUNDE_OPTS = { region: REGION, timeoutSeconds: 1800, memory: '1GiB', maxInstances: 1 };
+// maxInstances 1 + concurrency 1: nie zwei Läufe desselben Wegs parallel
+// (Kosten, Google-Limit). maxInstances allein reicht nicht — Gen2 nimmt sonst
+// bis zu 80 Anfragen in DIESELBE Instanz (Prüfrunde 24.09.).
+const RUNDE_OPTS = { region: REGION, timeoutSeconds: 1800, memory: '1GiB', maxInstances: 1, concurrency: 1 };
 
 exports.fotoRundeTaeglich = onSchedule(
   { ...RUNDE_OPTS, schedule: '0 8 * * *', timeZone: 'Europe/Berlin', retryCount: 0 },
@@ -1003,6 +986,23 @@ exports.fotoRundeManuell = onRequest(
     // stehen im Bericht in Firestore und im Dashboard, nicht in einer HTTP-Antwort.
     const { lauf, dryRun, geprueft, freigegeben, abgelehnt, offen, gebuchtCents, warnungen: warn } = bericht;
     res.json({ lauf, dryRun, geprueft, freigegeben, abgelehnt, offen, gebuchtCents, warnungen: (warn || []).map((w) => w.text) });
+  },
+);
+
+/**
+ * Bon-Runde: Bons in `review` jeden Morgen um 07:45 (Logik: src/bonRunde.js,
+ * Regeln: src/bonRegeln.js). Läuft VOR der Foto-Runde, die das Ergebnis aus
+ * `ops_bonrunden/{tag}` in ihren Tagesbericht übernimmt. Scharf nur mit
+ * `cashback_config/v1.bonWorker === true`; sonst Trockenlauf.
+ */
+const { bonRunde } = require('./src/bonRunde');
+exports.bonRundeTaeglich = onSchedule(
+  { region: REGION, schedule: '45 7 * * *', timeZone: 'Europe/Berlin', retryCount: 0, timeoutSeconds: 900, memory: '1GiB', maxInstances: 1, concurrency: 1, secrets: [CASHBACK_ADMIN_KEY] },
+  async () => {
+    const cfg = (await db.doc('cashback_config/v1').get()).data() || {};
+    const scharf = cfg.bonWorker === true;
+    const b = await bonRunde({ dryRun: !scharf, projekt: PROJEKT, schluessel: scharf ? CASHBACK_ADMIN_KEY.value() : null, ausloeser: 'zeitplan' });
+    logger.info(scharf ? 'Bon-Runde scharf gelaufen' : 'Bon-Runde als Trockenlauf (Schalter bonWorker steht nicht auf true)', { lauf: b.lauf, geprueft: b.geprueft });
   },
 );
 

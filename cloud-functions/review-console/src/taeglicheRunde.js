@@ -39,6 +39,7 @@ const { GoogleGenAI } = require('@google/genai');
 const { evaluateDuplicate, completenessCheck } = require('./duplicatePolicy');
 const { entscheideFall, notbremse, nameAusLesungen, eanAusLesungen, BILD_GRUENDE } = require('./fotoRundeRegeln');
 const { warnungen } = require('./warnungen');
+const { mitWiederholung, arbeite, schlafe } = require('./ki');
 
 const COL = 'crowd_uploads';
 const BERICHTE = 'ops_tagesberichte';
@@ -58,7 +59,6 @@ const BUCHUNG_WARTEN_MS = 5 * 60 * 1000;
 const ms = (v) => (v && typeof v.toMillis === 'function' ? v.toMillis() : typeof v === 'number' ? v : null);
 const fmtDate = (m) => (m ? new Date(m).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Berlin' }) : null);
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-const schlafe = (t) => new Promise((r) => setTimeout(r, t));
 const berlinTag = (t) => new Date(t).toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
 const berlinZeit = (t) => new Date(t).toLocaleTimeString('sv-SE', { timeZone: 'Europe/Berlin' }).replace(/:/g, '');
 
@@ -92,22 +92,6 @@ function noteFor(reason, ctx = {}) {
 /* ─────────────────────────── Bilder lesen ─────────────────────────── */
 
 const teil = (bucket, slot, pfad) => [{ text: `— Foto "${slot}":` }, { fileData: { fileUri: `gs://${bucket}/${pfad}`, mimeType: 'image/jpeg' } }];
-
-/** Google-Limits sind der Normalfall, kein Ausnahmefall (24.09.: 18 von 229
- *  Bildprüfungen im ersten Durchgang). Wiederholen mit Pause; ein 400
- *  („Bild nicht lesbar") wird NICHT wiederholt, das wird nicht besser. */
-async function mitWiederholung(fn) {
-  const pausen = [4000, 10000, 25000];
-  for (let i = 0; ; i++) {
-    try { return await fn(); }
-    catch (e) {
-      const t = String(e && (e.message || e));
-      const voruebergehend = /429|RESOURCE_EXHAUSTED|500|503|INTERNAL|UNAVAILABLE|deadline|ECONNRESET|fetch failed/i.test(t) && !/decode|INVALID_ARGUMENT/i.test(t);
-      if (!voruebergehend || i >= pausen.length) throw e;
-      await schlafe(pausen[i] + Math.floor(Math.random() * 1500));
-    }
-  }
-}
 
 async function frage(ai, bucket, images, slots, text) {
   const parts = [];
@@ -250,21 +234,6 @@ async function bildAudit(ai, bucket, x) {
 
 /* ─────────────────────────── Hilfen ─────────────────────────── */
 
-/** Arbeitet eine Liste parallel ab; nach `frist` wird nichts Neues begonnen. */
-async function arbeite(liste, arbeiter, gleichzeitig, frist) {
-  const queue = [...liste];
-  const liegen = [];
-  await Promise.all(Array.from({ length: Math.min(gleichzeitig, queue.length || 1) }, async () => {
-    for (;;) {
-      const e = queue.shift();
-      if (!e) return;
-      if (frist && Date.now() > frist) { liegen.push(e); continue; }
-      await arbeiter(e);
-    }
-  }));
-  return liegen;
-}
-
 function regelVersion() {
   const h = crypto.createHash('sha1');
   for (const f of ['duplicatePolicy.js', 'fotoRundeRegeln.js']) h.update(fs.readFileSync(path.join(__dirname, f)));
@@ -316,6 +285,7 @@ async function bonLage(db, jetzt) {
       laeufeLetzte48h: nutzung.reduce((s, d) => s + (Number(d.get('runs')) || 0), 0),
     },
     fotoWorkerScharf: cfg.get('fotoWorker') === true,
+    bonWorkerScharf: cfg.get('bonWorker') === true,
   };
 }
 
@@ -530,7 +500,26 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   }
 
   // 9) Lage bei Bons und Aktionen, Warnungen
-  const [lage, aktionen, vorher] = await Promise.all([bonLage(db, start), aktionsLage(db), db.doc(`${BERICHTE}/aktuell`).get()]);
+  const [lage, aktionen, vorher, bonSnap] = await Promise.all([bonLage(db, start), aktionsLage(db), db.doc(`${BERICHTE}/aktuell`).get(), db.doc(`ops_bonrunden/${tag}`).get()]);
+  // Ergebnis der Bon-Runde von 07:45 (src/bonRunde.js) in denselben Bericht.
+  const bonRundeRoh = (d) => (({ laufAt, ...rest }) => ({ ...rest, laufAt: laufAt && laufAt.toMillis ? laufAt.toMillis() : null }))(d);
+  let bonRundeHeute = bonSnap.exists ? bonRundeRoh(bonSnap.data()) : null;
+  // Kein fertiger Bericht: läuft sie noch, oder ist sie abgebrochen? Nach
+  // 15 min (Laufzeitgrenze der Function) steht ein Lauf-Dokument auf `laeuft`
+  // nur noch, wenn die Function beendet wurde, ohne den Bericht zu schreiben.
+  let bonAbgebrochen = false; let bonLaeuftNoch = false; let bonNachgereicht = null;
+  if (!bonSnap.exists) {
+    const laeufe = (await db.collection('ops_bonrunden').where('tag', '==', tag).limit(10).get()).docs;
+    // Zwischen den beiden Lesevorgängen fertig geworden? Dann diesen Bericht nehmen.
+    const fertig = laeufe.filter((d) => d.get('laeuft') === false)
+      .sort((a, b) => ((b.get('laufAt')?.toMillis?.() || 0) - (a.get('laufAt')?.toMillis?.() || 0)))[0];
+    if (fertig) bonNachgereicht = fertig.data();
+    else laeufe.filter((d) => d.get('laeuft') === true).forEach((d) => {
+      const at = d.get('laufAt'); const alt = at && at.toMillis ? Date.now() - at.toMillis() : Infinity;
+      if (alt > 15 * 60 * 1000) bonAbgebrochen = true; else bonLaeuftNoch = true;
+    });
+  }
+  if (bonNachgereicht) bonRundeHeute = bonRundeRoh(bonNachgereicht);
   const version = regelVersion();
   const zaehle = (liste, feld) => liste.reduce((a, p) => { const k = p[feld] || '?'; a[k] = (a[k] || 0) + 1; return a; }, {});
   const abgelehnt = plan.filter((p) => p.entscheidung === 'ablehnen' && !p.uebersprungen);
@@ -544,6 +533,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   const warn = warnungen({
     jetzt: start, aktionen, zweitpruefung: lage.zweitpruefung, bons: lage.bons, runde, notbremse: bremse,
     regelVersion: { alt: vorher.exists ? vorher.get('regelVersion') || null : null, neu: version },
+    bonRunde: { scharf: lage.bonWorkerScharf, bericht: bonRundeHeute, abgebrochen: bonAbgebrochen, laeuftNoch: bonLaeuftNoch },
   });
   const gebuchtCents = gebucht.filter((s) => s.rewardResult === 'credited').reduce((s, g) => s + (Number(g.rewardCents) || 0), 0);
   const fall = (p) => ({ id: p.id, name: String(nameOf(p.x) || '?').slice(0, 60), markt: p.x.marketName || null, grund: p.grund, hinweis: p.ctx?.hinweis || null, zurueckgehalten: p.zurueckgehaltenGrund || null });
@@ -574,6 +564,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     abgelehntListe: abgelehnt.slice(0, 100).map(fall),
     bons: lage.bons,
     zweitpruefung: lage.zweitpruefung,
+    bonRunde: bonRundeHeute,
     aktionen: aktionen.filter((a) => a.active && a.endAt > start - 7 * 24 * 60 * 60 * 1000).map(({ id, kind, startAt, endAt, budgetRemainingCents, budgetTotalCents, cashbackPerBonCents }) => ({ id, kind, startAt, endAt, budgetRemainingCents, budgetTotalCents, cashbackPerBonCents })),
     warnungen: warn,
   };

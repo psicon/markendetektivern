@@ -26,6 +26,7 @@ const TAG_MS = 24 * 60 * 60 * 1000;
  * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number}} k.runde
  * @param {{bild:boolean, gesamt:boolean, text:string[]}} k.notbremse
  * @param {{alt:string|null, neu:string}} k.regelVersion
+ * @param {{scharf:boolean, bericht:object|null, abgebrochen?:boolean, laeuftNoch?:boolean}} [k.bonRunde]
  * @returns {Array<{stufe:'rot'|'gelb', code:string, text:string}>}
  */
 function warnungen(k) {
@@ -83,6 +84,28 @@ function warnungen(k) {
     }
   }
   for (const t of (k.notbremse?.text || [])) rot('notbremse', `Notbremse: ${t}`);
+
+  // ── Bon-Runde (07:45) ────────────────────────────────────────────────
+  const br = k.bonRunde;
+  if (br && !br.bericht) {
+    if (br.laeuftNoch && !br.abgebrochen) gelb('bonrunde_laeuft', 'Die Bon-Runde von 7:45 Uhr lief beim Schreiben dieses Berichts noch — ihr Ergebnis fehlt hier. Offene Bons in der Prüfkonsole ansehen.');
+    else if (br.abgebrochen) {
+      if (br.scharf) rot('bonrunde_abgebrochen', 'Die Bon-Runde von 7:45 Uhr ist nicht fertig geworden. Einzelne Bons können schon entschieden sein — Stand in der Prüfkonsole ansehen.');
+      else gelb('bonrunde_abgebrochen', 'Der Trockenlauf der Bon-Runde von 7:45 Uhr ist nicht fertig geworden.');
+    }
+    else if (br.scharf) rot('bonrunde_fehlt', 'Die Bon-Runde von 7:45 Uhr ist heute nicht gelaufen — Bons in der Prüfung warten weiter.');
+    else gelb('bonrunde_fehlt', 'Der Trockenlauf der Bon-Runde von 7:45 Uhr ist heute nicht gelaufen.');
+  }
+  const bb = br && br.bericht;
+  if (bb) {
+    if (bb.technikFehler > 0) rot('bonrunde_technik', `Bei ${bb.technikFehler} Bons ist die Bon-Runde an einem technischen Fehler gescheitert — sie bleiben offen und sind morgen wieder dran.`);
+    const budget = (bb.budgetEnde || 0) + ((bb.offenGruende && bb.offenGruende.budget_leer) || 0);
+    if (budget > 0) (bb.dryRun ? gelb : rot)('bonrunde_budget', bb.dryRun
+      ? `${budget} Bons könnten nicht bezahlt werden, weil das Budget ihrer Aktion nicht reicht.`
+      : `${budget} Bons konnten nicht bezahlt werden, weil das Budget ihrer Aktion leer ist.`);
+    if (bb.offen >= 5) gelb('bonrunde_offen', `${bb.offen} Bons konnte die Bon-Runde nicht entscheiden — bitte in der Prüfkonsole ansehen.`);
+    if (bb.tagesKollisionen > 0) gelb('bonrunde_kollision', `Bei ${bb.tagesKollisionen} Personen lagen mehr Bons desselben Tages als das Tageslimit — welcher bezahlt wurde, entschied die Reihenfolge.`);
+  }
 
   if (k.regelVersion && k.regelVersion.alt && k.regelVersion.alt !== k.regelVersion.neu) {
     gelb('regeln_geaendert', 'Die Prüfregeln haben sich seit dem letzten Lauf geändert. Die Ergebnisse von heute bitte einmal ansehen.');

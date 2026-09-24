@@ -3146,6 +3146,17 @@ Vorfälle — steht in `cloud-functions/review-console/WISSEN-FOTORUNDE.md`.**
 Handrunden mit den `.crowd-*-DDMM.js`-Skripten sind damit überholt; wer doch
 von Hand prüft, nutzt dieselben Regeln (Datei `review-console/src/fotoRundeRegeln.js`).
 
+**Bons in `review` entscheidet seit 24.09. die Bon-Runde um 07:45**
+(`bonRundeTaeglich`, Regeln `review-console/src/bonRegeln.js`, Schalter
+`cashback_config/v1.bonWorker`). Sie ersetzt die Handrunden
+`.pruefe-bons-*.js` + `.review-approve-*.js` und entscheidet ausschließlich über
+den Resolver. Zwei Regeln aus ihrer Prüfrunde, die für JEDE Bon-Nacharbeit
+gelten: (1) eine Zweitlesung, die Datum oder Endsumme NICHT liest, bestätigt
+nichts — „nicht lesbar" als „kein Widerspruch" zu werten gibt jeden Bon frei;
+(2) vor einer Freigabe das Budget der wirksamen Aktion prüfen — der Resolver
+schließt einen Bon bei leerem Budget ENDGÜLTIG ohne Prämie ab.
+Details in `WISSEN-FOTORUNDE.md` („Bon-Runde").
+
 ## Bons nachverarbeiten / Review auflösen — Regeln (Money-Ops 02.09.2026)
 
 Am 02.09. wurden 163 Review-Bons (seit Juli gehalten, „meistens innerhalb eines
