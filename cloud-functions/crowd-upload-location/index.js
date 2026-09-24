@@ -45,13 +45,15 @@
  * 61–377 km daneben und geht ohnehin nur als Landes-Signal ein.
  */
 
-const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
 
 const { bewerteLocation, landAusKoordinate, MODEL_VERSION } = require('./src/scorer');
 const { findeExifGps } = require('./src/exif');
 const { findeJourneyLocation } = require('./src/journey');
+const { bonAdresseAusDoc, bonAdresseGeaendert } = require('./src/bonAdresse');
+const PLZ = require('./data/plz.json');
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -163,7 +165,57 @@ exports.onCrowdUploadCreated = onDocumentCreated(
       }
     }
 
-    // ── Bewerten ─────────────────────────────────────────────────────────
+    // ── Bewerten und schreiben ───────────────────────────────────────────
+    await bewertenUndSchreiben(snap.ref, id, { nachtrag, ipLocation, profileRegion, exifGps, capturedAtMs });
+  },
+);
+
+/**
+ * Neu bewerten, sobald die Filialadresse vom Kassenbon eintrifft (ploc-v2).
+ *
+ * `priceReceipt` schreibt crowd-upload-namer erst NACH der Anlage — der
+ * onCreate-Trigger oben sieht sie in aller Regel noch nicht. Ohne diesen
+ * Trigger käme die wichtigste Ortsquelle nie zum Zug. Er reagiert NUR auf
+ * eine Änderung der Bon-Adresse; das eigene Schreiben von probableLocation
+ * ändert sie nicht, eine Schleife ist ausgeschlossen.
+ */
+exports.onCrowdUploadBonAdresse = onDocumentUpdated(
+  { document: 'crowd_uploads/{id}', region: REGION, memory: '256MiB', timeoutSeconds: 60 },
+  async (event) => {
+    const vorher = event.data?.before?.data();
+    const nachher = event.data?.after?.data();
+    if (!vorher || !nachher) return;
+    if (!bonAdresseGeaendert(vorher, nachher)) return;
+    await bewertenUndSchreiben(event.data.after.ref, event.params.id, {});
+  },
+);
+
+/**
+ * Bewertet aus dem FRISCHEN Dokumentstand und schreibt in einer Transaktion.
+ *
+ * Zwei Trigger schreiben probableLocation (Anlage und Bon-Adresse), und der
+ * Namer schreibt die Bon-Adresse zeitlich dazwischen. Rechnete jeder mit
+ * seinem eigenen Schnappschuss, könnte der langsamere den besseren Stand
+ * überschreiben. Darum liest jeder Schreibvorgang das Dokument in der
+ * Transaktion neu; Zusatz-Eingaben, die nur die Anlage kennt (rekonstruierte
+ * IP-Ortung, Profil, EXIF), werden hereingereicht, sonst aus dem Dokument
+ * genommen.
+ */
+async function bewertenUndSchreiben(ref, id, zusatz) {
+  const ergebnis = await db.runTransaction(async (tx) => {
+    const frisch = await tx.get(ref);
+    if (!frisch.exists) return null;
+    const doc = frisch.data();
+    const capturedAtMs = zusatz.capturedAtMs
+      ?? doc.capture?.capturedAt?.toDate?.().getTime()
+      ?? doc.createdAt?.toDate?.().getTime()
+      ?? Date.now();
+    const ipLocation = zusatz.ipLocation ?? doc.journeyLocation ?? null;
+    const profileRegion = zusatz.profileRegion ?? doc.userLocation ?? null;
+    const exifGps = zusatz.exifGps
+      ?? (doc.exifGps && typeof doc.exifGps.lat === 'number'
+        ? { lat: doc.exifGps.lat, lon: doc.exifGps.lon, accuracyM: doc.exifGps.accuracyM ?? null, ageMinutes: doc.exifGps.ageMinutes ?? null }
+        : null);
     const captureGps = doc.capture?.gps
       ? {
           lat: doc.capture.gps.lat,
@@ -177,7 +229,8 @@ exports.onCrowdUploadCreated = onDocumentCreated(
       : null;
 
     const probableLocation = bewerteLocation({
-      submittedAtMs,
+      submittedAtMs: doc.createdAt?.toDate?.().getTime() ?? Date.now(),
+      receiptAddress: bonAdresseAusDoc(doc, PLZ),
       captureGps,
       exifGps,
       confirmedPlace: doc.capture?.confirmedPlace ?? null,
@@ -187,9 +240,10 @@ exports.onCrowdUploadCreated = onDocumentCreated(
       ipLocation,
     });
 
-    await snap.ref.set(
+    tx.set(
+      ref,
       {
-        ...nachtrag,
+        ...(zusatz.nachtrag || {}),
         probableLocation: {
           ...probableLocation,
           computedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -199,17 +253,18 @@ exports.onCrowdUploadCreated = onDocumentCreated(
       },
       { merge: true },
     );
-
-    logger.info('bewertet', {
-      id,
-      source: probableLocation.source,
-      confidence: probableLocation.confidence,
-      granularity: probableLocation.granularity,
-      modelVersion: MODEL_VERSION,
-      nachgetragen: Object.keys(nachtrag),
-    });
-  },
-);
+    return probableLocation;
+  });
+  if (!ergebnis) return;
+  logger.info('bewertet', {
+    id,
+    source: ergebnis.source,
+    confidence: ergebnis.confidence,
+    granularity: ergebnis.granularity,
+    modelVersion: MODEL_VERSION,
+    nachgetragen: Object.keys(zusatz.nachtrag || {}),
+  });
+}
 
 /**
  * Landeszuordnung der IP-Ortung. Die Stadt ist wertlos, das Land war in

@@ -9,7 +9,9 @@
  * leer ausgeht, nur weil er noch nicht aktualisiert hat.
  */
 
-const { pruefeOrtsanforderung } = require('../src/locationGate');
+const { pruefeOrtsanforderung, STANDORTPFLICHT_AB_BUILD } = require('../src/locationGate');
+
+const IP = { source: 'ip', city: 'Köln', lat: 50.95, lon: 6.95 };
 
 describe('Ein angegebener Ort erfüllt die Anforderung', () => {
   it('akzeptiert eine Standortmessung', () => {
@@ -68,21 +70,35 @@ describe('Wer noch nicht aktualisiert hat, geht nicht leer aus', () => {
 });
 
 describe('Die App hat den Orts-Schritt übersprungen, der GPS-Fix blieb aus', () => {
-  it('vergütet bei gpsStatus unavailable — der Nutzer wurde nie gefragt', () => {
+  it('vergütet bei gpsStatus unavailable mit IP-Ortung — der Nutzer wurde nie gefragt', () => {
     // Wizard ≤ 6.0.15 (18b8cb6): Berechtigung erteilt → Schritt entfällt →
     // GPS liefert nichts → Einreichung ohne Ort, ohne dass der Nutzer je
     // die Chance hatte, einen einzutippen. 53 von 55 Fällen am 03.09.2026.
     const r = pruefeOrtsanforderung({
       clientVersion: { app: '6.0.15', build: '1234', platform: 'android' },
       capture: { gpsStatus: 'unavailable' },
+      journeyLocation: IP,
     });
     expect(r.ok).toBe(true);
     expect(r.grund).toBe('gps_fix_fehlt_schritt_uebersprungen');
   });
 
-  it('vergütet ebenso bei timeout', () => {
-    const r = pruefeOrtsanforderung({ clientVersion: { app: '6.0.15' }, capture: { gpsStatus: 'timeout' } });
+  it('vergütet ebenso bei timeout mit IP-Ortung', () => {
+    const r = pruefeOrtsanforderung({ clientVersion: { app: '6.0.15' }, capture: { gpsStatus: 'timeout' }, journeyLocation: IP });
     expect(r.ok).toBe(true);
+  });
+
+  it('ohne jede Ortung (auch keine IP) keine Vergütung — Rangfolge 24.09.2026', () => {
+    const ohne = pruefeOrtsanforderung({ clientVersion: { app: '6.0.15' }, capture: { gpsStatus: 'unavailable' } });
+    expect(ohne).toEqual({ ok: false, grund: 'no_location' });
+    // 'fallback' ist der DACH-Mittelpunkt einer gescheiterten IP-Abfrage — kein Ort.
+    const fallback = pruefeOrtsanforderung({ clientVersion: { app: '6.0.15' }, capture: { gpsStatus: 'timeout' }, journeyLocation: { source: 'fallback', lat: 51.15, lon: 10.45 } });
+    expect(fallback.ok).toBe(false);
+  });
+
+  it('IP-Ortung ersetzt keine verweigerte Freigabe', () => {
+    const r = pruefeOrtsanforderung({ clientVersion: { app: '6.0.17' }, capture: { gpsStatus: 'denied' }, journeyLocation: IP });
+    expect(r).toEqual({ ok: false, grund: 'no_location' });
   });
 
   it('lehnt weiterhin ab, wenn der Nutzer die Berechtigung verweigert hat', () => {
@@ -147,8 +163,40 @@ describe('Ortsangabe aus dem Kassenbon (06.09.2026)', () => {
     expect(pruefeOrtsanforderung({ ...basis, priceReceipt: null }).ok).toBe(false);
   });
 
-  test('eine eigene Ortsangabe hat weiter Vorrang', () => {
-    const r = pruefeOrtsanforderung({ ...basis, capture: { confirmedPlace: { city: 'Köln' } }, priceReceipt: { zip: '46325', city: 'Borken', complete: true } });
-    expect(r).toEqual({ ok: true });
+  test('Kassenbon hat Vorrang vor Ortsangabe und GPS (Rangfolge 24.09.2026)', () => {
+    const bon = { zip: '46325', city: 'Borken', complete: true };
+    expect(pruefeOrtsanforderung({ ...basis, capture: { confirmedPlace: { city: 'Köln' } }, priceReceipt: bon })).toEqual({ ok: true, grund: 'ort_aus_kassenbon' });
+    expect(pruefeOrtsanforderung({ ...basis, capture: { gps: { lat: 51.8, lon: 6.8 }, gpsStatus: 'granted_precise' }, priceReceipt: bon })).toEqual({ ok: true, grund: 'ort_aus_kassenbon' });
+  });
+
+  test('ohne lesbaren Bon: GPS vor Ortsangabe, beide mit dem bisherigen Grund', () => {
+    expect(pruefeOrtsanforderung({ ...basis, capture: { gps: { lat: 51.8, lon: 6.8 }, confirmedPlace: { city: 'Köln' } } })).toEqual({ ok: true });
+    expect(pruefeOrtsanforderung({ ...basis, capture: { confirmedPlace: { city: 'Köln' } }, priceReceipt: { city: 'Borken', complete: false } })).toEqual({ ok: true });
+  });
+});
+
+describe('Harte Standortfreigabe-Pflicht (Entscheidung 24.09.2026)', () => {
+  const ab = { android: 1250, ios: 1280 };
+  const doc = (platform, build, capture, extra = {}) => ({ clientVersion: { app: '6.1.0', platform, build: String(build) }, capture, ...extra });
+
+  test('ist ausgeliefert inaktiv, solange keine App-Version sie durchsetzt', () => {
+    expect(STANDORTPFLICHT_AB_BUILD).toEqual({ android: null, ios: null });
+    expect(pruefeOrtsanforderung(doc('ios', 9999, { gpsStatus: 'denied', confirmedPlace: { city: 'Köln' } }))).toEqual({ ok: true });
+  });
+
+  test('ab dem Build: ohne Freigabe keine Vergütung — auch nicht mit eingetipptem Ort oder Bon', () => {
+    const bon = { zip: '46325', city: 'Borken', complete: true };
+    expect(pruefeOrtsanforderung(doc('ios', 1280, { gpsStatus: 'denied', confirmedPlace: { city: 'Köln' } }), { standortpflichtAb: ab }).ok).toBe(false);
+    expect(pruefeOrtsanforderung(doc('android', 1251, { gpsStatus: 'not_asked' }, { priceReceipt: bon }), { standortpflichtAb: ab }).ok).toBe(false);
+  });
+
+  test('ab dem Build: mit Freigabe gilt die Rangfolge, auch der Rückfall bei fehlendem Fix', () => {
+    expect(pruefeOrtsanforderung(doc('android', 1250, { gpsStatus: 'timeout', confirmedPlace: { city: 'Köln' } }), { standortpflichtAb: ab })).toEqual({ ok: true });
+    expect(pruefeOrtsanforderung(doc('android', 1250, { gpsStatus: 'unavailable' }, { journeyLocation: IP }), { standortpflichtAb: ab }).ok).toBe(true);
+    expect(pruefeOrtsanforderung(doc('ios', 1280, { gpsStatus: 'granted_coarse', gps: { lat: 1, lon: 2 } }), { standortpflichtAb: ab })).toEqual({ ok: true });
+  });
+
+  test('ältere Builds bleiben unberührt (Übergang, bis das Update verbreitet ist)', () => {
+    expect(pruefeOrtsanforderung(doc('ios', 1269, { gpsStatus: 'denied', confirmedPlace: { city: 'Köln' } }), { standortpflichtAb: ab })).toEqual({ ok: true });
   });
 });

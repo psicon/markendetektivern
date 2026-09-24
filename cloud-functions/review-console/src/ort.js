@@ -245,10 +245,13 @@ function auffaelligkeiten({ lat, lon, genauigkeitM, erwartetesLand, quelle }) {
 }
 
 const QUELLE_TEXT = {
+  // ploc-v2 (24.09.2026): Filialadresse vom Kassenbon auf dem Preisfoto ist
+  // Ortsquelle Nr. 1 im Ortsschätzer (crowd-upload-location/src/scorer.js).
+  receipt_address: ['filiale', 'Filialadresse vom Kassenbon auf dem Preisfoto'],
   gps_capture: ['geraet', 'Standort des Geräts bei der Aufnahme'],
   exif_gps: ['geraet', 'Standort aus den Bilddaten'],
   user_confirmed_place: ['nutzerangabe', 'Ort, den der Nutzer angegeben hat'],
-  user_profile_region: ['profil', 'aus früheren Bons abgeleiteter Wohnort'],
+  user_profile_region: ['profil', 'Wohnort laut Profilangabe'],
   market_country: ['land', 'nur das Land des gewählten Marktes'],
 };
 

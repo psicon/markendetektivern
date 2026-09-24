@@ -79,32 +79,79 @@ function createdAtMs(doc) {
 }
 
 /**
- * @param {object} doc Das crowd_uploads-Dokument.
- * @returns {{ok: true} | {ok: false, grund: string}}
+ * Ortsrangfolge (Entscheidung Patrick, 24.09.2026):
+ *   1. Filialadresse vom Kassenbon auf dem Preisfoto — steht belegt im Bild,
+ *      zeigt den tatsächlichen Markt; wichtigste Quelle.
+ *   2. GPS vom Gerät beim Aufnehmen.
+ *   3. Ortsangabe (eingetippt) — nur als Rückfall.
+ *   4. IP-Ortung — nur, wenn GPS technisch scheiterte (Freigabe erteilt, aber
+ *      kein Fix: in der Filiale, zu Hause).
+ * Die erste zutreffende Stufe bestimmt `grund` (landet als rewardLocationRule
+ * am Dokument). Am Datenschema ändert sich nichts: gelesen werden nur
+ * bestehende Felder, geschrieben werden nur bestehende Grund-Werte.
  */
-function pruefeOrtsanforderung(doc) {
+
+/**
+ * Harte Standortfreigabe-Pflicht (Entscheidung Patrick, 24.09.2026: wer am
+ * Reward-Programm teilnimmt, MUSS die Freigabe erteilt haben — auch auf iOS).
+ * Serverseitig greift sie ab der ersten App-Version je Plattform, die die
+ * Pflicht auch in der App durchsetzt. Vorher würde sie Leute leer ausgehen
+ * lassen, denen die installierte App ausdrücklich „Ort eintippen" anbietet —
+ * genau das Muster „freigegeben, 0 Cent", das sich nicht wiederholen darf.
+ * `null` = noch keine solche Version ausgeliefert. Beim Release den Build
+ * eintragen (clientVersion.build, z. B. Android-versionCode / iOS-Build).
+ */
+const STANDORTPFLICHT_AB_BUILD = { android: null, ios: null };
+
+/** Die App schreibt diese Werte, wenn die Freigabe NICHT erteilt ist (captureContext.ts). */
+const FREIGABE_FEHLT = new Set(['denied', 'not_asked']);
+
+function standortpflichtGilt(doc, ab) {
+  const cv = doc?.clientVersion;
+  const schwelle = cv && ab ? ab[String(cv.platform || '').toLowerCase()] : null;
+  const build = Number(cv?.build);
+  return schwelle != null && Number.isFinite(build) && build >= Number(schwelle);
+}
+
+/**
+ * Verwertbare IP-Ortung? `source: 'fallback'` ist der DACH-Mittelpunkt, den
+ * die App einträgt, wenn die IP-Abfrage scheiterte — kein Ort (CLAUDE.md).
+ */
+function ipOrtNutzbar(jl) {
+  if (!jl || typeof jl !== 'object') return false;
+  if (String(jl.source || '') === 'fallback') return false;
+  return Boolean(jl.city) || (Number.isFinite(Number(jl.lat)) && Number.isFinite(Number(jl.lon)));
+}
+
+/**
+ * @param {object} doc Das crowd_uploads-Dokument.
+ * @param {object} [opts]
+ * @param {{android: number|null, ios: number|null}} [opts.standortpflichtAb]  für Tests
+ * @returns {{ok: true, grund?: string} | {ok: false, grund: string}}
+ */
+function pruefeOrtsanforderung(doc, opts = {}) {
   const capture = doc?.capture || null;
+  const gpsStatus = String(capture?.gpsStatus || '');
 
-  // Der Nutzer hat den Ort selbst angegeben — per Standortfreigabe oder
-  // durch Eintippen. Beide Wege zählen gleich: die Anforderung lautet
-  // „sag uns wo", nicht „gib GPS frei". Alles andere wäre nach Art. 5
-  // Abs. 1 lit. c (Datenminimierung) auch nicht zu halten — wenn ein
-  // eingetippter Ort den Datensatz erfüllt, darf GPS nicht der einzige
-  // Weg sein.
-  const hatOrt = Boolean(capture?.confirmedPlace || capture?.gps);
-  if (hatOrt) return { ok: true };
+  // 0) Harte Freigabe-Pflicht — erst ab der App-Version, die sie durchsetzt.
+  if (standortpflichtGilt(doc, opts.standortpflichtAb || STANDORTPFLICHT_AB_BUILD) && FREIGABE_FEHLT.has(gpsStatus)) {
+    return { ok: false, grund: 'no_location' };
+  }
 
-  // 06.09.2026: Manche Nutzer fotografieren als „Preis" den KASSENBON statt
-  // des Regal-Etiketts (17,5 % einer Stichprobe von 40). Der Bon-Kopf trägt
-  // die Filialadresse — eine härtere Tatsache als jede Selbstauskunft und
-  // genauer als ein GPS-Raster. `crowd-upload-namer` liest sie im ohnehin
-  // stattfindenden OCR-Aufruf mit und legt sie als `priceReceipt` ab.
-  // Das ist KEINE Lockerung der Ortspflicht, sondern eine zusätzliche Quelle,
-  // die sie erfüllt: der Ort steht belegt im eingereichten Bild.
+  // 1) Kassenbon auf dem Preisfoto. Manche Nutzer fotografieren als „Preis"
+  // den Bon statt des Regal-Etiketts (30 % in den 30 Tagen bis 24.09.). Der
+  // Bon-Kopf trägt die Filialadresse; crowd-upload-namer liest sie im
+  // ohnehin stattfindenden OCR-Aufruf mit (`priceReceipt`).
   const bon = doc?.priceReceipt;
   if (bon && bon.complete && bon.zip && bon.city) {
     return { ok: true, grund: 'ort_aus_kassenbon' };
   }
+
+  // 2) GPS und 3) Ortsangabe. Beide tragen seit jeher denselben Grund
+  // (`ort_vorhanden`, vom Aufrufer gesetzt) — unverändert, damit keine neuen
+  // Werte in rewardLocationRule entstehen.
+  if (capture?.gps) return { ok: true };
+  if (capture?.confirmedPlace) return { ok: true };
 
   // Kein Ort. Konnte diese App überhaupt danach fragen?
   const kanntePflichtSchritt = Boolean(doc?.clientVersion);
@@ -117,22 +164,19 @@ function pruefeOrtsanforderung(doc) {
     }
   }
 
-  // 03.09.2026 (Freigabe Patrick): Der Wizard (≤ 6.0.15, Commit 18b8cb6)
-  // überspringt den Orts-Schritt, sobald die Standortberechtigung erteilt
-  // ist, und verlässt sich auf den GPS-Fix. Bleibt der aus (gpsStatus
-  // unavailable/timeout — 53 von 55 ortlosen Einreichungen einer Runde, alle
-  // Android 6.0.15), gibt es KEINEN Fallback zur manuellen Ortsangabe: der
-  // Nutzer wurde nie gefragt. Das ist dieselbe Lage wie beim alten Client —
-  // die App konnte die Pflichtangabe nicht einholen, nicht der Nutzer hat
-  // sie verweigert. Deshalb vergüten, mit eigenem Grund (auswertbar), bis der
-  // Wizard den Fallback hat. 'denied' bleibt no_location: da hat der Nutzer
-  // die Berechtigung verweigert UND den angebotenen Orts-Schritt übersprungen.
-  const gpsStatus = String(capture?.gpsStatus || '');
-  if (gpsStatus === 'unavailable' || gpsStatus === 'timeout') {
+  // 4) IP-Ortung als letzte Stufe: nur wenn GPS technisch scheiterte
+  // (unavailable/timeout — Freigabe erteilt, aber kein Fix) UND eine
+  // verwertbare IP-Ortung vorliegt. Der Grund-Wert stammt aus der Regel vom
+  // 03.09.2026 (Android 6.0.15 übersprang den Orts-Schritt): bis 24.09. wurde
+  // dort ganz ohne Ort vergütet; seit der Rangfolge nur noch mit IP-Ortung
+  // (gemessen: 38 von 42 Fällen in 30 Tagen hatten eine).
+  // 'denied' bleibt no_location: da hat der Nutzer die Berechtigung
+  // verweigert UND den angebotenen Orts-Schritt übersprungen.
+  if ((gpsStatus === 'unavailable' || gpsStatus === 'timeout') && ipOrtNutzbar(doc?.journeyLocation)) {
     return { ok: true, grund: 'gps_fix_fehlt_schritt_uebersprungen' };
   }
 
   return { ok: false, grund: 'no_location' };
 }
 
-module.exports = { pruefeOrtsanforderung, GNADENFRIST_ALTE_CLIENTS, GNADENFRIST_BIS_ISO };
+module.exports = { pruefeOrtsanforderung, GNADENFRIST_ALTE_CLIENTS, GNADENFRIST_BIS_ISO, STANDORTPFLICHT_AB_BUILD };
