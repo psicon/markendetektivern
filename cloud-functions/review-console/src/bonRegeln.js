@@ -179,8 +179,9 @@ function jahrGestuetzt(bon, gelesen) {
  */
 function jahrZweifel(bon, gelesen, konflikte) {
   const k = bon.bonDateCorrection;
-  // Eine alte Korrektur (2020 → 2026) erklärt genau diese Fehllesung.
-  if (k && String(k.from || '').slice(0, 4) === String(gelesen || '').slice(0, 4)) return false;
+  // Eine alte Korrektur (2020 → 2026) erklärt genau diese Fehllesung; liest die
+  // Zweitlesung ein DRITTES Jahr, bleibt der Zweifel (Prüfrunde 5).
+  if (k) return String(k.from || '').slice(0, 4) !== String(gelesen || '').slice(0, 4);
   if (erstJahre(bon).length) return jahrGestuetzt(bon, gelesen);
   return konflikte.includes('bonDate');
 }
@@ -197,7 +198,7 @@ function vorjahresKorrektur(bon) {
   if (!k || !up) return false;
   const von = Number(String(k.from || '').slice(0, 4));
   const upJahr = Number(new Date(up).toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' }).slice(0, 4));
-  return Boolean(von) && von >= upJahr - 1;
+  return Boolean(von) && von === upJahr - 1;
 }
 
 /**
@@ -222,7 +223,20 @@ const STOPP = new Set([
   'markt', 'maerkte', 'markte', 'supermarkt', 'center', 'drogerie', 'discount', 'marken', 'filiale', 'tankstelle',
   'apotheke', 'handel', 'handelshof', 'handelsgesellschaft', 'gesellschaft', 'stiftung', 'shop', 'store', 'e', 'k',
 ]);
+// Himmelsrichtungen/Länder tragen bei Kettennamen keine Identität („Aldi Nord"
+// ↔ „Netto Nord", Prüfrunde 5).
+const KETTE_STOPP = new Set(['nord', 'sud', 'sued', 'suisse', 'deutschland', 'austria', 'osterreich']);
+// Wörter bekannter Ketten: taucht eines davon in der Lesung auf, das nicht zur
+// eigenen Kette gehört, ist es ein anderer Markt — egal was sonst passt.
+// (Nicht „muller": auch ein Nachname in Inhabernamen.)
+const KETTEN = new Set(['rewe', 'edeka', 'lidl', 'aldi', 'netto', 'penny', 'kaufland', 'norma', 'dm', 'rossmann',
+  'globus', 'tegut', 'marktkauf', 'real', 'famila', 'nahkauf', 'hofer', 'spar', 'billa', 'merkur', 'denns', 'alnatura',
+  'tedi', 'kik', 'aral', 'shell', 'esso', 'jet', 'rusta', 'action', 'woolworth', 'budni', 'mpreis']);
 const woerter = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  // „R E W E CENTER" → „rewe center" (einzelne Buchstaben zusammenziehen) …
+  .replace(/(?<![a-z0-9'’])(?:[a-z][\s.]){2,}[a-z]\b/g, (m) => m.replace(/[\s.]/g, ''))
+  // … und „E center"/„E-Center" ist EDEKA (sonst bestünde er nur aus Stoppwörtern).
+  .replace(/(^|[^a-z0-9])e[\s-]?center\b/g, '$1edeka')
   .split(/[^a-z0-9]+/).filter((w) => w && !STOPP.has(w));
 
 /**
@@ -238,10 +252,17 @@ function marktPasst(bon, gelesen) {
   const z = new Set(woerter(gelesen));
   if (!z.size) return false;
   const m = bon.merchant || {};
-  const kette = new Set([...woerter(String(m.id || '').replace(/-/g, ' ')), ...woerter(m.name)]);
-  if ([...kette].some((w) => z.has(w))) return true;
+  const kette = new Set([...woerter(String(m.id || '').replace(/-/g, ' ')), ...woerter(m.name)].filter((w) => !KETTE_STOPP.has(w)));
   const roh = [...new Set(woerter(m.raw))];
-  return roh.length > 0 && roh.filter((w) => z.has(w)).length * 2 >= roh.length && roh.some((w) => w.length >= 4 && z.has(w));
+  // Eine ANDERE bekannte Kette in der Lesung als die zugeordnete → anderer
+  // Markt (auch wenn der Rohname sie nennt: dann hat die Pipeline falsch
+  // zugeordnet, „Joh's R E W E CENTER" als EDEKA — Mensch).
+  if ([...z].some((w) => KETTEN.has(w) && !kette.has(w))) return false;
+  if ([...kette].some((w) => z.has(w))) return true;
+  // Rohname: echte Mehrheit seiner Wörter, und bei mehreren Wörtern mindestens
+  // zwei („Michael Seidl" ↔ „Michael Brücken" ist kein Treffer).
+  const treffer = roh.filter((w) => z.has(w)).length;
+  return roh.length > 0 && treffer * 2 >= roh.length && (roh.length === 1 || treffer >= 2) && roh.some((w) => w.length >= 4 && z.has(w));
 }
 
 /**
@@ -258,11 +279,12 @@ function abgleich(bon, zweit, { grenzen = [] } = {}) {
   if (zweit.manipuliert === true) gruende.push('manipulationsverdacht');
   const { schwach, konflikte } = konfliktLage(bon);
 
-  const dv = datumVergleich(bon.bonDate, zweit.datum);
+  const zd = datumNormal(zweit.datum);
+  const dv = datumVergleich(bon.bonDate, zd);
   if (vorjahresKorrektur(bon)) gruende.push('jahr_unsicher');
   else if (dv === 'unlesbar') gruende.push('datum_nicht_gelesen');
   else if (dv === 'anders') gruende.push('datum_widerspricht');
-  else if (dv !== 'gleich' && !jahrUnmoeglich(bon, zweit.datum) && jahrZweifel(bon, zweit.datum, konflikte)) gruende.push('jahr_unsicher');
+  else if (dv !== 'gleich' && !jahrUnmoeglich(bon, zd) && jahrZweifel(bon, zd, konflikte)) gruende.push('jahr_unsicher');
 
   const gesp = Number(bon.bonTotalCents);
   const gel = Number(zweit.endsummeCent);

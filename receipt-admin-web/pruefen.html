@@ -670,7 +670,9 @@
         const fallId = c.id;
         setBusy(true);
         try {
-          const r = await call('reviewDecideReceipt')({ receiptId: c.id, decision, reason });
+          // 95 s: der Server wartet bis zu 75 s auf den Resolver — das SDK gäbe
+          // sonst nach 70 s auf, bevor „Ergebnis unklar" überhaupt ankommt.
+          const r = await call('reviewDecideReceipt', { timeout: 95000 })({ receiptId: c.id, decision, reason });
           if (r.data.ok) {
             // Der Resolver rechnet die Deckel beim Freigeben NEU — ein Bon, der
             // Tage in der Prüfung lag, kann am Tageslimit hängen und mit
@@ -701,7 +703,11 @@
             const code = r.data.code || r.data.http;
             toast(`Nicht ausgeführt: ${esc(RESOLVER_DE[code] || code)}`, 'bad');
           }
-        } catch (e) { toast('Fehler: ' + e.message, 'bad'); }
+        } catch (e) {
+          // Abbruch ohne Antwort: der Resolver kann trotzdem gebucht haben.
+          const unklar = /deadline-exceeded|unavailable/.test(String(e && e.code));
+          toast(unklar ? `Nicht sicher ausgeführt: ${RESOLVER_DE.netzwerk}` : 'Fehler: ' + e.message, 'bad');
+        }
         setBusy(false);
       }
 

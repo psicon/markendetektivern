@@ -82,6 +82,10 @@ describe('Bon-Runde', () => {
   it('viele offene → gelb', () => {
     expect(codes(warnungen(basis({ bonRunde: { scharf: true, bericht: { offen: 6 } } })))).toContain('gelb:bonrunde_offen');
   });
+  it('Bon-Bericht nicht lesbar → nur gelb, geht vor „läuft"/„abgebrochen"', () => {
+    expect(codes(warnungen(basis({ bonRunde: { scharf: true, bericht: null, unbekannt: true } })))).toEqual(['gelb:bonrunde_unbekannt']);
+    expect(codes(warnungen(basis({ bonRunde: { scharf: true, bericht: null, unbekannt: true, abgebrochen: true } })))).toEqual(['gelb:bonrunde_unbekannt']);
+  });
   it('technischer Fehler → rot, schon ab einem Bon', () => {
     expect(codes(warnungen(basis({ bonRunde: { scharf: true, bericht: { offen: 1, technikFehler: 1 } } })))).toContain('rot:bonrunde_technik');
   });

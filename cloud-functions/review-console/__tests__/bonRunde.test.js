@@ -356,30 +356,52 @@ describe('scharf — liegen lassen', () => {
     expect(offen[0].grund).toBe('budget_leer');
   });
 
-  it('eigene Buchung wird nicht doppelt abgezogen, wenn sie schon im frisch gelesenen Budget steckt (Prüfrunde 4)', async () => {
+  it('bucht die Pipeline parallel aus derselben Aktion, gibt es keine Teilbuchung — der zweite Bon bleibt liegen (Prüfrunde 5)', async () => {
     lege('cashback_campaigns/sep', { budgetRemainingCents: 20, minItems: 4 });
     lege('receipts/a1', bon('a1', { userId: 'a' }));
     lege('receipts/b1', bon('b1', { userId: 'b' }));
-    // Reihenfolge erzwingen: a1 bucht beim Resolver das Budget (20 → 12) und
-    // antwortet noch nicht; erst DANN liest b1 die Aktion frisch. Die
-    // Reservierung von a1 steht dann noch — die alte Rechnung „frisch −
-    // reserviert" ergab 4 ct und ließ b1 fälschlich liegen.
-    let a1Gebucht; const a1HatGebucht = new Promise((r) => { a1Gebucht = r; });
+    // a1 ist beim Resolver (noch nicht gebucht); währenddessen bucht die
+    // Pipeline 8 ct für einen neuen Bon (20 → 12). Erst dann prüft b1.
+    // Mit min(frisch, Start − reserviert) wäre b1 freigegeben worden und a1
+    // hätte nur noch 4 ct bekommen.
+    let pipelineGebucht; const pipelineFertig = new Promise((r) => { pipelineGebucht = r; });
     let a1Weiter; const a1Antwort = new Promise((r) => { a1Weiter = r; });
     let lesungen = 0;
     mockGenerate.mockImplementation(async () => {
-      if (++lesungen === 2) await a1HatGebucht; // die zweite Lesung (b1) wartet auf a1s Buchung
+      if (++lesungen === 2) { await pipelineFertig; setTimeout(() => a1Weiter(), 20); }
       return antwort(zweit());
     });
+    const gebucht = {};
     mockResolver.mockImplementation(async (a) => {
+      if (a.receiptId === 'a1') {
+        const c0 = mockStore.get('cashback_campaigns/sep');
+        mockStore.set('cashback_campaigns/sep', { ...c0, budgetRemainingCents: c0.budgetRemainingCents - 8 }); // Pipeline bucht fremden Bon
+        pipelineGebucht();
+        await a1Antwort;
+      }
       const c = mockStore.get('cashback_campaigns/sep');
-      mockStore.set('cashback_campaigns/sep', { ...c, budgetRemainingCents: c.budgetRemainingCents - 8 });
-      if (a.receiptId === 'a1') { a1Gebucht(); await a1Antwort; } else a1Weiter();
+      const cents = Math.min(8, c.budgetRemainingCents);
+      mockStore.set('cashback_campaigns/sep', { ...c, budgetRemainingCents: c.budgetRemainingCents - cents });
+      gebucht[a.receiptId] = cents;
       return resolverBucht(a);
     });
     await scharf();
-    expect(mockResolver.mock.calls.map(([a]) => a.receiptId).sort()).toEqual(['a1', 'b1']);
-    expect(['a1', 'b1'].map((id) => fall(id).entscheidung)).toEqual(['freigeben', 'freigeben']);
+    expect(gebucht).toEqual({ a1: 8 });
+    expect(fall('b1')).toMatchObject({ entscheidung: 'offen', grund: 'budget_leer' });
+  });
+
+  it('eine bestätigte eigene Buchung fällt aus der Reservierung (steckt dann im frischen Budget)', async () => {
+    lege('cashback_campaigns/sep', { budgetRemainingCents: 16, minItems: 4 });
+    lege('receipts/a1', bon('a1', { userId: 'a', createdAt: ts(1000) }));
+    lege('receipts/a2', bon('a2', { userId: 'a', createdAt: ts(2000), contentHash: 'x2', transactionHash: 'y2', itemsHash: 'z2' }));
+    mockResolver.mockImplementation(async (a) => {
+      const c = mockStore.get('cashback_campaigns/sep');
+      mockStore.set('cashback_campaigns/sep', { ...c, budgetRemainingCents: c.budgetRemainingCents - 8 });
+      return resolverBucht(a);
+    });
+    await scharf();
+    // nacheinander (dieselbe Person): 16 → a1 bucht 8 → a2 sieht frisch 8, Reservierung 0 → frei
+    expect(['a1', 'a2'].map((id) => fall(id).entscheidung)).toEqual(['freigeben', 'freigeben']);
   });
 
   it('Budget reicht nicht → offen „budget_leer", kein Resolver', async () => {

@@ -79,7 +79,20 @@ describe('marktPasst', () => {
     expect(marktPasst(bon({ merchant: { id: 'dm', name: 'dm', raw: 'dm-drogerie markt' } }), 'Müller Drogerie Markt')).toBe(false);
     expect(marktPasst(bon({ merchant: { id: 'rewe', name: 'REWE', raw: 'REWE CENTER' } }), 'E center HERKULES')).toBe(false);
   });
+  it('Himmelsrichtungen und andere Ketten in der Lesung (Prüfrunde 5)', () => {
+    expect(marktPasst(bon({ merchant: { id: 'aldi-nord', name: 'Aldi Nord' } }), 'Netto Nord')).toBe(false);
+    expect(marktPasst(bon({ merchant: { id: 'aldi-nord', name: 'Aldi Nord' } }), 'ALDI Nord')).toBe(true);
+    expect(marktPasst(bon({ merchant: { id: 'edeka', name: 'EDEKA', raw: 'EDEKA Schäfer' } }), 'REWE Schäfer OHG')).toBe(false);
+    expect(marktPasst(bon({ merchant: { id: 'edeka', name: 'EDEKA', raw: "Joh's R E W E CENTER" } }), "Joh's R E W E CENTER")).toBe(false);
+    expect(marktPasst(bon({ merchant: { id: 'rewe', name: 'REWE', raw: "Joh's R E W E CENTER" } }), 'R E W E Center')).toBe(true);
+  });
+  it('„E center" ist EDEKA', () => {
+    expect(marktPasst(bon({ merchant: { id: 'edeka', name: 'EDEKA', raw: 'E center' } }), 'E center')).toBe(true);
+    expect(marktPasst(bon({ merchant: { id: 'edeka', name: 'EDEKA', raw: 'E-Center' } }), 'E-Center Mustermann')).toBe(true);
+  });
   it('ein gemeinsamer Vorname im Rohnamen reicht nicht', () => {
+    expect(marktPasst(bon({ merchant: { id: 'lidl', name: 'Lidl', raw: 'Michael Seidl e.K.' } }), 'Michael Brücken Kaufpark')).toBe(false);
+    expect(marktPasst(bon({ merchant: { id: 'lidl', name: 'Lidl', raw: 'Michael Seidl e.K.' } }), 'Michael Seidl e.K.')).toBe(true);
     expect(marktPasst(bon({ merchant: { id: 'edeka', name: 'EDEKA', raw: 'Edeka Michael Müller' } }), 'REWE Michael Schmidt')).toBe(false);
   });
   it('anderer Markt / leer / zu kurz → nein', () => {
@@ -122,6 +135,19 @@ describe('abgleich', () => {
     const b = bon({ bonDate: '2026-09-23', bonDateCorrection: { from: '2025-09-23', to: '2026-09-23', reason: 'year_misread_same_day' } });
     expect(abgleich(b, zweit({ datum: '2026-09-23' })).gruende).toContain('jahr_unsicher');
     expect(abgleich(b, zweit({ datum: '2028-09-23' })).gruende).toContain('jahr_unsicher');
+  });
+  it('Datum in deutscher Schreibweise zählt auch für die Jahresprüfung (Prüfrunde 5)', () => {
+    const b = bon({ ocrFieldAgreement: fa(['bonDate']), ocr: { robust: { reads: [{ bonDate: '2026-09-23' }, { bonDate: '2025-09-23' }] } } });
+    expect(abgleich(b, zweit({ datum: '23.09.25' })).gruende).toContain('jahr_unsicher');
+    expect(abgleich(bon(), zweit({ datum: '23.09.28' })).ok).toBe(true); // Zukunftsjahr = Fehllesung
+  });
+  it('Korrektur 2020 → 2026, Zweitlesung liest ein drittes Jahr → Zweifel', () => {
+    const b = bon({ bonDateCorrection: { from: '2020-09-23', to: '2026-09-23' } });
+    expect(abgleich(b, zweit({ datum: '2025-09-23' })).gruende).toContain('jahr_unsicher');
+  });
+  it('Korrektur aus einem Zukunftsjahr (2028 → 2026) ist eine Fehllesung und hält nicht an', () => {
+    const b = bon({ bonDateCorrection: { from: '2028-09-23', to: '2026-09-23' } });
+    expect(abgleich(b, zweit()).ok).toBe(true);
   });
   it('alte Korrektur (2020 → 2026) erklärt dieselbe Fehllesung der Zweitlesung', () => {
     const b = bon({ bonDateCorrection: { from: '2020-09-23', to: '2026-09-23' }, ocr: { robust: { reads: [{ bonDate: '2020-09-23' }, { bonDate: '2020-09-23' }] } } });

@@ -19,7 +19,7 @@ export const app = initializeApp({
 export const auth = getAuth(app);
 export const fns = getFunctions(app, 'europe-west1');
 export const storage = getStorage(app);
-export const call = (name) => httpsCallable(fns, name);
+export const call = (name, opts) => httpsCallable(fns, name, opts);
 
 export const $ = (id) => document.getElementById(id);
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

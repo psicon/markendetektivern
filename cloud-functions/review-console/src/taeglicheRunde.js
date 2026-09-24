@@ -500,11 +500,13 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   }
 
   // 9) Lage bei Bons und Aktionen, Warnungen
-  const [lage, aktionen, vorher, bonSnap] = await Promise.all([bonLage(db, start), aktionsLage(db), db.doc(`${BERICHTE}/aktuell`).get(), db.doc(`ops_bonrunden/${tag}`).get().catch(() => null)]);
+  const [lage, aktionen, vorher, bonSnap] = await Promise.all([bonLage(db, start), aktionsLage(db), db.doc(`${BERICHTE}/aktuell`).get(), db.doc(`ops_bonrunden/${tag}`).get().catch((e) => { logger.warn('ops_bonrunden nicht lesbar', { tag, fehler: String(e && e.message).slice(0, 160) }); return null; })]);
   // Ergebnis der Bon-Runde von 07:45 (src/bonRunde.js) in denselben Bericht.
   const bonRundeRoh = (d) => (({ laufAt, ...rest }) => ({ ...rest, laufAt: laufAt && laufAt.toMillis ? laufAt.toMillis() : null }))(d);
-  // Ein Lesefehler hier darf den Bericht nicht kosten — die Entscheidungen der
-  // Foto-Runde sind zu diesem Zeitpunkt schon geschrieben (Prüfrunde 4).
+  // Ein Lesefehler beim Bon-Bericht darf den Tagesbericht nicht kosten — die
+  // Entscheidungen der Foto-Runde sind zu diesem Zeitpunkt schon geschrieben
+  // (Prüfrunde 4). Gilt nur für ops_bonrunden; die übrigen Lage-Abfragen oben
+  // sind wie bisher ungeschützt.
   let bonRundeUnbekannt = bonSnap == null;
   let bonRundeHeute = bonSnap && bonSnap.exists ? bonRundeRoh(bonSnap.data()) : null;
   // Kein fertiger Bericht: läuft sie noch, oder ist sie abgebrochen? Nach
@@ -513,7 +515,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   let bonAbgebrochen = false; let bonLaeuftNoch = false; let bonNachgereicht = null;
   if (bonSnap && !bonSnap.exists) {
     const laeufe = await db.collection('ops_bonrunden').where('tag', '==', tag).limit(10).get()
-      .then((q) => q.docs).catch(() => { bonRundeUnbekannt = true; return []; });
+      .then((q) => q.docs).catch((e) => { logger.warn('ops_bonrunden-Läufe nicht lesbar', { tag, fehler: String(e && e.message).slice(0, 160) }); bonRundeUnbekannt = true; return []; });
     // Zwischen den beiden Lesevorgängen fertig geworden? Dann diesen Bericht nehmen.
     const fertig = laeufe.filter((d) => d.get('laeuft') === false)
       .sort((a, b) => ((b.get('laufAt')?.toMillis?.() || 0) - (a.get('laufAt')?.toMillis?.() || 0)))[0];
