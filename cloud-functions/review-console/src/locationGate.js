@@ -101,7 +101,9 @@ function createdAtMs(doc) {
  * `null` = noch keine solche Version ausgeliefert. Beim Release den Build
  * eintragen (clientVersion.build, z. B. Android-versionCode / iOS-Build).
  */
-const STANDORTPFLICHT_AB_BUILD = { android: null, ios: null };
+// 6.0.20: erste Version mit der Sperre in der App (Android versionCode 1244,
+// iOS-Build 1270). Höhere Nummern bei einem Neubau fallen automatisch darunter.
+const STANDORTPFLICHT_AB_BUILD = { android: 1244, ios: 1270 };
 
 /** Die App schreibt diese Werte, wenn die Freigabe NICHT erteilt ist (captureContext.ts). */
 const FREIGABE_FEHLT = new Set(['denied', 'not_asked']);

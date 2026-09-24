@@ -181,9 +181,17 @@ describe('Harte Standortfreigabe-Pflicht (Entscheidung 24.09.2026)', () => {
   const ab = { android: 1250, ios: 1280 };
   const doc = (platform, build, capture, extra = {}) => ({ clientVersion: { app: '6.1.0', platform, build: String(build) }, capture, ...extra });
 
-  test('ist ausgeliefert inaktiv, solange keine App-Version sie durchsetzt', () => {
-    expect(STANDORTPFLICHT_AB_BUILD).toEqual({ android: null, ios: null });
-    expect(pruefeOrtsanforderung(doc('ios', 9999, { gpsStatus: 'denied', confirmedPlace: { city: 'Köln' } }))).toEqual({ ok: true });
+  test('greift ab 6.0.20 (Android 1244, iOS 1270) — ältere Versionen unberührt', () => {
+    expect(STANDORTPFLICHT_AB_BUILD).toEqual({ android: 1244, ios: 1270 });
+    const getippt = { gpsStatus: 'denied', confirmedPlace: { city: 'Köln' } };
+    // 6.0.19 bzw. 6.0.18 bieten „Ort eintippen" noch an → weiter vergütet
+    expect(pruefeOrtsanforderung(doc('android', 1243, getippt))).toEqual({ ok: true });
+    expect(pruefeOrtsanforderung(doc('ios', 1269, getippt))).toEqual({ ok: true });
+    // ab 6.0.20 zählt ohne Freigabe nichts
+    expect(pruefeOrtsanforderung(doc('android', 1244, getippt))).toEqual({ ok: false, grund: 'no_location' });
+    expect(pruefeOrtsanforderung(doc('ios', 1270, getippt))).toEqual({ ok: false, grund: 'no_location' });
+    // mit Freigabe normal
+    expect(pruefeOrtsanforderung(doc('ios', 1270, { gpsStatus: 'granted_precise', gps: { lat: 51, lon: 7 } })).ok).toBe(true);
   });
 
   test('ab dem Build: ohne Freigabe keine Vergütung — auch nicht mit eingetipptem Ort oder Bon', () => {
