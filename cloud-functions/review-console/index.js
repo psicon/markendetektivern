@@ -951,3 +951,38 @@ exports.reviewMapPoints = onCall({ region: REGION, memory: '1GiB', timeoutSecond
   };
   return { ...kartenCache, ausCache: false };
 });
+
+/* ─── Tägliche Produktfoto-Runde (vorbereitet 20.09.2026) ───────────────────
+ *
+ * Läuft um 08:00 und macht, was bisher von Hand lief. ZWEI Sicherungen:
+ *  1. Sie entscheidet nur scharf, wenn `cashback_config/v1.fotoWorker === true`
+ *     steht. Sonst läuft sie als Trockenlauf und schreibt nur den Bericht —
+ *     ein Deploy schaltet also nichts still scharf (gleiche Bauart wie der
+ *     Schalter `ocrReferee`).
+ *  2. Sie lehnt nur mechanisch eindeutige Fälle ab. Alles, wofür man die Bilder
+ *     ansehen muss, landet in `ops_tagesberichte/{tag}.wartetAufDich`.
+ */
+const { onSchedule } = require('firebase-functions/v2/scheduler');
+const { onRequest } = require('firebase-functions/v2/https');
+const { taeglicheRunde } = require('./src/taeglicheRunde');
+const PROJEKT = process.env.GCLOUD_PROJECT || 'markendetektive-895f7';
+
+exports.fotoRundeTaeglich = onSchedule(
+  { region: REGION, schedule: '0 8 * * *', timeZone: 'Europe/Berlin', timeoutSeconds: 3600, memory: '1GiB' },
+  async () => {
+    const cfg = (await db.doc('cashback_config/v1').get()).data() || {};
+    const scharf = cfg.fotoWorker === true;
+    const bericht = await taeglicheRunde({ dryRun: !scharf, projekt: PROJEKT });
+    logger.info(scharf ? 'Fotorunde scharf gelaufen' : 'Fotorunde als Trockenlauf gelaufen (Schalter fotoWorker steht nicht auf true)', bericht);
+  },
+);
+
+/** Manueller Anstoß zum Prüfen — ohne Schlüssel immer nur Trockenlauf. */
+exports.fotoRundeManuell = onRequest(
+  { region: REGION, secrets: [CASHBACK_ADMIN_KEY], timeoutSeconds: 3600, memory: '1GiB' },
+  async (req, res) => {
+    const scharf = req.query.key === CASHBACK_ADMIN_KEY.value() && req.query.scharf === '1';
+    const bericht = await taeglicheRunde({ dryRun: !scharf, projekt: PROJEKT });
+    res.json(bericht);
+  },
+);
