@@ -3,6 +3,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useNavigation, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
+  AppState,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -44,7 +45,7 @@ export default function JoinScanScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const [permission, requestPermission] = useCameraPermissions();
+  const [permission, requestPermission, getPermission] = useCameraPermissions();
   const firedRef = useRef(false);
   const [manualCode, setManualCode] = useState('');
   const [notAQr, setNotAQr] = useState(false);
@@ -58,6 +59,26 @@ export default function JoinScanScreen() {
   // und die zweite Ablehnung sperrte die Kamera für die ganze App (Prüfung
   // 25.09.2026). Danach entscheidet der Nutzer über den Knopf auf dem Screen.
   const automatischGefragt = useRef(false);
+  // Doppeltipp auf „Kamera erlauben" darf keine zweite Anfrage einreihen —
+  // eine zweite Ablehnung ist unter Android endgültig.
+  const [kameraFragtGerade, setKameraFragtGerade] = useState(false);
+  const kameraErlauben = useCallback(async () => {
+    if (kameraFragtGerade) return;
+    setKameraFragtGerade(true);
+    try {
+      await requestPermission();
+    } finally {
+      setKameraFragtGerade(false);
+    }
+  }, [kameraFragtGerade, requestPermission]);
+  // Zurück aus den Einstellungen → Freigabe neu lesen, sonst bliebe der
+  // Hinweis stehen, obwohl die Kamera inzwischen erlaubt ist.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') void getPermission();
+    });
+    return () => sub.remove();
+  }, [getPermission]);
   useEffect(() => {
     if (automatischGefragt.current) return;
     if (permission && !permission.granted && permission.canAskAgain) {
@@ -137,7 +158,8 @@ export default function JoinScanScreen() {
           </Text>
           {camNochFragbar ? (
             <Pressable
-              onPress={() => void requestPermission()}
+              onPress={() => void kameraErlauben()}
+              disabled={kameraFragtGerade}
               style={({ pressed }) => ({ marginTop: 18, height: 44, paddingHorizontal: 22, borderRadius: radii.full, backgroundColor: '#0d8575', alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.9 : 1 })}
             >
               <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 14, color: '#fff' }}>Kamera erlauben</Text>

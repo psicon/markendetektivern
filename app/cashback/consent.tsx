@@ -64,6 +64,7 @@ import {
 import { AuthRueckkehr } from '@/lib/services/authRueckkehr';
 import { gesperrteFreigeben } from '@/lib/services/bonUploadQueue';
 import { standortAnfordern, standortStatus } from '@/lib/services/captureContext';
+import { pruefeStandortPflicht } from '@/lib/services/standortPflicht';
 import { consentService } from '@/lib/services/consentService';
 import { mitZeitlimit } from '@/lib/services/berechtigungsWaechter';
 import { isOnline, refreshNetwork } from '@/lib/services/network';
@@ -451,9 +452,12 @@ function RewardsMarquee({
 // programmweite Bedingung (nicht gelockert). Die frühere Zusatzzeile dazu
 // („Bei Bons nehmen wir die Filialadresse …") steht seit 25.09.2026 NICHT
 // mehr im Screen (Entscheidung Patrick: zu viel Text) — das Badge „Mit
-// Standortfreigabe", der Systemdialog und die verlinkte Datenschutzerklärung
-// tragen die Information. Keine neue Datenkategorie → consentVersion
-// bewusst NICHT gebumpt.
+// Standortfreigabe" und die verlinkte Datenschutzerklärung tragen die
+// Information (unter iOS zusätzlich der Zweck-Text im Systemdialog; unter
+// Android zeigt der Systemdialog keinen App-Text). Dass Produktfotos den
+// genauen Aufnahmeort speichern, muss deshalb die Datenschutzerklärung
+// nennen (siehe OFFEN FÜR DEN ANWALT unten). Keine neue Datenkategorie →
+// consentVersion bewusst NICHT gebumpt.
 // OFFEN FÜR DEN ANWALT (Stand 05.09.2026, verlinkte Datenschutzerklärung
 // „Stand 10. Juni 2026"): (1) Sie sagt zweimal „kein Zugriff auf den genauen
 // Gerätestandort (GPS)" — Produktfotos speichern aber präzises GPS und dieser
@@ -567,7 +571,7 @@ export default function CashbackConsentScreen() {
     [],
   );
   /** Gesetzt, sobald die Standortfreigabe verweigert wurde. */
-  const [standortFehlt, setStandortFehlt] = useState<'denied' | null>(null);
+  const [standortFehlt, setStandortFehlt] = useState<'denied' | 'dienste_aus' | null>(null);
 
   /**
    * Wer in die Einstellungen geht und zurückkommt, soll nicht raten müssen,
@@ -583,6 +587,14 @@ export default function CashbackConsentScreen() {
     if (!standortFehlt) return;
     const sub = AppState.addEventListener('change', (s) => {
       if (s !== 'active') return;
+      if (standortFehlt === 'dienste_aus') {
+        // iOS-Ortungsdienste wieder an → die Karte hat ihren Zweck erfüllt;
+        // die App-Freigabe fragt der nächste Tipp auf „Akzeptieren".
+        void pruefeStandortPflicht().then((pflicht) => {
+          if (pflicht !== 'dienste_aus') setStandortFehlt(null);
+        });
+        return;
+      }
       void standortStatus().then((status) => {
         if (status === 'granted_precise' || status === 'granted_coarse') {
           setStandortFehlt(null);
@@ -609,6 +621,9 @@ export default function CashbackConsentScreen() {
       if (user?.uid) {
         const valid = await hasValidCashbackConsent(user.uid);
         if (alive && valid) {
+          // Kam das Speichern erst nach der Zeitgrenze an, stehen Bons ohne
+          // Einwilligung noch in der Warteschlange — jetzt freigeben.
+          void gesperrteFreigeben(['consent_missing']).catch(() => {});
           // Consent schon gültig → context-aware weiter (kein Auto-Scanner
           // außer from=receipt).
           goAfterConsent();
@@ -689,6 +704,16 @@ export default function CashbackConsentScreen() {
     );
   }, []);
 
+  /** iOS: Ortungsdienste des Geräts aus — der Weg führt nicht über die App-Seite. */
+  const zeigeOrtungsdiensteHinweis = useCallback(() => {
+    setStandortFehlt('dienste_aus');
+    Alert.alert(
+      'Ortungsdienste einschalten',
+      'Einstellungen → Datenschutz & Sicherheit → Ortungsdienste – dann zurück und auf Akzeptieren.',
+      [{ text: 'OK' }],
+    );
+  }, []);
+
   const handleAccept = useCallback(async () => {
     if (!user?.uid) {
       Alert.alert(
@@ -737,6 +762,15 @@ export default function CashbackConsentScreen() {
       const status = await standortAnfordern();
       if (!gilt()) return;
       if (status === 'denied') {
+        // iOS meldet „verweigert" auch, wenn die Ortungsdienste des ganzen
+        // Geräts aus sind — dann hilft die App-Seite der Einstellungen nicht
+        // (Prüfung 25.09.2026). Android fragt die Freigabe unabhängig davon.
+        if (Platform.OS === 'ios' && (await pruefeStandortPflicht()) === 'dienste_aus') {
+          if (!gilt()) return;
+          zeigeOrtungsdiensteHinweis();
+          return;
+        }
+        if (!gilt()) return;
         zeigeEinstellungenPopup();
         return;
       }
@@ -745,11 +779,12 @@ export default function CashbackConsentScreen() {
         return;
       }
 
-      const gespeichert = await mitZeitlimit(
-        acceptCashbackConsent(user.uid).then(() => true),
-        SPEICHERN_MS,
-        false,
-      );
+      const schreiben = acceptCashbackConsent(user.uid);
+      // Bons, die ohne Einwilligung in der Warteschlange hängen geblieben
+      // sind, freigeben, sobald das Speichern WIRKLICH durch ist — auch wenn
+      // das erst nach der Zeitgrenze oder nach Verlassen des Screens passiert.
+      void schreiben.then(() => gesperrteFreigeben(['consent_missing'])).catch(() => {});
+      const gespeichert = await mitZeitlimit(schreiben.then(() => true), SPEICHERN_MS, false);
       if (!gilt()) return;
       if (!gespeichert) {
         // Der Write ist ein idempotentes merge — kommt er später doch an,
@@ -758,9 +793,6 @@ export default function CashbackConsentScreen() {
         return;
       }
       setHasAccepted(true);
-      // Bons, die ohne Einwilligung in der Warteschlange hängen geblieben
-      // sind, jetzt wieder anstoßen.
-      void gesperrteFreigeben(['consent_missing']).catch(() => {});
       // 86cagb57g: Wer den App-Start-Tracking-Consent (UMP, Android)
       // abgelehnt hatte, bekommt ihn beim Cashback-Aktivieren erneut —
       // VOR der Navigation, damit das native Formular nicht über einem
@@ -782,7 +814,7 @@ export default function CashbackConsentScreen() {
     } finally {
       if (aktivRef.current) setSubmitting(false);
     }
-  }, [user?.uid, scheme, goAfterConsent, zeigeStandortHinweis, zeigeEinstellungenPopup]);
+  }, [user?.uid, scheme, goAfterConsent, zeigeStandortHinweis, zeigeEinstellungenPopup, zeigeOrtungsdiensteHinweis]);
 
   // Nach jedem Render aktualisieren, damit der Dialog-Knopf nie eine
   // veraltete Closure aufruft.
@@ -1188,6 +1220,17 @@ export default function CashbackConsentScreen() {
             Nutzer liest sie, während er in den Einstellungen sucht, und
             findet sie bei der Rückkehr noch vor. Ein Dialog wäre genau
             dann weg, wenn man ihn braucht. */}
+        {standortFehlt === 'dienste_aus' && (
+          <View style={styles.locHint}>
+            <View style={styles.locHintHead}>
+              <MaterialCommunityIcons name="map-marker-off-outline" size={16} color={accent} />
+              <Text style={styles.locHintTitle}>Ortungsdienste einschalten</Text>
+            </View>
+            <Text style={styles.locHintBody}>
+              Einstellungen → Datenschutz & Sicherheit → Ortungsdienste – dann zurück und auf Akzeptieren.
+            </Text>
+          </View>
+        )}
         {standortFehlt === 'denied' && (
           <View style={styles.locHint}>
             <View style={styles.locHintHead}>

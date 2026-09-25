@@ -32,13 +32,27 @@ class MainActivity : ReactActivity() {
    * Hier: Hörer selbst halten, Ergebnis sofort zustellen, wenn die Activity
    * RESUMED ist, sonst wie bisher beim nächsten `onResume`. Ein Hörer auf
    * einmal wie in React Native.
+   *
+   * - Alle Zugriffe laufen auf dem Hauptthread: Expo ruft `requestPermissions`
+   *   von seinem Hintergrund-Thread auf (vorher legte die Expo-Hülle das auf
+   *   den Hauptthread; ohne das gäbe es einen Wettlauf mit der Zustellung).
+   * - Hörer und zurückgehaltenes Ergebnis leben prozessweit (companion): wird
+   *   die Activity bei offenem Dialog neu erstellt (Faltgerät, Anzeigegröße),
+   *   erreicht das Ergebnis trotzdem den wartenden Hörer, statt dass Expo
+   *   jede weitere Anfrage für immer parkt.
    */
-  private var berechtigungsHoerer: PermissionListener? = null
-  private var ausstehendesErgebnis: (() -> Unit)? = null
+  companion object {
+    private var berechtigungsHoerer: PermissionListener? = null
+    private var ausstehendesErgebnis: (() -> Unit)? = null
+  }
 
   override fun requestPermissions(permissions: Array<String>, requestCode: Int, listener: PermissionListener?) {
-    berechtigungsHoerer = listener
-    requestPermissions(permissions, requestCode)
+    // Auf dem Hauptthread synchron (Folgeanfrage aus einem Expo-Hörer),
+    // sonst in dessen Warteschlange — Expo hält dabei sein Schloss nicht fest.
+    runOnUiThread {
+      berechtigungsHoerer = listener
+      requestPermissions(permissions, requestCode)
+    }
   }
 
   @Suppress("DEPRECATION")

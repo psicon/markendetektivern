@@ -23,8 +23,9 @@ jest.mock('expo-application', () => ({
   nativeBuildVersion: '1234',
 }));
 
+const mockPlattform = { OS: 'ios' as 'ios' | 'android' };
 jest.mock('react-native', () => ({
-  Platform: { OS: 'ios' },
+  Platform: mockPlattform,
   // Wächter (berechtigungsWaechter.ts): 'background' = Dialog sichtbar → regulär warten.
   AppState: { currentState: 'background', addEventListener: jest.fn(() => ({ remove: jest.fn() })) },
 }));
@@ -107,10 +108,24 @@ describe('standortAnfordern löst den System-Dialog aus — und nur diese Funkti
     expect(mockLocation.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
   });
 
-  it('endgültig abgelehnt → sofort denied, KEINE Anfrage (kein ewiger Spinner)', async () => {
+  it('iOS, endgültig abgelehnt → sofort denied, KEINE Anfrage (kein ewiger Spinner)', async () => {
     mockLocation.getForegroundPermissionsAsync.mockResolvedValue({ granted: false, canAskAgain: false });
     expect(await standortAnfordern()).toBe('denied');
     expect(mockLocation.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+  });
+
+  it('Android, canAskAgain=false → trotzdem fragen (weggetippter Dialog), Ergebnis entscheidet', async () => {
+    mockPlattform.OS = 'android';
+    try {
+      mockLocation.getForegroundPermissionsAsync.mockResolvedValue({ granted: false, canAskAgain: false });
+      mockLocation.requestForegroundPermissionsAsync.mockResolvedValue({ granted: true, canAskAgain: true });
+      expect(await standortAnfordern()).toBe('granted_precise');
+      expect(mockLocation.requestForegroundPermissionsAsync).toHaveBeenCalledTimes(1);
+      mockLocation.requestForegroundPermissionsAsync.mockResolvedValue({ granted: false, canAskAgain: false });
+      expect(await standortAnfordern()).toBe('denied');
+    } finally {
+      mockPlattform.OS = 'ios';
+    }
   });
 
   it('meldet die erteilte Freigabe', async () => {

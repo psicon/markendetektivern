@@ -151,7 +151,9 @@ export const LocationPicker: React.FC<LocationPickerProps> = ({
       // beim nächsten Aufwachen der App; bis dahin parkte Expo jede weitere
       // Berechtigungsanfrage (Vorfall 25.09.2026, berechtigungsWaechter.ts).
       const vorher = await Location.getForegroundPermissionsAsync();
-      const p = vorher.granted || !vorher.canAskAgain
+      // iOS: canAskAgain=false ist endgültig. Android meldet es auch nach
+      // einem weggetippten Dialog — dort trotzdem (mit Wächter) fragen.
+      const p = vorher.granted || (!vorher.canAskAgain && Platform.OS === 'ios')
         ? vorher
         : await anfragenOhneHaenger(
             () => Location.requestForegroundPermissionsAsync(),

@@ -175,7 +175,12 @@ export async function standortAnfordern(): Promise<GpsStatus> {
     // auf Android kam die Antwort dann erst beim nächsten Aufwachen der App
     // (ewiger Spinner, Vorfall 25.09.2026, siehe berechtigungsWaechter.ts).
     const vorher = await Location.getForegroundPermissionsAsync();
-    if (!vorher.granted && !vorher.canAskAgain) return 'denied';
+    // iOS: canAskAgain=false ist verlässlich endgültig → gar nicht fragen.
+    // Android meldet es auch nach einem weggetippten Dialog oder einer
+    // abgelaufenen „Nur dieses Mal"-Freigabe — dort kommt der Dialog noch.
+    // Also fragen; ist es wirklich endgültig, kommt die Antwort ohne Dialog
+    // sofort (MainActivity.kt) bzw. nach dem Wächter.
+    if (!vorher.granted && !vorher.canAskAgain && Platform.OS === 'ios') return 'denied';
     const p = vorher.granted
       ? vorher
       : await anfragenOhneHaenger(
