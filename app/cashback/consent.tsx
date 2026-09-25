@@ -12,6 +12,7 @@
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { useIsFocused } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { safePush } from '@/lib/utils/safeNav';
@@ -60,8 +61,12 @@ import {
   getCashbackConfig,
   hasValidCashbackConsent,
 } from '@/lib/services/cashbackService';
+import { AuthRueckkehr } from '@/lib/services/authRueckkehr';
+import { gesperrteFreigeben } from '@/lib/services/bonUploadQueue';
 import { standortAnfordern, standortStatus } from '@/lib/services/captureContext';
 import { consentService } from '@/lib/services/consentService';
+import { isOnline, refreshNetwork } from '@/lib/services/network';
+import { showInfoToast } from '@/lib/services/ui/toast';
 
 const PRIVACY_URL = 'https://markendetektive.de/datenschutz';
 const TERMS_URL = 'https://markendetektive.de/agb';
@@ -467,10 +472,11 @@ const LOCATION_NOTE_BY_VARIANT: Record<ConsentVariant, string> = {
 };
 
 export default function CashbackConsentScreen() {
-  const { theme } = useTokens();
+  const { theme, scheme } = useTokens();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { user, isAnonymous } = useAuth();
+  const isFocused = useIsFocused();
   // Kompakt-Modus für kleine Displays (iPhone SE-Klasse): engere
   // Paddings, damit Hero + alle 3 Steps ohne Scrollen sichtbar sind.
   const { height: winHeight } = useWindowDimensions();
@@ -578,6 +584,10 @@ export default function CashbackConsentScreen() {
   }, [navigation]);
 
   useEffect(() => {
+    // Nur im Vordergrund weiterleiten: Meldet sich ein Gast über „Schon ein
+    // Konto?" an, wechselt die uid, während der Login-Screen oben liegt —
+    // ein replace von hier aus würde dann den Login-Screen ersetzen.
+    if (!isFocused) return;
     let alive = true;
     (async () => {
       const config = await getCashbackConfig();
@@ -595,7 +605,7 @@ export default function CashbackConsentScreen() {
     return () => {
       alive = false;
     };
-  }, [user?.uid, goAfterConsent]);
+  }, [user?.uid, goAfterConsent, isFocused]);
 
   /**
    * Was passiert, wenn die Standortfreigabe nicht erteilt wird.
@@ -655,19 +665,23 @@ export default function CashbackConsentScreen() {
       );
       return;
     }
-    if (isAnonymous) {
-      Alert.alert(
-        'Konto erforderlich',
-        'Für Cashback brauchst du ein vollständiges Konto.',
-        [
-          { text: 'Abbrechen', style: 'cancel' },
-          { text: 'Konto erstellen', onPress: () => safePush('/auth/register') },
-        ],
-      );
-      return;
+    // Gäste nehmen das Programm selbst an (Entscheidung 25.09.2026 „erst
+    // einreichen, dann Konto"). Ein Konto braucht es erst zum Auszahlen —
+    // das erzwingt der Server in requestPayout, nicht dieser Screen.
+
+    // acceptCashbackConsent wartet auf den Server-Ack und hängt offline
+    // ewig (Firestore-Promise). Deshalb vorher kurz prüfen — und gar nicht
+    // erst nach dem Standort fragen, wenn danach nichts gespeichert werden kann.
+    setSubmitting(true);
+    if (!isOnline()) {
+      await refreshNetwork();
+      if (!isOnline()) {
+        setSubmitting(false);
+        showInfoToast('Für die Anmeldung zum Programm brauchst du kurz Internet.', 'info', scheme);
+        return;
+      }
     }
 
-    setSubmitting(true);
     try {
       // Standortfreigabe ist Teilnahmebedingung für das gesamte
       // Reward-Programm — Bons, Produktfotos UND Umfragen (Entscheidung
@@ -687,6 +701,9 @@ export default function CashbackConsentScreen() {
 
       await acceptCashbackConsent(user.uid);
       setHasAccepted(true);
+      // Bons, die ohne Einwilligung in der Warteschlange hängen geblieben
+      // sind, jetzt wieder anstoßen.
+      void gesperrteFreigeben(['consent_missing']).catch(() => {});
       // 86cagb57g: Wer den App-Start-Tracking-Consent (UMP, Android)
       // abgelehnt hatte, bekommt ihn beim Cashback-Aktivieren erneut —
       // VOR der Navigation, damit das native Formular nicht über einem
@@ -704,13 +721,20 @@ export default function CashbackConsentScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [user?.uid, isAnonymous, goAfterConsent, zeigeStandortHinweis]);
+  }, [user?.uid, scheme, goAfterConsent, zeigeStandortHinweis]);
 
   // Nach jedem Render aktualisieren, damit der Dialog-Knopf nie eine
   // veraltete Closure aufruft.
   handleAcceptRef.current = handleAccept;
 
   const handleCancel = useCallback(() => router.back(), []);
+
+  // Wiederkehrer melden sich am besten VOR dem Einreichen an — dann muss
+  // später nichts umgezogen werden. Nach dem Login geht es hierher zurück.
+  const handleAnmelden = useCallback(async () => {
+    await AuthRueckkehr.merke('/cashback/consent?from=' + from);
+    router.push('/auth/login');
+  }, [from]);
 
   const chromeHeight = insets.top + DETAIL_HEADER_ROW_HEIGHT;
   const accent = theme.primary ?? '#0d8575';
@@ -979,6 +1003,22 @@ export default function CashbackConsentScreen() {
         fontSize: 15,
         letterSpacing: 0.2,
       },
+      gastText: {
+        fontFamily,
+        fontWeight: fontWeight.medium as any,
+        fontSize: 11,
+        lineHeight: 15,
+        color: theme.textSub,
+        textAlign: 'center' as const,
+        paddingHorizontal: 6,
+      },
+      gastLink: {
+        fontFamily,
+        fontWeight: fontWeight.bold as any,
+        fontSize: 12,
+        color: accent,
+        textAlign: 'center' as const,
+      },
     }),
     [theme, accent, insets.bottom, isSubmitting, compact],
   );
@@ -1158,6 +1198,24 @@ export default function CashbackConsentScreen() {
             </>
           )}
         </Pressable>
+
+        {/* Gäste: eine Zeile, wann das Konto nötig wird, plus der Weg für
+            alle, die schon eins haben. */}
+        {isAnonymous ? (
+          <>
+            <Text style={styles.gastText}>
+              Zum Auszahlen legst du später ein kostenloses Konto an.
+            </Text>
+            <Pressable
+              accessibilityRole="link"
+              onPress={handleAnmelden}
+              disabled={isSubmitting || hasAccepted}
+              hitSlop={8}
+            >
+              <Text style={styles.gastLink}>Schon ein Konto? Anmelden</Text>
+            </Pressable>
+          </>
+        ) : null}
 
         {/* Trust-Badges UNTER den Buttons (User-Vorgabe 2026-06-10:
             nicht vom Akzeptieren ablenken) — drei dezente Icon-

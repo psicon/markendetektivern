@@ -1,0 +1,222 @@
+import { Alert } from 'react-native';
+
+import { auth } from '@/lib/firebase';
+import { AuthRueckkehr } from '@/lib/services/authRueckkehr';
+import {
+  gesperrteFreigeben,
+  pausiereBonQueue,
+  setzeBonQueueFort,
+} from '@/lib/services/bonUploadQueue';
+import { GastBestand } from '@/lib/services/gastBestand';
+import { GastUebernahme } from '@/lib/services/gastUebernahme';
+import { isOnline } from '@/lib/services/network';
+import { pausiereUploadQueue, setzeUploadQueueFort } from '@/lib/services/uploadQueue';
+import { isEffectivelyAnonymous } from '@/lib/utils/authIdentity';
+
+/**
+ * Wechsel eines Gastes in ein BESTEHENDES Konto (Entscheidung 25.09.2026
+ * „erst einreichen, dann Konto", Bauanleitung Schritt 26).
+ *
+ * Es gibt vier Stellen, an denen ein Gast seine uid verliert: Anbieter-
+ * Konflikt beim Verknüpfen (Google/Apple/Facebook), E-Mail-Anmeldung als Gast,
+ * Registrierung mit schon vergebener E-Mail und die geführte Facebook-
+ * Verknüpfung. Alle vier laufen durch `inBestehendesKontoWechseln`:
+ *
+ *   1. Kein Gast → direkt anmelden, sonst nichts.
+ *   2. Hat der Gast etwas eingereicht, erscheint IMMER der Mitnahme-Dialog
+ *      (keine stille 60-Minuten-Automatik) — mit maskierter Ziel-E-Mail.
+ *   3. VOR dem Wechsel, solange der Gast noch angemeldet ist, wird der
+ *      Besitznachweis gesichert (`GastUebernahme.vorbereiten`). Danach ist er
+ *      nicht mehr zu erbringen — deshalb bricht der Wechsel ab, wenn das bei
+ *      vorhandenem Bestand nicht klappt, statt Einreichungen zurückzulassen.
+ *   4. Nach dem Wechsel wird das Zielkonto gemerkt und eingelöst. In Stufe 1
+ *      antwortet der Server noch mit `pausiert` und bindet nichts; der Eintrag
+ *      bleibt und wird bei Start/Vordergrund erneut versucht.
+ *
+ * Während des Wechsels ruhen beide Upload-Warteschlangen, damit kein Auftrag
+ * mit halb gewechselter Identität startet.
+ */
+
+/**
+ * Wechsel abgebrochen, weil der Besitznachweis bei vorhandenem Bestand nicht
+ * gesichert werden konnte. Kein Defekt: die Anmelde-Bildschirme zeigen dafür
+ * einen kurzen Hinweis (lib/utils/authFehler.ts).
+ */
+export const KONTO_UMZUG_OFFLINE = 'auth/konto-umzug-offline';
+
+const OFFLINE_TEXT =
+  'Deine Einreichungen nehmen wir gleich mit – dafür brauchen wir kurz Netz. Bitte gleich nochmal versuchen.';
+
+type CodeFehler = Error & { code: string };
+
+function codeFehler(code: string, message: string): CodeFehler {
+  const err = new Error(message) as CodeFehler;
+  err.code = code;
+  return err;
+}
+
+/**
+ * Abbruch, so wie ihn alle Anmelde-Bildschirme heute kennen: `auth/cancelled`
+ * wird dort still behandelt (Formular bleibt offen, kein Toast).
+ */
+function abbruchFehler(): CodeFehler {
+  return codeFehler('auth/cancelled', 'Anmeldung abgebrochen');
+}
+
+/** p***@web.de — genug zum Wiedererkennen, nicht genug zum Ausspähen. */
+export function maskiereEmail(email: string | null | undefined): string | null {
+  const e = (email ?? '').trim();
+  const at = e.lastIndexOf('@');
+  if (at < 1 || at >= e.length - 1) return null;
+  return `${e[0]}***${e.slice(at)}`;
+}
+
+/**
+ * Confirm-Dialog, wenn ein Gast OHNE Einreichungen in ein bestehendes Konto
+ * wechselt. Liefert true, wenn der User fortfahren will, sonst false.
+ * (Unverändert aus AuthContext verschoben.)
+ *
+ * ClickUp 86ca7f3xn (2026-06-11):
+ * - FRISCHE Anon-Session (< 60 Min, typisch: erste Anmeldung direkt
+ *   nach dem Onboarding) → KEIN Dialog, einfach mit dem bestehenden
+ *   Konto fortfahren. Da ist nichts Wertvolles zu verlieren, und
+ *   ein Warn-Dialog beim allerersten Login ist doppelt verwirrend.
+ * - Sonst: positive Formulierung ("Mit diesem Konto fortfahren"
+ *   statt rotem "Konto wechseln") + faktischer Hinweis, dass die
+ *   Gast-Daten nicht übernommen werden.
+ */
+export function confirmAccountSwitch(): Promise<boolean> {
+  const createdAt = auth.currentUser?.metadata?.creationTime;
+  if (createdAt) {
+    const ageMs = Date.now() - new Date(createdAt).getTime();
+    // 60 Min statt 5 (ClickUp 86ca7x1m2): Onboarding + Walkthrough
+    // dauern laenger als 5 Min — die 'erste Anmeldung direkt nach
+    // der Installation' fiel sonst aus dem Fenster und bekam den
+    // Dialog doch. 60 Min deckt die gesamte Erst-Session ab.
+    if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs < 60 * 60 * 1000) {
+      return Promise.resolve(true);
+    }
+  }
+  return new Promise((resolve) => {
+    // Copy-Ton-Regel + ClickUp 86ca7x1m2: kein 'nicht übernommen'
+    // (Negativ-Frame), Button kurz und eindeutig.
+    Alert.alert(
+      'Du hast bereits ein Konto',
+      'Mit diesem Konto bist du schon einmal angemeldet gewesen. ' +
+        'Du machst genau dort weiter, wo du damit aufgehört hast — ' +
+        'mit deinen Punkten, Favoriten und Listen aus diesem Konto.',
+      [
+        { text: 'Abbrechen', style: 'cancel', onPress: () => resolve(false) },
+        {
+          text: 'Ok, fortfahren!',
+          onPress: () => resolve(true),
+        },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) },
+    );
+  });
+}
+
+/**
+ * Mitnahme-Dialog für Gäste MIT Einreichungen. Erscheint immer — auch in der
+ * ersten Stunde und auch dort, wo ein anderes Sheet schon bestätigt hat —,
+ * weil hier Bons und Guthaben den Besitzer wechseln.
+ */
+function bestaetigeMitnahme(zielEmail: string | null | undefined): Promise<boolean> {
+  const maskiert = maskiereEmail(zielEmail);
+  return new Promise((resolve) => {
+    Alert.alert(
+      'Willkommen zurück!',
+      `Deine Bons, Fotos und dein Guthaben nehmen wir mit in dein Konto${maskiert ? ` ${maskiert}` : ''}.`,
+      [
+        { text: 'Abbrechen', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'Mitnehmen & anmelden', onPress: () => resolve(true) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) },
+    );
+  });
+}
+
+export interface KontoWechselOptionen<T> {
+  /** E-Mail des Zielkontos, falls bekannt — nur maskiert angezeigt. */
+  zielEmail?: string | null;
+  /**
+   * true, wenn ein anderes UI den Wechsel schon bestätigt hat (Facebook-
+   * Link-Sheet). Gilt nur ohne Bestand — mit Bestand kommt der Mitnahme-
+   * Dialog trotzdem.
+   */
+  dialogUeberspringen?: boolean;
+  /** Der eigentliche Anmeldeschritt, der die uid wechselt. */
+  anmelden: () => Promise<T>;
+}
+
+/**
+ * Einziger Weg, auf dem ein Gast in ein bestehendes Konto wechselt.
+ * Wirft `auth/cancelled` bei Ablehnung und `auth/konto-umzug-offline`, wenn
+ * der Besitznachweis bei vorhandenem Bestand nicht gesichert werden konnte.
+ * Fehler aus `anmelden()` kommen unverändert durch.
+ */
+export async function inBestehendesKontoWechseln<T>(opts: KontoWechselOptionen<T>): Promise<T> {
+  const vorher = auth.currentUser;
+  if (!vorher || !isEffectivelyAnonymous(vorher)) return opts.anmelden();
+  const vonUid = vorher.uid;
+
+  let bestand: boolean;
+  try {
+    bestand = await GastBestand.hat(vonUid);
+  } catch {
+    // Unklar → wie Bestand behandeln: lieber einmal zu viel fragen und
+    // absichern als Einreichungen zurücklassen.
+    bestand = true;
+  }
+
+  const weiter = bestand
+    ? await bestaetigeMitnahme(opts.zielEmail)
+    : opts.dialogUeberspringen
+      ? true
+      : await confirmAccountSwitch();
+  if (!weiter) throw abbruchFehler();
+
+  pausiereBonQueue();
+  pausiereUploadQueue();
+  try {
+    // Ohne Bestand und offline gibt es nichts abzusichern — dann nicht bis
+    // zu drei Netzversuche lang warten, bevor die Anmeldung ohnehin scheitert.
+    const ok = bestand || isOnline() ? await GastUebernahme.vorbereiten(vonUid) : false;
+    if (!ok && bestand) {
+      throw codeFehler(KONTO_UMZUG_OFFLINE, OFFLINE_TEXT);
+    }
+
+    const ergebnis = await opts.anmelden();
+
+    const neueUid = auth.currentUser?.uid ?? null;
+    if (ok && neueUid && neueUid !== vonUid) {
+      try {
+        await GastUebernahme.zielMerken(vonUid, neueUid);
+      } catch (e) {
+        // Die Anmeldung selbst hat geklappt — sie darf hieran nicht scheitern.
+        console.warn('[kontoWechsel] Zielkonto konnte nicht gemerkt werden:', (e as Error)?.message);
+      }
+      await AuthRueckkehr.nachKontowechsel();
+      void GastUebernahme.einloesenAlle();
+    }
+    return ergebnis;
+  } finally {
+    setzeBonQueueFort();
+    setzeUploadQueueFort();
+  }
+}
+
+/**
+ * Nach erfolgreichem Verknüpfen (Gast → Konto, uid bleibt): Aufträge, die nur
+ * auf ein Konto gewartet haben, wieder freigeben. Wirft nie.
+ */
+export function nachVerknuepfung(): void {
+  try {
+    void Promise.resolve(gesperrteFreigeben(['konto_erforderlich'])).catch((e) =>
+      console.warn('[kontoWechsel] Freigabe gesperrter Aufträge fehlgeschlagen:', e?.message),
+    );
+  } catch (e) {
+    console.warn('[kontoWechsel] Freigabe gesperrter Aufträge fehlgeschlagen:', (e as Error)?.message);
+  }
+}

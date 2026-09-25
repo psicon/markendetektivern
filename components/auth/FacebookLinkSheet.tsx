@@ -8,6 +8,7 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { showInfoToast } from '@/lib/services/ui/toast';
+import { erwarteterAuthFehler } from '@/lib/utils/authFehler';
 
 /**
  * ClickUp 86cacp92p (1.19): Geführtes Facebook ↔ E-Mail/Passwort-Linking.
@@ -46,6 +47,9 @@ export function FacebookLinkSheet() {
       );
       // facebookLinkPrompt wird vom Context auf null gesetzt → Sheet schließt.
     } catch (e: any) {
+      // Abbruch im Mitnahme-Dialog oder fehlende Verbindung beim Wechsel in
+      // ein bestehendes Konto sind keine Fehler (lib/utils/authFehler.ts).
+      if (erwarteterAuthFehler(e, scheme)) return;
       const code = e?.code;
       const msg =
         code === 'auth/wrong-password' || code === 'auth/invalid-credential'

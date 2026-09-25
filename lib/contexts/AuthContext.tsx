@@ -15,7 +15,7 @@ import {
   User,
 } from '@react-native-firebase/auth';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, InteractionManager } from 'react-native';
+import { AppState, InteractionManager } from 'react-native';
 import { PERF } from '../perfFlags';
 import { auth } from '../firebase';
 import achievementService, { setProfileRefreshCallback } from '../services/achievementService';
@@ -34,7 +34,13 @@ import {
   lastFbDebug,
   signOutFacebook,
 } from '../services/auth/facebookAuth';
+import { GastUebernahme } from '../services/gastUebernahme';
 import journeyTrackingService from '../services/journeyTrackingService';
+import {
+  inBestehendesKontoWechseln,
+  KONTO_UMZUG_OFFLINE,
+  nachVerknuepfung,
+} from '../services/kontoWechsel';
 import { attemptLegacySessionRescue } from '../services/legacyRescueService';
 import { isEffectivelyAnonymous } from '../utils/authIdentity';
 import { createUserProfile, getUserProfile, patchUserProfile, syncProfileFromAuth, UserProfile } from '../services/userProfile';
@@ -372,6 +378,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // ihre Writes automatisch nach).
         setLoading(false);
 
+        // Gast-Übernahme (25.09.2026): offene Tickets für dieses Konto
+        // einlösen. Nie als Gast — der Dienst prüft das zusätzlich selbst.
+        if (!isEffectivelyAnonymous(user)) void GastUebernahme.einloesenAlle();
+
         // 🔄 EINMALIGE GAMIFICATION INITIALISIERUNG nach Authentifizierung
         console.log('🚀 Starte Gamification-Initialisierung nach Authentifizierung...');
         try {
@@ -503,6 +513,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [refreshUserProfile]);
 
+  // Gast-Übernahme (25.09.2026): gespeicherte Tickets einmal laden und bei
+  // jeder Rückkehr in den Vordergrund erneut einlösen — nur als Konto. Solange
+  // der Server `pausiert` antwortet, bleibt das Ticket liegen und wird hier
+  // wieder versucht.
+  useEffect(() => {
+    void GastUebernahme.laden();
+    const sub = AppState.addEventListener('change', (zustand) => {
+      if (zustand !== 'active') return;
+      const cu = auth.currentUser;
+      if (cu && !isEffectivelyAnonymous(cu)) void GastUebernahme.einloesenAlle();
+    });
+    return () => sub.remove();
+  }, []);
+
   // ─── Anon-Linking helpers ───────────────────────────────────────────
   //
   // Wenn der aktuelle User anonym ist und sich später mit einem
@@ -514,62 +538,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Edge-case: Provider-Account gehört bereits einer anderen UID
   // (User hat sich z.B. früher mal angemeldet, dann Anon-Session auf
   // dem gleichen Device gestartet). Firebase wirft dann
-  // `auth/credential-already-in-use`. Wir fragen den User per
-  // Confirm-Dialog ob er zum bestehenden Account wechseln will
-  // (Daten-Verlust akzeptiert) — falls ja, fallback auf normalen
-  // signInWithCredential. Falls nein, Anmeldung abbrechen.
-
-  /**
-   * Confirm-Dialog wenn die Anon-Daten gegen einen existierenden
-   * Provider-Account getauscht würden. Returns true wenn der User
-   * fortfahren will, false sonst.
-   *
-   * ClickUp 86ca7f3xn (2026-06-11):
-   * - FRISCHE Anon-Session (< 5 Min, typisch: erste Anmeldung direkt
-   *   nach dem Onboarding) → KEIN Dialog, einfach mit dem bestehenden
-   *   Konto fortfahren. Da ist nichts Wertvolles zu verlieren, und
-   *   ein Warn-Dialog beim allerersten Login ist doppelt verwirrend.
-   * - Sonst: positive Formulierung ("Mit diesem Konto fortfahren"
-   *   statt rotem "Konto wechseln") + faktischer Hinweis, dass die
-   *   Gast-Daten nicht übernommen werden.
-   */
-  const confirmAccountSwitch = (): Promise<boolean> => {
-    const createdAt = auth.currentUser?.metadata?.creationTime;
-    if (createdAt) {
-      const ageMs = Date.now() - new Date(createdAt).getTime();
-      // 60 Min statt 5 (ClickUp 86ca7x1m2): Onboarding + Walkthrough
-      // dauern laenger als 5 Min — die 'erste Anmeldung direkt nach
-      // der Installation' fiel sonst aus dem Fenster und bekam den
-      // Dialog doch. 60 Min deckt die gesamte Erst-Session ab.
-      if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs < 60 * 60 * 1000) {
-        return Promise.resolve(true);
-      }
-    }
-    return new Promise((resolve) => {
-      // Copy-Ton-Regel + ClickUp 86ca7x1m2: kein 'nicht übernommen'
-      // (Negativ-Frame), Button kurz und eindeutig.
-      Alert.alert(
-        'Du hast bereits ein Konto',
-        'Mit diesem Konto bist du schon einmal angemeldet gewesen. ' +
-          'Du machst genau dort weiter, wo du damit aufgehört hast — ' +
-          'mit deinen Punkten, Favoriten und Listen aus diesem Konto.',
-        [
-          { text: 'Abbrechen', style: 'cancel', onPress: () => resolve(false) },
-          {
-            text: 'Ok, fortfahren!',
-            onPress: () => resolve(true),
-          },
-        ],
-        { cancelable: true, onDismiss: () => resolve(false) },
-      );
-    });
-  };
+  // `auth/credential-already-in-use`. Dann wechseln wir über
+  // `inBestehendesKontoWechseln` (lib/services/kontoWechsel.ts) ins
+  // bestehende Konto: Dialog (Mitnahme-Dialog, sobald der Gast etwas
+  // eingereicht hat), Besitznachweis für die Gast-Übernahme, dann
+  // signInWithCredential. Lehnt der User ab, wird abgebrochen.
+  // confirmAccountSwitch (inkl. 60-Minuten-Automatik) lebt jetzt dort.
 
   /**
    * Zentrale Auth-Logik: bei anonymem User → linkWithCredential
    * (UID + Daten bleiben), sonst signInWithCredential (normaler
-   * Login). Bei `credential-already-in-use` wird der User gefragt
-   * ob er zum bestehenden Account wechseln will.
+   * Login). Bei `credential-already-in-use` läuft der Wechsel ins
+   * bestehende Konto über `inBestehendesKontoWechseln`.
    *
    * Kern-Logik — Aufrufer nutzen den `linkOrSignIn`-Wrapper darunter,
    * der nach JEDEM Erfolgs-Exit das users-Doc konservativ aus Auth
@@ -587,6 +567,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Konflikt-/Reinstall-Fall). Nur Provider mit Single-Use-Credential (Apple)
     // übergeben den Refresher; ohne ihn bleibt das bisherige Verhalten.
     refreshCredential?: () => Promise<FirebaseAuthTypes.AuthCredential | null>,
+    // E-Mail aus dem Anbieter-Sheet — Rückfall für den Mitnahme-Dialog, falls
+    // der Konflikt-Fehler selbst keine E-Mail mitliefert (nur maskiert gezeigt).
+    anbieterEmail?: string | null,
   ): Promise<FirebaseAuthTypes.UserCredential> => {
     const currentUser = auth.currentUser;
     // Helper: "credential already attached to a different user"
@@ -613,7 +596,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Roh-Fehler beim User landet UND die frische Anon-Session stuck bleibt
       // (jeder Retry wiederholt denselben Fehler; nach Neustart = Gast).
       // Die Credential-Konflikt-Prosa daher CODE-AGNOSTISCH matchen, damit der
-      // Duplicate in den Fallback (confirmAccountSwitch → signInWithCredential
+      // Duplicate in den Fallback (inBestehendesKontoWechseln → signInWithCredential
       // = sauberer Wechsel ins bestehende Apple-Konto) geroutet wird. Eng auf
       // die Konflikt-Prosa beschränkt, um transiente internal-errors nicht zu
       // verschlucken. (SDK-Versionen variieren die Prosa → beide Formen.)
@@ -647,26 +630,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser(upgraded);
           setIsAnonymous(isEffectivelyAnonymous(upgraded));
         }
+        // uid bleibt → Aufträge, die nur auf ein Konto gewartet haben, laufen weiter.
+        nachVerknuepfung();
         return linked;
       } catch (e: any) {
         if (isCredentialAlreadyInUse(e)) {
-          const confirmed = await confirmAccountSwitch();
-          if (!confirmed) {
-            const err: any = new Error('Anmeldung abgebrochen');
-            err.code = 'auth/cancelled';
-            throw err;
-          }
-          // Fallback: drop anon, sign in with the existing account.
-          // R3-deeper (86cacp8xx): das ursprüngliche Credential kann beim Sign-in
-          // single-use-verbraucht sein (Apple-idToken). Wenn ein Refresher da ist,
-          // ein FRISCHES Credential holen — sonst failt signInWithCredential mit
-          // demselben "duplicate credential" wie das vorangegangene linkWithCredential.
-          let signInCred = credential;
-          if (refreshCredential) {
-            const fresh = await refreshCredential();
-            if (fresh) signInCred = fresh;
-          }
-          const result = await signInWithCredential(auth, signInCred);
+          // Fallback: drop anon, sign in with the existing account — über den
+          // einen Wechselweg (Dialog + Besitznachweis für die Gast-Übernahme).
+          // Ablehnung wirft auth/cancelled wie bisher.
+          const result = await inBestehendesKontoWechseln({
+            zielEmail: e?.userInfo?.email ?? e?.email ?? anbieterEmail ?? null,
+            anmelden: async () => {
+              // R3-deeper (86cacp8xx): das ursprüngliche Credential kann beim Sign-in
+              // single-use-verbraucht sein (Apple-idToken). Wenn ein Refresher da ist,
+              // ein FRISCHES Credential holen — sonst failt signInWithCredential mit
+              // demselben "duplicate credential" wie das vorangegangene linkWithCredential.
+              let signInCred = credential;
+              if (refreshCredential) {
+                const fresh = await refreshCredential();
+                if (fresh) signInCred = fresh;
+              }
+              return signInWithCredential(auth, signInCred);
+            },
+          });
           // ClickUp 86cacp981 (1.18) + 86cacp8xx (1.17): leere Felder des
           // bestehenden Kontos aus den frischen Onboarding-Daten füllen
           // (fill-only-missing). Non-fatal — Login läuft auch ohne Carry-over.
@@ -717,8 +703,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const linkOrSignIn = async (
     credential: FirebaseAuthTypes.AuthCredential,
     refreshCredential?: () => Promise<FirebaseAuthTypes.AuthCredential | null>,
+    anbieterEmail?: string | null,
   ): Promise<FirebaseAuthTypes.UserCredential> => {
-    const result = await linkOrSignInCore(credential, refreshCredential);
+    const result = await linkOrSignInCore(credential, refreshCredential, anbieterEmail);
     const authedUser = result?.user ?? auth.currentUser;
     if (authedUser && !authedUser.isAnonymous) {
       void syncProfileFromAuth(authedUser).catch((e) =>
@@ -736,21 +723,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // anhängen, statt zum existierenden Account zu wechseln.
       //
       // Korrektes Verhalten bei Anon-User der sich auf ein
-      // existierendes Konto einloggen will: warnen dass die
-      // Anon-Daten verloren gehen, dann signInWithEmailAndPassword.
+      // existierendes Konto einloggen will: über inBestehendesKontoWechseln
+      // (Dialog, Besitznachweis für die Gast-Übernahme), dann
+      // signInWithEmailAndPassword. Kein Gast → direkt anmelden.
       // (isEffectivelyAnonymous: gilt auch für gerettete Legacy-Gäste.)
-      const currentUser = auth.currentUser;
-      if (currentUser && isEffectivelyAnonymous(currentUser)) {
-        const confirmed = await confirmAccountSwitch();
-        if (!confirmed) {
-          const err: any = new Error('Anmeldung abgebrochen');
-          err.code = 'auth/cancelled';
-          throw err;
-        }
-      }
-      await signInWithEmailAndPassword(auth, email, password);
-    } catch (error) {
-      if (__DEV__) {
+      await inBestehendesKontoWechseln({
+        zielEmail: email,
+        anmelden: () => signInWithEmailAndPassword(auth, email, password),
+      });
+    } catch (error: any) {
+      // auth/konto-umzug-offline ist erwartet (Hinweis-Toast im Bildschirm,
+      // lib/utils/authFehler.ts) — kein rotes Dev-Overlay dafür.
+      if (__DEV__ && error?.code !== KONTO_UMZUG_OFFLINE) {
         console.error('Sign in error:', error);
       }
       throw error;
@@ -779,18 +763,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const credential = EmailAuthProvider.credential(email, password);
         try {
           userCredential = await linkWithCredential(currentUser, credential);
+          // uid bleibt → Aufträge, die nur auf ein Konto gewartet haben, laufen weiter.
+          nachVerknuepfung();
         } catch (e: any) {
           if (e?.code === 'auth/email-already-in-use') {
             // Email gehört schon einem anderen Account → User hat zwei
-            // Optionen: bestehenden Account einloggen (Daten weg) oder
-            // andere Email nehmen.
-            const confirmed = await confirmAccountSwitch();
-            if (!confirmed) {
-              const err: any = new Error('Registrierung abgebrochen');
-              err.code = 'auth/cancelled';
-              throw err;
-            }
-            userCredential = await signInWithEmailAndPassword(auth, email, password);
+            // Optionen: bestehenden Account einloggen (über den einen
+            // Wechselweg, inkl. Gast-Übernahme) oder andere Email nehmen.
+            userCredential = await inBestehendesKontoWechseln({
+              zielEmail: email,
+              anmelden: () => signInWithEmailAndPassword(auth, email, password),
+            });
           } else {
             throw e;
           }
@@ -893,8 +876,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }
       }
-    } catch (error) {
-      if (__DEV__) {
+    } catch (error: any) {
+      // auth/konto-umzug-offline ist erwartet (Hinweis-Toast im Bildschirm).
+      if (__DEV__ && error?.code !== KONTO_UMZUG_OFFLINE) {
         console.error('Sign up error:', error);
       }
       throw error;
@@ -912,7 +896,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // User hat das Google-Sheet abgebrochen. Kein Fehler.
         return false;
       }
-      const userCredential = await linkOrSignIn(bundle.credential);
+      const userCredential = await linkOrSignIn(bundle.credential, undefined, bundle.email);
       console.log(
         '✅ Google Sign-In:',
         userCredential.user.email,
@@ -955,6 +939,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return true;
     } catch (error: any) {
       if (error?.code === 'auth/cancelled') return false; // User cancel = kein Fehler
+      // Offline beim Absichern der Gast-Einreichungen: unverändert an den
+      // Bildschirm, der den Hinweis zeigt (lib/utils/authFehler.ts).
+      if (error?.code === KONTO_UMZUG_OFFLINE) throw error;
       if (__DEV__) {
         console.error('Google Sign-In error:', error);
       }
@@ -1002,10 +989,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // anderen Konto, z.B. nach Reinstall), ist das erste Credential verbraucht.
       // Dann holt linkOrSignIn über diesen Callback ein FRISCHES Apple-Credential,
       // bevor es signInWithCredential ins bestehende Konto macht.
-      const userCredential = await linkOrSignIn(bundle.credential, async () => {
-        const fresh = await getAppleCredential();
-        return fresh?.credential ?? null;
-      });
+      const userCredential = await linkOrSignIn(
+        bundle.credential,
+        async () => {
+          const fresh = await getAppleCredential();
+          return fresh?.credential ?? null;
+        },
+        bundle.email,
+      );
 
       const isNewUser = userCredential.additionalUserInfo?.isNewUser;
       if (isNewUser && userCredential.user) {
@@ -1054,6 +1045,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return true;
     } catch (error: any) {
       if (error?.code === 'auth/cancelled') return false;
+      // Offline beim Absichern der Gast-Einreichungen: unverändert an den
+      // Bildschirm, der den Hinweis zeigt (lib/utils/authFehler.ts).
+      if (error?.code === KONTO_UMZUG_OFFLINE) throw error;
       if (__DEV__) {
         console.error('Apple Sign-In error:', error);
       }
@@ -1074,7 +1068,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       fbEmail = bundle.email || '';
       fbCredential = bundle.credential;
-      const userCredential = await linkOrSignIn(bundle.credential);
+      const userCredential = await linkOrSignIn(bundle.credential, undefined, bundle.email);
 
       // Facebook liefert beim ersten Sign-In email + displayName + photoURL
       // (best-effort, je nach User-Permission). Bei neuem User legen wir
@@ -1093,6 +1087,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return true;
     } catch (error: any) {
       if (error?.code === 'auth/cancelled') return false;
+      // Offline beim Absichern der Gast-Einreichungen: unverändert an den
+      // Bildschirm, der den Hinweis zeigt (lib/utils/authFehler.ts).
+      if (error?.code === KONTO_UMZUG_OFFLINE) throw error;
 
       // ClickUp 86cacp92p (1.19): Die Facebook-E-Mail gehört bereits einem
       // Konto mit ANDEREM Provider (Google/Apple/E-Mail). Firebase wirft
@@ -1174,9 +1171,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error('Keine Facebook-Verknüpfung ausstehend');
     }
     // 1. In das bestehende E-Mail/Passwort-Konto einloggen. Das Link-Sheet IST
-    //    die Account-Switch-Bestätigung → signInWithEmailAndPassword direkt
-    //    (kein zusätzlicher confirmAccountSwitch-Dialog wie in signIn()).
-    await signInWithEmailAndPassword(auth, pending.email, password);
+    //    die Account-Switch-Bestätigung → kein zusätzlicher confirmAccountSwitch-
+    //    Dialog wie in signIn(). Als Gast läuft der Wechsel trotzdem über den
+    //    einen Wechselweg (Besitznachweis für die Gast-Übernahme); hat der Gast
+    //    etwas eingereicht, erscheint der Mitnahme-Dialog.
+    await inBestehendesKontoWechseln({
+      zielEmail: pending.email,
+      dialogUeberspringen: true,
+      anmelden: () => signInWithEmailAndPassword(auth, pending.email, password),
+    });
     // 2. FB-Credential ans jetzt eingeloggte Konto knüpfen → künftige FB-Logins
     //    treffen den normalen signInWithCredential-Erfolgspfad.
     try {

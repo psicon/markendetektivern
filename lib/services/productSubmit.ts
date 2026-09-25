@@ -537,13 +537,26 @@ async function liegtSchonVor(ref: any, timeoutMs = 8000): Promise<boolean> {
   }
 }
 
+export interface SubmitProductOpts {
+  /**
+   * uid, unter der der Produkt-Slot ursprünglich eingereiht wurde. Zieht ein
+   * Gast-Auftrag nach bestätigter Übernahme ins Konto um, bleibt die
+   * Dokument-ID die des Gastes — eine Wiederholung trifft denselben Slot statt
+   * eine zweite Einreichung anzulegen. `userId` ist trotzdem immer `uid`
+   * (Regelwerk: `data.userId == auth.uid`). Hat der Server den Slot schon ins
+   * Konto umgezogen, kann das Konto ihn lesen → `liegtSchonVor` greift.
+   */
+  docUid?: string;
+}
+
 export async function submitProduct(
   uid: string,
   input: ProductSubmissionInput,
+  opts?: SubmitProductOpts,
 ): Promise<string> {
   if (!auth.currentUser) throw codeErr('not_authenticated');
   const context = await collectContext(uid, input.capture ?? null);
-  const id = productSubmissionDocId(uid, input.sessionId, input.productIndex);
+  const id = productSubmissionDocId(opts?.docUid ?? uid, input.sessionId, input.productIndex);
   const ref = doc(db, 'crowd_uploads', id);
   try {
     await setDoc(ref, {

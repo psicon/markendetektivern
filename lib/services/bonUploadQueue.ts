@@ -18,6 +18,16 @@
  *
  * JS-only (AsyncStorage + expo-file-system + netinfo, all in the dev build).
  * NO image compression — full quality is required for OCR (see CLAUDE.md).
+ *
+ * ═══ Wem ein Auftrag gehört (Stufe 1 „erst einreichen, dann Konto", 25.09.2026) ═══
+ *
+ * Ein Auftrag läuft nur für die uid, unter der er eingereiht wurde, oder für
+ * ein Konto, in das der Server die Übernahme dieser Gast-uid BESTÄTIGT hat
+ * (`GastUebernahme.zielVon`). Früher wurde jeder Auftrag bedingungslos auf die
+ * gerade angemeldete uid umgeschrieben — nach einer Abmeldung landete ein Bon
+ * so auf der neuen Gast-uid oder bei einer anderen Person am selben Gerät.
+ * Aufträge, die (noch) nicht laufen dürfen, bleiben `queued` und warten; sie
+ * sind kein Fehler und verbrauchen keine Versuche.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
@@ -25,6 +35,9 @@ import { AppState } from 'react-native';
 
 import { prepareForUpload } from '@/lib/utils/cashbackImage';
 import { auth } from '@/lib/firebase';
+import { isEffectivelyAnonymous } from '@/lib/utils/authIdentity';
+import { GastBestand } from './gastBestand';
+import { GastUebernahme } from './gastUebernahme';
 import journeyTrackingService from './journeyTrackingService';
 import { isOnline, refreshNetwork, subscribeNetwork } from './network';
 import {
@@ -46,6 +59,10 @@ const MAX_AUTO_ATTEMPTS = 5;
 // Budget wieder freigegeben (jede Auto-Wiederbelebung — AppState, NetInfo,
 // kickBonQueue — prüft das Fenster).
 const RETRY_WINDOW_MS = 30 * 60_000;
+// Harte Server-Ablehnungen: mit Wiederholen nicht heilbar, darum kein
+// Auto-Retry. consent_missing heilt die Einwilligung, konto_erforderlich das
+// Anlegen eines Kontos — beide geben ihre Aufträge über gesperrteFreigeben frei.
+const TERMINALE_CODES = ['consent_missing', 'rate_limited', 'bon_too_old', 'konto_erforderlich'];
 
 export type BonJobStatus = 'queued' | 'uploading' | 'enqueueing' | 'failed';
 
@@ -69,6 +86,8 @@ export interface BonJob {
   /** Harte Server-Ablehnung (consent_missing/rate_limited): kein Auto-Retry,
    *  nur manuell — verbrennt kein Budget. */
   terminal?: boolean;
+  /** Fehlercode der harten Ablehnung — daran hängt gesperrteFreigeben(). */
+  terminalCode?: string | null;
   /** Mirror-Write (users/{uid}/cashback_status) schlug fehl — der Job ist
    *  dann NUR über die lokale Queue-Anzeige sichtbar (history.tsx). */
   mirrorFailed?: boolean;
@@ -90,6 +109,8 @@ type Listener = (jobs: BonJob[]) => void;
 let jobs: BonJob[] = [];
 let loaded = false;
 let processing = false;
+// Während eines Kontowechsels startet kein neuer Auftrag (pausiereBonQueue).
+let pausiert = false;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 const listeners = new Set<Listener>();
 
@@ -128,7 +149,7 @@ async function ensureLoaded() {
       jobs = parsed.map((j) =>
         j.status === 'uploading' || j.status === 'enqueueing'
           ? { ...j, status: 'queued', progress: 0 }
-          : j,
+          : mitSperrcode(j),
       );
     }
   } catch (e: any) {
@@ -149,6 +170,31 @@ async function ensureDir() {
 
 function randomId(): string {
   return `bon_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function aktuelleUid(): string | null {
+  return auth.currentUser?.uid ?? null;
+}
+
+/**
+ * Darf dieser Auftrag JETZT laufen? Nur für die angemeldete uid selbst oder
+ * für eine Gast-uid, deren Übernahme in genau dieses Konto der Server
+ * bestätigt hat. Eine lokal nur GEMERKTE Zuordnung reicht nicht.
+ */
+function darfLaufen(job: Pick<BonJob, 'uid'>, currentUid: string | null = aktuelleUid()): boolean {
+  return !!currentUid && (job.uid === currentUid || GastUebernahme.zielVon(job.uid) === currentUid);
+}
+
+/**
+ * Aufträge aus App-Ständen vor `terminalCode` tragen nur den Anzeigetext.
+ * Der ist je Code fest (humanError) — daraus lässt sich der Code eindeutig
+ * zurückgewinnen, sonst bliebe z. B. ein alter consent_missing-Auftrag nach
+ * der Einwilligung für immer gesperrt.
+ */
+function mitSperrcode(j: BonJob): BonJob {
+  if (!j.terminal || j.terminalCode) return j;
+  const code = TERMINALE_CODES.find((c) => humanError({ code: c }) === j.lastError);
+  return code ? { ...j, terminalCode: code } : j;
 }
 
 function getJob(id: string): BonJob | null {
@@ -189,6 +235,8 @@ function humanError(e: any): string {
   // Wiederholen — dasselbe Foto bleibt gleich alt. Frist positiv nennen.
   if (code === 'bon_too_old') return 'Dieser Bon liegt außerhalb der Frist — wir nehmen Bons der letzten 7 Tage an. Beim nächsten Einkauf lohnt sich das Foto direkt an der Kasse.';
   if (code === 'consent_missing') return 'Bitte bestätige zuerst die Cashback-Einwilligung.';
+  if (code === 'konto_erforderlich')
+    return 'Mit einem kostenlosen Konto laden wir deinen Bon hoch – deine Belohnung wartet schon.';
   if (code === 'unauthenticated' || code === 'not_authenticated')
     return 'Bitte melde dich an, um Bons einzureichen.';
   if (code?.startsWith('storage/')) return `Upload abgelehnt: ${code}`;
@@ -236,6 +284,10 @@ export async function enqueueBon(input: EnqueueBonInput): Promise<string> {
   await persist();
   emit();
 
+  // Gast-Merker: ohne ihn wüsste ein späterer Wechsel in ein bestehendes Konto
+  // nicht, dass es hier etwas mitzunehmen gibt (Besitznachweis + Dialog).
+  if (isEffectivelyAnonymous(auth.currentUser)) await GastBestand.merke(input.uid);
+
   // Placeholder mirror so the bon shows in history immediately (fire-and-
   // forget — a Firestore write hangs offline). NO human-facing merchantName
   // here: the list derives a status-driven title until the CF resolves the
@@ -263,7 +315,7 @@ export function getBonJob(id: string): BonJob | null {
 
 export async function retryBonJob(id: string) {
   await ensureLoaded();
-  setJob(id, { status: 'queued', attempts: 0, lastError: null, terminal: false });
+  setJob(id, { status: 'queued', attempts: 0, lastError: null, terminal: false, terminalCode: null });
   void processQueue();
 }
 
@@ -273,10 +325,19 @@ export async function retryBonJob(id: string) {
 export async function retryAllFailedBons() {
   await ensureLoaded();
   let changed = false;
+  const uid = aktuelleUid();
   jobs = jobs.map((j) => {
-    if (j.status !== 'failed') return j;
+    // Nur die eigenen (sichtbaren) Aufträge — fremde bleiben unangetastet.
+    if (j.status !== 'failed' || !darfLaufen(j, uid)) return j;
     changed = true;
-    return { ...j, status: 'queued' as BonJobStatus, attempts: 0, lastError: null, terminal: false };
+    return {
+      ...j,
+      status: 'queued' as BonJobStatus,
+      attempts: 0,
+      lastError: null,
+      terminal: false,
+      terminalCode: null,
+    };
   });
   if (changed) {
     emit();
@@ -298,13 +359,73 @@ export function kickBonQueue() {
   void processQueue();
 }
 
+/** Kontowechsel läuft: keinen neuen Auftrag starten (ein laufender endet normal). */
+export function pausiereBonQueue(): void {
+  pausiert = true;
+}
+
+export function setzeBonQueueFort(): void {
+  pausiert = false;
+  void processQueue();
+}
+
+/**
+ * Hart abgelehnte Aufträge wieder freigeben, sobald ihr Grund behoben ist —
+ * z. B. nach der Einwilligung (`consent_missing`) oder nach dem Anlegen eines
+ * Kontos (`konto_erforderlich`). Betrifft nur Aufträge, die für die aktuelle
+ * uid laufen dürfen.
+ */
+export async function gesperrteFreigeben(codes: string[]): Promise<void> {
+  await ensureLoaded();
+  const uid = aktuelleUid();
+  let changed = false;
+  jobs = jobs.map((j) => {
+    if (j.status !== 'failed' || !j.terminal || !j.terminalCode) return j;
+    if (!codes.includes(j.terminalCode) || !darfLaufen(j, uid)) return j;
+    changed = true;
+    return {
+      ...j,
+      status: 'queued' as BonJobStatus,
+      attempts: 0,
+      lastError: null,
+      terminal: false,
+      terminalCode: null,
+    };
+  });
+  if (changed) {
+    emit();
+    void persist();
+  }
+  void processQueue();
+}
+
+/**
+ * Filter für Anzeigen (Meine Bons, Prüfseite): nur Aufträge, die für die
+ * angemeldete uid laufen dürfen. Aufträge einer anderen Person am selben
+ * Gerät oder einer noch nicht bestätigten Übernahme erscheinen nicht als eigene.
+ */
+export function sichtbareBonJobs(liste: BonJob[]): BonJob[] {
+  const uid = aktuelleUid();
+  return liste.filter((j) => darfLaufen(j, uid));
+}
+
 // ─── processing ─────────────────────────────────────────────────────
 
 function pickNext(): BonJob | null {
+  // Wartende fremde Aufträge werden übersprungen, nicht als Fehler markiert —
+  // so endet die Schleife in processQueue, auch wenn sie liegen bleiben.
+  const uid = aktuelleUid();
   for (let i = jobs.length - 1; i >= 0; i--) {
-    if (jobs[i].status === 'queued') return jobs[i];
+    if (jobs[i].status === 'queued' && darfLaufen(jobs[i], uid)) return jobs[i];
   }
   return null;
+}
+
+/** Die Anmeldung hat während des Laufs gewechselt: zurück in die Warteschlange,
+ *  ohne einen Versuch zu verbrauchen. Ob und für wen er weiterläuft,
+ *  entscheidet pickNext beim nächsten Durchgang. */
+function zurueckstellen(jobId: string) {
+  setJob(jobId, { status: 'queued', progress: 0, lastError: null });
 }
 
 function requeueFailed() {
@@ -349,18 +470,16 @@ function noteMirrorFailure(jobId: string, e: any) {
 }
 
 async function runJob(job: BonJob) {
-  // uid-Drift (86cb6tx29): anonym → registriert / Re-Login. Der Job trägt
-  // die uid vom Einreihen ein; storage.rules verlangt request.auth.uid ==
-  // userId → mit alter uid schlägt JEDER Versuch dauerhaft fehl und
-  // verbrannte vorher still das Budget. Vor dem Upload auf die aktuelle
-  // uid umschreiben + Mirror umziehen.
-  const currentUid = auth.currentUser?.uid ?? null;
-  if (currentUid && currentUid !== job.uid) {
-    const oldUid = job.uid;
-    console.log('[bonQueue] uid drift — rewriting job', job.id);
+  // Umschreiben NUR bei einer vom Server bestätigten Übernahme (Gast → Konto).
+  // storage.rules verlangt request.auth.uid == userId, der Auftrag muss also
+  // unter der neuen uid hochladen. Den Platzhalter der alten uid räumt der
+  // Server bei der Übernahme auf — hier wird dort nichts mehr geschrieben.
+  const currentUid = aktuelleUid();
+  if (!currentUid || !darfLaufen(job, currentUid)) return; // pickNext filtert schon
+  if (job.uid !== currentUid) {
+    console.log('[bonQueue] bestätigte Übernahme — Auftrag zieht ins Konto', job.id);
     setJob(job.id, { uid: currentUid });
     job = { ...job, uid: currentUid };
-    void deletePendingMirror(oldUid, job.id).catch(() => {});
     void createPendingMirror(currentUid, job.id).catch((e) => noteMirrorFailure(job.id, e));
   }
 
@@ -396,6 +515,11 @@ async function runJob(job: BonJob) {
       timeoutMs: 60_000,
     });
 
+    // Kontowechsel während des Hochladens: nicht mit fremdem Token einreichen.
+    if (aktuelleUid() !== job.uid) {
+      zurueckstellen(job.id);
+      return;
+    }
     setJob(job.id, { status: 'enqueueing' });
 
     let journey: any = null;
@@ -437,13 +561,20 @@ async function runJob(job: BonJob) {
     await persist();
     emit();
   } catch (e: any) {
+    // Fehlschlag, weil die Anmeldung mitten im Lauf gewechselt hat: kein
+    // Versuch verbraucht, der Auftrag wartet auf seine uid oder die Übernahme.
+    if (aktuelleUid() !== job.uid) {
+      zurueckstellen(job.id);
+      return;
+    }
     // Fehlerklassen trennen (86cb6tx29): harte Server-Ablehnungen sind mit
     // Wiederholen NICHT heilbar — sie verbrennen kein Budget und werden
     // nicht auto-retried (consent_missing braucht die Einwilligung des
     // Nutzers, rate_limited löst sich erst am Folgetag). Manueller Retry
-    // (retryBonJob / retryAllFailedBons) setzt terminal zurück.
+    // (retryBonJob / retryAllFailedBons) setzt terminal zurück,
+    // gesperrteFreigeben gibt gezielt nach terminalCode frei.
     const code = e?.code as string | undefined;
-    const terminal = code === 'consent_missing' || code === 'rate_limited' || code === 'bon_too_old';
+    const terminal = !!code && TERMINALE_CODES.includes(code);
     const prevAttempts = getJob(job.id)?.attempts ?? job.attempts;
     const attempts = terminal ? prevAttempts : prevAttempts + 1;
     const human = humanError(e);
@@ -452,7 +583,7 @@ async function runJob(job: BonJob) {
       attempts,
       lastError: human,
       lastAttemptAt: Date.now(),
-      ...(terminal ? { terminal: true } : {}),
+      ...(terminal ? { terminal: true, terminalCode: code } : {}),
     });
     // Persist failure to the mirror so history/other screens don't show a
     // forever-"uploading" zombie (fire-and-forget — hangs offline).
@@ -463,7 +594,7 @@ async function runJob(job: BonJob) {
 
 export async function processQueue(): Promise<void> {
   await ensureLoaded();
-  if (processing) return;
+  if (pausiert || processing) return;
   // Don't burn the 60s upload watchdog / enqueue when clearly offline; jobs
   // stay 'queued' and the network listener resumes on reconnect.
   if (!isOnline()) {
@@ -473,7 +604,7 @@ export async function processQueue(): Promise<void> {
   processing = true;
   try {
     let next = pickNext();
-    while (next) {
+    while (next && !pausiert) {
       await runJob(next);
       next = pickNext();
     }
@@ -497,3 +628,7 @@ subscribeNetwork((s) => {
     void processQueue();
   }
 });
+
+// … and as soon as the server confirms a guest → account takeover (waiting
+// jobs of that guest uid may now run under the account).
+GastUebernahme.beiAenderung(() => kickBonQueue());

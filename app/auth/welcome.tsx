@@ -38,8 +38,10 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { auth as firebaseAuth } from '@/lib/firebase';
+import { AuthRueckkehr } from '@/lib/services/authRueckkehr';
 import { OnboardingService } from '@/lib/services/onboardingService';
 import { showInfoToast } from '@/lib/services/ui/toast';
+import { erwarteterAuthFehler } from '@/lib/utils/authFehler';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -73,15 +75,16 @@ export default function WelcomeScreen() {
 
   /**
    * Post-Auth Erfolgs-Handler. Onboarding-Status auf 'completed'
-   * (B1-Fix) und dann ab nach /(tabs).
+   * (B1-Fix) und dann zum vorgemerkten Ziel (AuthRueckkehr) — ohne Ziel
+   * wie bisher /(tabs).
    */
   const completeAndGoHome = async () => {
     try {
-      await OnboardingService.markCompleted();
+      await AuthRueckkehr.abschliessen(router);
     } catch (e) {
-      console.warn('[Welcome] markCompleted failed:', e);
+      console.warn('[Welcome] abschliessen failed:', e);
+      router.replace('/(tabs)');
     }
-    router.replace('/(tabs)');
   };
 
   const handleApple = async () => {
@@ -93,7 +96,7 @@ export default function WelcomeScreen() {
       if (!ok) return;
       await completeAndGoHome();
     } catch (error: any) {
-      if (error?.code === 'auth/cancelled') return;
+      if (erwarteterAuthFehler(error, colorScheme)) return;
       console.error('Apple Sign-In error:', error);
       showInfoToast(
         error?.message || 'Apple-Anmeldung fehlgeschlagen.',
@@ -114,7 +117,7 @@ export default function WelcomeScreen() {
       if (!ok) return;
       await completeAndGoHome();
     } catch (error: any) {
-      if (error?.code === 'auth/cancelled') return;
+      if (erwarteterAuthFehler(error, colorScheme)) return;
       console.error('Google Sign-In error:', error);
       showInfoToast(
         error?.message || 'Google-Anmeldung fehlgeschlagen.',
@@ -135,7 +138,7 @@ export default function WelcomeScreen() {
       if (!ok) return;
       await completeAndGoHome();
     } catch (error: any) {
-      if (error?.code === 'auth/cancelled') return;
+      if (erwarteterAuthFehler(error, colorScheme)) return;
       // T17.2: SDK-Unavailable (Sim/alter Build) → warn statt error,
       // sonst rotes Dev-Overlay für einen erwarteten Fall.
       if (error?.code === 'auth/facebook-sdk-unavailable') {
@@ -243,7 +246,15 @@ export default function WelcomeScreen() {
     setAuthInFlight(true);
     try {
       await signInAnon();
-      await completeAndGoHome();
+      // Bewusst OHNE Rücksprungziel: eine frische Gast-Sitzung hat mit einem
+      // vorgemerkten Ziel (z. B. Bon-Detail) nichts zu tun — das bleibt für
+      // eine echte Anmeldung liegen.
+      try {
+        await OnboardingService.markCompleted();
+      } catch (e) {
+        console.warn('[Welcome] markCompleted failed:', e);
+      }
+      router.replace('/(tabs)');
     } catch (error: any) {
       console.error('Anonymous sign-in error:', error);
       showInfoToast(
