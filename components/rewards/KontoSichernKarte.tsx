@@ -1,5 +1,4 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { router } from 'expo-router';
 import React, { useCallback } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
@@ -7,6 +6,7 @@ import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { AuthRueckkehr } from '@/lib/services/authRueckkehr';
+import { safePush } from '@/lib/utils/safeNav';
 
 /**
  * „Erst einreichen, dann Konto" (Entscheidung 25.09.2026): Gäste sammeln
@@ -25,12 +25,12 @@ export function KontoSichernKarte({ ziel }: { ziel: string }) {
 
   const kontoErstellen = useCallback(async () => {
     await AuthRueckkehr.merke(ziel);
-    router.push('/auth/register');
+    safePush('/auth/register');
   }, [ziel]);
 
   const anmelden = useCallback(async () => {
     await AuthRueckkehr.merke(ziel);
-    router.push('/auth/login');
+    safePush('/auth/login');
   }, [ziel]);
 
   if (!isAnonymous) return null;

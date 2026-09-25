@@ -34,8 +34,9 @@ import { isEffectivelyAnonymous } from '@/lib/utils/authIdentity';
  *      Automatik), dann solange der Gast noch angemeldet ist:
  *        a) Besitznachweis sichern (`GastUebernahme.vorbereiten`) — danach
  *           ist er nicht mehr zu erbringen;
- *        b) offene Uploads des Gastes fertig hochladen — nach dem Wechsel
- *           dürften sie bis zur Server-Übernahme nicht laufen;
+ *        b) offene Uploads des Gastes fertig hochladen (auch gescheiterte
+ *           erneut) — nach dem Wechsel dürften sie bis zur Server-Übernahme
+ *           nicht laufen; dauert es zu lange, darf der Nutzer trotzdem weiter;
  *        c) erst dann anmelden, Zielkonto merken, einlösen. In Stufe 1
  *           antwortet der Server mit `pausiert`; der Eintrag bleibt und wird
  *           bei Start/Vordergrund erneut versucht.
@@ -60,13 +61,19 @@ const OFFLINE_TEXT =
 const ABARBEITEN_MS = 20_000;
 
 /**
- * Eine Mitnahme-Bestätigung gilt für denselben Gast zehn Minuten. Der Weg
- * Facebook → „Konto hat ein Passwort" ruft den Wechsel zweimal auf (erst der
- * Anbieter-Versuch, dann die Passwort-Eingabe) — ohne das käme der Dialog
- * doppelt (Prüfrunde 1).
+ * Eine Mitnahme-Bestätigung gilt zehn Minuten für denselben Gast UND dieselbe
+ * Ziel-E-Mail. Der Weg Facebook → „Konto hat ein Passwort" ruft den Wechsel
+ * zweimal auf (erst der Anbieter-Versuch, dann die Passwort-Eingabe) — ohne
+ * das käme der Dialog doppelt (Prüfrunde 1). Für ein anderes oder unbekanntes
+ * Zielkonto wird erneut gefragt (Prüfrunde 2).
  */
 const BESTAETIGUNG_GILT_MS = 10 * 60 * 1000;
-let mitnahmeBestaetigt: { uid: string; bis: number } | null = null;
+let mitnahmeBestaetigt: { uid: string; email: string; bis: number } | null = null;
+
+function normEmail(email: string | null | undefined): string | null {
+  const e = (email ?? '').trim().toLowerCase();
+  return e.includes('@') ? e : null;
+}
 
 type CodeFehler = Error & { code: string };
 
@@ -178,17 +185,22 @@ function fragNachFehlschlag(): Promise<'nochmal' | 'anmelden' | 'abbrechen'> {
   });
 }
 
-/** Uploads laufen noch — weiter warten oder abbrechen (kein stilles Zurücklassen). */
-function fragWeiterWarten(): Promise<boolean> {
+/**
+ * Uploads laufen noch — weiter warten, trotzdem anmelden (der Rest bleibt auf
+ * dem Gerät und folgt nach der Übertragung) oder abbrechen. Nie still
+ * zurücklassen, nie aussperren (Prüfrunde 2).
+ */
+function fragWeiterWarten(): Promise<'warten' | 'anmelden' | 'abbrechen'> {
   return new Promise((resolve) => {
     Alert.alert(
       'Gleich fertig',
-      'Deine Einreichungen werden noch hochgeladen. Einen Moment noch, dann nehmen wir alles mit.',
+      'Deine Einreichungen werden noch hochgeladen. Einen Moment noch, dann nehmen wir alles mit – oder melde dich schon an, der Rest folgt später.',
       [
-        { text: 'Abbrechen', style: 'cancel', onPress: () => resolve(false) },
-        { text: 'Weiter warten', onPress: () => resolve(true) },
+        { text: 'Abbrechen', style: 'cancel', onPress: () => resolve('abbrechen') },
+        { text: 'Jetzt anmelden', onPress: () => resolve('anmelden') },
+        { text: 'Weiter warten', onPress: () => resolve('warten') },
       ],
-      { cancelable: true, onDismiss: () => resolve(false) },
+      { cancelable: true, onDismiss: () => resolve('abbrechen') },
     );
   });
 }
@@ -201,7 +213,9 @@ async function uploadsAbarbeiten(vonUid: string): Promise<void> {
       uploadsVorWechselAbarbeiten(vonUid, ABARBEITEN_MS),
     ]);
     if (bons && fotos) return;
-    if (!(await fragWeiterWarten())) throw abbruchFehler();
+    const wahl = await fragWeiterWarten();
+    if (wahl === 'abbrechen') throw abbruchFehler();
+    if (wahl === 'anmelden') return;
   }
 }
 
@@ -239,10 +253,17 @@ export async function inBestehendesKontoWechseln<T>(opts: KontoWechselOptionen<T
     return opts.anmelden();
   }
 
-  const schonBestaetigt = mitnahmeBestaetigt?.uid === vonUid && mitnahmeBestaetigt.bis > Date.now();
+  const zielEmail = normEmail(opts.zielEmail);
+  const schonBestaetigt =
+    !!zielEmail &&
+    mitnahmeBestaetigt?.uid === vonUid &&
+    mitnahmeBestaetigt.email === zielEmail &&
+    mitnahmeBestaetigt.bis > Date.now();
   if (!schonBestaetigt) {
     if (!(await bestaetigeMitnahme(opts.zielEmail))) throw abbruchFehler();
-    mitnahmeBestaetigt = { uid: vonUid, bis: Date.now() + BESTAETIGUNG_GILT_MS };
+    mitnahmeBestaetigt = zielEmail
+      ? { uid: vonUid, email: zielEmail, bis: Date.now() + BESTAETIGUNG_GILT_MS }
+      : null;
   }
   // Ohne Netz scheitert die Anmeldung ohnehin — nicht erst drei Versuche warten.
   if (!isOnline()) throw codeFehler(KONTO_UMZUG_OFFLINE, OFFLINE_TEXT);
@@ -260,10 +281,10 @@ export async function inBestehendesKontoWechseln<T>(opts: KontoWechselOptionen<T
     if (wahl === 'anmelden') break;
   }
 
-  // Nur mit gesichertem Nachweis lohnt das Warten: ohne ihn kann der Server
-  // die Uploads ohnehin nicht übernehmen, und der Nutzer hat „Jetzt anmelden"
-  // gewählt.
-  if (gesichert) await uploadsAbarbeiten(vonUid);
+  // Auch ohne gesicherten Nachweis: solange der Gast angemeldet ist, landen
+  // seine Einreichungen samt Gutschrift auf dem Server — sonst lägen sie nur
+  // auf dem Gerät, und auch der Support könnte nichts übertragen (Prüfrunde 2).
+  await uploadsAbarbeiten(vonUid);
 
   pausiereBonQueue();
   pausiereUploadQueue();
@@ -271,16 +292,19 @@ export async function inBestehendesKontoWechseln<T>(opts: KontoWechselOptionen<T
     const ergebnis = await opts.anmelden();
 
     const neueUid = auth.currentUser?.uid ?? null;
-    if (neueUid && neueUid !== vonUid) mitnahmeBestaetigt = null;
-    if (gesichert && neueUid && neueUid !== vonUid) {
-      try {
-        await GastUebernahme.zielMerken(vonUid, neueUid);
-      } catch (e) {
-        // Die Anmeldung selbst hat geklappt — sie darf hieran nicht scheitern.
-        console.warn('[kontoWechsel] Zielkonto konnte nicht gemerkt werden:', (e as Error)?.message);
-      }
+    if (neueUid && neueUid !== vonUid) {
+      mitnahmeBestaetigt = null;
+      // Die Bon-Seite des Gastes gibt es unter der neuen uid nicht.
       await AuthRueckkehr.nachKontowechsel();
-      void GastUebernahme.einloesenAlle();
+      if (gesichert) {
+        try {
+          await GastUebernahme.zielMerken(vonUid, neueUid);
+        } catch (e) {
+          // Die Anmeldung selbst hat geklappt — sie darf hieran nicht scheitern.
+          console.warn('[kontoWechsel] Zielkonto konnte nicht gemerkt werden:', (e as Error)?.message);
+        }
+        void GastUebernahme.einloesenAlle();
+      }
     }
     return ergebnis;
   } finally {

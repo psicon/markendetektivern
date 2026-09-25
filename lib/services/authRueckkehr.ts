@@ -51,7 +51,12 @@ async function schreiben(v: { ziel: string; bis: number } | null): Promise<void>
   }
 }
 
-type RouterLike = { replace: (href: any) => void; push: (href: any) => void };
+type RouterLike = {
+  replace: (href: any) => void;
+  push: (href: any) => void;
+  canDismiss?: () => boolean;
+  dismissAll?: () => void;
+};
 
 export const AuthRueckkehr = {
   /** Ziel für die nächste erfolgreiche Anmeldung vormerken (nur Whitelist). */
@@ -87,6 +92,14 @@ export const AuthRueckkehr = {
   async abschliessen(router: RouterLike): Promise<void> {
     await OnboardingService.markCompleted();
     const ziel = await AuthRueckkehr.nehmen();
+    // Anmelde-Screens UND den Ursprungsscreen verlassen: sonst lagen nach
+    // dem Ersetzen Ursprung und Tabs doppelt im Stapel, und „Zurück" führte
+    // nach einem Kontowechsel auf eine Seite der alten uid (Prüfrunde 2).
+    try {
+      if (router.canDismiss?.()) router.dismissAll?.();
+    } catch {
+      // ohne Aufräumen geht es wie bisher weiter
+    }
     if (!ziel) {
       router.replace('/(tabs)');
       return;

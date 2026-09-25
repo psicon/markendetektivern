@@ -259,18 +259,22 @@ describe('inBestehendesKontoWechseln — mit Einreichungen', () => {
   });
 
   it.each(['fehler', 'zu_viele'])(
-    'Ticket scheitert (%s) → „Jetzt anmelden" führt ins Konto, ohne Ziel und ohne Warten',
+    'Ticket scheitert (%s) → „Jetzt anmelden" lädt erst die Gast-Uploads hoch, dann Konto ohne Ziel',
     async (grund) => {
       vorbereitenMock.mockResolvedValue(grund);
       antworten = { 'Mitnahme klappt gerade nicht': 'Jetzt anmelden' };
+      const vonUid = authMock.currentUser.uid;
       const anmelden = wechselNach();
 
       await expect(inBestehendesKontoWechseln({ anmelden })).resolves.toBe('ergebnis');
 
       expect(anmelden).toHaveBeenCalledTimes(1);
-      expect(bonsAbarbeitenMock).not.toHaveBeenCalled();
+      expect(bonsAbarbeitenMock).toHaveBeenCalledWith(vonUid, expect.any(Number));
+      expect(fotosAbarbeitenMock).toHaveBeenCalledWith(vonUid, expect.any(Number));
       expect(zielMerkenMock).not.toHaveBeenCalled();
       expect(einloesenMock).not.toHaveBeenCalled();
+      // Rücksprung zeigt keine Bon-Seite der alten uid.
+      expect(AuthRueckkehr.nachKontowechsel).toHaveBeenCalledTimes(1);
       expect(bonQueue.setzeBonQueueFort).toHaveBeenCalledTimes(1);
     },
   );
@@ -303,6 +307,17 @@ describe('inBestehendesKontoWechseln — mit Einreichungen', () => {
     expect(zielMerkenMock).toHaveBeenCalledTimes(1);
   });
 
+  it('Uploads noch nicht fertig → „Jetzt anmelden" wechselt trotzdem (nie aussperren)', async () => {
+    fotosAbarbeitenMock.mockResolvedValue(false);
+    antworten = { 'Gleich fertig': 'Jetzt anmelden' };
+    const anmelden = wechselNach();
+
+    await expect(inBestehendesKontoWechseln({ anmelden })).resolves.toBe('ergebnis');
+
+    expect(anmelden).toHaveBeenCalledTimes(1);
+    expect(zielMerkenMock).toHaveBeenCalledTimes(1);
+  });
+
   it('Uploads noch nicht fertig → Abbrechen lässt den Gast angemeldet', async () => {
     fotosAbarbeitenMock.mockResolvedValue(false);
     antworten = { 'Gleich fertig': 'Abbrechen' };
@@ -312,16 +327,31 @@ describe('inBestehendesKontoWechseln — mit Einreichungen', () => {
     expect(bonQueue.pausiereBonQueue).not.toHaveBeenCalled();
   });
 
-  it('zweiter Aufruf für denselben Gast (Facebook → Passwort) zeigt den Dialog nicht noch einmal', async () => {
-    const scheitert = jest.fn(async () => {
+  function scheitertMitFacebook() {
+    return jest.fn(async () => {
       throw Object.assign(new Error('fb'), { code: 'auth/account-exists-with-different-credential' });
     });
-    await expect(inBestehendesKontoWechseln({ anmelden: scheitert })).rejects.toMatchObject({
-      code: 'auth/account-exists-with-different-credential',
-    });
-    await inBestehendesKontoWechseln({ dialogUeberspringen: true, anmelden: wechselNach() });
+  }
+
+  it('zweiter Aufruf für denselben Gast und dieselbe E-Mail (Facebook → Passwort) fragt nicht noch einmal', async () => {
+    await expect(
+      inBestehendesKontoWechseln({ zielEmail: 'Patrick@Web.de', anmelden: scheitertMitFacebook() }),
+    ).rejects.toMatchObject({ code: 'auth/account-exists-with-different-credential' });
+    await inBestehendesKontoWechseln({ zielEmail: 'patrick@web.de', dialogUeberspringen: true, anmelden: wechselNach() });
 
     expect(titel()).toEqual(['Willkommen zurück!']);
+  });
+
+  it('anderes oder unbekanntes Zielkonto → erneut fragen', async () => {
+    await expect(
+      inBestehendesKontoWechseln({ zielEmail: 'a@web.de', anmelden: scheitertMitFacebook() }),
+    ).rejects.toBeTruthy();
+    await expect(
+      inBestehendesKontoWechseln({ zielEmail: 'b@web.de', anmelden: scheitertMitFacebook() }),
+    ).rejects.toBeTruthy();
+    await inBestehendesKontoWechseln({ anmelden: wechselNach() });
+
+    expect(titel()).toEqual(['Willkommen zurück!', 'Willkommen zurück!', 'Willkommen zurück!']);
   });
 
   it('Anmeldung scheitert → Fehler kommt durch, Warteschlangen laufen weiter, kein Ziel', async () => {

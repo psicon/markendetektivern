@@ -129,8 +129,9 @@ const warte = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 function hinweisText(stand: NonNullable<Eintrag['stand']>): string | null {
   const s = stand.summe || {};
+  // Ein Satz je Stand — der Hinweis zeigt höchstens zwei Zeilen (Prüfrunde 2).
   if (stand.status === 'pausiert' || stand.status === 'vorbereitet') {
-    return 'Deine Einreichungen als Gast übernehmen wir in dein Konto – das dauert noch einen Moment.';
+    return 'Deine Gast-Einreichungen sind gesichert – wir übertragen sie in dein Konto und sagen dir Bescheid.';
   }
   if (stand.status === 'pruefung') {
     return 'Wir schauen uns die Übernahme kurz an – deine Einreichungen sind sicher.';
@@ -143,19 +144,13 @@ function hinweisText(stand: NonNullable<Eintrag['stand']>): string | null {
   if ((s.uebernommenCents || 0) > 0) {
     teile.push(`${((s.uebernommenCents || 0) / 100).toFixed(2).replace('.', ',')} €`);
   }
-  const saetze: string[] = [];
+  const rest = (s.wartet || 0) > 0;
   if (teile.length > 0) {
     const liste = teile.length > 1 ? `${teile.slice(0, -1).join(', ')} und ${teile[teile.length - 1]}` : teile[0];
     const einzeln = teile.length === 1 && bons + fotos === 1;
-    saetze.push(`${liste} ${einzeln ? 'ist' : 'sind'} jetzt in deinem Konto.`);
+    return `${liste} ${einzeln ? 'ist' : 'sind'} jetzt in deinem Konto${rest ? ' – der Rest folgt gleich' : ''}.`;
   }
-  if ((s.gedeckeltCents || 0) > 0) {
-    saetze.push('Ein Teil fiel auf Tage, an denen dein Konto schon eine Belohnung hatte – die Einreichungen zählen trotzdem zu deiner Übersicht.');
-  }
-  if ((s.wartet || 0) > 0) {
-    saetze.push('Ein paar Einreichungen werden gerade noch geprüft und kommen automatisch nach.');
-  }
-  return saetze.length ? saetze.join(' ') : null;
+  return rest ? 'Deine Gast-Einreichungen kommen gleich in dein Konto.' : null;
 }
 
 export const GastUebernahme = {
@@ -220,9 +215,19 @@ export const GastUebernahme = {
             stand: null,
             angezeigt: null,
           };
+          const vorher = spiegel[vonUid];
           spiegel[vonUid] = eintrag;
           // ZUERST speichern — erst dann darf der Server den Hash kennen.
-          await speichern();
+          try {
+            await speichern();
+          } catch {
+            // Nicht gespeichert → nicht im Spiegel lassen, sonst meldete der
+            // nächste Versuch 'ok' für ein Geheimnis, das den Neustart nicht
+            // überlebt (Prüfrunde 2).
+            if (vorher) spiegel[vonUid] = vorher;
+            else delete spiegel[vonUid];
+            return 'fehler';
+          }
         }
         const ticketHash = await sha256Hex(eintrag.geheimnis as string);
 

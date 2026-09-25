@@ -635,29 +635,41 @@ GastUebernahme.beiAenderung(() => kickBonQueue());
 
 // ─── Vor dem Wechsel in ein bestehendes Konto ───────────────────────
 
-const AKTIV_BON: BonJobStatus[] = ['queued', 'uploading', 'enqueueing'];
-
-function aktiveBonsVon(uid: string): number {
-  return jobs.filter((j) => j.uid === uid && AKTIV_BON.includes(j.status)).length;
+/** Offen = noch nicht hochgeladen und nicht endgültig abgelehnt (auch ein
+ *  vorübergehend gescheiterter Auftrag, der auf seine Wiederholung wartet). */
+function offeneBonsVon(uid: string): number {
+  return jobs.filter((j) => j.uid === uid && !(j.status === 'failed' && j.terminal)).length;
 }
 
 /**
  * Lädt die Aufträge des NOCH angemeldeten Gastes jetzt hoch, bevor die uid
- * wechselt (Prüfrunde 1): danach dürften sie bis zur Server-Übernahme
+ * wechselt (Prüfrunden 1+2): danach dürften sie bis zur Server-Übernahme
  * (Stufe 2) nicht mehr laufen, und ein Bon würde womöglich zu alt.
- * Liefert true, sobald kein Auftrag dieser uid mehr aktiv ist (endgültig
- * gescheiterte zählen nicht), false nach Ablauf der Zeit.
+ * Vorübergehend gescheiterte Aufträge werden sofort erneut versucht (auch
+ * mit aufgebrauchtem Wiederholungs-Budget) und zählen als offen. Liefert
+ * true, sobald nur noch endgültig abgelehnte übrig sind, sonst false nach
+ * Ablauf der Zeit.
  */
 export async function bonsVorWechselAbarbeiten(uid: string, timeoutMs: number): Promise<boolean> {
   await ensureLoaded();
-  kickBonQueue();
-  if (aktiveBonsVon(uid) === 0) return true;
+  let changed = false;
+  jobs = jobs.map((j) => {
+    if (j.uid !== uid || j.status !== 'failed' || j.terminal) return j;
+    changed = true;
+    return { ...j, status: 'queued' as BonJobStatus, attempts: 0, lastError: null };
+  });
+  if (changed) {
+    emit();
+    void persist();
+  }
+  void processQueue();
+  if (offeneBonsVon(uid) === 0) return true;
   return new Promise<boolean>((resolve) => {
     let erledigt = false;
     const pruefe = () => {
-      if (aktiveBonsVon(uid) === 0) fertig(true);
+      if (offeneBonsVon(uid) === 0) fertig(true);
     };
-    const timer = setTimeout(() => fertig(aktiveBonsVon(uid) === 0), timeoutMs);
+    const timer = setTimeout(() => fertig(offeneBonsVon(uid) === 0), timeoutMs);
     function fertig(ok: boolean) {
       if (erledigt) return;
       erledigt = true;

@@ -24,6 +24,7 @@ import { router } from 'expo-router';
 
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { AuthRueckkehr } from '@/lib/services/authRueckkehr';
+import { safePush } from '@/lib/utils/safeNav';
 import { hasValidCashbackConsent } from '@/lib/services/cashbackService';
 import { formatCents } from '@/lib/types/cashback';
 import {
@@ -97,12 +98,12 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
     router.push('/cashback/consent?from=rewards' as any);
   }, []);
 
-  // Gast, der Cashback schon angenommen hat: ihm fehlt nur das Konto
-  // (Prüfrunde 1 — „Zum Cashback" führte ihn zurück in eine Einwilligung,
-  // die er längst gegeben hat). Nach der Anmeldung zurück zu den Belohnungen.
+  // Gäste: vergütete Umfragen gibt es nur mit Konto — „Zum Cashback" führte
+  // sie in eine Einwilligung, nach der immer noch das Konto fehlte
+  // (Prüfrunden 1+2). Nach der Anmeldung zurück zu den Belohnungen.
   const goToKonto = useCallback(async () => {
     await AuthRueckkehr.merke('/(tabs)/rewards');
-    router.push('/auth/register' as any);
+    safePush('/auth/register');
   }, []);
 
   const [poll, setPoll] = useState<Poll | null>(null);
@@ -219,7 +220,7 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
         // Glow-Banner statt grauem Mini-Toast (ClickUp 86ca8hqt8). Der CF
         // schreibt den Betrag gleich gut → optimistisch sofort feiern.
         showBanner(bannerDataFromCashbackPayout(p.rewardCents!));
-      } else if (pays && !registered && validConsent) {
+      } else if (pays && !registered) {
         showCashbackNudgeToast(
           `${formatCents(p.rewardCents!)} Guthaben gibt's mit Konto – für Umfragen wie diese.`,
           () => void goToKonto(),

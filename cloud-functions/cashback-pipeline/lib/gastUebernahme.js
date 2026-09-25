@@ -213,15 +213,17 @@ function erstelleGastUebernahme({ db, admin, logger, loadConfig, zeit = () => Da
       // sperrten zehn Anmeldeversuche an einem Tag einen Gast mit Guthaben
       // aus seinem eigenen Konto aus (Prüfrunde 1).
       const bekannt = job && Array.isArray(job.ticketHashes) && job.ticketHashes.includes(ticketHash);
-      if (bekannt) {
+      // Neu ist auch ein abgelaufener oder verfallener, nie gebundener Job:
+      // sonst bliebe gueltigBis für immer in der Vergangenheit, und jedes
+      // spätere Ticket dieses Gastes wäre schon beim Anlegen verfallen. Das
+      // gilt AUCH für einen bekannten Hash — die App schickt nach einer
+      // gescheiterten Anmeldung Wochen später denselben (Prüfrunde 2).
+      const neu = !job || tsMs(job.gueltigBis) <= jetzt || job.status === 'verfallen';
+      if (bekannt && !neu) {
         return antwort(200, { ok: true, gueltigBis: job.gueltigBis ? new Date(tsMs(job.gueltigBis)).toISOString() : null });
       }
-      if (bisher >= MAX_VORBEREITUNGEN_PRO_TAG) return fehler(429, 'zu_viele_vorbereitungen');
-
-      // Neu ist auch ein abgelaufener, nie gebundener Job: sonst bliebe
-      // gueltigBis für immer in der Vergangenheit, und jedes spätere Ticket
-      // dieses Gastes wäre schon beim Anlegen verfallen.
-      const neu = !job || tsMs(job.gueltigBis) <= jetzt;
+      // Ein bekannter Hash zählt nie gegen das Tageslimit, auch nicht beim Erneuern.
+      if (!bekannt && bisher >= MAX_VORBEREITUNGEN_PRO_TAG) return fehler(429, 'zu_viele_vorbereitungen');
       const alte = neu
         ? []
         : (Array.isArray(job.ticketHashes) ? job.ticketHashes : []).filter((h) => typeof h === 'string' && HASH_RE.test(h));
@@ -232,7 +234,7 @@ function erstelleGastUebernahme({ db, admin, logger, loadConfig, zeit = () => Da
       const felder = {
         status: 'vorbereitet',
         ticketHashes,
-        vorbereitungen: { tag, anzahl: bisher + 1 },
+        vorbereitungen: { tag, anzahl: bekannt ? bisher : bisher + 1 },
         aktualisiertAm: Timestamp.fromMillis(jetzt),
       };
       let gueltigBis = job && job.gueltigBis;

@@ -578,6 +578,86 @@ describe('Foto-Warteschlange', () => {
 
 // ─── submitProduct: Dokument-ID aus docUid ───────────────────────────
 
+// ─── Vor dem Wechsel in ein bestehendes Konto (Prüfrunde 2) ───────────
+
+describe('Abarbeiten vor dem Kontowechsel', () => {
+  beforeEach(() => {
+    // Wiederholungs-Timer der Warteschlangen sollen den Lauf nicht offen halten.
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask'] });
+  });
+  afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
+  test('Bon: vorübergehend gescheitert, Budget aufgebraucht → wird sofort erneut hochgeladen', async () => {
+    anmelden(A);
+    const q = frischeBonQueue([
+      bonAuftrag('bon_a1', A, { status: 'failed', attempts: 5, lastAttemptAt: Date.now(), lastError: 'Netz' }),
+    ]);
+
+    const fertig = q.bonsVorWechselAbarbeiten(A, 5_000);
+    await ruhe();
+
+    await expect(fertig).resolves.toBe(true);
+    expect(mock(uploadBonImage).mock.calls[0][1]).toBe(A);
+    expect(await bonStand(q)).toHaveLength(0);
+  });
+
+  test('Bon: scheitert erneut → gilt NICHT als fertig', async () => {
+    anmelden(A);
+    mock(uploadBonImage).mockRejectedValue(new Error('Netz weg'));
+    const q = frischeBonQueue([bonAuftrag('bon_a1', A)]);
+
+    const fertig = q.bonsVorWechselAbarbeiten(A, 5_000);
+    await ruhe();
+    jest.advanceTimersByTime(5_000);
+
+    await expect(fertig).resolves.toBe(false);
+  });
+
+  test('Bon: endgültig abgelehnt (z. B. fehlende Einwilligung) hält den Wechsel nicht auf', async () => {
+    anmelden(A);
+    const q = frischeBonQueue([
+      bonAuftrag('bon_a1', A, { status: 'failed', terminal: true, terminalCode: 'consent_missing' }),
+    ]);
+
+    await expect(q.bonsVorWechselAbarbeiten(A, 5_000)).resolves.toBe(true);
+    expect(uploadBonImage).not.toHaveBeenCalled();
+  });
+
+  test('Bon: Aufträge anderer uids zählen nicht', async () => {
+    anmelden(A);
+    const q = frischeBonQueue([bonAuftrag('bon_c1', C)]);
+    await expect(q.bonsVorWechselAbarbeiten(A, 5_000)).resolves.toBe(true);
+    expect(uploadBonImage).not.toHaveBeenCalled();
+  });
+
+  test('Foto: gescheitert mit aufgebrauchtem Budget → wird sofort erneut eingereicht', async () => {
+    anmelden(A);
+    const q = frischeFotoQueue([fotoAuftrag('f1', A, { status: 'failed', attempts: 5, lastError: 'Netz' })]);
+
+    const fertig = q.uploadsVorWechselAbarbeiten(A, 5_000);
+    await ruhe();
+
+    await expect(fertig).resolves.toBe(true);
+    expect(submitProduct).toHaveBeenCalledTimes(1);
+    expect(await fotoStand(q)).toHaveLength(0);
+  });
+
+  test('Foto: scheitert erneut → gilt NICHT als fertig', async () => {
+    anmelden(A);
+    mock(submitProduct).mockRejectedValue(new Error('unavailable'));
+    const q = frischeFotoQueue([fotoAuftrag('f1', A)]);
+
+    const fertig = q.uploadsVorWechselAbarbeiten(A, 5_000);
+    await ruhe();
+    jest.advanceTimersByTime(5_000);
+
+    await expect(fertig).resolves.toBe(false);
+  });
+});
+
 describe('submitProduct mit docUid', () => {
   const echt = jest.requireActual('../productSubmit') as typeof import('../productSubmit');
   const EINGABE = {

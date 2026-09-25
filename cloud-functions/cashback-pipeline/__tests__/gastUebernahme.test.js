@@ -220,6 +220,37 @@ describe('vorbereiten', () => {
     expect(j.gueltigBis.toMillis()).toBe(T0 + GUELTIG_MS);
   });
 
+  it('derselbe Hash nach Ablauf (gescheiterte Anmeldung, Wochen später): erneuert, zählt nicht, Einlösen gibt kein 410 (Prüfrunde 2)', async () => {
+    const w = welt({
+      nutzer: { [GAST]: gast, [ZIEL]: konto },
+      config: { gastUebernahmeAktiv: true },
+      docs: {
+        [`gast_uebernahmen/${GAST}`]: job({
+          ticketHashes: [HASH],
+          gueltigBis: ts(T0 - 1),
+          status: 'verfallen',
+          vorbereitungen: { tag: '2026-09-25', anzahl: MAX_VORBEREITUNGEN_PRO_TAG },
+        }),
+      },
+    });
+    const r = await w.vorbereiten({ gastUid: GAST, ticketHash: HASH });
+    expect(r).toEqual({ http: 200, body: { ok: true, gueltigBis: new Date(T0 + GUELTIG_MS).toISOString() } });
+    const j = w.store.get(`gast_uebernahmen/${GAST}`);
+    expect(j.status).toBe('vorbereitet');
+    expect(j.ticketHashes).toEqual([HASH]);
+    expect(j.vorbereitungen.anzahl).toBe(MAX_VORBEREITUNGEN_PRO_TAG);
+    const e = await w.einloesen({ zielUid: ZIEL, gastUid: GAST, geheimnis: GEHEIMNIS });
+    expect(e.http).toBe(200);
+  });
+
+  it('derselbe Hash, noch gültig: keine neue Frist', async () => {
+    const w = welt({ nutzer: { [GAST]: gast } });
+    await w.vorbereiten({ gastUid: GAST, ticketHash: HASH });
+    w.uhr(T0 + 5 * TAG_MS);
+    const r = await w.vorbereiten({ gastUid: GAST, ticketHash: HASH });
+    expect(r.body.gueltigBis).toBe(new Date(T0 + GUELTIG_MS).toISOString());
+  });
+
   it('schon gebunden → 409 schon_gebunden, nichts geschrieben', async () => {
     const w = welt({
       nutzer: { [GAST]: gast },
