@@ -616,6 +616,23 @@ describe('Abarbeiten vor dem Kontowechsel', () => {
     await expect(fertig).resolves.toBe(false);
   });
 
+  test('Bon: dauerhaft kaputt → nach Versuch + einer Wiederholung erledigt; ein zweiter Anmeldeversuch wartet nicht (Nachprüfung)', async () => {
+    anmelden(A);
+    mock(uploadBonImage).mockRejectedValue(new Error('Datei fehlt'));
+    const q = frischeBonQueue([bonAuftrag('bon_a1', A, { status: 'failed', attempts: 5, lastAttemptAt: Date.now() })]);
+
+    const erster = q.bonsVorWechselAbarbeiten(A, 30_000);
+    await ruhe();
+    jest.advanceTimersByTime(10_000); // die eine Wiederholung
+    await ruhe();
+    await expect(erster).resolves.toBe(true);
+    expect(uploadBonImage).toHaveBeenCalledTimes(2);
+
+    // Falsches Passwort, neuer Versuch: kein neues Budget, kein Warten, kein Upload.
+    await expect(q.bonsVorWechselAbarbeiten(A, 30_000)).resolves.toBe(true);
+    expect(uploadBonImage).toHaveBeenCalledTimes(2);
+  });
+
   test('Bon: endgültig abgelehnt (z. B. fehlende Einwilligung) hält den Wechsel nicht auf', async () => {
     anmelden(A);
     const q = frischeBonQueue([
@@ -643,6 +660,22 @@ describe('Abarbeiten vor dem Kontowechsel', () => {
     await expect(fertig).resolves.toBe(true);
     expect(submitProduct).toHaveBeenCalledTimes(1);
     expect(await fotoStand(q)).toHaveLength(0);
+  });
+
+  test('Foto: dauerhaft kaputt → nach Versuch + einer Wiederholung erledigt; zweiter Aufruf wartet nicht', async () => {
+    anmelden(A);
+    mock(submitProduct).mockRejectedValue(new Error('unavailable'));
+    const q = frischeFotoQueue([fotoAuftrag('f1', A, { status: 'failed', attempts: 5 })]);
+
+    const erster = q.uploadsVorWechselAbarbeiten(A, 30_000);
+    await ruhe();
+    jest.advanceTimersByTime(10_000);
+    await ruhe();
+    await expect(erster).resolves.toBe(true);
+    expect(submitProduct).toHaveBeenCalledTimes(2);
+
+    await expect(q.uploadsVorWechselAbarbeiten(A, 30_000)).resolves.toBe(true);
+    expect(submitProduct).toHaveBeenCalledTimes(2);
   });
 
   test('Foto: scheitert erneut → gilt NICHT als fertig', async () => {

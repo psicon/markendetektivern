@@ -635,32 +635,49 @@ GastUebernahme.beiAenderung(() => kickBonQueue());
 
 // ─── Vor dem Wechsel in ein bestehendes Konto ───────────────────────
 
-/** Offen = noch nicht hochgeladen und nicht endgültig abgelehnt (auch ein
- *  vorübergehend gescheiterter Auftrag, der auf seine Wiederholung wartet). */
+/**
+ * Versuche je Auftrag vor dem Wechsel: einer plus eine Wiederholung. Ein
+ * kurzer Aussetzer wird so noch aufgefangen (Prüfrunde 2), ein dauerhaft
+ * kaputter Auftrag hält den Wechsel aber nicht auf (Nachprüfung).
+ */
+const VERSUCHE_VOR_WECHSEL = 2;
+/** Gast-uids, deren Budget in dieser Sitzung schon einmal zurückgesetzt wurde. */
+const vorWechselZurueckgesetzt = new Set<string>();
+
+/** Offen = läuft, wartet oder wartet auf seine eine Wiederholung. */
 function offeneBonsVon(uid: string): number {
-  return jobs.filter((j) => j.uid === uid && !(j.status === 'failed' && j.terminal)).length;
+  return jobs.filter(
+    (j) =>
+      j.uid === uid &&
+      (j.status !== 'failed' || (!j.terminal && j.attempts < VERSUCHE_VOR_WECHSEL)),
+  ).length;
 }
 
 /**
  * Lädt die Aufträge des NOCH angemeldeten Gastes jetzt hoch, bevor die uid
- * wechselt (Prüfrunden 1+2): danach dürften sie bis zur Server-Übernahme
- * (Stufe 2) nicht mehr laufen, und ein Bon würde womöglich zu alt.
- * Vorübergehend gescheiterte Aufträge werden sofort erneut versucht (auch
- * mit aufgebrauchtem Wiederholungs-Budget) und zählen als offen. Liefert
- * true, sobald nur noch endgültig abgelehnte übrig sind, sonst false nach
- * Ablauf der Zeit.
+ * wechselt: danach dürften sie bis zur Server-Übernahme (Stufe 2) nicht mehr
+ * laufen, und ein Bon würde womöglich zu alt.
+ *
+ * Gescheiterte Aufträge bekommen EINMAL je Sitzung ein frisches Budget (auch
+ * wenn es aufgebraucht war) und dürfen es zweimal versuchen. Wer danach noch
+ * scheitert oder endgültig abgelehnt ist, gilt als erledigt — ein neuer
+ * Anmeldeversuch (z. B. nach falschem Passwort) wartet dann nicht erneut.
+ * Liefert true, sobald nichts mehr offen ist, sonst false nach Ablauf der Zeit.
  */
 export async function bonsVorWechselAbarbeiten(uid: string, timeoutMs: number): Promise<boolean> {
   await ensureLoaded();
-  let changed = false;
-  jobs = jobs.map((j) => {
-    if (j.uid !== uid || j.status !== 'failed' || j.terminal) return j;
-    changed = true;
-    return { ...j, status: 'queued' as BonJobStatus, attempts: 0, lastError: null };
-  });
-  if (changed) {
-    emit();
-    void persist();
+  if (!vorWechselZurueckgesetzt.has(uid)) {
+    vorWechselZurueckgesetzt.add(uid);
+    let changed = false;
+    jobs = jobs.map((j) => {
+      if (j.uid !== uid || j.status !== 'failed' || j.terminal) return j;
+      changed = true;
+      return { ...j, status: 'queued' as BonJobStatus, attempts: 0, lastError: null };
+    });
+    if (changed) {
+      emit();
+      void persist();
+    }
   }
   void processQueue();
   if (offeneBonsVon(uid) === 0) return true;

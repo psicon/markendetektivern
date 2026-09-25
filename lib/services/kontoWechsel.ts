@@ -190,11 +190,16 @@ function fragNachFehlschlag(): Promise<'nochmal' | 'anmelden' | 'abbrechen'> {
  * dem Gerät und folgt nach der Übertragung) oder abbrechen. Nie still
  * zurücklassen, nie aussperren (Prüfrunde 2).
  */
-function fragWeiterWarten(): Promise<'warten' | 'anmelden' | 'abbrechen'> {
+function fragWeiterWarten(gesichert: boolean): Promise<'warten' | 'anmelden' | 'abbrechen'> {
+  // Ohne gesicherten Besitznachweis gibt es keine Mitnahme — dann nichts
+  // versprechen (Nachprüfung Runde 2).
+  const text = gesichert
+    ? 'Deine Einreichungen werden noch hochgeladen. Einen Moment noch, dann nehmen wir alles mit – oder melde dich schon an, der Rest folgt später.'
+    : 'Deine Einreichungen werden noch gespeichert. Einen Moment noch – oder melde dich schon an.';
   return new Promise((resolve) => {
     Alert.alert(
       'Gleich fertig',
-      'Deine Einreichungen werden noch hochgeladen. Einen Moment noch, dann nehmen wir alles mit – oder melde dich schon an, der Rest folgt später.',
+      text,
       [
         { text: 'Abbrechen', style: 'cancel', onPress: () => resolve('abbrechen') },
         { text: 'Jetzt anmelden', onPress: () => resolve('anmelden') },
@@ -206,14 +211,14 @@ function fragWeiterWarten(): Promise<'warten' | 'anmelden' | 'abbrechen'> {
 }
 
 /** Offene Uploads des Gastes hochladen, solange er noch angemeldet ist. */
-async function uploadsAbarbeiten(vonUid: string): Promise<void> {
+async function uploadsAbarbeiten(vonUid: string, gesichert: boolean): Promise<void> {
   for (;;) {
     const [bons, fotos] = await Promise.all([
       bonsVorWechselAbarbeiten(vonUid, ABARBEITEN_MS),
       uploadsVorWechselAbarbeiten(vonUid, ABARBEITEN_MS),
     ]);
     if (bons && fotos) return;
-    const wahl = await fragWeiterWarten();
+    const wahl = await fragWeiterWarten(gesichert);
     if (wahl === 'abbrechen') throw abbruchFehler();
     if (wahl === 'anmelden') return;
   }
@@ -284,7 +289,7 @@ export async function inBestehendesKontoWechseln<T>(opts: KontoWechselOptionen<T
   // Auch ohne gesicherten Nachweis: solange der Gast angemeldet ist, landen
   // seine Einreichungen samt Gutschrift auf dem Server — sonst lägen sie nur
   // auf dem Gerät, und auch der Support könnte nichts übertragen (Prüfrunde 2).
-  await uploadsAbarbeiten(vonUid);
+  await uploadsAbarbeiten(vonUid, gesichert);
 
   pausiereBonQueue();
   pausiereUploadQueue();

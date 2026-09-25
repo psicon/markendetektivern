@@ -581,28 +581,36 @@ GastUebernahme.beiAenderung(() => kickUploadQueue());
 
 // ─── Vor dem Wechsel in ein bestehendes Konto ───────────────────────
 
-/** Offen = noch nicht eingereicht; Foto-Aufträge kennen kein endgültiges
- *  Scheitern, auch ein gescheiterter Auftrag gilt als offen. */
+/** Versuche je Auftrag vor dem Wechsel: einer plus eine Wiederholung
+ *  (Gegenstück zu bonUploadQueue.ts). */
+const VERSUCHE_VOR_WECHSEL = 2;
+const vorWechselZurueckgesetzt = new Set<string>();
+
+/** Offen = läuft, wartet oder wartet auf seine eine Wiederholung. */
 function offeneUploadsVon(uid: string): number {
-  return jobs.filter((j) => j.uid === uid).length;
+  return jobs.filter((j) => j.uid === uid && (j.status !== 'failed' || j.attempts < VERSUCHE_VOR_WECHSEL)).length;
 }
 
 /**
  * Gegenstück zu bonsVorWechselAbarbeiten: Produktfotos des noch
  * angemeldeten Gastes hochladen und einreichen, bevor die uid wechselt.
- * Gescheiterte Aufträge werden sofort erneut versucht (Budget zurückgesetzt).
+ * Gescheiterte Aufträge bekommen einmal je Sitzung ein frisches Budget und
+ * zwei Versuche; danach halten sie den Wechsel nicht mehr auf.
  */
 export async function uploadsVorWechselAbarbeiten(uid: string, timeoutMs: number): Promise<boolean> {
   await ensureLoaded();
-  let changed = false;
-  jobs = jobs.map((j) => {
-    if (j.uid !== uid || j.status !== 'failed') return j;
-    changed = true;
-    return { ...j, status: 'queued' as UploadJobStatus, attempts: 0, lastError: null };
-  });
-  if (changed) {
-    emit();
-    void persist();
+  if (!vorWechselZurueckgesetzt.has(uid)) {
+    vorWechselZurueckgesetzt.add(uid);
+    let changed = false;
+    jobs = jobs.map((j) => {
+      if (j.uid !== uid || j.status !== 'failed') return j;
+      changed = true;
+      return { ...j, status: 'queued' as UploadJobStatus, attempts: 0, lastError: null };
+    });
+    if (changed) {
+      emit();
+      void persist();
+    }
   }
   void processQueue();
   if (offeneUploadsVon(uid) === 0) return true;
