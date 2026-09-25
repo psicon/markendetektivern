@@ -23,7 +23,11 @@ jest.mock('expo-application', () => ({
   nativeBuildVersion: '1234',
 }));
 
-jest.mock('react-native', () => ({ Platform: { OS: 'ios' } }));
+jest.mock('react-native', () => ({
+  Platform: { OS: 'ios' },
+  // Wächter (berechtigungsWaechter.ts): 'background' = Dialog sichtbar → regulär warten.
+  AppState: { currentState: 'background', addEventListener: jest.fn(() => ({ remove: jest.fn() })) },
+}));
 
 // Ohne Typ-Argument leitet jest.fn(() => null) den Rückgabetyp `null` ab
 // und lehnt danach jedes mockReturnValue mit echten Daten ab.
@@ -85,6 +89,30 @@ describe('Berechtigungsstatus wird gelesen, nie erfragt', () => {
 });
 
 describe('standortAnfordern löst den System-Dialog aus — und nur diese Funktion', () => {
+  beforeEach(() => {
+    // Standard: noch nie gefragt → der Dialog ist möglich.
+    mockLocation.getForegroundPermissionsAsync.mockResolvedValue({ granted: false, canAskAgain: true });
+    mockLocation.requestForegroundPermissionsAsync.mockReset();
+  });
+
+  it('schon erteilt → KEINE Anfrage (Android antwortete dann ohne Dialog erst beim nächsten Aufwachen)', async () => {
+    mockLocation.getForegroundPermissionsAsync.mockResolvedValue({ granted: true, canAskAgain: true });
+    expect(await standortAnfordern()).toBe('granted_precise');
+    mockLocation.getForegroundPermissionsAsync.mockResolvedValue({
+      granted: true,
+      canAskAgain: true,
+      android: { accuracy: 'coarse' },
+    });
+    expect(await standortAnfordern()).toBe('granted_coarse');
+    expect(mockLocation.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+  });
+
+  it('endgültig abgelehnt → sofort denied, KEINE Anfrage (kein ewiger Spinner)', async () => {
+    mockLocation.getForegroundPermissionsAsync.mockResolvedValue({ granted: false, canAskAgain: false });
+    expect(await standortAnfordern()).toBe('denied');
+    expect(mockLocation.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+  });
+
   it('meldet die erteilte Freigabe', async () => {
     mockLocation.requestForegroundPermissionsAsync.mockResolvedValue(erlaubt());
     expect(await standortAnfordern()).toBe('granted_precise');

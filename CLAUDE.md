@@ -444,6 +444,23 @@ werden sollten. Andere "Don't"-Regeln stehen verteilt im File
 `USE_FLYING_TABS`-Legacy etc.) — hier nur die Learnings aus
 Recent-Sessions.
 
+- **Auf Android eine Laufzeit-Berechtigung anfragen, deren Ausgang schon
+  feststeht (Vorfall 25.09.2026, Pixel 8, Build 6.0.20-1246).** Erteilt oder
+  dauerhaft verweigert → Android antwortet ohne Dialog, und React Native
+  (`ReactActivityDelegate.mPermissionsCallback`) plus die Expo-Hülle
+  (Coroutine) stellen das Ergebnis erst beim nächsten `onResume` zu. Auf dem
+  Pixel wurde die App dabei nicht pausiert → ewiger Spinner auf „Akzeptieren“,
+  „Einstellungen öffnen“ ohne Wirkung, erst Sperren/Entsperren löste es; Expo
+  parkte danach jede weitere Abfrage (Kamera, Mitteilungen). Der Emulator
+  (Android 14 UND 16) zeigt es NICHT — dort startet GrantPermissionsActivity
+  immer kurz. Regeln: (1) Vor jeder Anfrage `get…PermissionsAsync()` lesen;
+  bei `granted` oder `!canAskAgain` NICHT anfragen. (2) Anfragen nur über
+  `anfragenOhneHaenger` (`lib/services/berechtigungsWaechter.ts`). (3) Kein
+  Knopf/Spinner ohne Zeitgrenze an einem nativen await (`mitZeitlimit`).
+  (4) `MainActivity.kt` stellt Ergebnisse sofort zu, wenn RESUMED — NICHT
+  entfernen. Diagnose-Merker: „hängt, bis man das Handy sperrt/entsperrt“ =
+  ein Ergebnis wartet auf `onResume`.
+
 - **Eine Codebase von einem Zweig ausrollen, dem Änderungen eines anderen
   Zweigs fehlen, die schon live sind (Vorfall 23./24.09.2026).** Die
   Zweitprüfung unsicherer Bons (19.09., von Patrick eingeschaltet) lag nur im

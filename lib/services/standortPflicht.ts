@@ -1,6 +1,8 @@
 import * as Location from 'expo-location';
 import { Linking, Platform } from 'react-native';
 
+import { anfragenOhneHaenger } from '@/lib/services/berechtigungsWaechter';
+
 /**
  * Standortpflicht für das Reward-Programm (Bons, Produktfotos, vergütete
  * Umfragen). Entscheidung 24.09.2026, ab 6.0.20.
@@ -100,17 +102,36 @@ function ortungsSeiteOeffnen(): null {
 }
 
 /**
+ * Systemanfrage mit Wächter: kommt kein Dialog, wird nicht bis zum nächsten
+ * Aufwachen der App gewartet (Vorfall 25.09.2026, berechtigungsWaechter.ts).
+ */
+function anfragen(): Promise<Location.LocationPermissionResponse> {
+  return anfragenOhneHaenger(
+    () => Location.requestForegroundPermissionsAsync(),
+    () => Location.getForegroundPermissionsAsync(),
+  );
+}
+
+/**
  * Führt den nächsten Schritt aus und liefert den Stand danach — oder `null`,
  * wenn der Nutzer in die Einstellungen gewechselt ist. Dann ändert sich der
  * Stand erst beim Zurückkehren; das fängt `useStandortPflicht` über den
  * AppState ab.
+ *
+ * `gilt` sagt, ob der Aufrufer das Ergebnis noch will. Ein abgebrochener
+ * Versuch darf später nicht plötzlich die Einstellungen öffnen (Prüfung
+ * 25.09.2026: ein nach dem Zeitlimit verwaister Aufruf sprang Minuten später
+ * in die Einstellungen).
  */
-export async function standortPflichtErfuellen(stand: StandortPflicht): Promise<StandortPflicht | null> {
+export async function standortPflichtErfuellen(
+  stand: StandortPflicht,
+  gilt: () => boolean = () => true,
+): Promise<StandortPflicht | null> {
   if (stand === 'erfuellt') return stand;
 
   if (stand === 'fragen') {
     try {
-      await Location.requestForegroundPermissionsAsync();
+      await anfragen();
     } catch {
       // Stand danach frisch lesen — der entscheidet.
     }
@@ -124,13 +145,15 @@ export async function standortPflichtErfuellen(stand: StandortPflicht): Promise<
     // nicht an der Zeit (langsame Geräte brauchen auch ohne Dialog > 400 ms):
     // erteilt → weiter; wieder fragbar → der Dialog lief, Nutzer lehnte ab;
     // weiterhin „einstellungen" → in die Einstellungen, wie der Knopf sagt.
+    // Der Wächter sorgt dafür, dass das ohne Dialog sofort geht.
     try {
-      await Location.requestForegroundPermissionsAsync();
+      await anfragen();
     } catch {
       // Stand danach frisch lesen — der entscheidet.
     }
     const danach = await pruefeStandortPflicht();
     if (danach !== 'einstellungen') return danach;
+    if (!gilt()) return null;
     return einstellungenOeffnen(stand);
   }
 
@@ -138,6 +161,7 @@ export async function standortPflichtErfuellen(stand: StandortPflicht): Promise<
     // Zweiter Tipp kurz nach einer Absage: direkt auf die Systemseite.
     if (letzteDiensteAbsageMs > 0 && Date.now() - letzteDiensteAbsageMs < ZWEITER_TIPP_MS) {
       letzteDiensteAbsageMs = 0;
+      if (!gilt()) return null;
       return ortungsSeiteOeffnen();
     }
     const t0 = Date.now();
@@ -151,7 +175,7 @@ export async function standortPflichtErfuellen(stand: StandortPflicht): Promise<
       return pruefeStandortPflicht();
     } catch {
       // Kein Dialog möglich (etwa ohne Play-Dienste) → Systemseite der Ortung.
-      if (Date.now() - t0 < OHNE_DIALOG_MS) return ortungsSeiteOeffnen();
+      if (Date.now() - t0 < OHNE_DIALOG_MS) return gilt() ? ortungsSeiteOeffnen() : null;
       // „Nein danke" im Dialog → nicht ungefragt weiterleiten; ein zweiter
       // Tipp führt direkt auf die Systemseite.
       letzteDiensteAbsageMs = Date.now();
@@ -159,5 +183,6 @@ export async function standortPflichtErfuellen(stand: StandortPflicht): Promise<
     }
   }
 
+  if (!gilt()) return null;
   return einstellungenOeffnen(stand);
 }

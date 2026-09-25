@@ -65,10 +65,18 @@ import { AuthRueckkehr } from '@/lib/services/authRueckkehr';
 import { gesperrteFreigeben } from '@/lib/services/bonUploadQueue';
 import { standortAnfordern, standortStatus } from '@/lib/services/captureContext';
 import { consentService } from '@/lib/services/consentService';
+import { mitZeitlimit } from '@/lib/services/berechtigungsWaechter';
 import { isOnline, refreshNetwork } from '@/lib/services/network';
 import { showInfoToast } from '@/lib/services/ui/toast';
 
 const PRIVACY_URL = 'https://markendetektive.de/datenschutz';
+
+// Zeitgrenzen für „Akzeptieren": kein Schritt darf den Knopf ewig drehen
+// lassen (Vorfall 25.09.2026, Android 16). Der Standort-Dialog selbst hat
+// keine Grenze — auf den Nutzer wird gewartet.
+const NETZ_PRUEFUNG_MS = 5000;
+const SPEICHERN_MS = 15000;
+const TRACKING_MS = 15000;
 const TERMS_URL = 'https://markendetektive.de/agb';
 
 // Drei Anzeige-Varianten desselben (EINEN) Cashback-Consents — je nachdem,
@@ -440,10 +448,11 @@ function RewardsMarquee({
 // bisher als receipts.journey.location gespeichert; die Datenschutzerklärung
 // nennt die IP-Ortung). Bei PRODUKTFOTOS gehört der präzise Aufnahmeort zum
 // Datensatz (Wizard + crowd-upload-reward). Die Standortfreigabe bleibt
-// programmweite Bedingung (nicht gelockert). `LOCATION_NOTE_BY_VARIANT`
-// sagt das dem Nutzer je Variante. Reine Wortlaut-Präzisierung, keine neue
-// Datenkategorie (die Anschrift steht auf dem ohnehin verarbeiteten Bon und
-// wurde seit Prompt v1.0 als merchantSubtitle gespeichert) → consentVersion
+// programmweite Bedingung (nicht gelockert). Die frühere Zusatzzeile dazu
+// („Bei Bons nehmen wir die Filialadresse …") steht seit 25.09.2026 NICHT
+// mehr im Screen (Entscheidung Patrick: zu viel Text) — das Badge „Mit
+// Standortfreigabe", der Systemdialog und die verlinkte Datenschutzerklärung
+// tragen die Information. Keine neue Datenkategorie → consentVersion
 // bewusst NICHT gebumpt.
 // OFFEN FÜR DEN ANWALT (Stand 05.09.2026, verlinkte Datenschutzerklärung
 // „Stand 10. Juni 2026"): (1) Sie sagt zweimal „kein Zugriff auf den genauen
@@ -463,13 +472,6 @@ const TRUST: { icon: string; label: string }[] = [
   { icon: 'map-marker-outline', label: 'Mit Standortfreigabe' },
 ];
 
-// Was „Standort" je Verdien-Weg bedeutet — eine Zeile unter den Trust-Badges.
-// Bons: Filiale vom Bon. Produktfotos: Aufnahmeort. Immer positiv formuliert.
-const LOCATION_NOTE_BY_VARIANT: Record<ConsentVariant, string> = {
-  receipt: 'Bei Bons nehmen wir die Filialadresse vom Bon, bei Produktfotos deinen Aufnahmeort.',
-  product: 'Bei Produktfotos speichern wir den Aufnahmeort – so sieht man, wo es das Produkt gibt. Bei Bons nehmen wir die Filialadresse vom Bon.',
-  survey: 'Bei Produktfotos speichern wir den Aufnahmeort, bei Bons die Filialadresse vom Bon.',
-};
 
 export default function CashbackConsentScreen() {
   const { theme, scheme } = useTokens();
@@ -553,6 +555,17 @@ export default function CashbackConsentScreen() {
    * Abhängigkeiten hereinzureichen würde eine Endlosschleife bauen.
    */
   const handleAcceptRef = useRef<() => void>(() => {});
+  /** false, sobald der Screen weg ist — ein verwaister Durchlauf löst nichts mehr aus. */
+  const aktivRef = useRef(true);
+  /** Zähler der Akzeptieren-Durchläufe; nur der jüngste zählt. */
+  const versuchRef = useRef(0);
+  useEffect(
+    () => () => {
+      aktivRef.current = false;
+      versuchRef.current += 1;
+    },
+    [],
+  );
   /** Gesetzt, sobald die Standortfreigabe verweigert wurde. */
   const [standortFehlt, setStandortFehlt] = useState<'denied' | null>(null);
 
@@ -653,6 +666,29 @@ export default function CashbackConsentScreen() {
     );
   }, []);
 
+  /**
+   * Standort dauerhaft verweigert: kein Systemdialog mehr möglich. Statt zu
+   * warten, sofort der Weg in die Einstellungen — als Popup UND als Karte
+   * über dem Knopf (Wunsch Patrick 25.09.2026). Wer nicht erlaubt, bleibt auf
+   * diesem Screen und kann jederzeit erneut tippen, ohne Spinner.
+   */
+  const zeigeEinstellungenPopup = useCallback(() => {
+    setStandortFehlt('denied');
+    Alert.alert(
+      'Standort in den Einstellungen erlauben',
+      'Einmal in den Einstellungen erlauben – dann geht’s direkt los.',
+      [
+        { text: 'Abbrechen', style: 'cancel' as const },
+        {
+          text: 'Einstellungen öffnen',
+          onPress: () => {
+            void Linking.openSettings().catch(() => {});
+          },
+        },
+      ],
+    );
+  }, []);
+
   const handleAccept = useCallback(async () => {
     if (!user?.uid) {
       Alert.alert(
@@ -669,37 +705,58 @@ export default function CashbackConsentScreen() {
     // einreichen, dann Konto"). Ein Konto braucht es erst zum Auszahlen —
     // das erzwingt der Server in requestPayout, nicht dieser Screen.
 
-    // acceptCashbackConsent wartet auf den Server-Ack und hängt offline
-    // ewig (Firestore-Promise). Deshalb vorher kurz prüfen — und gar nicht
-    // erst nach dem Standort fragen, wenn danach nichts gespeichert werden kann.
+    // Nur der zuletzt gestartete Durchlauf auf einem noch sichtbaren Screen
+    // darf speichern, navigieren oder einen Dialog zeigen (Prüfung 25.09.2026:
+    // eine spät eintreffende Antwort riss Nutzer sonst in den Scanner).
+    const meinVersuch = ++versuchRef.current;
+    const gilt = () => aktivRef.current && meinVersuch === versuchRef.current;
     setSubmitting(true);
-    if (!isOnline()) {
-      await refreshNetwork();
-      if (!isOnline()) {
-        setSubmitting(false);
-        showInfoToast('Für die Anmeldung zum Programm brauchst du kurz Internet.', 'info', scheme);
-        return;
-      }
-    }
-
     try {
+      // acceptCashbackConsent wartet auf den Server-Ack und hängt offline
+      // ewig (Firestore-Promise). Deshalb vorher kurz prüfen — und gar nicht
+      // erst nach dem Standort fragen, wenn danach nichts gespeichert werden kann.
+      if (!isOnline()) {
+        await mitZeitlimit(refreshNetwork().then(() => undefined), NETZ_PRUEFUNG_MS, undefined);
+        if (!gilt()) return;
+        if (!isOnline()) {
+          showInfoToast('Für die Anmeldung zum Programm brauchst du kurz Internet.', 'info', scheme);
+          return;
+        }
+      }
+
       // Standortfreigabe ist Teilnahmebedingung für das gesamte
       // Reward-Programm — Bons, Produktfotos UND Umfragen (Entscheidung
       // 11.08.2026). Der Ort gehört zum vergüteten Datensatz; ohne ihn
       // keine Teilnahme.
       //
       // ZUERST fragen, DANN speichern: Sonst entstünde ein halber Zustand —
-      // Consent gespeichert, Bedingung nicht erfüllt. `hasValidCashbackConsent`
-      // würde dann true liefern für jemanden, der gar nicht teilnehmen darf.
-      // „Angenommen" muss heißen: vollständig angenommen.
+      // Consent gespeichert, Bedingung nicht erfüllt. „Angenommen" muss
+      // heißen: vollständig angenommen. standortAnfordern fragt nur, wenn
+      // ein Dialog überhaupt möglich ist (captureContext.ts) — sonst hing
+      // der Knopf auf Android bis zum nächsten Aufwachen der App.
       const status = await standortAnfordern();
+      if (!gilt()) return;
+      if (status === 'denied') {
+        zeigeEinstellungenPopup();
+        return;
+      }
       if (status !== 'granted_precise' && status !== 'granted_coarse') {
-        setSubmitting(false);
         zeigeStandortHinweis(status, handleAcceptRef.current);
         return;
       }
 
-      await acceptCashbackConsent(user.uid);
+      const gespeichert = await mitZeitlimit(
+        acceptCashbackConsent(user.uid).then(() => true),
+        SPEICHERN_MS,
+        false,
+      );
+      if (!gilt()) return;
+      if (!gespeichert) {
+        // Der Write ist ein idempotentes merge — kommt er später doch an,
+        // leitet der nächste Tipp bzw. die Prüfung beim Öffnen weiter.
+        showInfoToast('Das Speichern dauert gerade zu lange – bitte gleich nochmal tippen.', 'info', scheme);
+        return;
+      }
       setHasAccepted(true);
       // Bons, die ohne Einwilligung in der Warteschlange hängen geblieben
       // sind, jetzt wieder anstoßen.
@@ -707,21 +764,25 @@ export default function CashbackConsentScreen() {
       // 86cagb57g: Wer den App-Start-Tracking-Consent (UMP, Android)
       // abgelehnt hatte, bekommt ihn beim Cashback-Aktivieren erneut —
       // VOR der Navigation, damit das native Formular nicht über einem
-      // bereits ersetzten Screen hängt. iOS/erteilter Consent: No-op.
-      await consentService.ensureTrackingConsentAtCashback();
+      // bereits ersetzten Screen hängt. Mit Zeitlimit: das Formular bleibt
+      // als natives Fenster sichtbar, der Knopf hängt aber nie daran.
+      await mitZeitlimit(consentService.ensureTrackingConsentAtCashback(), TRACKING_MS, undefined);
+      if (!gilt()) return;
       setTimeout(() => {
-        goAfterConsent();
+        if (aktivRef.current) goAfterConsent();
       }, 300);
     } catch (error: any) {
       console.warn('acceptCashbackConsent failed:', error);
-      Alert.alert(
-        'Speichern fehlgeschlagen',
-        'Bitte prüfe deine Internetverbindung und versuch es erneut.',
-      );
+      if (gilt()) {
+        Alert.alert(
+          'Speichern fehlgeschlagen',
+          'Bitte prüfe deine Internetverbindung und versuch es erneut.',
+        );
+      }
     } finally {
-      setSubmitting(false);
+      if (aktivRef.current) setSubmitting(false);
     }
-  }, [user?.uid, scheme, goAfterConsent, zeigeStandortHinweis]);
+  }, [user?.uid, scheme, goAfterConsent, zeigeStandortHinweis, zeigeEinstellungenPopup]);
 
   // Nach jedem Render aktualisieren, damit der Dialog-Knopf nie eine
   // veraltete Closure aufruft.
@@ -902,16 +963,6 @@ export default function CashbackConsentScreen() {
         lineHeight: 14,
         fontFamily,
         textAlign: 'center' as const,
-      },
-      locationNote: {
-        fontFamily,
-        fontWeight: fontWeight.medium as any,
-        fontSize: 11,
-        lineHeight: 15,
-        color: theme.textSub,
-        textAlign: 'center' as const,
-        paddingHorizontal: 6,
-        marginBottom: compact ? 4 : 6,
       },
       legalLink: {
         color: accent,
@@ -1232,10 +1283,6 @@ export default function CashbackConsentScreen() {
             </View>
           ))}
         </View>
-        {/* Was „Standort" hier konkret heißt — je Verdien-Weg (05.09.2026).
-            Die Zusage muss zur Datenwirkung passen: Bons → Filiale vom Bon,
-            Produktfotos → Aufnahmeort. */}
-        <Text style={styles.locationNote}>{LOCATION_NOTE_BY_VARIANT[variant]}</Text>
 
         {/* Legal-Zeile ganz unten, klein unter "Jetzt nicht"
             (User-Vorgabe 2026-06-10). */}

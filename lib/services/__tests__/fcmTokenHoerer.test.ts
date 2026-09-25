@@ -32,6 +32,8 @@ jest.mock('react-native', () => ({
   Platform: mockPlattform,
   NativeModules: { RNFBMessagingModule: {} },
   TurboModuleRegistry: { get: () => null },
+  // Wächter (berechtigungsWaechter.ts): 'background' = Dialog sichtbar → regulär warten.
+  AppState: { currentState: 'background', addEventListener: jest.fn(() => ({ remove: jest.fn() })) },
 }));
 
 jest.mock('expo-application', () => ({ nativeApplicationVersion: '6.0.18' }));

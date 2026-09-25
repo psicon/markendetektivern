@@ -18,6 +18,9 @@ jest.mock('expo-location', () => mockLocation);
 const mockRN = {
   Platform: { OS: 'android' as 'android' | 'ios' },
   Linking: { openSettings: jest.fn<any, []>(), sendIntent: jest.fn<any, [string]>() },
+  // Der Wächter (berechtigungsWaechter.ts) hört auf den Vordergrund-Wechsel.
+  // 'background' = „ein Dialog ist sichtbar" → er wartet regulär auf die Antwort.
+  AppState: { currentState: 'background', addEventListener: jest.fn(() => ({ remove: jest.fn() })) },
 };
 jest.mock('react-native', () => mockRN);
 
@@ -136,6 +139,47 @@ describe('standortPflichtErfuellen', () => {
     mockLocation.getForegroundPermissionsAsync.mockResolvedValue({ ...nieGefragt, status: 'denied' });
     await expect(standortPflichtErfuellen('einstellungen')).resolves.toBe('fragen');
     expect(mockRN.Linking.openSettings).not.toHaveBeenCalled();
+  });
+
+  it('Android, einstellungen: Anfrage antwortet NIE (Pixel/Android 16) → nach kurzer Zeit trotzdem in die Einstellungen', async () => {
+    jest.useFakeTimers();
+    mockRN.AppState.currentState = 'active'; // kein Dialog erscheint
+    try {
+      mockLocation.getForegroundPermissionsAsync.mockResolvedValue(endgueltigAbgelehnt);
+      mockLocation.requestForegroundPermissionsAsync.mockImplementation(() => new Promise(() => {}));
+      const r = standortPflichtErfuellen('einstellungen');
+      await jest.advanceTimersByTimeAsync(3000);
+      await expect(r).resolves.toBeNull();
+      expect(mockRN.Linking.openSettings).toHaveBeenCalledTimes(1);
+    } finally {
+      mockRN.AppState.currentState = 'background';
+      jest.useRealTimers();
+    }
+  });
+
+  it('abgebrochener Versuch (gilt=false) öffnet keine Einstellungen mehr', async () => {
+    mockLocation.getForegroundPermissionsAsync.mockResolvedValue(endgueltigAbgelehnt);
+    mockLocation.requestForegroundPermissionsAsync.mockResolvedValue(endgueltigAbgelehnt);
+    await expect(standortPflichtErfuellen('einstellungen', () => false)).resolves.toBeNull();
+    expect(mockRN.Linking.openSettings).not.toHaveBeenCalled();
+    mockRN.Platform.OS = 'ios';
+    await expect(standortPflichtErfuellen('einstellungen', () => false)).resolves.toBeNull();
+    expect(mockRN.Linking.openSettings).not.toHaveBeenCalled();
+  });
+
+  it('fragen: Anfrage antwortet NIE → nach kurzer Zeit mit dem gelesenen Stand weiter', async () => {
+    jest.useFakeTimers();
+    mockRN.AppState.currentState = 'active';
+    try {
+      mockLocation.getForegroundPermissionsAsync.mockResolvedValue(erlaubt);
+      mockLocation.requestForegroundPermissionsAsync.mockImplementation(() => new Promise(() => {}));
+      const r = standortPflichtErfuellen('fragen');
+      await jest.advanceTimersByTimeAsync(3000);
+      await expect(r).resolves.toBe('erfuellt');
+    } finally {
+      mockRN.AppState.currentState = 'background';
+      jest.useRealTimers();
+    }
   });
 
   it('Android, Dienste aus → Googles Einschalt-Dialog, danach weiter', async () => {

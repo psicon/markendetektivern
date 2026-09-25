@@ -53,8 +53,15 @@ export default function JoinScanScreen() {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
 
+  // Nur EINMAL pro Öffnen automatisch fragen: Nach dem ersten „Ablehnen"
+  // meldet Android weiter canAskAgain=true, der Effekt lief sofort erneut,
+  // und die zweite Ablehnung sperrte die Kamera für die ganze App (Prüfung
+  // 25.09.2026). Danach entscheidet der Nutzer über den Knopf auf dem Screen.
+  const automatischGefragt = useRef(false);
   useEffect(() => {
+    if (automatischGefragt.current) return;
     if (permission && !permission.granted && permission.canAskAgain) {
+      automatischGefragt.current = true;
       void requestPermission();
     }
   }, [permission, requestPermission]);
@@ -99,6 +106,9 @@ export default function JoinScanScreen() {
 
   // Dauerhaft verweigert → Hinweis + Einstellungen (Code-Eingabe bleibt möglich).
   const camDenied = permission && !permission.granted && !permission.canAskAgain;
+  // Einmal abgelehnt, aber noch fragbar → eigener Knopf statt Dauer-„vorbereitet".
+  const camNochFragbar =
+    !!permission && !permission.granted && permission.canAskAgain && automatischGefragt.current;
 
   return (
     <View style={{ flex: 1, backgroundColor: '#000' }}>
@@ -121,8 +131,18 @@ export default function JoinScanScreen() {
           <Text style={{ fontFamily, fontWeight: fontWeight.medium, fontSize: 14, lineHeight: 20, color: 'rgba(255,255,255,0.75)', textAlign: 'center', marginTop: 14, maxWidth: 300 }}>
             {camDenied
               ? 'Kamera-Zugriff ist deaktiviert. Erlaube ihn in den Einstellungen oder gib den Code unten ein.'
-              : 'Kamera wird vorbereitet …'}
+              : camNochFragbar
+                ? 'Erlaube die Kamera, um den QR-Code zu scannen – oder gib den Code unten ein.'
+                : 'Kamera wird vorbereitet …'}
           </Text>
+          {camNochFragbar ? (
+            <Pressable
+              onPress={() => void requestPermission()}
+              style={({ pressed }) => ({ marginTop: 18, height: 44, paddingHorizontal: 22, borderRadius: radii.full, backgroundColor: '#0d8575', alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.9 : 1 })}
+            >
+              <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 14, color: '#fff' }}>Kamera erlauben</Text>
+            </Pressable>
+          ) : null}
           {camDenied ? (
             <Pressable
               onPress={() => void Linking.openSettings()}
