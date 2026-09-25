@@ -455,21 +455,15 @@ function RewardsMarquee({
 const TRUST: { icon: string; label: string }[] = [
   { icon: 'shield-check-outline', label: 'EU-Datenschutz' },
   { icon: 'chart-box-outline', label: 'Anonyme Marktdaten' },
-  { icon: 'map-marker-outline', label: 'Standort erforderlich' },
+  { icon: 'map-marker-outline', label: 'Mit Standortfreigabe' },
 ];
 
 // Was „Standort" je Verdien-Weg bedeutet — eine Zeile unter den Trust-Badges.
 // Bons: Filiale vom Bon. Produktfotos: Aufnahmeort. Immer positiv formuliert.
 const LOCATION_NOTE_BY_VARIANT: Record<ConsentVariant, string> = {
-  receipt:
-    'Bei Bons lesen wir die Filialadresse (Straße, PLZ, Ort) direkt vom Bon ab. ' +
-    'Die Standortfreigabe gilt fürs ganze Reward-Programm — bei Produktfotos gehört dein Aufnahmeort zum Datensatz.',
-  product:
-    'Dein Aufnahmeort gehört zu jedem Produkt-Datensatz — so ist nachvollziehbar, wo ein Produkt wirklich zu finden war. ' +
-    'Bei Bons lesen wir die Filialadresse direkt vom Bon ab.',
-  survey:
-    'Die Standortfreigabe gilt fürs ganze Reward-Programm: Bei Produktfotos gehört dein Aufnahmeort zum Datensatz, ' +
-    'bei Bons lesen wir die Filialadresse direkt vom Bon ab.',
+  receipt: 'Bei Bons nehmen wir die Filialadresse vom Bon, bei Produktfotos deinen Aufnahmeort.',
+  product: 'Bei Produktfotos speichern wir den Aufnahmeort – so sieht man, wo es das Produkt gibt. Bei Bons nehmen wir die Filialadresse vom Bon.',
+  survey: 'Bei Produktfotos speichern wir den Aufnahmeort, bei Bons die Filialadresse vom Bon.',
 };
 
 export default function CashbackConsentScreen() {
@@ -640,12 +634,11 @@ export default function CashbackConsentScreen() {
       return;
     }
     Alert.alert(
-      'Standort wird benötigt',
-      'Die Standortfreigabe gehört zum Reward-Programm — bei Produktfotos dein Aufnahmeort, ' +
-        'bei Bons die Filialadresse vom Bon. Gib den Standort frei, dann kann es losgehen.',
+      'Noch ein kurzer Schritt',
+      'Erlaube einmal deinen Standort – dann kann es losgehen.',
       [
         { text: 'Später', style: 'cancel' as const },
-        { text: 'Standort freigeben', onPress: erneutVersuchen },
+        { text: 'Weiter', onPress: erneutVersuchen },
       ],
     );
   }, []);
@@ -1108,11 +1101,10 @@ export default function CashbackConsentScreen() {
           <View style={styles.locHint}>
             <View style={styles.locHintHead}>
               <MaterialCommunityIcons name="map-marker-alert-outline" size={16} color={accent} />
-              <Text style={styles.locHintTitle}>Standort noch freigeben</Text>
+              <Text style={styles.locHintTitle}>Standort noch erlauben</Text>
             </View>
             <Text style={styles.locHintBody}>
-              Die Standortfreigabe gehört zum Reward-Programm — bei Produktfotos dein
-              Aufnahmeort, bei Bons die Filialadresse vom Bon. So gibst du sie frei:
+              So geht’s in wenigen Sekunden:
             </Text>
             {(Platform.OS === 'ios'
               ? [
