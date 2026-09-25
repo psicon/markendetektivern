@@ -160,20 +160,29 @@ describe('vorbereiten', () => {
     expect(w.schreibvorgaenge).toHaveLength(0);
   });
 
-  it('Tageslimit: 10 Vorbereitungen je Berliner Tag, die 11. → 429, am nächsten Tag wieder frei', async () => {
+  it('Tageslimit: 10 NEUE Hashes je Berliner Tag, der 11. → 429, am nächsten Tag wieder frei', async () => {
     const w = welt({ nutzer: { [GAST]: gast } });
+    const h = (i) => sha256Hex(`neu-${i}-zzzzzzzzzzzzzzzzzzzz`);
     for (let i = 0; i < MAX_VORBEREITUNGEN_PRO_TAG; i++) {
-      expect((await w.vorbereiten({ gastUid: GAST, ticketHash: HASH })).http).toBe(200);
+      expect((await w.vorbereiten({ gastUid: GAST, ticketHash: h(i) })).http).toBe(200);
     }
-    expect(await w.vorbereiten({ gastUid: GAST, ticketHash: HASH })).toEqual({ http: 429, body: { code: 'zu_viele_vorbereitungen' } });
+    expect(await w.vorbereiten({ gastUid: GAST, ticketHash: h(99) })).toEqual({ http: 429, body: { code: 'zu_viele_vorbereitungen' } });
     expect(w.store.get(`gast_uebernahmen/${GAST}`).vorbereitungen.anzahl).toBe(MAX_VORBEREITUNGEN_PRO_TAG);
     // 23:30 Berlin am selben Tag ist noch derselbe Tag …
     w.uhr(Date.UTC(2026, 8, 25, 21, 30));
-    expect((await w.vorbereiten({ gastUid: GAST, ticketHash: HASH })).http).toBe(429);
+    expect((await w.vorbereiten({ gastUid: GAST, ticketHash: h(98) })).http).toBe(429);
     // … 00:30 Berlin ist der nächste.
     w.uhr(Date.UTC(2026, 8, 25, 22, 30));
-    expect((await w.vorbereiten({ gastUid: GAST, ticketHash: HASH })).http).toBe(200);
+    expect((await w.vorbereiten({ gastUid: GAST, ticketHash: h(97) })).http).toBe(200);
     expect(w.store.get(`gast_uebernahmen/${GAST}`).vorbereitungen).toEqual({ tag: '2026-09-26', anzahl: 1 });
+  });
+
+  it('derselbe Hash erneut: idempotent 200, zählt NICHT gegen das Tageslimit (Prüfrunde 1)', async () => {
+    const w = welt({ nutzer: { [GAST]: gast } });
+    for (let i = 0; i < MAX_VORBEREITUNGEN_PRO_TAG + 5; i++) {
+      expect((await w.vorbereiten({ gastUid: GAST, ticketHash: HASH })).http).toBe(200);
+    }
+    expect(w.store.get(`gast_uebernahmen/${GAST}`).vorbereitungen.anzahl).toBe(1);
   });
 
   it('Hash-Menge: höchstens 5, der älteste fliegt raus, derselbe Hash steht nie doppelt', async () => {
@@ -181,12 +190,11 @@ describe('vorbereiten', () => {
     const hashes = [1, 2, 3, 4, 5, 6, 7].map((i) => sha256Hex(`geheimnis-${i}-xxxxxxxxxxxxxxxx`));
     for (const h of hashes) await w.vorbereiten({ gastUid: GAST, ticketHash: h });
     expect(w.store.get(`gast_uebernahmen/${GAST}`).ticketHashes).toEqual(hashes.slice(2));
-    // Wiederholung eines vorhandenen Hashes: rückt ans Ende, keine Dublette.
+    // Wiederholung eines vorhandenen Hashes: idempotent, keine Dublette,
+    // Menge unverändert (seit Prüfrunde 1 wird sie gar nicht neu geschrieben).
     await w.vorbereiten({ gastUid: GAST, ticketHash: hashes[3] });
     const jetzt = w.store.get(`gast_uebernahmen/${GAST}`).ticketHashes;
-    expect(jetzt).toHaveLength(5);
-    expect(new Set(jetzt).size).toBe(5);
-    expect(jetzt[4]).toBe(hashes[3]);
+    expect(jetzt).toEqual(hashes.slice(2));
   });
 
   it('gueltigBis bleibt bei weiteren Vorbereitungen, wird also nicht verlängert', async () => {
@@ -276,13 +284,18 @@ describe('einloesen (Stufe 1)', () => {
     expect((await w.einloesen({ zielUid: ZIEL, gastUid: GAST, geheimnis: GEHEIMNIS })).http).toBe(200);
   });
 
-  it('abgelaufen → 410, aber erst nach bestandener Hash-Prüfung', async () => {
+  it('solange pausiert: abgelaufenes Ticket bleibt gültig („pausiert“, nie 410) — Prüfrunde 1', async () => {
     const w = welt(basis({ docs: { [`gast_uebernahmen/${GAST}`]: job({ gueltigBis: ts(T0 - 1) }) } }));
+    expect(await w.einloesen({ zielUid: ZIEL, gastUid: GAST, geheimnis: GEHEIMNIS })).toEqual({ http: 200, body: { status: 'pausiert' } });
+    const w2 = welt(basis({ docs: { [`gast_uebernahmen/${GAST}`]: job({ status: 'verfallen' }) } }));
+    expect((await w2.einloesen({ zielUid: ZIEL, gastUid: GAST, geheimnis: GEHEIMNIS })).body).toEqual({ status: 'pausiert' });
+  });
+
+  it('aktiv: abgelaufen → 410, aber erst nach bestandener Hash-Prüfung', async () => {
+    const w = welt(basis({ config: { gastUebernahmeAktiv: true }, docs: { [`gast_uebernahmen/${GAST}`]: job({ gueltigBis: ts(T0 - 1) }) } }));
     expect(await w.einloesen({ zielUid: ZIEL, gastUid: GAST, geheimnis: GEHEIMNIS })).toEqual({ http: 410, body: { code: 'abgelaufen' } });
     // Wer das Geheimnis nicht hat, erfährt nichts über den Ablauf.
     expect((await w.einloesen({ zielUid: ZIEL, gastUid: GAST, geheimnis: `${GEHEIMNIS}x` })).body.code).toBe('ticket_ungueltig');
-    const w2 = welt(basis({ docs: { [`gast_uebernahmen/${GAST}`]: job({ status: 'verfallen' }) } }));
-    expect((await w2.einloesen({ zielUid: ZIEL, gastUid: GAST, geheimnis: GEHEIMNIS })).http).toBe(410);
   });
 
   it('Ziel = Gast → 400, nicht einmal der Zähler wird geschrieben', async () => {

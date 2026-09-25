@@ -35,7 +35,11 @@ import { isEffectivelyAnonymous } from '@/lib/utils/authIdentity';
  */
 
 const KEY = 'gast_uebernahme_v1';
-const MAX_EINTRAEGE = 3;
+/** Erledigte Einträge (ohne Geheimnis) werden ab hier verdrängt — offene NIE. */
+const MAX_EINTRAEGE = 10;
+
+/** Ergebnis der Vorbereitung — der Aufrufer braucht den GRUND (Prüfrunde 1). */
+export type VorbereitenErgebnis = 'ok' | 'offline' | 'zu_viele' | 'fehler';
 
 export type UebernahmeStatus =
   | 'vorbereitet'
@@ -70,17 +74,25 @@ type Speicher = Record<string, Eintrag>;
 
 let spiegel: Speicher = {};
 let geladen: Promise<void> | null = null;
-let vorbereitenLaeuft: Promise<boolean> | null = null;
+/** Lesen scheiterte → nie schreiben, sonst überschriebe ein leerer Stand echte Tickets. */
+let ladeFehler = false;
+let vorbereitenLaeuft: Promise<VorbereitenErgebnis> | null = null;
 let einloesenLaeuft: Promise<void> | null = null;
 const hoerer = new Set<() => void>();
 
 async function speichern(): Promise<void> {
-  // Überlauf: der älteste Eintrag ohne offenes Geheimnis fliegt zuerst raus.
-  const eintraege = Object.entries(spiegel).sort((a, b) => a[1].erstelltAm - b[1].erstelltAm);
-  while (eintraege.length > MAX_EINTRAEGE) {
-    const idx = eintraege.findIndex(([, e]) => !e.geheimnis);
-    const [uid] = eintraege.splice(idx >= 0 ? idx : 0, 1)[0];
+  if (ladeFehler) throw new Error('gast_uebernahme_speicher_unlesbar');
+  // Überlauf: nur ERLEDIGTE Einträge (ohne Geheimnis) verdrängen, älteste
+  // zuerst. Ein offenes Ticket ist der einzige Weg zu Guthaben und
+  // Einreichungen des Gastes — es darf nie verdrängt werden.
+  const erledigte = Object.entries(spiegel)
+    .filter(([, e]) => !e.geheimnis)
+    .sort((a, b) => a[1].erstelltAm - b[1].erstelltAm);
+  let zuViel = Object.keys(spiegel).length - MAX_EINTRAEGE;
+  for (const [uid] of erledigte) {
+    if (zuViel <= 0) break;
     delete spiegel[uid];
+    zuViel -= 1;
   }
   await SecureStore.setItemAsync(KEY, JSON.stringify(spiegel));
 }
@@ -155,8 +167,12 @@ export const GastUebernahme = {
           const raw = await SecureStore.getItemAsync(KEY);
           const obj = raw ? JSON.parse(raw) : {};
           spiegel = obj && typeof obj === 'object' ? obj : {};
+          ladeFehler = false;
         } catch {
           spiegel = {};
+          ladeFehler = true;
+          // Beim nächsten Aufruf erneut lesen statt den Fehler festzuhalten.
+          geladen = null;
         }
         melden();
       })();
@@ -181,15 +197,17 @@ export const GastUebernahme = {
 
   /**
    * Besitznachweis für den AKTUELL angemeldeten Gast sichern — VOR dem
-   * Kontowechsel aufrufen. Liefert true, wenn der Server den Hash kennt.
+   * Kontowechsel aufrufen. 'ok', wenn der Server den Hash kennt; sonst der
+   * Grund, damit der Nutzer die richtige Meldung bekommt.
    */
-  vorbereiten(vonUid: string): Promise<boolean> {
+  vorbereiten(vonUid: string): Promise<VorbereitenErgebnis> {
     if (vorbereitenLaeuft) return vorbereitenLaeuft;
-    vorbereitenLaeuft = (async () => {
+    vorbereitenLaeuft = (async (): Promise<VorbereitenErgebnis> => {
       try {
         await GastUebernahme.laden();
+        if (ladeFehler) return 'fehler';
         const user = auth.currentUser;
-        if (!user || user.uid !== vonUid || !isEffectivelyAnonymous(user)) return false;
+        if (!user || user.uid !== vonUid || !isEffectivelyAnonymous(user)) return 'fehler';
 
         let eintrag = spiegel[vonUid];
         if (!eintrag || !eintrag.geheimnis || eintrag.zielUid) {
@@ -208,6 +226,7 @@ export const GastUebernahme = {
         }
         const ticketHash = await sha256Hex(eintrag.geheimnis as string);
 
+        let letzterGrund: VorbereitenErgebnis = 'offline';
         for (let versuch = 0; versuch < 3; versuch++) {
           if (versuch > 0) await warte(versuch === 1 ? 1000 : 3000);
           try {
@@ -221,16 +240,18 @@ export const GastUebernahme = {
               },
               10_000,
             );
-            if (res.ok) return true;
-            // 4xx ist endgültig (kein Gast, schon gebunden, zu viele Versuche).
-            if (res.status >= 400 && res.status < 500) return false;
+            if (res.ok) return 'ok';
+            if (res.status === 429) return 'zu_viele';
+            // Übrige 4xx sind endgültig (kein Gast, schon gebunden).
+            if (res.status >= 400 && res.status < 500) return 'fehler';
+            letzterGrund = 'fehler'; // 5xx → erneut versuchen
           } catch {
-            // Netz/Timeout → nächster Versuch.
+            letzterGrund = 'offline'; // Netz/Timeout → nächster Versuch
           }
         }
-        return false;
+        return letzterGrund;
       } catch {
-        return false;
+        return 'fehler';
       } finally {
         vorbereitenLaeuft = null;
       }
@@ -289,7 +310,14 @@ export const GastUebernahme = {
             }
             if (body.status === 'abgeschlossen') e.geheimnis = null; // Zuordnung bleibt
             geaendert = true;
-          } else if ([403, 404, 409, 410].includes(res.status) && body.code !== 'konto_erforderlich') {
+          } else if (
+            [403, 404, 409, 410].includes(res.status) &&
+            body.code !== 'konto_erforderlich' &&
+            typeof body.code === 'string' &&
+            // Solange zuletzt „pausiert" galt, nie verwerfen — das Ticket ist
+            // der einzige Weg zum Gast-Guthaben (Prüfrunde 1).
+            e.stand?.status !== 'pausiert'
+          ) {
             // Ticket endgültig ungültig/verbraucht/verfallen.
             delete spiegel[vonUid];
             geaendert = true;

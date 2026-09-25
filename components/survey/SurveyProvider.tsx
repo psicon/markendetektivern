@@ -23,6 +23,7 @@ import { useTokens } from '@/hooks/useTokens';
 import { router } from 'expo-router';
 
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { AuthRueckkehr } from '@/lib/services/authRueckkehr';
 import { hasValidCashbackConsent } from '@/lib/services/cashbackService';
 import { formatCents } from '@/lib/types/cashback';
 import {
@@ -94,6 +95,14 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
     // sich (Duplikat). Direkt zum Consent; from=rewards landet nach dem
     // Akzeptieren auf Rewards (siehe goAfterConsent), kein Auto-Scanner.
     router.push('/cashback/consent?from=rewards' as any);
+  }, []);
+
+  // Gast, der Cashback schon angenommen hat: ihm fehlt nur das Konto
+  // (Prüfrunde 1 — „Zum Cashback" führte ihn zurück in eine Einwilligung,
+  // die er längst gegeben hat). Nach der Anmeldung zurück zu den Belohnungen.
+  const goToKonto = useCallback(async () => {
+    await AuthRueckkehr.merke('/(tabs)/rewards');
+    router.push('/auth/register' as any);
   }, []);
 
   const [poll, setPoll] = useState<Poll | null>(null);
@@ -210,6 +219,13 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
         // Glow-Banner statt grauem Mini-Toast (ClickUp 86ca8hqt8). Der CF
         // schreibt den Betrag gleich gut → optimistisch sofort feiern.
         showBanner(bannerDataFromCashbackPayout(p.rewardCents!));
+      } else if (pays && !registered && validConsent) {
+        showCashbackNudgeToast(
+          `${formatCents(p.rewardCents!)} Guthaben gibt's mit Konto – für Umfragen wie diese.`,
+          () => void goToKonto(),
+          scheme,
+          'Konto erstellen',
+        );
       } else if (pays && !eligible) {
         // Betrag ZUERST — der Hinweis-Toast kürzt lange Texte (2 Zeilen +
         // Action-Pille), sonst wird der Betrag abgeschnitten (86ca…).
@@ -223,7 +239,7 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
       }
       setActivityNonce((n) => n + 1); // Tile-Liste neu laden
     },
-    [poll, user?.uid, scheme, isAnonymous, goToCashback, showBanner],
+    [poll, user?.uid, scheme, isAnonymous, goToCashback, goToKonto, showBanner],
   );
 
   const handleClose = useCallback(() => {

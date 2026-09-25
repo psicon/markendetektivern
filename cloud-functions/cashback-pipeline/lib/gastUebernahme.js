@@ -208,6 +208,14 @@ function erstelleGastUebernahme({ db, admin, logger, loadConfig, zeit = () => Da
       const bisher = job && job.vorbereitungen && job.vorbereitungen.tag === tag
         ? Number(job.vorbereitungen.anzahl) || 0
         : 0;
+      // Derselbe Hash ist schon hinterlegt (die App verwendet ihr Geheimnis
+      // bis zum Einlösen wieder): idempotent bestätigen, NICHT zählen. Sonst
+      // sperrten zehn Anmeldeversuche an einem Tag einen Gast mit Guthaben
+      // aus seinem eigenen Konto aus (Prüfrunde 1).
+      const bekannt = job && Array.isArray(job.ticketHashes) && job.ticketHashes.includes(ticketHash);
+      if (bekannt) {
+        return antwort(200, { ok: true, gueltigBis: job.gueltigBis ? new Date(tsMs(job.gueltigBis)).toISOString() : null });
+      }
       if (bisher >= MAX_VORBEREITUNGEN_PRO_TAG) return fehler(429, 'zu_viele_vorbereitungen');
 
       // Neu ist auch ein abgelaufener, nie gebundener Job: sonst bliebe
@@ -294,13 +302,15 @@ function erstelleGastUebernahme({ db, admin, logger, loadConfig, zeit = () => Da
         logger.info('gastUebernahme: Ticket passt nicht', { gastUid, zielUid });
         return fehler(403, 'ticket_ungueltig');
       }
-      if (job.status === 'verfallen' || tsMs(job.gueltigBis) <= jetzt) return fehler(410, 'abgelaufen');
-      if (job.status !== 'vorbereitet') return fehler(409, 'nicht_einloesbar');
     }
-    // job.nachUid === zielUid: schon gebunden an genau diesen Aufrufer →
-    // idempotent weiter (die Hashes sind nach der Bindung gelöscht). In
-    // Stufe 1 kommt das nicht vor, weil nie gebunden wird.
 
+    // Solange die Übernahme nicht aktiv ist, wird NACH der Besitzprüfung
+    // sofort „pausiert“ geantwortet — VOR Ablauf- und Statusprüfung. Sonst
+    // verfiele ein Ticket, das noch gar nicht einlösbar ist, nach 30 Tagen;
+    // die App löschte es bei 410, und Guthaben/Einreichungen des Gastes
+    // wären nie mehr zuzuordnen (Prüfrunde 1, höchste Schwere).
+    // STUFE 2 muss deshalb die Frist ab der AKTIVIERUNG rechnen (gueltigBis
+    // beim ersten aktiven Einlösen neu setzen), nicht ab der Anlage.
     let config;
     try {
       config = await loadConfig({ strict: true });
@@ -312,6 +322,13 @@ function erstelleGastUebernahme({ db, admin, logger, loadConfig, zeit = () => Da
       logger.info('gastUebernahme: pausiert', { gastUid, zielUid });
       return antwort(200, { status: 'pausiert' });
     }
+
+    if (!job.nachUid) {
+      if (job.status === 'verfallen' || tsMs(job.gueltigBis) <= jetzt) return fehler(410, 'abgelaufen');
+      if (job.status !== 'vorbereitet') return fehler(409, 'nicht_einloesbar');
+    }
+    // job.nachUid === zielUid: schon gebunden an genau diesen Aufrufer →
+    // idempotent weiter (die Hashes sind nach der Bindung gelöscht).
 
     // ── Stufe 2 setzt hier an: getUser(gast), Zählung, Transaktion T0
     //    (Bindung, Einwilligung, Region), Sperre von A, verarbeiteJob. ──

@@ -632,3 +632,40 @@ subscribeNetwork((s) => {
 // … and as soon as the server confirms a guest → account takeover (waiting
 // jobs of that guest uid may now run under the account).
 GastUebernahme.beiAenderung(() => kickBonQueue());
+
+// ─── Vor dem Wechsel in ein bestehendes Konto ───────────────────────
+
+const AKTIV_BON: BonJobStatus[] = ['queued', 'uploading', 'enqueueing'];
+
+function aktiveBonsVon(uid: string): number {
+  return jobs.filter((j) => j.uid === uid && AKTIV_BON.includes(j.status)).length;
+}
+
+/**
+ * Lädt die Aufträge des NOCH angemeldeten Gastes jetzt hoch, bevor die uid
+ * wechselt (Prüfrunde 1): danach dürften sie bis zur Server-Übernahme
+ * (Stufe 2) nicht mehr laufen, und ein Bon würde womöglich zu alt.
+ * Liefert true, sobald kein Auftrag dieser uid mehr aktiv ist (endgültig
+ * gescheiterte zählen nicht), false nach Ablauf der Zeit.
+ */
+export async function bonsVorWechselAbarbeiten(uid: string, timeoutMs: number): Promise<boolean> {
+  await ensureLoaded();
+  kickBonQueue();
+  if (aktiveBonsVon(uid) === 0) return true;
+  return new Promise<boolean>((resolve) => {
+    let erledigt = false;
+    const pruefe = () => {
+      if (aktiveBonsVon(uid) === 0) fertig(true);
+    };
+    const timer = setTimeout(() => fertig(aktiveBonsVon(uid) === 0), timeoutMs);
+    function fertig(ok: boolean) {
+      if (erledigt) return;
+      erledigt = true;
+      clearTimeout(timer);
+      listeners.delete(pruefe);
+      resolve(ok);
+    }
+    listeners.add(pruefe);
+    pruefe();
+  });
+}

@@ -578,3 +578,37 @@ subscribeNetwork((s) => {
 // Sobald der Server eine Übernahme Gast → Konto bestätigt, dürfen wartende
 // Aufträge dieser Gast-uid unter dem Konto laufen.
 GastUebernahme.beiAenderung(() => kickUploadQueue());
+
+// ─── Vor dem Wechsel in ein bestehendes Konto ───────────────────────
+
+const AKTIV_UPLOAD: UploadJobStatus[] = ['queued', 'uploading'];
+
+function aktiveUploadsVon(uid: string): number {
+  return jobs.filter((j) => j.uid === uid && AKTIV_UPLOAD.includes(j.status)).length;
+}
+
+/**
+ * Gegenstück zu bonsVorWechselAbarbeiten: Produktfotos des noch
+ * angemeldeten Gastes hochladen und einreichen, bevor die uid wechselt.
+ */
+export async function uploadsVorWechselAbarbeiten(uid: string, timeoutMs: number): Promise<boolean> {
+  await ensureLoaded();
+  kickUploadQueue();
+  if (aktiveUploadsVon(uid) === 0) return true;
+  return new Promise<boolean>((resolve) => {
+    let erledigt = false;
+    const pruefe = () => {
+      if (aktiveUploadsVon(uid) === 0) fertig(true);
+    };
+    const timer = setTimeout(() => fertig(aktiveUploadsVon(uid) === 0), timeoutMs);
+    function fertig(ok: boolean) {
+      if (erledigt) return;
+      erledigt = true;
+      clearTimeout(timer);
+      listeners.delete(pruefe);
+      resolve(ok);
+    }
+    listeners.add(pruefe);
+    pruefe();
+  });
+}

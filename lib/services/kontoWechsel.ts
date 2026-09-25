@@ -3,6 +3,7 @@ import { Alert } from 'react-native';
 import { auth } from '@/lib/firebase';
 import { AuthRueckkehr } from '@/lib/services/authRueckkehr';
 import {
+  bonsVorWechselAbarbeiten,
   gesperrteFreigeben,
   pausiereBonQueue,
   setzeBonQueueFort,
@@ -10,7 +11,11 @@ import {
 import { GastBestand } from '@/lib/services/gastBestand';
 import { GastUebernahme } from '@/lib/services/gastUebernahme';
 import { isOnline } from '@/lib/services/network';
-import { pausiereUploadQueue, setzeUploadQueueFort } from '@/lib/services/uploadQueue';
+import {
+  pausiereUploadQueue,
+  setzeUploadQueueFort,
+  uploadsVorWechselAbarbeiten,
+} from '@/lib/services/uploadQueue';
 import { isEffectivelyAnonymous } from '@/lib/utils/authIdentity';
 
 /**
@@ -23,18 +28,22 @@ import { isEffectivelyAnonymous } from '@/lib/utils/authIdentity';
  * Verknüpfung. Alle vier laufen durch `inBestehendesKontoWechseln`:
  *
  *   1. Kein Gast → direkt anmelden, sonst nichts.
- *   2. Hat der Gast etwas eingereicht, erscheint IMMER der Mitnahme-Dialog
- *      (keine stille 60-Minuten-Automatik) — mit maskierter Ziel-E-Mail.
- *   3. VOR dem Wechsel, solange der Gast noch angemeldet ist, wird der
- *      Besitznachweis gesichert (`GastUebernahme.vorbereiten`). Danach ist er
- *      nicht mehr zu erbringen — deshalb bricht der Wechsel ab, wenn das bei
- *      vorhandenem Bestand nicht klappt, statt Einreichungen zurückzulassen.
- *   4. Nach dem Wechsel wird das Zielkonto gemerkt und eingelöst. In Stufe 1
- *      antwortet der Server noch mit `pausiert` und bindet nichts; der Eintrag
- *      bleibt und wird bei Start/Vordergrund erneut versucht.
+ *   2. Gast OHNE Einreichungen → genau der Ablauf von vorher (Bestätigung,
+ *      anmelden). Kein Besitznachweis, kein Hinweis, keine Netzrunde.
+ *   3. Gast MIT Einreichungen → Mitnahme-Dialog (immer, keine 60-Minuten-
+ *      Automatik), dann solange der Gast noch angemeldet ist:
+ *        a) Besitznachweis sichern (`GastUebernahme.vorbereiten`) — danach
+ *           ist er nicht mehr zu erbringen;
+ *        b) offene Uploads des Gastes fertig hochladen — nach dem Wechsel
+ *           dürften sie bis zur Server-Übernahme nicht laufen;
+ *        c) erst dann anmelden, Zielkonto merken, einlösen. In Stufe 1
+ *           antwortet der Server mit `pausiert`; der Eintrag bleibt und wird
+ *           bei Start/Vordergrund erneut versucht.
+ *      Klappt a) nicht, kann der Nutzer trotzdem in sein Konto — er wird nie
+ *      aus dem eigenen Konto ausgesperrt (Prüfrunde 1).
  *
- * Während des Wechsels ruhen beide Upload-Warteschlangen, damit kein Auftrag
- * mit halb gewechselter Identität startet.
+ * Während des eigentlichen Wechsels ruhen beide Upload-Warteschlangen, damit
+ * kein Auftrag mit halb gewechselter Identität startet.
  */
 
 /**
@@ -46,6 +55,18 @@ export const KONTO_UMZUG_OFFLINE = 'auth/konto-umzug-offline';
 
 const OFFLINE_TEXT =
   'Deine Einreichungen nehmen wir gleich mit – dafür brauchen wir kurz Netz. Bitte gleich nochmal versuchen.';
+
+/** Wie lange je Runde auf offene Gast-Uploads gewartet wird. */
+const ABARBEITEN_MS = 20_000;
+
+/**
+ * Eine Mitnahme-Bestätigung gilt für denselben Gast zehn Minuten. Der Weg
+ * Facebook → „Konto hat ein Passwort" ruft den Wechsel zweimal auf (erst der
+ * Anbieter-Versuch, dann die Passwort-Eingabe) — ohne das käme der Dialog
+ * doppelt (Prüfrunde 1).
+ */
+const BESTAETIGUNG_GILT_MS = 10 * 60 * 1000;
+let mitnahmeBestaetigt: { uid: string; bis: number } | null = null;
 
 type CodeFehler = Error & { code: string };
 
@@ -137,6 +158,53 @@ function bestaetigeMitnahme(zielEmail: string | null | undefined): Promise<boole
   });
 }
 
+/**
+ * Der Besitznachweis ließ sich nicht sichern (Server/Netz). Der Nutzer darf
+ * trotzdem in sein Konto — sonst sperrte ein Serverfehler ihn aus dem eigenen
+ * Konto aus. Liefert 'nochmal' | 'anmelden' | 'abbrechen'.
+ */
+function fragNachFehlschlag(): Promise<'nochmal' | 'anmelden' | 'abbrechen'> {
+  return new Promise((resolve) => {
+    Alert.alert(
+      'Mitnahme klappt gerade nicht',
+      'Versuch es gleich nochmal. Wenn du dich jetzt anmeldest, bleiben deine Gast-Einreichungen erst einmal beim Gast-Zugang – unser Support hilft dir beim Übertragen.',
+      [
+        { text: 'Abbrechen', style: 'cancel', onPress: () => resolve('abbrechen') },
+        { text: 'Jetzt anmelden', onPress: () => resolve('anmelden') },
+        { text: 'Nochmal versuchen', onPress: () => resolve('nochmal') },
+      ],
+      { cancelable: true, onDismiss: () => resolve('abbrechen') },
+    );
+  });
+}
+
+/** Uploads laufen noch — weiter warten oder abbrechen (kein stilles Zurücklassen). */
+function fragWeiterWarten(): Promise<boolean> {
+  return new Promise((resolve) => {
+    Alert.alert(
+      'Gleich fertig',
+      'Deine Einreichungen werden noch hochgeladen. Einen Moment noch, dann nehmen wir alles mit.',
+      [
+        { text: 'Abbrechen', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'Weiter warten', onPress: () => resolve(true) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) },
+    );
+  });
+}
+
+/** Offene Uploads des Gastes hochladen, solange er noch angemeldet ist. */
+async function uploadsAbarbeiten(vonUid: string): Promise<void> {
+  for (;;) {
+    const [bons, fotos] = await Promise.all([
+      bonsVorWechselAbarbeiten(vonUid, ABARBEITEN_MS),
+      uploadsVorWechselAbarbeiten(vonUid, ABARBEITEN_MS),
+    ]);
+    if (bons && fotos) return;
+    if (!(await fragWeiterWarten())) throw abbruchFehler();
+  }
+}
+
 export interface KontoWechselOptionen<T> {
   /** E-Mail des Zielkontos, falls bekannt — nur maskiert angezeigt. */
   zielEmail?: string | null;
@@ -153,44 +221,58 @@ export interface KontoWechselOptionen<T> {
 /**
  * Einziger Weg, auf dem ein Gast in ein bestehendes Konto wechselt.
  * Wirft `auth/cancelled` bei Ablehnung und `auth/konto-umzug-offline`, wenn
- * der Besitznachweis bei vorhandenem Bestand nicht gesichert werden konnte.
- * Fehler aus `anmelden()` kommen unverändert durch.
+ * bei vorhandenem Bestand kein Netz da ist. Fehler aus `anmelden()` kommen
+ * unverändert durch.
  */
 export async function inBestehendesKontoWechseln<T>(opts: KontoWechselOptionen<T>): Promise<T> {
   const vorher = auth.currentUser;
   if (!vorher || !isEffectivelyAnonymous(vorher)) return opts.anmelden();
   const vonUid = vorher.uid;
 
-  let bestand: boolean;
-  try {
-    bestand = await GastBestand.hat(vonUid);
-  } catch {
-    // Unklar → wie Bestand behandeln: lieber einmal zu viel fragen und
-    // absichern als Einreichungen zurücklassen.
-    bestand = true;
+  // Wirft nicht: im Zweifel gilt „hat Bestand" (lib/services/gastBestand.ts).
+  const bestand = await GastBestand.hat(vonUid);
+
+  if (!bestand) {
+    // Der Normalfall — exakt wie vor dem Umbau.
+    const weiter = opts.dialogUeberspringen ? true : await confirmAccountSwitch();
+    if (!weiter) throw abbruchFehler();
+    return opts.anmelden();
   }
 
-  const weiter = bestand
-    ? await bestaetigeMitnahme(opts.zielEmail)
-    : opts.dialogUeberspringen
-      ? true
-      : await confirmAccountSwitch();
-  if (!weiter) throw abbruchFehler();
+  const schonBestaetigt = mitnahmeBestaetigt?.uid === vonUid && mitnahmeBestaetigt.bis > Date.now();
+  if (!schonBestaetigt) {
+    if (!(await bestaetigeMitnahme(opts.zielEmail))) throw abbruchFehler();
+    mitnahmeBestaetigt = { uid: vonUid, bis: Date.now() + BESTAETIGUNG_GILT_MS };
+  }
+  // Ohne Netz scheitert die Anmeldung ohnehin — nicht erst drei Versuche warten.
+  if (!isOnline()) throw codeFehler(KONTO_UMZUG_OFFLINE, OFFLINE_TEXT);
+
+  let gesichert = false;
+  for (;;) {
+    const ergebnis = await GastUebernahme.vorbereiten(vonUid);
+    if (ergebnis === 'ok') {
+      gesichert = true;
+      break;
+    }
+    if (ergebnis === 'offline') throw codeFehler(KONTO_UMZUG_OFFLINE, OFFLINE_TEXT);
+    const wahl = await fragNachFehlschlag();
+    if (wahl === 'abbrechen') throw abbruchFehler();
+    if (wahl === 'anmelden') break;
+  }
+
+  // Nur mit gesichertem Nachweis lohnt das Warten: ohne ihn kann der Server
+  // die Uploads ohnehin nicht übernehmen, und der Nutzer hat „Jetzt anmelden"
+  // gewählt.
+  if (gesichert) await uploadsAbarbeiten(vonUid);
 
   pausiereBonQueue();
   pausiereUploadQueue();
   try {
-    // Ohne Bestand und offline gibt es nichts abzusichern — dann nicht bis
-    // zu drei Netzversuche lang warten, bevor die Anmeldung ohnehin scheitert.
-    const ok = bestand || isOnline() ? await GastUebernahme.vorbereiten(vonUid) : false;
-    if (!ok && bestand) {
-      throw codeFehler(KONTO_UMZUG_OFFLINE, OFFLINE_TEXT);
-    }
-
     const ergebnis = await opts.anmelden();
 
     const neueUid = auth.currentUser?.uid ?? null;
-    if (ok && neueUid && neueUid !== vonUid) {
+    if (neueUid && neueUid !== vonUid) mitnahmeBestaetigt = null;
+    if (gesichert && neueUid && neueUid !== vonUid) {
       try {
         await GastUebernahme.zielMerken(vonUid, neueUid);
       } catch (e) {

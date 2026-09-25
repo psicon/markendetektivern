@@ -342,10 +342,11 @@ export function showCashbackNudgeToast(
   message: string,
   onOpen: () => void,
   colorScheme?: 'light' | 'dark',
+  actionLabel = 'Zum Cashback',
 ) {
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   showToast(message, 'INFO', {
-    actionLabel: 'Zum Cashback',
+    actionLabel,
     onActionPress: onOpen,
     colorScheme,
     durationMs: 8000,
