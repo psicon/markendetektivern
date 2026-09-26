@@ -12,6 +12,7 @@ import {
   SHARED_LIST_MAX_MEMBERS,
   type SharedListDoc,
 } from '@/lib/services/sharedListService';
+import { isOnline } from '@/lib/services/network';
 import { showInfoToast, showRetryableErrorToast } from '@/lib/services/ui/toast';
 
 // ── Fire-and-forget-Writes (Offline-Regel aus CLAUDE.md) ──
@@ -19,23 +20,42 @@ import { showInfoToast, showRetryableErrorToast } from '@/lib/services/ui/toast'
 // bis Reconnect. Deshalb hier NIE awaiten: der Write feuert im Hintergrund,
 // die Live-Subscription (subscribeMySharedLists) treibt die UI sofort aus dem
 // latenzkompensierten lokalen Cache. Ein echter Server-Reject (z.B.
-// permission-denied) landet im catch → Retry-Toast, der dieselbe Closure
-// erneut feuert.
+// permission-denied) landet im catch → Retry-Toast, der dieselbe Aktion
+// erneut feuert — genau EINMAL je Toast: der Knopf im Toast schließt ihn
+// nicht, und ein zweiter Tipp nach erfolgreicher Wiederholung scheiterte
+// zwangsläufig (dann schon kein Mitglied mehr) und meldete einen Fehler, den
+// es nicht gibt.
+function einmal(aktion: () => void): () => void {
+  let benutzt = false;
+  return () => {
+    if (benutzt) return;
+    benutzt = true;
+    aktion();
+  };
+}
+
 function fireRotate(listId: string) {
-  void SharedListService.rotateInvite(listId).catch(() =>
-    showRetryableErrorToast('Konnte keinen neuen Link erstellen.', () => fireRotate(listId)),
-  );
+  // Der neue Link gilt erst, wenn der Server ihn hat. Offline löst der Write
+  // erst beim Wiederverbinden auf — bis dahin nicht „erstellt" melden.
+  if (!isOnline()) {
+    showInfoToast('Der neue Link wird aktiv, sobald du wieder online bist.', 'info');
+  }
+  void SharedListService.rotateInvite(listId)
+    .then(() => showInfoToast('Neuer Link erstellt — 48 Stunden gültig.', 'success'))
+    .catch(() =>
+      showRetryableErrorToast('Konnte keinen neuen Link erstellen.', einmal(() => fireRotate(listId))),
+    );
 }
 
 function fireRename(listId: string, name: string) {
   void SharedListService.rename(listId, name).catch(() =>
-    showRetryableErrorToast('Konnte die Liste nicht umbenennen.', () => fireRename(listId, name)),
+    showRetryableErrorToast('Konnte die Liste nicht umbenennen.', einmal(() => fireRename(listId, name))),
   );
 }
 
 function fireLeave(listId: string) {
   void SharedListService.leaveList(listId).catch(() =>
-    showRetryableErrorToast('Konnte die Liste nicht verlassen.', () => fireLeave(listId)),
+    showRetryableErrorToast('Konnte die Liste nicht verlassen.', einmal(() => fireLeave(listId))),
   );
 }
 
@@ -93,7 +113,6 @@ export function SharedListManageSheet({
   const onRotate = () => {
     if (!list) return;
     fireRotate(list.id);
-    showInfoToast('Neuer Link erstellt — 48 Stunden gültig.', 'success');
   };
 
   // ─── Umbenennen (Owner) ───

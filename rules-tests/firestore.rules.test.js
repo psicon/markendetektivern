@@ -30,6 +30,7 @@ const {
   query,
   where,
   serverTimestamp,
+  arrayRemove,
 } = require('firebase/firestore');
 const fs = require('fs');
 const path = require('path');
@@ -91,6 +92,16 @@ beforeAll(async () => {
     });
     await setDoc(doc(db, 'shared_lists/list_expand'), {
       ownerId: ALICE, memberIds: [ALICE], name: 'L',
+    });
+    // arrayRemove (26.09.2026): MALLORY ist hier „inzwischen beigetreten".
+    await setDoc(doc(db, 'shared_lists/list_leave_ar'), {
+      ownerId: ALICE, memberIds: [ALICE, BOB, MALLORY], name: 'L',
+    });
+    await setDoc(doc(db, 'shared_lists/list_remove_ar'), {
+      ownerId: ALICE, memberIds: [ALICE, BOB, MALLORY], name: 'L',
+    });
+    await setDoc(doc(db, 'shared_lists/list_remove_ar_bad'), {
+      ownerId: ALICE, memberIds: [ALICE, BOB, MALLORY], name: 'L',
     });
   });
 });
@@ -629,6 +640,42 @@ describe('Stufe 5: shared_lists — Mitgliederschutz + Item-Zugriff', () => {
   test('Owner darf umbenennen', async () => {
     await assertSucceeds(
       updateDoc(doc(alice(), 'shared_lists/list_rename'), { name: 'Neuer Name' }),
+    );
+  });
+
+  // leaveList/removeMember schreiben seit 26.09.2026 arrayRemove statt eines
+  // gelesenen, evtl. veralteten Arrays — sonst verschwanden Neu-Beigetretene.
+  const mitglieder = async (id) => {
+    let ids;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      ids = (await getDoc(doc(ctx.firestore(), `shared_lists/${id}`))).data().memberIds;
+    });
+    return ids;
+  };
+  test('Mitglied verlässt per arrayRemove — Neu-Beigetretene bleiben', async () => {
+    await assertSucceeds(
+      updateDoc(doc(bob(), 'shared_lists/list_leave_ar'), {
+        memberIds: arrayRemove(BOB),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    expect(await mitglieder('list_leave_ar')).toEqual([ALICE, MALLORY]);
+  });
+  test('Owner entfernt per arrayRemove genau dieses Mitglied', async () => {
+    await assertSucceeds(
+      updateDoc(doc(alice(), 'shared_lists/list_remove_ar'), {
+        memberIds: arrayRemove(BOB),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    expect(await mitglieder('list_remove_ar')).toEqual([ALICE, MALLORY]);
+  });
+  test('Nicht-Owner darf per arrayRemove KEIN anderes Mitglied entfernen', async () => {
+    await assertFails(
+      updateDoc(doc(bob(), 'shared_lists/list_remove_ar_bad'), {
+        memberIds: arrayRemove(MALLORY),
+        updatedAt: serverTimestamp(),
+      }),
     );
   });
 
