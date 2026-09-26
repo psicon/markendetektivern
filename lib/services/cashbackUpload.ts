@@ -11,6 +11,7 @@
  */
 
 import { auth, storage } from '@/lib/firebase';
+import type { BonGeraeteOrt, ClientVersion } from '@/lib/services/captureContext';
 import {
   collection,
   doc,
@@ -365,6 +366,11 @@ export interface EnqueueArgs {
     filterMetricsMotivation?: any | null;
     viewedProductsCount?: number;
   } | null;
+  /** Standort-Kontext aus dem Moment der Aufnahme. Der Server übernimmt
+   *  daraus nur gpsStatus + geprüfte GPS-Koordinaten (lib/clientKontext.js). */
+  captureContext?: BonGeraeteOrt | null;
+  /** App-Version, die den Bon aufgenommen hat. */
+  clientVersion?: ClientVersion | null;
 }
 
 export interface EnqueueResult {

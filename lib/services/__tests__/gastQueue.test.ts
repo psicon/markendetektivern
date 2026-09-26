@@ -409,6 +409,51 @@ describe('Bon-Warteschlange', () => {
     expect(uploadBonImage).toHaveBeenCalledTimes(1);
   });
 
+  test('Altauftrag ohne Standort/Version schickt keine neuen Felder', async () => {
+    anmelden(B, true);
+    const q = frischeBonQueue([bonAuftrag('bon_b1', B)]);
+
+    await q.processQueue();
+
+    const nutzlast = mock(enqueueCashback).mock.calls[0][0];
+    expect(nutzlast).not.toHaveProperty('captureContext');
+    expect(nutzlast).not.toHaveProperty('clientVersion');
+  });
+
+  test('Standort und Version aus der Aufnahme überleben einen Neustart und gehen unverändert raus', async () => {
+    anmelden(B, true);
+    mock(isOnline).mockImplementation(() => false); // erst nur vormerken
+    const ort = {
+      gpsStatus: 'granted_precise' as const,
+      gps: { lat: 52.52, lon: 13.4, accuracyM: 12, fixAt: 1_758_000_000_000 },
+    };
+    const version = { app: '6.0.21', build: '1275', platform: 'ios' };
+    const q1 = frischeBonQueue();
+    const id = await q1.enqueueBon({
+      uid: B,
+      imageUri: 'file:///cache/bon.jpg',
+      hash: 'h',
+      width: 1,
+      height: 1,
+      capturedAt: 1_758_000_001_000,
+      source: 'live_camera',
+      campaignId: null,
+      captureContext: ort,
+      clientVersion: version,
+    });
+    await ruhe();
+
+    // App-Neustart: frisches Modul, gespeicherter Auftrag bleibt.
+    const gespeichert = speicher[BON_KEY];
+    mock(isOnline).mockImplementation(() => true);
+    const q2 = frischeBonQueue(JSON.parse(gespeichert));
+    await q2.processQueue();
+
+    expect(enqueueCashback).toHaveBeenCalledWith(
+      expect.objectContaining({ clientUploadId: id, captureContext: ort, clientVersion: version }),
+    );
+  });
+
   test('enqueueBon merkt sich die uid nur für Gäste', async () => {
     mock(isOnline).mockImplementation(() => false);
     const eingabe = {

@@ -2802,6 +2802,14 @@ Regeln:
   consentVersion NICHT gebumpt (Wortlaut-Präzisierung, keine neue Daten-
   kategorie). Präzise: bei Bons fließt kein GPS in den Datensatz, die IP-
   Journey-Ortung (~5-km-Raster) bleibt als `receipts.journey.location`.
+  **Ergänzt 26.09.2026 (Patrick):** Bons schicken ab dem ersten App-Build nach
+  iOS 1274 / Android 1247 ZUSÄTZLICH den Gerätestandort bei der Aufnahme mit —
+  `receipts.capture.gpsStatus/gps/gpsError` + top-level `clientVersion`, exakt
+  die Feldnamen von crowd_uploads, rein additiv (Server: `cashback-pipeline/
+  lib/clientKontext.js`, prüft und verwirft unplausible Fixes). Gemessen wird
+  beim Öffnen der Prüfseite, nie beim Upload; Galerie-Bilder bekommen keinen
+  Standort. Die Filialadresse bleibt der Einkaufsort. „Kein GPS bei Bons" gilt
+  nur noch für ältere Builds. Datenschutzerklärung muss das nennen (Anwalt).
   **Anwalt (Doc-Änderungen, kein Code):** Datenschutzerklärung sagt „kein
   GPS-Zugriff" (Produktfotos speichern präzises GPS, Freigabe ist Bedingung)
   und zählt die Bon-Daten ohne Filialadresse auf — beides nachziehen.

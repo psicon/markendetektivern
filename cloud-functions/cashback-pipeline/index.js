@@ -65,6 +65,7 @@ const CASHBACK_ADMIN_KEY = defineSecret('NUTRITION_SCRAPER_TRIGGER_KEY');
 const { extractReceipt, reconcile, countEligibleItems, tierFor, isPfandItem, DEFAULT_MODEL } = require('./lib/ocr');
 const { extractReceiptCVHybrid } = require('./lib/ocr_cvhybrid');
 const { extractReceiptRobust } = require('./lib/ocr_robust');
+const { uebernehmeClientKontext, logZusammenfassung: clientKontextLog } = require('./lib/clientKontext');
 const { moneyFieldAgreement, normMerchant } = require('./lib/fieldAgreement');
 const { refereeMode, shouldRequestReferee, infraVerhindert: refereeInfraVerhindert, einheitlicheUhrzeit } = require('./lib/refereePolicy');
 const { runReferee } = require('./lib/ocr_referee');
@@ -1247,13 +1248,26 @@ exports.enqueueCashback = onRequest(
           }
         : null;
 
+    // Geräte-Standort + App-Version aus dem Moment der Aufnahme (26.09.2026,
+    // rein additiv, Feldnamen wie crowd_uploads). Nicht vertrauenswürdig:
+    // lib/clientKontext.js übernimmt nur geprüfte Werte und wirft nie. Alte
+    // Apps schicken nichts → der Bon sieht exakt aus wie bisher.
+    const kontext = uebernehmeClientKontext(body, { jetztMs: Date.now() });
+    if (kontext.verworfen) {
+      // Nie Koordinaten loggen.
+      logger.info('bon-gps-verworfen', { cashbackId, ...clientKontextLog(kontext) });
+    }
+
     await docRef.set({
       userId: uid,
       status: 'ocr_pending',
       // Vom User gewählte Aktion — Quelle der Wahrheit für die Vergütung
       // in processCashback (campaignsEnabled-Modus). null = keine Aktion.
       campaignId: typeof campaignId === 'string' && campaignId ? campaignId : null,
+      ...(kontext.clientVersion ? { clientVersion: kontext.clientVersion } : {}),
       capture: {
+        // NUR gpsStatus / gps / gpsError — die Serverfelder danach gewinnen immer.
+        ...kontext.capture,
         source: source || 'live_camera',
         appCheck: false, // wire when the App Check token lands
         deviceAttest: false,
