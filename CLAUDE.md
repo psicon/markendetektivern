@@ -3067,7 +3067,11 @@ Hersteller aus EINER Quelle (`review-console/src/werte.js`), gerettete Werte
 eingeschlossen und als „nachgelesen" gekennzeichnet. Ein geretteter Hersteller
 zählt weiter NICHT für die Doppel-Regel. Die Rettungs- und OCR-Felder darf der
 Client beim Anlegen nicht mehr mitschicken (`firestore.rules`, Sperrliste von
-47 Serverfeldern, Rules-Tests in beide Richtungen).
+47 Serverfeldern, Rules-Tests in beide Richtungen; live seit 26.09., keine
+App-Version im Feld schickt eines davon — geprüft bis 6.0.14 zurück). Offen,
+nur Anzeige, kein Geld: `campaignQuelle`, `campaignIdServer`,
+`campaignZeitQuelle`, `rewardPushGebuendelt`, `priceImageAt`, `rewardCheckNote`
+fehlen auf der Liste (Server berechnet die Aktion selbst, liest sie nicht).
 
 **Korrekturen an älteren Notizen (gemessen 19.09.2026):**
 - Der Foto-Trigger schreibt das Ergebnis inzwischen ans Dokument
@@ -3236,8 +3240,10 @@ Buchung, 0 ohne Grund am Dokument, Warteschlange leer.
 
 ## Morgenrunde Produktfotos (seit 24.09.2026)
 
-**Stand 26.09.2026:** auf Trockenlauf (`fotoWorker: false`), bis die
-Preis-Pflicht live ist; danach wieder scharf.
+**Stand 26.09.2026, 14:40 UTC:** wieder scharf (`fotoWorker: true`) mit
+Preis-Pflicht. Vorher live geprüft: Trockenlauf der ausgerollten Runde über 55
+offene Fälle (44 frei, 10 `preis_fehlt`, 1 `preis_unsicher`), jede der 10
+Ablehnungen von zwei unabhängigen Prüfern am Foto bestätigt.
 
 Täglich 08:00 prüft und entscheidet `fotoRundeTaeglich` (Codebase
 review-console) alle offenen Produktfoto-Einreichungen — Freigaben UND
