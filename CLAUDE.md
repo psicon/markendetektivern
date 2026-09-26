@@ -2427,6 +2427,19 @@ gewachsen + in kritischen Teilen offen). **Regeln:**
   Anonymous-Sign-In → kein `auth != null` als read-Gate einbauen, sonst Boot-
   Race), `write: if false`. `produkte/markenProdukte` hatten mal `update: if
   true` (jeder konnte den Katalog defacen) — NIE wieder.
+  **Ausnahme seit 01.09.2026:** `produkte`, `markenProdukte`, `hersteller`,
+  `hersteller_new` = `read: if request.auth != null` (Schutz gegen das
+  Abgreifen der Datenbank, `scripts/canary`). Läuft seitdem ohne Befund.
+- **Vor jedem Rules-Deploy den LIVE-Stand holen und vergleichen.** Die
+  Katalog-Sperre vom 01.09. wurde live ausgerollt, aber nie eingecheckt — am
+  26.09. hätte ein Deploy aus dem Repo sie still entfernt (gefunden nur durch
+  diesen Vergleich). Ein Rules-Deploy ERSETZT den Live-Stand komplett:
+  ```bash
+  T=$(gcloud auth print-access-token); H="x-goog-user-project: markendetektive-895f7"
+  R=$(curl -s -H "Authorization: Bearer $T" -H "$H" https://firebaserules.googleapis.com/v1/projects/markendetektive-895f7/releases/cloud.firestore | python3 -c "import sys,json;print(json.load(sys.stdin)['rulesetName'])")
+  curl -s -H "Authorization: Bearer $T" -H "$H" "https://firebaserules.googleapis.com/v1/$R" | python3 -c "import sys,json;print(json.load(sys.stdin)['source']['files'][0]['content'])" > /tmp/rules-live.txt
+  diff /tmp/rules-live.txt firestore.rules   # jede Zeile mit „<" muss gewollt wegfallen
+  ```
 - Owner-only + Owner-Feld-Check: `poll_responses`/`productRatings`/`userfeedback`/
   `pushTokens`/`crowd_uploads` verlangen `request.resource.data.userId (bzw.
   userID) == request.auth.uid`. `leaderboards/{uid}` write nur eigenes Doc.

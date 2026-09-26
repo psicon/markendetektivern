@@ -43,20 +43,25 @@ service cloud.firestore {
     // Client-Writes laufen für ALLE diese Collections über Cloud
     // Functions/Pipelines (Admin-SDK). `update: if true` auf produkte/
     // markenProdukte (jeder konnte den Katalog ändern!) ist entfernt.
+    // Produkte, Markenprodukte und Hersteller lesen nur Angemeldete (auch
+    // anonym) — seit 01.09.2026 live als Schutz gegen das Abgreifen der
+    // Datenbank (siehe scripts/canary), damals aber nie eingecheckt. Am
+    // 26.09. aus dem Live-Stand übernommen, damit ein Rules-Deploy ihn nicht
+    // still wieder entfernt.
     match /produkte/{document} {
-      allow read: if true;
+      allow read: if request.auth != null;
       allow write: if false;
     }
     match /markenProdukte/{document} {
-      allow read: if true;
+      allow read: if request.auth != null;
       allow write: if false;
     }
     match /hersteller/{document} {
-      allow read: if true;
+      allow read: if request.auth != null;
       allow write: if false;
     }
     match /hersteller_new/{document} {
-      allow read: if true;
+      allow read: if request.auth != null;
       allow write: if false;
     }
     match /handelsmarken/{document} {

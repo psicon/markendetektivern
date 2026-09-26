@@ -221,10 +221,17 @@ describe('Bestenliste: nur eigenes Doc schreiben, Lesen nur eingeloggt', () => {
 // ─── 4. KATALOG ──────────────────────────────────────────────────────
 
 describe('Katalog: öffentlich lesbar, nie client-schreibbar', () => {
-  test('produkte lesbar ohne Auth (Boot-Race-sicher)', async () => {
-    await assertSucceeds(getDoc(doc(unauth(), 'produkte/p1')));
+  test('übriger Katalog lesbar ohne Auth (Boot-Race-sicher)', async () => {
     await assertSucceeds(getDoc(doc(unauth(), 'scraped_products/s1')));
     await assertSucceeds(getDoc(doc(unauth(), 'aggregates/leaderboard_v1')));
+  });
+  // Live seit 01.09.2026 (Schutz gegen das Abgreifen der Datenbank), am 26.09.
+  // ins Repo übernommen: diese vier nur mit Anmeldung, anonym genügt.
+  test('produkte, markenProdukte, hersteller, hersteller_new: nur angemeldet lesbar', async () => {
+    for (const pfad of ['produkte/p1', 'markenProdukte/m1', 'hersteller/h1', 'hersteller_new/h1']) {
+      await assertSucceeds(getDoc(doc(alice(), pfad)));
+      await assertFails(getDoc(doc(unauth(), pfad)));
+    }
   });
   test('ANGRIFF: Katalog-Defacement scheitert (vorher update: if true!)', async () => {
     await assertFails(updateDoc(doc(unauth(), 'produkte/p1'), { preis: 0 }));
