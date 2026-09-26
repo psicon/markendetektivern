@@ -73,6 +73,8 @@ function noteFor(reason, ctx = {}) {
       return 'Dieselben Fotos wurden schon für eine andere Einreichung verwendet — jedes Produkt braucht eigene Aufnahmen.';
     case 'fotos_unpassend':
       return 'Die Fotos zeigen nicht das erwartete Produkt — bitte alle Ansichten vom selben Artikel.';
+    case 'preis_fehlt':
+      return 'Auf dem Preisfoto war kein Preis zu sehen — beim nächsten Mal Preisschild oder Kassenbon fotografieren.';
     case 'produkt_bereits_verguetet':
       return 'Dieses Produkt hast du schon eingereicht und es wurde bereits vergütet — danke!';
     default:

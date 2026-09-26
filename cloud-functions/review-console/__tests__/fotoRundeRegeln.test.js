@@ -7,7 +7,74 @@ const { entscheideFall, notbremse } = require('../src/fotoRundeRegeln');
 
 const ok = { ok: true, problems: [], missing: [] };
 const echt = { echt: true, loseWare: false, gleicheAnsicht: false, grund: '' };
-const fall = (over = {}) => ({ comp: ok, dup: { verdict: 'ok', reason: null, lockUntil: null }, leer: [], unlesbar: [], wiederverwendet: false, audit: echt, auditFehler: null, rettungFehler: {}, ...over });
+// Normalfall: der Preis wurde gelesen (Namer oder Nachlesen).
+const fall = (over = {}) => ({ comp: ok, dup: { verdict: 'ok', reason: null, lockUntil: null }, leer: [], unlesbar: [], wiederverwendet: false, audit: echt, auditFehler: null, rettungFehler: {}, preisVorhanden: true, ...over });
+
+describe('Preis ist Pflicht (Entscheidung Patrick 26.09.2026)', () => {
+  const ohnePreis = (audit, over = {}) => fall({ preisVorhanden: false, audit, ...over });
+  it('kein Preis gelesen, Preisfoto zeigt keinen Preis → ablehnen preis_fehlt', () => {
+    expect(entscheideFall(ohnePreis({ ...echt, preisSichtbar: false }))).toMatchObject({ entscheidung: 'ablehnen', grund: 'preis_fehlt' });
+  });
+  it('Preis auf dem Foto sichtbar, nur nicht gelesen → freigeben', () => {
+    expect(entscheideFall(ohnePreis({ ...echt, preisSichtbar: true })).entscheidung).toBe('freigeben');
+  });
+  it('Preis gelesen → freigeben, auch wenn die Bildprüfung ihn nicht sah', () => {
+    expect(entscheideFall(fall({ audit: { ...echt, preisSichtbar: false } })).entscheidung).toBe('freigeben');
+  });
+  it('Bildprüfung hat den Preis nicht beurteilt → offen, nicht raten', () => {
+    expect(entscheideFall(ohnePreis({ ...echt }))).toMatchObject({ entscheidung: 'offen', grund: 'preis_unbeurteilt' });
+  });
+  it('Nachlesen des Preises an unserer Technik gescheitert → offen', () => {
+    expect(entscheideFall(ohnePreis({ ...echt, preisSichtbar: false }, { rettungFehler: { preis: '429' } }))).toMatchObject({ entscheidung: 'offen', grund: 'nachlesen_gescheitert' });
+  });
+  it('lose Ware ohne Preis → ebenfalls preis_fehlt', () => {
+    const e = entscheideFall(ohnePreis({ ...echt, loseWare: true, preisSichtbar: false }, { comp: { ok: false, problems: ['ean_fehlt'], missing: [] } }));
+    expect(e).toMatchObject({ entscheidung: 'ablehnen', grund: 'preis_fehlt' });
+  });
+  it('lose Ware mit Preis → freigeben als lose Ware', () => {
+    const e = entscheideFall(fall({ audit: { ...echt, loseWare: true }, comp: { ok: false, problems: ['ean_fehlt'], missing: [] } }));
+    expect(e).toMatchObject({ entscheidung: 'freigeben', loseWare: true });
+  });
+  it('unpassende Fotos gehen weiter vor (genauerer Grund)', () => {
+    expect(entscheideFall(ohnePreis({ ...echt, echt: false, preisSichtbar: false })).grund).toBe('fotos_unpassend');
+  });
+
+  // Gegenprüfung 26.09.: abgelehnt wird nur ohne jedes Gegenzeichen.
+  it('Lesedienst sah ein Preisschild, Bildprüfung nicht → offen preis_unsicher statt Ablehnung', () => {
+    const e = entscheideFall(ohnePreis({ ...echt, preisSichtbar: false }, { preisHinweis: 'Lesedienst sah auf dem Preisfoto: preisschild' }));
+    expect(e).toMatchObject({ entscheidung: 'offen', grund: 'preis_unsicher' });
+    expect(e.ctx.hinweis).toMatch(/preisschild/);
+  });
+  it('nur eine von zwei Nachlesungen fand einen Preis → offen preis_unsicher', () => {
+    expect(entscheideFall(ohnePreis({ ...echt, preisSichtbar: false }, { rettungFehler: { preis: 'lesungen_uneinig' } })))
+      .toMatchObject({ entscheidung: 'offen', grund: 'preis_unsicher' });
+  });
+  it('Preisfoto beim Hochladen beschädigt → offen, keine Ablehnung für unseren Fehler', () => {
+    expect(entscheideFall(ohnePreis({ ...echt, preisSichtbar: false }, { preisBildDefekt: true }))).toMatchObject({ entscheidung: 'offen', grund: 'bild_defekt' });
+  });
+  it('Bildprüfung unsicher (null) → offen preis_unbeurteilt', () => {
+    expect(entscheideFall(ohnePreis({ ...echt, preisSichtbar: null }))).toMatchObject({ entscheidung: 'offen', grund: 'preis_unbeurteilt' });
+  });
+  it('Gegenzeichen ohne Belang, wenn der Preis sichtbar ist → freigeben', () => {
+    expect(entscheideFall(ohnePreis({ ...echt, preisSichtbar: true }, { preisHinweis: 'x', rettungFehler: { preis: 'lesungen_uneinig' } })).entscheidung).toBe('freigeben');
+  });
+  it('Doppel-Sperre ohne Preis und uneinige Preis-Nachlesung → offen, keine Sperre aus einer Lesung', () => {
+    const e = entscheideFall(fall({ preisFehlt: true, rettungFehler: { preis: 'lesungen_uneinig' }, dup: { verdict: 'locked', reason: 'sperre_30_tage_gleicher_nutzer', lockUntil: 1 } }));
+    expect(e).toMatchObject({ entscheidung: 'offen', grund: 'preis_unsicher' });
+  });
+});
+
+describe('Aufnahmeort und Lesedienst', () => {
+  it('Aufnahmeort passt nicht zum Markt → offen für den Menschen', () => {
+    expect(entscheideFall(fall({ ortAuffaellig: 'Aufnahmeort liegt in Österreich, der Markt ist für DE hinterlegt' }))).toMatchObject({ entscheidung: 'offen', grund: 'ort_auffaellig' });
+  });
+  it('… aber ein fehlender Preis wird trotzdem abgelehnt (eindeutiger Grund zuerst)', () => {
+    expect(entscheideFall(fall({ preisVorhanden: false, audit: { ...echt, preisSichtbar: false }, ortAuffaellig: 'x' })).grund).toBe('preis_fehlt');
+  });
+  it('Lesedienst liest noch nach → offen (die Runde prüft vorher, ob sein Termin nicht hängt)', () => {
+    expect(entscheideFall(fall({ namerLaeuft: true }))).toMatchObject({ entscheidung: 'offen', grund: 'namer_laeuft_noch' });
+  });
+});
 
 describe('entscheideFall', () => {
   it('alles sauber → freigeben', () => {
@@ -128,6 +195,36 @@ describe('notbremse', () => {
   it('wenige Ablehnungen lösen nie aus', () => {
     const p = plan(3, 0, 4);
     expect(notbremse(p, { schnittQuote: 0.01 }).gesamt).toBe(false);
+  });
+
+  const preisPlan = (freigaben, preisFehlt) => [
+    ...Array.from({ length: freigaben }, () => ({ entscheidung: 'freigeben', grund: null, audit: { ...echt, preisSichtbar: true } })),
+    ...Array.from({ length: preisFehlt }, () => ({ entscheidung: 'ablehnen', grund: 'preis_fehlt', audit: { ...echt, preisSichtbar: false } })),
+  ];
+  it('Preis fehlt im üblichen Maß (20 von 188, gut 10 %) → keine Bremse', () => {
+    const p = preisPlan(168, 20);
+    expect(notbremse(p, { schnittQuote: 0.104 })).toMatchObject({ preis: false, gesamt: false });
+    expect(p.filter((x) => x.grund === 'preis_fehlt')).toHaveLength(20);
+  });
+  // Gegenprüfung 26.09.: mit „Preis fehlt" in der Gesamtquote hätte die Bremse
+  // an einem normalen Tag ausgelöst (vorher 21 von 100 > 2 × 10,4 %).
+  it('üblicher Tag mit Preis-Pflicht (10 andere + 11 Preis von 100) → keine Gesamt-Bremse', () => {
+    const p = [...preisPlan(79, 11), ...plan(0, 0, 10)];
+    expect(notbremse(p, { schnittQuote: 0.104 })).toMatchObject({ gesamt: false, preis: false });
+    expect(p.filter((x) => x.entscheidung === 'ablehnen')).toHaveLength(21);
+  });
+  it('kippt die Gesamtquote wirklich, werden auch Preis-Ablehnungen gehalten', () => {
+    const p = [...preisPlan(40, 3), ...plan(0, 0, 20)];
+    expect(notbremse(p, { schnittQuote: 0.1 }).gesamt).toBe(true);
+    expect(p.filter((x) => x.entscheidung === 'ablehnen')).toHaveLength(0);
+    expect(p.filter((x) => x.zurueckgehaltenGrund === 'preis_fehlt')).toHaveLength(3);
+  });
+  it('Preis fehlt angeblich bei fast der Hälfte → Bildprüfung verdächtig, Ablehnungen zurückgehalten', () => {
+    const p = preisPlan(30, 25);
+    const b = notbremse(p, { schnittQuote: null });
+    expect(b.preis).toBe(true);
+    expect(p.filter((x) => x.entscheidung === 'ablehnen')).toHaveLength(0);
+    expect(p.find((x) => x.grund === 'notbremse_preis').zurueckgehaltenGrund).toBe('preis_fehlt');
   });
 });
 

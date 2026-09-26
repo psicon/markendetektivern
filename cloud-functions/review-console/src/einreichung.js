@@ -115,7 +115,15 @@ function stripPolicy(row) {
 
 const OHNE_DOPPEL = { verdict: 'ok', reason: null, priorId: null, priorUserId: null, sameUser: null, lockUntil: null, updatedFields: [], diff: null };
 
-/** Vorprüfung eines Kandidaten gegen die Einreichungen derselben (effektiven) EAN — wie die Morgenrunde. */
+/**
+ * Vorprüfung eines Kandidaten gegen die Einreichungen derselben (effektiven) EAN — wie die Morgenrunde.
+ *
+ * `hinweise` blockieren nichts, sie sagen dem Menschen, wo er hinsehen muss.
+ * `preis_nicht_gelesen` (Preis-Pflicht 26.09.2026): vorher stand bei einer
+ * Einreichung ohne Preis „Vorprüfung ok · Vollständig, kein Doppel" — ob der
+ * Preis im Foto steht, sieht aber nur, wer hinschaut. Deshalb Hinweis statt
+ * Sperre: ein sichtbarer, nur nicht gelesener Preis ist freigabefähig.
+ */
 function precheckOf(row, sameEanRows) {
   const completeness = completenessCheck(row._komplett, REQUIRED_STEPS);
   const others = (sameEanRows || []).filter((r) => r.id !== row.id).map((r) => r._policy);
@@ -123,7 +131,8 @@ function precheckOf(row, sameEanRows) {
   const reasons = [...completeness.problems];
   if (dup.verdict === 'locked' || dup.verdict === 'hold') reasons.push(dup.reason);
   const verdict = !completeness.ok ? 'incomplete' : dup.verdict === 'ok' ? 'ok' : dup.verdict;
-  return { verdict, reasons, missing: completeness.missing, dup };
+  const hinweise = row.priceCents ? [] : ['preis_nicht_gelesen'];
+  return { verdict, reasons, missing: completeness.missing, dup, hinweise };
 }
 
 /**
@@ -206,7 +215,7 @@ function baueFotoListe(openDocs, byEan, p, q) {
       nameNachgelesen: r.herkunft.nameQuelle === 'nachgelesen', eanNachgelesen: r.herkunft.eanNachgelesen,
       marketName: r.marketName || r.marketId, createdAt: r.createdAt, campaignId: r.campaignId,
       priceCents: r.priceCents, manufacturer: r.manufacturer, priceImageKind: r.priceImageKindAnzeige,
-      stepCount: r.stepCount, verdict: pre.verdict, reasons: pre.reasons,
+      stepCount: r.stepCount, verdict: pre.verdict, reasons: pre.reasons, hinweise: pre.hinweise,
       // Nur für die Suche, wird unten entfernt.
       _suche: [r.id, r.userId, r.anzeigeName, r.productName, r.productNameOcr, r.productNameRescueOcr, r.anzeigeEan, r.ean, r.marketName, r.manufacturer],
     };

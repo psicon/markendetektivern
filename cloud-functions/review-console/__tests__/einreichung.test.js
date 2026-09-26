@@ -66,6 +66,13 @@ describe('precheckOf: dieselbe Semantik wie die Morgenrunde', () => {
     expect(precheckOf(r, [])).toMatchObject({ verdict: 'ok', reasons: [] });
   });
 
+  it('ohne gelesenen Preis: Vorprüfung bleibt ok, aber mit Hinweis (Preis-Pflicht 26.09.)', () => {
+    const ohne = rowOf(doc('k', basis({ productNameOcr: 'Skyr', ean: GUELTIG })));
+    expect(precheckOf(ohne, [])).toMatchObject({ verdict: 'ok', hinweise: ['preis_nicht_gelesen'] });
+    const mit = rowOf(doc('m', basis({ productNameOcr: 'Skyr', ean: GUELTIG, priceRescueOcr: { priceCents: 129 } })));
+    expect(precheckOf(mit, []).hinweise).toEqual([]);
+  });
+
   it('ohne Nachlesung: kein Name, Barcode fehlt', () => {
     const r = rowOf(doc('k', basis({})));
     expect(precheckOf(r, []).reasons).toEqual(['ean_fehlt', 'kein_produktname']);

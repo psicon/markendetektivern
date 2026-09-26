@@ -121,3 +121,17 @@ describe('Doppel-Regel: welche Nachlesung eine Sperre löst', () => {
     expect(urteil(k).verdict).toBe('locked');
   });
 });
+
+describe('preisHinweisOf (Gegenzeichen zur Preis-Pflicht, 26.09.2026)', () => {
+  const { preisHinweisOf } = require('../src/werte');
+  it('Lesedienst sah Preisschild oder Kassenbon → Hinweis', () => {
+    expect(preisHinweisOf({ priceImageKind: 'preisschild' })).toMatch(/preisschild/);
+    expect(preisHinweisOf({ priceImageKind: 'Kassenbon' })).toMatch(/kassenbon/);
+    expect(preisHinweisOf({ priceImageKind: 'unklar', priceReceipt: { city: 'Köln' } })).toMatch(/Kassenbon/);
+  });
+  it('Produktfoto, fehlt oder nichts bekannt → kein Hinweis', () => {
+    expect(preisHinweisOf({ priceImageKind: 'produktfoto' })).toBeNull();
+    expect(preisHinweisOf({ priceImageKind: 'fehlt', priceReceipt: {} })).toBeNull();
+    expect(preisHinweisOf({})).toBeNull();
+  });
+});

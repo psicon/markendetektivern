@@ -38,9 +38,11 @@ const { FieldValue } = require('firebase-admin/firestore');
 const logger = require('firebase-functions/logger');
 const { GoogleGenAI } = require('@google/genai');
 const { evaluateDuplicate, completenessCheck, dupZumSpeichern } = require('./duplicatePolicy');
-const { entscheideFall, notbremse, nameAusLesungen, eanAusLesungen, rettungNichtGeschafft, BILD_GRUENDE } = require('./fotoRundeRegeln');
+const { entscheideFall, notbremse, nameAusLesungen, eanAusLesungen, rettungNichtGeschafft, BILD_GRUENDE, PREIS_GRUENDE } = require('./fotoRundeRegeln');
 // Werte-Helfer gemeinsam mit der Prüfkonsole (index.js/einreichung.js) — eine Quelle.
-const { eanOf, nameOf, preisOf, policyOf, pruefzifferOk, vollstaendigkeitOf } = require('./werte');
+const { eanOf, nameOf, preisOf, policyOf, pruefzifferOk, vollstaendigkeitOf, preisHinweisOf, PREIS_ARTEN } = require('./werte');
+const { auffaelligkeiten } = require('./ort');
+const { bildDefektOf } = require('./einreichung');
 const { warnungen } = require('./warnungen');
 const { mitWiederholung, arbeite, schlafe } = require('./ki');
 
@@ -57,6 +59,8 @@ const ENTSCHEIDER = 'worker-fotorunde';
 // Nach dieser Zeit beginnt die Runde nichts Neues mehr; der Rest ist morgen dran.
 // Die Function darf 30 Minuten laufen — Luft für Schreiben und Buchungs-Abwarten.
 const ARBEITSZEIT_MS = 18 * 60 * 1000;
+/** Ab hier gilt ein geplanter Nachlauf des Lesedienstes als hängend (Takt: 15 min). */
+const NAMER_HAENGT_MS = 2 * 60 * 60 * 1000;
 const BUCHUNG_WARTEN_MS = 5 * 60 * 1000;
 
 const ms = (v) => (v && typeof v.toMillis === 'function' ? v.toMillis() : typeof v === 'number' ? v : null);
@@ -77,9 +81,47 @@ function noteFor(reason, ctx = {}) {
     case 'bilder_wiederverwendet': return 'Dieselben Fotos wurden schon für eine andere Einreichung verwendet — jedes Produkt braucht eigene Aufnahmen.';
     case 'fotos_unpassend': return 'Die Fotos zeigen nicht das erwartete Produkt oder nicht die verlangten Ansichten.';
     case 'gleiche_ansicht_mehrfach': return 'Fast alle Fotos zeigen dieselbe Ansicht — Zutaten, Nährwerte, Hersteller und Preis brauchen wir einzeln.';
+    case 'preis_fehlt': return 'Auf dem Preisfoto war kein Preis zu sehen — beim nächsten Mal das Preisschild am Regal oder den Kassenbon fotografieren.';
     default: return 'Danke fürs Einreichen — beim nächsten Datensatz geht es weiter.';
   }
 }
+
+/* ─────────────────────────── Anweisungen an das Modell ─────────────────────────── */
+// Sie entscheiden mit, was freigegeben wird — deshalb gehen sie in die
+// Regelversion ein (regelVersion): eine geänderte Anweisung meldet der
+// Bericht wie eine geänderte Regel.
+
+const PROMPT_NAME = 'Lies den PRODUKTNAMEN von der Verpackung. JSON: {"name":"…","sicher":true|false}. name = Marke + Bezeichnung + Sorte, ohne Menge und Preis. Nicht zweifelsfrei lesbar → name leer, sicher false.';
+const PROMPT_EAN = 'Lies die EAN/GTIN unter dem Strichcode. JSON: {"ean":"nur Ziffern","sicher":true|false}. Vollständig und in gedruckter Reihenfolge. Nicht zweifelsfrei lesbar oder kein Strichcode → leer. Nichts raten.';
+const PROMPT_PREIS = [
+  'Lies zwei Angaben, sonst nichts. JSON: {"priceCents":0,"priceImageKind":"","manufacturer":""}.',
+  'priceCents: Verkaufspreis DIESES Produkts in Cent (1,99 € → 199), vom Regal-Preisschild oder der Bon-Zeile.',
+  'NICHT den Grundpreis (€/kg), NICHT den durchgestrichenen Preis, NICHT die Bon-Endsumme. Kein Preis sichtbar → 0.',
+  'priceImageKind: "preisschild" | "kassenbon" | "beides" | "produktfoto" | "sonstiges".',
+  'manufacturer: Inverkehrbringer laut Verpackung als Firmenname ohne Adresse. Nicht lesbar → leer.',
+  'Nichts raten — ein erfundener Wert ist schlechter als ein leeres Feld.',
+].join('\n');
+const AUDIT_ANWEISUNG = [
+  'Erwartung je Schritt: front=Vorderseite, rueckseite=Rückseite, hersteller=Hersteller-/Adressangabe, ean=Barcode, naehrwerte=Nährwerttabelle, zutaten=Zutatenliste, preis=Preisschild oder Bon.',
+  'JSON: {"echt":true|false,"loseWare":true|false,"traegtAngaben":true|false,"gleicheAnsicht":true|false,"preisSichtbar":true|false|null,"grund":"kurz"}.',
+  'echt=false NUR bei eindeutigem Ausschluss: kein reales Produkt, abfotografierter Bildschirm, fremde Motive, Schritte grob falsch belegt.',
+  'Unscharf, angeschnitten oder zwei vertauschte Schritte = trotzdem echt=true.',
+  // 26.09.2026 (Entscheidung Patrick): der Preis ist Pflicht. Die Frage
+  // steht getrennt von „echt" — ein fehlender Preis macht die übrigen
+  // Fotos nicht unecht, er wird eigens entschieden (fotoRundeRegeln.freigabe).
+  'preisSichtbar: ist auf den Fotos ein lesbarer Verkaufspreis dieses Produkts zu sehen — meist auf dem Foto "preis": Preisschild am Regal, Waage-Etikett mit Preis, Preisaufkleber auf der Packung oder Kassenbon mit dem Artikel? Ein Preis auf einem anderen Foto dieser Einreichung zählt ebenfalls.',
+  'preisSichtbar=false NUR, wenn eindeutig kein Preis zu sehen ist (das Preis-Foto zeigt nochmal das Produkt, den Tisch, den Einkaufswagen o. Ä.). Bist du unsicher — Preis angeschnitten, unscharf, Zuordnung zum Produkt unklar —, dann null.',
+  'Ein fehlender Preis allein ist KEIN Grund für echt=false — dafür gibt es preisSichtbar.',
+  'Ein und dasselbe Foto darf mehrere Schritte abdecken, wenn dort wirklich mehrere Angaben stehen — auf vielen Rückseiten stehen Zutaten, Nährwerte und Anschrift zusammen. Das ist KEIN Mangel.',
+  // 24.09.2026: fünf von sieben Fotos zeigten nur den Barcode am Becherboden.
+  // Vergleich am selben Tag: Nektarinen im Netz und Bergkäse von der Theke
+  // wurden fälschlich als „dieselbe Ansicht" gewertet — beide tragen gar
+  // keine Zutaten-/Nährwertangaben, ihr einziges Etikett war vollständig
+  // fotografiert (vier unabhängige Gutachten). Deshalb die Frage getrennt:
+  'traegtAngaben: trägt DIESES Produkt von Natur aus eine Zutatenliste oder Nährwerttabelle? false bei unverarbeitetem frischem Obst und Gemüse (auch im Netz, in der Schale, mit Banderole und echtem Barcode), frischen Kräutern, Eiern und Ware von der Frischetheke. true bei verarbeiteten, verpackten Lebensmitteln und bei Drogerieartikeln mit Inhaltsstoffliste.',
+  'gleicheAnsicht=true NUR, wenn mindestens fünf Fotos dasselbe Motiv zeigen UND dadurch Angaben fehlen, die dieses Produkt tatsächlich trägt (z. B. Zutaten und Nährwerte stehen auf der Packung, fotografiert wurde aber immer nur Vorderseite oder Barcode). Trägt das Produkt keine weiteren Angaben und ist sein Etikett lesbar fotografiert, ist gleicheAnsicht=false.',
+  'loseWare=true bei unverpackter Ware ohne Produkt-Barcode (Kräuterbund, Obst, Frischetheke mit Waage-Etikett).',
+].join('\n');
 
 /* ─────────────────────────── Bilder lesen ─────────────────────────── */
 
@@ -115,7 +157,7 @@ async function rettungFuer(ai, bucket, ref, x) {
   if (!offenName && !offenEan && !offenPreis && !offenHersteller) return { patch: null, fehler };
 
   if (offenName) {
-    const p = 'Lies den PRODUKTNAMEN von der Verpackung. JSON: {"name":"…","sicher":true|false}. name = Marke + Bezeichnung + Sorte, ohne Menge und Preis. Nicht zweifelsfrei lesbar → name leer, sicher false.';
+    const p = PROMPT_NAME;
     try {
       const [a, b] = [await frage(ai, bucket, x.images, ['front', 'rueckseite'], p), await frage(ai, bucket, x.images, ['front', 'rueckseite'], p)];
       const r = nameAusLesungen(a, b);
@@ -126,7 +168,7 @@ async function rettungFuer(ai, bucket, ref, x) {
     } catch (e) { fehler.name = String(e.message).slice(0, 120); }
   }
   if (offenEan) {
-    const p = 'Lies die EAN/GTIN unter dem Strichcode. JSON: {"ean":"nur Ziffern","sicher":true|false}. Vollständig und in gedruckter Reihenfolge. Nicht zweifelsfrei lesbar oder kein Strichcode → leer. Nichts raten.';
+    const p = PROMPT_EAN;
     try {
       const [a, b] = [await frage(ai, bucket, x.images, ['ean', 'rueckseite', 'front'], p), await frage(ai, bucket, x.images, ['ean', 'rueckseite', 'front'], p)];
       // Streng: unter den EAN-losen Einreichungen ist viel lose Ware, und ein
@@ -140,7 +182,9 @@ async function rettungFuer(ai, bucket, ref, x) {
   }
   if (offenPreis || offenHersteller) {
     try {
-      Object.assign(patch, await preisUndHersteller(ai, bucket, x, { preis: offenPreis, hersteller: offenHersteller }));
+      const r = await preisUndHersteller(ai, bucket, x, { preis: offenPreis, hersteller: offenHersteller });
+      Object.assign(patch, r.patch);
+      if (r.preisUnsicher) fehler.preis = 'lesungen_uneinig';
     } catch (e) { fehler.preis = String(e.message).slice(0, 120); }
   }
   if (!Object.keys(patch).length) return { patch: null, fehler };
@@ -153,30 +197,30 @@ async function rettungFuer(ai, bucket, ref, x) {
 /**
  * Preis und/oder Hersteller nachlesen — zwei Lesungen, übernommen nur bei
  * Übereinstimmung. Wirft bei technischen Fehlern (der Aufrufer entscheidet).
+ *
+ * `preisUnsicher`: der Preis wurde NICHT übernommen, aber mindestens eine
+ * Lesung sah einen Preis oder ein Preisschild/einen Kassenbon. Dann darf die
+ * Runde nicht „Preis fehlt" ablehnen (Preis-Pflicht 26.09.) — ein Mensch sieht hin.
  */
 async function preisUndHersteller(ai, bucket, x, { preis, hersteller }) {
   const patch = {};
-  const p = [
-    'Lies zwei Angaben, sonst nichts. JSON: {"priceCents":0,"priceImageKind":"","manufacturer":""}.',
-    'priceCents: Verkaufspreis DIESES Produkts in Cent (1,99 € → 199), vom Regal-Preisschild oder der Bon-Zeile.',
-    'NICHT den Grundpreis (€/kg), NICHT den durchgestrichenen Preis, NICHT die Bon-Endsumme. Kein Preis sichtbar → 0.',
-    'priceImageKind: "preisschild" | "kassenbon" | "beides" | "produktfoto" | "sonstiges".',
-    'manufacturer: Inverkehrbringer laut Verpackung als Firmenname ohne Adresse. Nicht lesbar → leer.',
-    'Nichts raten — ein erfundener Wert ist schlechter als ein leeres Feld.',
-  ].join('\n');
+  const p = PROMPT_PREIS;
   const slots = ['preis', 'hersteller', 'rueckseite', 'front'];
   const [a, b] = [await frage(ai, bucket, x.images || {}, slots, p), await frage(ai, bucket, x.images || {}, slots, p)];
   const ca = Number.isFinite(a.priceCents) && a.priceCents > 0 ? Math.round(a.priceCents) : null;
   const cb = Number.isFinite(b.priceCents) && b.priceCents > 0 ? Math.round(b.priceCents) : null;
   // Bei ~40 % der Einreichungen zeigt das „Preis"-Foto nur nochmal das Produkt.
-  if (preis && ca && ca === cb && ca <= 20000 && ['preisschild', 'kassenbon', 'beides'].includes(String(a.priceImageKind || '').toLowerCase())) {
+  if (preis && ca && ca === cb && ca <= 20000 && PREIS_ARTEN.includes(String(a.priceImageKind || '').toLowerCase())) {
     patch.priceRescueOcr = { priceCents: ca, currency: 'EUR', priceImageKind: String(a.priceImageKind).toLowerCase() };
   }
   if (hersteller && a.manufacturer && norm(a.manufacturer) === norm(b.manufacturer)) {
     patch.manufacturerRescueOcr = { name: String(a.manufacturer).slice(0, 140) };
   }
-  return patch;
+  const sahPreis = (l) => (Number.isFinite(l.priceCents) && l.priceCents > 0) || PREIS_ARTEN.includes(String(l.priceImageKind || '').toLowerCase());
+  const preisUnsicher = !!preis && !patch.priceRescueOcr && (sahPreis(a) || sahPreis(b));
+  return { patch, preisUnsicher };
 }
+
 
 /** Bildprüfung: sieht alle sieben Fotos an. */
 async function bildAudit(ai, bucket, x) {
@@ -186,23 +230,7 @@ async function bildAudit(ai, bucket, x) {
     text: [
       'Du prüfst eine Produkt-Einreichung (die Fotos sind oben je Schritt benannt).',
       `Erwartet: echtes Einzelhandels-Produkt "${nameOf(x) || 'unbekannt'}" (EAN ${eanOf(x) || 'unbekannt'}).`,
-      'Erwartung je Schritt: front=Vorderseite, rueckseite=Rückseite, hersteller=Hersteller-/Adressangabe, ean=Barcode, naehrwerte=Nährwerttabelle, zutaten=Zutatenliste, preis=Preisschild oder Bon.',
-      'JSON: {"echt":true|false,"loseWare":true|false,"traegtAngaben":true|false,"gleicheAnsicht":true|false,"grund":"kurz"}.',
-      'echt=false NUR bei eindeutigem Ausschluss: kein reales Produkt, abfotografierter Bildschirm, fremde Motive, Schritte grob falsch belegt.',
-      'Unscharf, angeschnitten oder zwei vertauschte Schritte = trotzdem echt=true.',
-      // 24.09.2026: Das Preisfoto zeigte eine Tischdecke, alles andere war
-      // vollständig — die alte Prüfung hielt das für „unecht". Ein fehlender
-      // Preis ist seit den Runden im September kein Ablehngrund.
-      'Das Preis-Foto darf ohne Preis sein (z. B. nochmal das Produkt, der Tisch, der Einkaufswagen) — das allein ist KEIN Ausschluss.',
-      'Ein und dasselbe Foto darf mehrere Schritte abdecken, wenn dort wirklich mehrere Angaben stehen — auf vielen Rückseiten stehen Zutaten, Nährwerte und Anschrift zusammen. Das ist KEIN Mangel.',
-      // 24.09.2026: fünf von sieben Fotos zeigten nur den Barcode am Becherboden.
-      // Vergleich am selben Tag: Nektarinen im Netz und Bergkäse von der Theke
-      // wurden fälschlich als „dieselbe Ansicht" gewertet — beide tragen gar
-      // keine Zutaten-/Nährwertangaben, ihr einziges Etikett war vollständig
-      // fotografiert (vier unabhängige Gutachten). Deshalb die Frage getrennt:
-      'traegtAngaben: trägt DIESES Produkt von Natur aus eine Zutatenliste oder Nährwerttabelle? false bei unverarbeitetem frischem Obst und Gemüse (auch im Netz, in der Schale, mit Banderole und echtem Barcode), frischen Kräutern, Eiern und Ware von der Frischetheke. true bei verarbeiteten, verpackten Lebensmitteln und bei Drogerieartikeln mit Inhaltsstoffliste.',
-      'gleicheAnsicht=true NUR, wenn mindestens fünf Fotos dasselbe Motiv zeigen UND dadurch Angaben fehlen, die dieses Produkt tatsächlich trägt (z. B. Zutaten und Nährwerte stehen auf der Packung, fotografiert wurde aber immer nur Vorderseite oder Barcode). Trägt das Produkt keine weiteren Angaben und ist sein Etikett lesbar fotografiert, ist gleicheAnsicht=false.',
-      'loseWare=true bei unverpackter Ware ohne Produkt-Barcode (Kräuterbund, Obst, Frischetheke mit Waage-Etikett).',
+      AUDIT_ANWEISUNG,
     ].join('\n'),
   });
   const r = await mitWiederholung(() => ai.models.generateContent({
@@ -211,7 +239,12 @@ async function bildAudit(ai, bucket, x) {
   }));
   const p = JSON.parse(String(r.text ?? '').replace(/^```json\s*|```\s*$/g, ''));
   if (typeof p.echt !== 'boolean') throw new Error('Bildprüfung ohne verwertbare Antwort');
-  return { echt: p.echt !== false, loseWare: p.loseWare === true, traegtAngaben: p.traegtAngaben !== false, gleicheAnsicht: p.gleicheAnsicht === true, grund: String(p.grund || '').slice(0, 140) };
+  return {
+    echt: p.echt !== false, loseWare: p.loseWare === true, traegtAngaben: p.traegtAngaben !== false, gleicheAnsicht: p.gleicheAnsicht === true,
+    // null = nicht beurteilt → die Runde lässt den Fall liegen, statt zu raten.
+    preisSichtbar: typeof p.preisSichtbar === 'boolean' ? p.preisSichtbar : null,
+    grund: String(p.grund || '').slice(0, 140),
+  };
 }
 
 /* ─────────────────────────── Hilfen ─────────────────────────── */
@@ -219,8 +252,10 @@ async function bildAudit(ai, bucket, x) {
 function regelVersion() {
   const h = crypto.createHash('sha1');
   // werte.js gehört dazu: es bestimmt, welche EAN, welcher Preis und welcher
-  // Hersteller in die Regeln eingehen.
-  for (const f of ['duplicatePolicy.js', 'fotoRundeRegeln.js', 'werte.js']) h.update(fs.readFileSync(path.join(__dirname, f)));
+  // Hersteller in die Regeln eingehen; ort.js, wann der Aufnahmeort auffällt.
+  for (const f of ['duplicatePolicy.js', 'fotoRundeRegeln.js', 'werte.js', 'ort.js']) h.update(fs.readFileSync(path.join(__dirname, f)));
+  // Ebenso die Anweisungen an das Modell: sie entscheiden mit (Gegenprüfung 26.09.).
+  h.update([PROMPT_NAME, PROMPT_EAN, PROMPT_PREIS, AUDIT_ANWEISUNG].join('\n'));
   return h.digest('hex').slice(0, 10);
 }
 
@@ -232,7 +267,9 @@ function schnittQuote(alle, jetzt) {
     const t = ms(d.x.reviewedAt);
     if (!t || t < ab) continue;
     if (d.x.status === 'approved') fr++;
-    else if (d.x.status === 'rejected') ab2++;
+    // „Preis fehlt" zählt nicht mit — sonst verschöbe die neue Regel den
+    // Vergleichswert der Gesamt-Notbremse (siehe fotoRundeRegeln.notbremse).
+    else if (d.x.status === 'rejected' && !PREIS_GRUENDE.has(d.x.rejectReason)) ab2++;
   }
   return fr + ab2 >= 30 ? ab2 / (fr + ab2) : null;
 }
@@ -396,9 +433,23 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     // Die Referenz (binnen 24 h freigegeben) lief selbst schon durch dieses
     // Nachlesen, als sie offen war — deshalb hier nur der Fehler des Kandidaten.
     const rf = { ...(rettungFehler.get(d.id) || {}) };
+    const gps = d.x.capture && d.x.capture.gps;
+    const ort = gps ? auffaelligkeiten({ lat: gps.lat, lon: gps.lon, genauigkeitM: gps.accuracyM, erwartetesLand: d.x.marketLand, quelle: 'geraet' })
+      .find((a) => a.art === 'ausland' || a.art === 'landabweichung' || a.art === 'simulator') : null;
+    // Der Nachlauf des Lesedienstes läuft alle 15 min. Liegt sein Termin mehr
+    // als zwei Stunden zurück, hängt er — dann entscheidet die Runde selbst
+    // (sie liest ja ohnehin nach), statt den Fall ewig liegen zu lassen.
+    const namerAb = ms(d.x.namerNachlesenAb);
+    // Beschädigtes Preisfoto: vom Lesedienst erkannt, oder die Dateigröße ist
+    // ein glattes Vielfaches von 512 KiB — genau dort brach der Android-Upload
+    // ab (firebase-storage 22.0.1). Ein echtes JPEG endet praktisch nie so.
+    const preisMeta = (metaVon.get(d.id) || []).find((m) => m.k === 'preis');
+    const preisBildDefekt = bildDefektOf(d.x).some((b) => b.slot === 'preis') || !!(preisMeta && preisMeta.size > 0 && preisMeta.size % 524288 === 0);
     const e = entscheideFall({
       comp: v.comp, dup, leer: v.leer, unlesbar: v.unlesbar, wiederverwendet: wiederverwendet.has(d.id),
       audit: audit.get(d.id) || null, auditFehler: auditFehler.get(d.id) || null, rettungFehler: rf, preisFehlt,
+      preisVorhanden: !!preisOf(d.x), preisHinweis: preisHinweisOf(d.x), ortAuffaellig: ort ? ort.text : null,
+      namerLaeuft: namerAb != null && namerAb > start - NAMER_HAENGT_MS, preisBildDefekt,
     });
     plan.push({ ...d, ...e, comp: v.comp, dup, audit: audit.get(d.id) || null });
     if (e.entscheidung === 'freigeben') statusJetzt.set(d.id, 'approved');
@@ -431,11 +482,15 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
         reasons: [...p.comp.problems, ...(p.dup.reason ? [p.dup.reason] : [])],
         dup: dupZumSpeichern(p.dup),
       };
-      const bild = p.audit ? { echt: p.audit.echt, loseWare: p.audit.loseWare, traegtAngaben: p.audit.traegtAngaben, gleicheAnsicht: p.audit.gleicheAnsicht, grund: p.audit.grund } : null;
+      const bild = p.audit ? { echt: p.audit.echt, loseWare: p.audit.loseWare, traegtAngaben: p.audit.traegtAngaben, gleicheAnsicht: p.audit.gleicheAnsicht, preisSichtbar: p.audit.preisSichtbar, grund: p.audit.grund } : null;
       try {
       await db.runTransaction(async (tx) => {
         const s = await tx.get(p.ref);
         if (!s.exists || s.data().status !== 'pending') { p.uebersprungen = true; return; }
+        // Die Runde dauert bis zu 18 min. Hat der Lesedienst in der Zeit doch
+        // einen Preis oder ein Preisschild gefunden, ist „Preis fehlt" überholt
+        // — nicht ablehnen, morgen neu entscheiden (Gegenprüfung 26.09.).
+        if (p.grund === 'preis_fehlt' && (preisOf(s.data()) || preisHinweisOf(s.data()))) { p.uebersprungen = true; return; }
         if (p.entscheidung === 'freigeben') {
           tx.update(p.ref, {
             status: 'approved', reviewedAt: FieldValue.serverTimestamp(), reviewedBy: ENTSCHEIDER, updatedAt: FieldValue.serverTimestamp(),
@@ -525,6 +580,8 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     auditVersucht: zuPruefen.length - nichtGeprueft.length, auditFehler: [...auditFehler.values()].filter((f) => f !== 'zeit_abgelaufen').length,
     nichtGeschafft: new Set([...nichtNachgelesen, ...nichtGeprueft].map((d) => d.id)).size,
     schreibFehler: plan.filter((p) => p.grund === 'schreib_fehler').length,
+    // Was liegen bleibt, wartet auf einen Menschen — seit wann?
+    aeltesteOffenTage: offen.length ? Math.floor((start - Math.min(...offen.map((p) => ms(p.x.createdAt) ?? start))) / (24 * 60 * 60 * 1000)) : null,
   };
   const warn = warnungen({
     jetzt: start, aktionen, zweitpruefung: lage.zweitpruefung, bons: lage.bons, runde, notbremse: bremse,
@@ -555,7 +612,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     bildpruefung: { versucht: runde.auditVersucht, gescheitert: runde.auditFehler, unpassend: plan.filter((p) => BILD_GRUENDE.has(p.grund) || BILD_GRUENDE.has(p.zurueckgehaltenGrund)).length },
     nichtGeschafft: runde.nichtGeschafft,
     schreibFehler: runde.schreibFehler,
-    notbremse: { bild: bremse.bild, gesamt: bremse.gesamt },
+    notbremse: { bild: bremse.bild, gesamt: bremse.gesamt, preis: bremse.preis },
     wartetAufDich: offen.slice(0, 100).map(fall),
     abgelehntListe: abgelehnt.slice(0, 100).map(fall),
     bons: lage.bons,

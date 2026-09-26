@@ -50,6 +50,35 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
 
 ## Regeln, die nicht verhandelbar sind
 
+- **Der Preis ist Pflicht (Entscheidung Patrick 26.09.2026).** Die Bildprüfung
+  beantwortet `preisSichtbar` getrennt von `echt`. Freigabe nur, wenn der Preis
+  gelesen ist (`werte.preisOf`) ODER auf dem Preisfoto sichtbar; sonst
+  `preis_fehlt` (endgültig). Hat die Bildprüfung den Preis nicht beurteilt
+  (auch: `preisSichtbar: null` = unsicher) oder scheiterte das Nachlesen an
+  unserer Technik → offen. Ein Preisschild eines ANDEREN Produkts zählt nicht
+  (Vergleich 26.09.: Käsezopf statt Milbona).
+  **Abgelehnt wird nur ohne jedes Gegenzeichen.** Sah der Lesedienst beim
+  Anlegen ein Preisschild oder einen Kassenbon (`werte.preisHinweisOf`) oder
+  fand nur eine von zwei Nachlesungen einen Preis → offen `preis_unsicher`.
+  Eine Ablehnung ist endgültig, Liegenlassen kostet einen Blick.
+  Gemessen 26.09. an 113 echten Fällen: 0 Fehlablehnungen bei 28 Fällen mit
+  sichtbarem Preis (24 frei, 4 offen), 63 von 65 ohne Preis abgelehnt.
+  Notbremse: fehlt angeblich bei mehr als 30 % der geprüften Fälle der Preis
+  (normal gut 10 %), werden diese Ablehnungen zurückgehalten.
+  Vorher stand hier das Gegenteil („Preisfoto darf ohne Preis sein") — eine
+  Regel, die ich aus meinen Handrunden übernommen hatte, obwohl Patrick am
+  20.09. „preis?" als Prüfpunkt genannt hatte. Seit 01.09. hatten 624 von 1.973
+  Freigaben keinen gelesenen Preis; hochgerechnet aus einer Sichtprobe zeigte
+  knapp jede fünfte Freigabe gar keinen Preis. In der Morgenrunde waren es 30
+  von 284. Zurückgefordert wird nichts.
+- **Aufnahmeort passt nicht zum Markt** (anderes Land, Ausland, Simulator-
+  Standort; `ort.auffaelligkeiten`) → bleibt für Patrick liegen (`ort_auffaellig`).
+  Selten (3 von 1.973 Freigaben seit 01.09.) und oft harmlos (Aldi Süd/Hofer).
+- **Liest der Lesedienst noch nach** (`namerNachlesenAb` gesetzt) → offen
+  (`namer_laeuft_noch`); erst danach stehen Name, Preis und Kassenbon-Adresse fest.
+  Liegt sein Termin mehr als zwei Stunden zurück, hängt er (Takt 15 min) — dann
+  entscheidet die Runde selbst.
+
 - **Die Regeldatei muss aus dem Haupt-Checkout stammen.** Am 20.09. lief ein
   Lauf gegen eine Regelfassung, die sechs Tage alt war — 8 von 14 Ablehnungen
   wären gegen eine Entscheidung gegangen, die Patrick Stunden vorher getroffen
@@ -117,6 +146,12 @@ Freigaben laufen IMMER — sie sind die harmlose Richtung. Zurückgehalten
   (Handrunden 09.–24.09.: 0–2 %).
 - **Gesamtquote springt:** mindestens 10 Ablehnungen und mehr als das Doppelte
   der Ablehnungsquote der letzten 30 Tage → alle Ablehnungen des Laufs.
+  „Preis fehlt" zählt dabei NICHT mit, weder heute noch im 30-Tage-Schnitt:
+  diese Ablehnungen gibt es erst seit 26.09. und hätten die Quote dauerhaft
+  verdoppelt — die Bremse hätte jeden Tag ausgelöst und keine einzige Ablehnung
+  mehr geschrieben (Gegenprüfung 26.09.).
+- **Preis fehlt auffällig oft:** mindestens 8 und mehr als 30 % der geprüften
+  Fälle → nur diese Ablehnungen (normal gut 10 %).
 
 ## Warnungen im Bericht
 
@@ -126,7 +161,9 @@ oder knapp, **Zweitprüfung eingeschaltet aber 48 h nicht gelaufen** (23.09.:
 ein Ausrollen von einem Zweig ohne diesen Code nahm sie still raus), Bons
 hängen ≥ 3 Tage in der Prüfung, > 5 % Bons ohne Aktion, Bildprüfung
 scheitert reihenweise, Runde nicht fertig geworden, Notbremse, Regeln
-seit dem letzten Lauf geändert. Dass die Runde gar nicht lief, erkennen
+oder Anweisungen an das Modell seit dem letzten Lauf geändert, Produktfotos
+warten ≥ 3 Tage auf eine Entscheidung (seit der Preis-Pflicht bleibt bei
+Zweifel mehr liegen). Dass die Runde gar nicht lief, erkennen
 Dashboard und Morgen-Chat selbst (Bericht älter als 26 h bzw. nicht von heute).
 
 ## Nachricht an die Nutzer

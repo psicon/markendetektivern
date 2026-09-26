@@ -181,8 +181,12 @@
         ['bilder_wiederverwendet', 'Bilder wiederverwendet'],
         ['bild_defekt', 'Foto unlesbar'],
         ['sperre_30_tage_gleicher_nutzer', 'Doppelt (selber Nutzer)'],
-        ['sperre_30_tage_anderer_nutzer', 'Doppelt (anderer Nutzer)'],
+        // 26.09.2026: Preis ist Pflicht (Entscheidung Patrick). Taste 8 — die
+        // übrigen Tasten bleiben, wo sie waren; auf 8 lag bis dahin die Sperre
+        // wegen fremder Einreichungen, die es seit 20.09. nicht mehr gibt.
+        ['preis_fehlt', 'Preis fehlt'],
         ['doppelt_eingereicht', 'Frühere Einreichung offen'],
+        ['sperre_30_tage_anderer_nutzer', 'Doppelt (anderer Nutzer)'],
       ];
       const REASONS_RECEIPT = [
         ['manual_review_rejected', 'Nicht verwertbar'],
@@ -402,7 +406,8 @@
         const l = $('qlist');
         l.innerHTML = S.queue.map((r, i) => {
           const done = S.done.has(r.id);
-          const v = r.verdict || 'ok';
+          // Ohne gelesenen Preis gelb statt grün — nachsehen, nicht blind freigeben.
+          const v = r.verdict === 'ok' && (r.hinweise || []).length ? 'hold' : (r.verdict || 'ok');
           const titel = S.type === 'photos' ? (r.productName || '(ohne Name)') : (r.merchantName || 'Unbekannter Markt');
           // Name und EAN sind die effektiven Werte (wie in der Morgenrunde);
           // nachgelesene sind als solche erkennbar.
@@ -507,6 +512,8 @@
           ? `<div class="folge zahlt-nicht">Abgelehnt wegen: <b>${esc(REASON_DE[ablehnGrund] || ablehnGrund)}</b></div>`
           : '';
         const dupHeute = p.dupQuelle === 'heute' ? ' <span class="nl">heute berechnet</span>' : '';
+        // Preis-Pflicht (26.09.2026): nur bei sonst unauffälliger Vorprüfung ersetzen.
+        const ohnePreis = (p.verdict || 'ok') === 'ok' && (p.hinweise || []).includes('preis_nicht_gelesen');
         const dup = p.dup && p.dup.priorId
           ? `<div class="kv"><div class="k">Früher</div><div class="v">${c.prior ? `${esc(c.prior.status)} · ${esc(fmtDate(c.prior.createdAt))} · ${p.dup.sameUser ? 'selber Nutzer' : 'anderer Nutzer'}` : esc(short(p.dup.priorId, 10))}${dupHeute}</div>
              <div class="k">Anders</div><div class="v">${(p.dup.updatedFields || []).length ? esc((p.dup.updatedFields || []).map((f) => ({ price: 'Preis', manufacturer: 'Hersteller', market: 'Markt' }[f] || f)).join(', ')) : '— nichts'}</div></div>`
@@ -516,8 +523,8 @@
           <div class="facts">
             <div class="eyebrow">Produktfoto-Einreichung</div>
             <h2>${esc(name || '(ohne Name)')}${h.nameQuelle === 'nachgelesen' ? nl() : ''}</h2>
-            <div class="verdict v-${esc(p.verdict || 'ok')}">${esc(VERDICT_DE[p.verdict] || p.verdict || '')}
-              ${(p.reasons || []).length ? `<small>${esc((p.reasons || []).map((x) => REASON_DE[x] || x).join(' · '))}</small>` : '<small>Vollständig, kein Doppel</small>'}
+            <div class="verdict v-${esc(ohnePreis ? 'hold' : p.verdict || 'ok')}">${esc(ohnePreis ? 'Preis nicht gelesen — auf dem Preisfoto nachsehen' : VERDICT_DE[p.verdict] || p.verdict || '')}
+              ${(p.reasons || []).length ? `<small>${esc((p.reasons || []).map((x) => REASON_DE[x] || x).join(' · '))}</small>` : `<small>Vollständig, kein Doppel${ohnePreis ? ' · ohne Preis im Foto: ablehnen mit A, dann 8' : ''}</small>`}
               ${urteilHerkunft}</div>
             ${entschieden}
             <div class="folge ${c.folge && c.folge.buchtCent > 0 ? 'zahlt' : 'zahlt-nicht'}">
@@ -595,7 +602,7 @@
       // ── Entscheiden ─────────────────────────────────────────
       function showReasons(list, onPick) {
         const box = $('reasons');
-        box.innerHTML = list.map(([k, l], i) => `<button class="rchip" data-r="${esc(k)}">${esc(l)}<span class="kbd">${i + 1}</span></button>`).join('')
+        box.innerHTML = list.map(([k, l], i) => `<button class="rchip" data-r="${esc(k)}">${esc(l)}${i < 9 ? `<span class="kbd">${i + 1}</span>` : ''}</button>`).join('')
           + '<button class="rchip" data-r="" style="border-style:dashed">Abbrechen<span class="kbd">Esc</span></button>';
         box.classList.add('on');
         $('spacer').classList.add('hidden');

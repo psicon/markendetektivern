@@ -78,4 +78,22 @@ function herkunftOf(x) {
   };
 }
 
-module.exports = { pruefzifferOk, eanOf, nameOf, preisOf, policyOf, herstellerAnzeige, vollstaendigkeitOf, herkunftOf };
+/** Bildarten, auf denen ein Preis steht (Lesedienst und Nachlesung benutzen dieselben Namen). */
+const PREIS_ARTEN = ['preisschild', 'kassenbon', 'beides'];
+
+/**
+ * Anzeichen, dass im Bild doch ein Preis ist, obwohl keiner gelesen wurde: der
+ * Lesedienst hat beim Anlegen ein Preisschild oder einen Kassenbon erkannt.
+ * Widerspricht das einer Bildprüfung, die „kein Preis" sagt, lehnt die
+ * Morgenrunde NICHT ab, sondern lässt den Fall liegen (Preis-Pflicht 26.09.2026).
+ * @returns {string|null} kurzer Hinweis für den Menschen
+ */
+function preisHinweisOf(x) {
+  const art = String(x.priceImageKind || '').toLowerCase();
+  if (PREIS_ARTEN.includes(art)) return `Lesedienst sah auf dem Preisfoto: ${art}`;
+  const b = x.priceReceipt;
+  if (b && (b.zip || b.city || b.merchant || b.street)) return 'Lesedienst erkannte einen Kassenbon';
+  return null;
+}
+
+module.exports = { pruefzifferOk, eanOf, nameOf, preisOf, policyOf, herstellerAnzeige, vollstaendigkeitOf, herkunftOf, preisHinweisOf, PREIS_ARTEN };

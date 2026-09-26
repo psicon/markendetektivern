@@ -63,6 +63,17 @@ describe('warnungen', () => {
   });
 });
 
+describe('Produktfotos warten', () => {
+  it('ältester offener Fall seit 3 Tagen → gelb', () => {
+    const w = warnungen(basis({ runde: { geprueft: 50, offen: 12, auditFehler: 0, auditVersucht: 49, nichtGeschafft: 0, aeltesteOffenTage: 3 } }));
+    expect(codes(w)).toEqual(['gelb:fotos_warten']);
+    expect(w[0].text).toMatch(/12 Produktfotos.*3 Tagen/);
+  });
+  it('seit 2 Tagen → noch keine Warnung', () => {
+    expect(warnungen(basis({ runde: { geprueft: 50, offen: 12, auditFehler: 0, auditVersucht: 49, nichtGeschafft: 0, aeltesteOffenTage: 2 } }))).toEqual([]);
+  });
+});
+
 describe('Schreibfehler', () => {
   it('nicht gespeicherte Entscheidungen → rot', () => {
     expect(codes(warnungen(basis({ runde: { geprueft: 50, offen: 2, auditFehler: 0, auditVersucht: 48, nichtGeschafft: 0, schreibFehler: 2 } })))).toContain('rot:schreibfehler');

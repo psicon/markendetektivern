@@ -3049,9 +3049,12 @@ gefragt wird, liefert dort gern eine vom Waage-Etikett, und händlerinterne GTIN
 Barcode-Schritt nimmt der Auslöser ein Foto an, auch wenn nichts dekodiert wurde
 (`app/product-submit/wizard.tsx`), das manuelle Eingabefeld erscheint nur auf dem
 Galerie-Weg — 163 sonst vollständige Einreichungen ohne EAN.
-**Drift-Warnung:** die Prüfkonsole (`review-console/index.js precheckOf`) liest
-WEDER `productNameRescueOcr` NOCH `eanRescueOcr` — Konsole und Ops-Skript
-urteilen über denselben Fall verschieden. Beim nächsten Konsolen-Umbau nachziehen.
+**Behoben 26.09.2026:** Prüfkonsole und Morgenrunde lesen Name, EAN, Preis und
+Hersteller aus EINER Quelle (`review-console/src/werte.js`), gerettete Werte
+eingeschlossen und als „nachgelesen" gekennzeichnet. Ein geretteter Hersteller
+zählt weiter NICHT für die Doppel-Regel. Die Rettungs- und OCR-Felder darf der
+Client beim Anlegen nicht mehr mitschicken (`firestore.rules`, Sperrliste von
+47 Serverfeldern, Rules-Tests in beide Richtungen).
 
 **Korrekturen an älteren Notizen (gemessen 19.09.2026):**
 - Der Foto-Trigger schreibt das Ergebnis inzwischen ans Dokument
@@ -3104,6 +3107,35 @@ vorher kommen soll.
   fehlender Aufrufberechtigung) verwerfen kein Ticket.
 - Umfragen bleiben wie sie sind (Vergütung nur registriert); Gäste mit
   Einwilligung bekommen nach einer vergüteten Umfrage „Konto erstellen".
+
+## Produktentscheidung 26.09.2026: der Preis ist Pflicht
+
+Patrick, 26.09.: „Ja, Preis Pflicht". Zeigt das Preisfoto weder Preisschild,
+Waage-Etikett mit Preis noch Kassenbon (sondern nochmal die Packung, den Tisch,
+ein fremdes Preisschild), lehnt die Morgenrunde mit `preis_fehlt` ab (App-Text
+in `lib/utils/productSubmissionCopy.ts`). Genügt: Preis gelesen ODER auf dem
+Foto sichtbar. Abgelehnt wird nur ohne Gegenzeichen — sah der Lesedienst ein
+Preisschild/einen Kassenbon oder ist die Bildprüfung unsicher, bleibt der Fall
+liegen (`preis_unsicher`/`preis_unbeurteilt`). Aufnahmeort in einem anderen
+Land als der Markt → bleibt beim Menschen (`ort_auffaellig`). Bereits bezahlte
+Fälle ohne Preis werden NICHT zurückgefordert. Gemessen vor der Regel: 624 von
+1.973 Freigaben seit 01.09. ohne gelesenen Preis, hochgerechnet zeigte knapp
+jede fünfte gar keinen Preis (Morgenrunde: 30 von 284).
+
+**Neue Ablehngründe gehören NICHT in die Gesamt-Notbremse.** Die Bremse
+vergleicht die heutige Ablehnungsquote mit dem 30-Tage-Schnitt. Ein Grund, den
+es vorher nicht gab, verdoppelt die Quote dauerhaft — die Bremse hätte ab dem
+ersten Tag jede Ablehnung zurückgehalten, still und für immer. Neue Gründe
+bekommen eine eigene Bremse und fallen aus beiden Seiten der Quote heraus
+(`PREIS_GRUENDE` in `fotoRundeRegeln.js`).
+
+**Die übertragbare Lehre — ich hatte das selbst verursacht:** Patrick hatte am
+20.09. als Prüfpunkte „alles drin? barcode? preis?" genannt. In meinen
+Handrunden ließ ich fehlende Preise trotzdem durch und schrieb das am 24.09.
+als Regel in die Morgenrunde („Preisfoto darf ohne Preis sein") — ohne es ihm
+vorzulegen. Regel: **Eine Prüfregel, die eine Vorgabe von Patrick abschwächt
+oder weglässt, wird nie still festgeschrieben** — vorher fragen, und im Code
+die Quelle der Regel nennen (Entscheidung Patrick vom … / eigene Annahme).
 
 ## Produktentscheidung 20.09.2026: lose Ware wird angenommen
 
@@ -3190,6 +3222,9 @@ Lesungen, eigenes Feld (`priceRescueOcr`/`manufacturerRescueOcr`), nie in
 Buchung, 0 ohne Grund am Dokument, Warteschlange leer.
 
 ## Morgenrunde Produktfotos (seit 24.09.2026)
+
+**Stand 26.09.2026:** auf Trockenlauf (`fotoWorker: false`), bis die
+Preis-Pflicht live ist; danach wieder scharf.
 
 Täglich 08:00 prüft und entscheidet `fotoRundeTaeglich` (Codebase
 review-console) alle offenen Produktfoto-Einreichungen — Freigaben UND

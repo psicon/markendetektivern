@@ -23,7 +23,7 @@ const TAG_MS = 24 * 60 * 60 * 1000;
  * @param {Array<{id:string, kind:string, active:boolean, startAt:number, endAt:number, budgetRemainingCents?:number, budgetTotalCents?:number}>} k.aktionen
  * @param {{eingeschaltet:boolean, laeufeLetzte48h:number}} k.zweitpruefung
  * @param {{inPruefung:number, aeltesteTage:number|null, letzte24h:{gesamt:number, ohneAktion:number}}} k.bons
- * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number}} k.runde
+ * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number, aeltesteOffenTage?:number|null}} k.runde
  * @param {{bild:boolean, gesamt:boolean, text:string[]}} k.notbremse
  * @param {{alt:string|null, neu:string}} k.regelVersion
  * @param {{scharf:boolean, bericht:object|null, abgebrochen?:boolean, laeuftNoch?:boolean, unbekannt?:boolean}} [k.bonRunde]
@@ -79,6 +79,11 @@ function warnungen(k) {
   if (r) {
     if (r.schreibFehler > 0) rot('schreibfehler', `${r.schreibFehler} Entscheidungen konnten nicht gespeichert werden — die Fälle sind offen geblieben und morgen wieder dran.`);
     if (r.nichtGeschafft > 0) gelb('runde_unvollstaendig', `${r.nichtGeschafft} Einreichungen hat die Runde in der Zeit nicht mehr geschafft — sie sind morgen dran.`);
+    // Seit der Preis-Pflicht (26.09.) bleibt bei Zweifel mehr liegen als vorher.
+    // Liegen heißt: die Person wartet auf ihr Geld — das darf nicht still wachsen.
+    if (r.aeltesteOffenTage != null && r.aeltesteOffenTage >= 3) {
+      gelb('fotos_warten', `${r.offen} Produktfotos warten auf deine Entscheidung, die älteste seit ${r.aeltesteOffenTage} Tagen.`);
+    }
     if (r.auditVersucht >= 8 && r.auditFehler / r.auditVersucht > 0.25) {
       rot('bildpruefung_gestoert', `Die Bildprüfung ist bei ${r.auditFehler} von ${r.auditVersucht} Einreichungen gescheitert (meist Google-Limit). Diese Fälle bleiben offen.`);
     }
