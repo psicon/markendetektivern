@@ -1,5 +1,6 @@
 import { Colors } from '@/constants/Colors';
 import { useTheme } from '@/lib/contexts/ThemeContext';
+import { anfragenOhneHaenger, mitZeitlimit } from '@/lib/services/berechtigungsWaechter';
 import * as Location from 'expo-location';
 import React, { useEffect, useState } from 'react';
 import {
@@ -16,6 +17,9 @@ import {
 import MapView, { Marker, Region } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { IconSymbol } from './IconSymbol';
+
+/** Längste Wartezeit auf einen Standort-Fix, bevor der Ladezustand endet. */
+const POSITION_MS = 15000;
 
 interface LocationData {
   address: string;
@@ -142,10 +146,22 @@ export const LocationPicker: React.FC<LocationPickerProps> = ({
 
   const requestLocationPermission = async () => {
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      setLocationPermission(status === 'granted');
-      
-      if (status === 'granted') {
+      // Erst lesen: steht der Ausgang fest (erteilt / dauerhaft verweigert),
+      // gibt es keinen Dialog — und Android lieferte die Antwort dann erst
+      // beim nächsten Aufwachen der App; bis dahin parkte Expo jede weitere
+      // Berechtigungsanfrage (Vorfall 25.09.2026, berechtigungsWaechter.ts).
+      const vorher = await Location.getForegroundPermissionsAsync();
+      // iOS: canAskAgain=false ist endgültig. Android meldet es auch nach
+      // einem weggetippten Dialog — dort trotzdem (mit Wächter) fragen.
+      const p = vorher.granted || (!vorher.canAskAgain && Platform.OS === 'ios')
+        ? vorher
+        : await anfragenOhneHaenger(
+            () => Location.requestForegroundPermissionsAsync(),
+            () => Location.getForegroundPermissionsAsync(),
+          );
+      setLocationPermission(p.granted);
+
+      if (p.granted) {
         getCurrentLocation();
       }
     } catch (error) {
@@ -157,9 +173,14 @@ export const LocationPicker: React.FC<LocationPickerProps> = ({
   const getCurrentLocation = async () => {
     try {
       setLoading(true);
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
+      // Ohne Fix (drinnen, Ortung aus) kann die Messung sehr lange dauern —
+      // der Ladezustand darf daran nicht hängen bleiben.
+      const location = await mitZeitlimit(
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+        POSITION_MS,
+        null,
+      );
+      if (!location) return;
       
       const newRegion = {
         latitude: location.coords.latitude,

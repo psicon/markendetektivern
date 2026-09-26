@@ -30,6 +30,7 @@ import {
   DETAIL_HEADER_ROW_HEIGHT,
 } from '@/components/design/DetailHeader';
 import { FilterSheet, OptionList } from '@/components/design/FilterSheet';
+import { KontoSichernKarte } from '@/components/rewards/KontoSichernKarte';
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -37,6 +38,7 @@ import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
 import {
   kickBonQueue,
   retryAllFailedBons,
+  sichtbareBonJobs,
   subscribeBonQueue,
   type BonJob,
 } from '@/lib/services/bonUploadQueue';
@@ -209,7 +211,7 @@ export default function CashbackHistoryScreen() {
   const { theme, shadows } = useTokens();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { user } = useAuth();
+  const { user, isAnonymous } = useAuth();
 
   const [entries, setEntries] = useState<CashbackStatusEntry[] | null>(null);
   const [pageLimit, setPageLimit] = useState(PAGE_SIZE);
@@ -245,13 +247,17 @@ export default function CashbackHistoryScreen() {
   const [queueJobs, setQueueJobs] = useState<BonJob[]>([]);
   useEffect(() => subscribeBonQueue(setQueueJobs), []);
   // Nur Jobs OHNE Mirror-Zeile als eigene Zeile rendern (sonst doppelt).
+  // Nur Aufträge, die zu DIESEM Konto gehören (oder vom Server bestätigt
+  // übernommen sind) — nach einem Kontowechsel wartende Gast-Aufträge sind
+  // nicht „deine" Bons.
+  const eigeneJobs = useMemo(() => sichtbareBonJobs(queueJobs), [queueJobs, user?.uid]);
   const orphanJobs = useMemo(
-    () => queueJobs.filter((j) => !(entries ?? []).some((e) => e.id === j.id)),
-    [queueJobs, entries],
+    () => eigeneJobs.filter((j) => !(entries ?? []).some((e) => e.id === j.id)),
+    [eigeneJobs, entries],
   );
   const failedJobCount = useMemo(
-    () => queueJobs.filter((j) => j.status === 'failed').length,
-    [queueJobs],
+    () => eigeneJobs.filter((j) => j.status === 'failed').length,
+    [eigeneJobs],
   );
 
   useEffect(() => {
@@ -797,6 +803,12 @@ export default function CashbackHistoryScreen() {
           ListHeaderComponent={
             <View style={{ paddingTop: headerOffset + 8 }}>
               <HeaderCard />
+              {/* Gäste: Belohnungen per Konto sichern. */}
+              {isAnonymous ? (
+                <View style={{ marginHorizontal: 16, marginBottom: 14 }}>
+                  <KontoSichernKarte ziel="/cashback/history" />
+                </View>
+              ) : null}
               {/* 86cb6tx29: Jobs aus der lokalen Upload-Queue, die (noch)
                   keine Mirror-Zeile haben — sonst wären sie unsichtbar. */}
               {failedJobCount > 0 ? (

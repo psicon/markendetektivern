@@ -30,7 +30,7 @@
       "supportsTablet": false,
       "requireFullScreen": true,
       "bundleIdentifier": "de.markendetektive",
-      "buildNumber": "1270",
+      "buildNumber": "1274",
       "appleTeamId": "MZD2N2F887",
       "googleServicesFile": "./GoogleService-Info.plist",
       "usesAppleSignIn": true,
@@ -49,7 +49,7 @@
           "UIInterfaceOrientationPortrait"
         ],
         "NSCameraUsageDescription": "Diese App benötigt Zugriff auf die Kamera, um Barcodes von Produkten zu scannen und Preise zu vergleichen.",
-        "NSLocationWhenInUseUsageDescription": "Bei Produktfotos wird dein Standort erfasst und dem Datensatz zugeordnet — so ist nachvollziehbar, wo ein Produkt zu finden war. Bei Bons lesen wir die Filialadresse direkt vom Bon ab. Die Standortfreigabe ist Voraussetzung für die Teilnahme am Cashback-Programm.",
+        "NSLocationWhenInUseUsageDescription": "Bei Produktfotos wird dein Standort erfasst und dem Datensatz zugeordnet — so ist nachvollziehbar, wo ein Produkt zu finden war. Bei Bons lesen wir die Filialadresse direkt vom Bon ab. Die Standortfreigabe ist Voraussetzung für die Teilnahme am Cashback-Programm (Bons, Produktfotos und vergütete Umfragen). Bei der Registrierung und im Profil kannst du deinen Einkaufsort außerdem per Standort wählen.",
         "NSPhotoLibraryUsageDescription": "Diese App benötigt Zugriff auf deine Fotos, um dein Profilbild aus der Galerie auszuwählen."
       }
     },
@@ -73,7 +73,7 @@
       ],
       "package": "de.markendetektive",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 1244
+      "versionCode": 1247
     },
     "web": {
       "bundler": "metro",
@@ -106,7 +106,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Bei Produktfotos wird dein Standort erfasst und dem Datensatz zugeordnet — so ist nachvollziehbar, wo ein Produkt zu finden war. Bei Bons lesen wir die Filialadresse direkt vom Bon ab. Die Standortfreigabe ist Voraussetzung für die Teilnahme am Cashback-Programm.",
+          "locationWhenInUsePermission": "Bei Produktfotos wird dein Standort erfasst und dem Datensatz zugeordnet — so ist nachvollziehbar, wo ein Produkt zu finden war. Bei Bons lesen wir die Filialadresse direkt vom Bon ab. Die Standortfreigabe ist Voraussetzung für die Teilnahme am Cashback-Programm (Bons, Produktfotos und vergütete Umfragen). Bei der Registrierung und im Profil kannst du deinen Einkaufsort außerdem per Standort wählen.",
           "locationAlwaysAndWhenInUsePermission": false,
           "locationAlwaysPermission": false
         }

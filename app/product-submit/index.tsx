@@ -10,13 +10,14 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Image as ExpoImage } from 'expo-image';
 import { router, useNavigation } from 'expo-router';
 import { safePush } from '@/lib/utils/safeNav';
-import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDownloadURL, ref as storageRef } from '@react-native-firebase/storage';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
 import { FilterSheet, OptionList } from '@/components/design/FilterSheet';
+import { KontoSichernKarte } from '@/components/rewards/KontoSichernKarte';
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { storage } from '@/lib/firebase';
 import { useTokens } from '@/hooks/useTokens';
@@ -36,6 +37,7 @@ import {
   removeJob,
   retryAllFailed,
   retryJob,
+  sichtbareUploadJobs,
   subscribeUploadQueue,
   type UploadJob,
 } from '@/lib/services/uploadQueue';
@@ -128,7 +130,7 @@ export default function ProductSubmitOverview() {
   const navigation = useNavigation();
   const { theme, shadows } = useTokens();
   const [rows, setRows] = useState<ProductSubmissionEntry[]>([]);
-  const [queue, setQueue] = useState<UploadJob[]>([]);
+  const [rohQueue, setQueue] = useState<UploadJob[]>([]);
   const net = useNetworkStatus();
   const [loaded, setLoaded] = useState(false);
   const [campaign, setCampaign] = useState<ActiveProductCampaign | null>(null);
@@ -194,7 +196,10 @@ export default function ProductSubmitOverview() {
   // die am Gate-Service (startProductSubmitFlow) vorbei hierher routen.
   // OHNE laufende Aktion bleibt der Screen ungegatet (Datensammlung ist
   // immer möglich, auch anonym).
-  const { user } = useAuth();
+  const { user, isAnonymous } = useAuth();
+  // Nur Aufträge dieses Kontos (oder vom Server bestätigt übernommene) —
+  // nach einem Kontowechsel wartende Gast-Aufträge gehören nicht hierher.
+  const queue = useMemo(() => sichtbareUploadJobs(rohQueue), [rohQueue, user?.uid]);
   useEffect(() => {
     if (!campaign || campaign.rewardCents <= 0) return;
     let alive = true;
@@ -379,6 +384,14 @@ export default function ProductSubmitOverview() {
             </Text>
           </Pressable>
         </View>
+
+        {/* Gäste mit mindestens einer Einreichung oder einem Auftrag:
+            Belohnung per Konto sichern. */}
+        {isAnonymous && (total > 0 || queue.length > 0) ? (
+          <View style={{ marginHorizontal: 16, marginTop: 12 }}>
+            <KontoSichernKarte ziel="/product-submit" />
+          </View>
+        ) : null}
 
         {/* Background upload queue — the single status surface for in-flight
             uploads. One row per job (progress + retry), no overlays even when

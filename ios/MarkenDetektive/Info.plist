@@ -54,7 +54,7 @@
       </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>1270</string>
+    <string>1274</string>
     <key>FacebookAdvertiserIDCollectionEnabled</key>
     <false/>
     <key>FacebookAppID</key>
@@ -94,7 +94,7 @@
     <key>NSCameraUsageDescription</key>
     <string>Diese App benötigt Zugriff auf die Kamera, um Barcodes von Produkten zu scannen und Preise zu vergleichen.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>Bei Produktfotos wird dein Standort erfasst und dem Datensatz zugeordnet — so ist nachvollziehbar, wo ein Produkt zu finden war. Bei Bons lesen wir die Filialadresse direkt vom Bon ab. Die Standortfreigabe ist Voraussetzung für die Teilnahme am Cashback-Programm.</string>
+    <string>Bei Produktfotos wird dein Standort erfasst und dem Datensatz zugeordnet — so ist nachvollziehbar, wo ein Produkt zu finden war. Bei Bons lesen wir die Filialadresse direkt vom Bon ab. Die Standortfreigabe ist Voraussetzung für die Teilnahme am Cashback-Programm (Bons, Produktfotos und vergütete Umfragen). Bei der Registrierung und im Profil kannst du deinen Einkaufsort außerdem per Standort wählen.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to access your microphone</string>
     <key>NSPhotoLibraryUsageDescription</key>

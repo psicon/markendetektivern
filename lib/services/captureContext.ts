@@ -3,6 +3,7 @@ import * as Application from 'expo-application';
 import { Platform } from 'react-native';
 
 import journeyTrackingService from '@/lib/services/journeyTrackingService';
+import { anfragenOhneHaenger } from '@/lib/services/berechtigungsWaechter';
 
 /**
  * Sammelt den Orts- und Zeitkontext im Moment der AUFNAHME.
@@ -170,7 +171,22 @@ export async function standortStatus(): Promise<GpsStatus> {
  */
 export async function standortAnfordern(): Promise<GpsStatus> {
   try {
-    const p = await Location.requestForegroundPermissionsAsync();
+    // Erst lesen: steht der Ausgang schon fest, erscheint kein Dialog — und
+    // auf Android kam die Antwort dann erst beim nächsten Aufwachen der App
+    // (ewiger Spinner, Vorfall 25.09.2026, siehe berechtigungsWaechter.ts).
+    const vorher = await Location.getForegroundPermissionsAsync();
+    // iOS: canAskAgain=false ist verlässlich endgültig → gar nicht fragen.
+    // Android meldet es auch nach einem weggetippten Dialog oder einer
+    // abgelaufenen „Nur dieses Mal"-Freigabe — dort kommt der Dialog noch.
+    // Also fragen; ist es wirklich endgültig, kommt die Antwort ohne Dialog
+    // sofort (MainActivity.kt) bzw. nach dem Wächter.
+    if (!vorher.granted && !vorher.canAskAgain && Platform.OS === 'ios') return 'denied';
+    const p = vorher.granted
+      ? vorher
+      : await anfragenOhneHaenger(
+          () => Location.requestForegroundPermissionsAsync(),
+          () => Location.getForegroundPermissionsAsync(),
+        );
     if (!p.granted) return p.canAskAgain ? 'not_asked' : 'denied';
     if (p.android?.accuracy === 'coarse') return 'granted_coarse';
     return 'granted_precise';

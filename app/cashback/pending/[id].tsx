@@ -33,6 +33,7 @@ import {
   DetailHeader,
   DETAIL_HEADER_ROW_HEIGHT,
 } from '@/components/design/DetailHeader';
+import { KontoSichernKarte } from '@/components/rewards/KontoSichernKarte';
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -42,6 +43,7 @@ import { storage } from '@/lib/firebase';
 import { isResolvedMerchant, subscribeReceipt } from '@/lib/services/cashbackUpload';
 import {
   getBonJob,
+  sichtbareBonJobs,
   kickBonQueue,
   retryBonJob,
   subscribeBonQueue,
@@ -53,6 +55,16 @@ import { useNetworkStatus } from '@/lib/services/network';
 const { width: SCREEN_W } = Dimensions.get('window');
 
 type ViewState = 'unknown' | 'uploading' | 'upload_failed' | 'pending' | 'review' | 'approved' | 'no_reward' | 'rejected' | 'superseded' | 'not_found';
+
+// Zustände, in denen die „Konto sichern"-Karte für Gäste Sinn ergibt: es
+// gibt eine Belohnung oder kann noch eine geben (nicht bei Ablehnung/0 €).
+const KONTO_KARTE_ZUSTAENDE: ReadonlySet<ViewState> = new Set<ViewState>([
+  'uploading',
+  'upload_failed',
+  'pending',
+  'review',
+  'approved',
+]);
 
 interface MirrorItem {
   name: string;
@@ -145,7 +157,7 @@ export default function CashbackPendingScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { theme, shadows } = useTokens();
-  const { user } = useAuth();
+  const { user, isAnonymous } = useAuth();
   const cb = useCashbackUserState();
 
   // "Neuer Bon" — campaign-aware scan start (shared with Home / Meine
@@ -160,7 +172,10 @@ export default function CashbackPendingScreen() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   // The background upload queue (bonUploadQueue) owns the upload now; we just
   // observe the in-flight job for this id (status + live progress).
-  const [bonJob, setBonJob] = useState<BonJob | null>(() => getBonJob(String(params.id ?? '')));
+  const [bonJob, setBonJob] = useState<BonJob | null>(() => {
+    const j = getBonJob(String(params.id ?? ''));
+    return j && sichtbareBonJobs([j]).length ? j : null;
+  });
   const [showDuplicate, setShowDuplicate] = useState<boolean>(params.dup === '1');
 
   useLayoutEffect(() => {
@@ -174,7 +189,7 @@ export default function CashbackPendingScreen() {
   useEffect(() => {
     const id = String(params.id ?? '');
     const unsub = subscribeBonQueue((all) => {
-      setBonJob(all.find((j) => j.id === id) ?? null);
+      setBonJob(sichtbareBonJobs(all).find((j) => j.id === id) ?? null);
     });
     // Resume any leftover job (e.g. app was killed mid-upload).
     kickBonQueue();
@@ -620,6 +635,14 @@ export default function CashbackPendingScreen() {
         ) : state === 'unknown' ? (
           <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 60 }}>
             <ActivityIndicator color={primary} />
+          </View>
+        ) : null}
+
+        {/* Gäste: Belohnung per Konto sichern — direkt unter dem Status,
+            nur solange es eine Belohnung gibt oder noch geben kann. */}
+        {isAnonymous && KONTO_KARTE_ZUSTAENDE.has(state) ? (
+          <View style={{ marginHorizontal: 16, marginTop: 12 }}>
+            <KontoSichernKarte ziel={`/cashback/pending/${String(params.id ?? '')}`} />
           </View>
         ) : null}
 

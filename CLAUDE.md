@@ -444,6 +444,23 @@ werden sollten. Andere "Don't"-Regeln stehen verteilt im File
 `USE_FLYING_TABS`-Legacy etc.) — hier nur die Learnings aus
 Recent-Sessions.
 
+- **Auf Android eine Laufzeit-Berechtigung anfragen, deren Ausgang schon
+  feststeht (Vorfall 25.09.2026, Pixel 8, Build 6.0.20-1246).** Erteilt oder
+  dauerhaft verweigert → Android antwortet ohne Dialog, und React Native
+  (`ReactActivityDelegate.mPermissionsCallback`) plus die Expo-Hülle
+  (Coroutine) stellen das Ergebnis erst beim nächsten `onResume` zu. Auf dem
+  Pixel wurde die App dabei nicht pausiert → ewiger Spinner auf „Akzeptieren“,
+  „Einstellungen öffnen“ ohne Wirkung, erst Sperren/Entsperren löste es; Expo
+  parkte danach jede weitere Abfrage (Kamera, Mitteilungen). Der Emulator
+  (Android 14 UND 16) zeigt es NICHT — dort startet GrantPermissionsActivity
+  immer kurz. Regeln: (1) Vor jeder Anfrage `get…PermissionsAsync()` lesen;
+  bei `granted` oder `!canAskAgain` NICHT anfragen. (2) Anfragen nur über
+  `anfragenOhneHaenger` (`lib/services/berechtigungsWaechter.ts`). (3) Kein
+  Knopf/Spinner ohne Zeitgrenze an einem nativen await (`mitZeitlimit`).
+  (4) `MainActivity.kt` stellt Ergebnisse sofort zu, wenn RESUMED — NICHT
+  entfernen. Diagnose-Merker: „hängt, bis man das Handy sperrt/entsperrt“ =
+  ein Ergebnis wartet auf `onResume`.
+
 - **Eine Codebase von einem Zweig ausrollen, dem Änderungen eines anderen
   Zweigs fehlen, die schon live sind (Vorfall 23./24.09.2026).** Die
   Zweitprüfung unsicherer Bons (19.09., von Patrick eingeschaltet) lag nur im
@@ -3046,6 +3063,39 @@ urteilen über denselben Fall verschieden. Beim nächsten Konsolen-Umbau nachzie
 `CASHBACK_OCR_ENGINE`, DocAI-Einstellungen und `TREMENDOUS_CAMPAIGN_ID` still weg.
 Vor jedem Deploy aus einem Worktree `cloud-functions/<codebase>/.env` aus dem
 Haupt-Checkout kopieren und per `cmp` prüfen.
+
+## Erst einreichen, dann Konto (Entscheidung 25.09.2026, ab 6.0.20)
+
+Gäste (anonyme uid) reichen Bons und Produktfotos ein, BEVOR sie ein Konto
+haben. Gutschrift sofort auf die Gast-uid; Auszahlung nur mit Konto — der
+Server erzwingt das in `requestPayout` (403 `konto_erforderlich` /
+`email_fehlt`, 503 bei Infrastrukturfehler). Nicht erneut fragen, ob das Konto
+vorher kommen soll.
+
+- **Neues Konto** = Verknüpfung (`linkWithCredential`), uid bleibt, nichts zieht um.
+- **Bestehendes Konto** = uid wechselt. Einziger Weg: `inBestehendesKontoWechseln`
+  (`lib/services/kontoWechsel.ts`). Ohne Gast-Einreichungen exakt der alte Ablauf.
+  Mit Einreichungen: Mitnahme-Dialog → Besitznachweis (`GastUebernahme.vorbereiten`,
+  Geheimnis in SecureStore, nur der Hash geht an den Server) → offene Gast-Uploads
+  NOCH ALS GAST fertig hochladen → anmelden → Zielkonto merken → einlösen.
+  Scheitert der Nachweis, darf der Nutzer trotzdem in sein Konto — nie aussperren.
+- **Stufe 1 (live mit 6.0.20):** Server antwortet beim Einlösen immer `pausiert`
+  (`cashback_config/v1.gastUebernahmeAktiv = false`) und bindet nichts. Tickets
+  bleiben auf dem Gerät und werden bei Start/Vordergrund erneut eingelöst.
+- **Stufe 2 (offen, nur Server, kein App-Update):** Umbuchung Gast → Zielkonto
+  (Deckel des ZIELkontos, uid-Guards, `create()` in enqueueCashback, Nachlauf-
+  Scheduler), dann Schalter auf true. **Pflicht beim Aktivieren:** `gueltigBis`
+  aller Tickets zurücksetzen — sie liegen seit Stufe 1 beliebig lange, und die
+  Ablaufprüfung greift erst, wenn der Schalter an ist (lib/gastUebernahme.js).
+- **Warteschlangen** führen Aufträge nur für die aktuelle uid oder eine vom Server
+  BESTÄTIGTE Zuordnung (`GastUebernahme.zielVon`) aus — nie bedingungslos
+  umschreiben. `docUid` behält die ursprüngliche Doc-ID der Foto-Einreichung.
+- **Tickets:** offene (mit Geheimnis) werden nie verdrängt; ein Lesefehler des
+  SecureStore sperrt das Schreiben (sonst überschriebe ein leerer Stand echte
+  Tickets); `pausiert` und Antworten ohne Fehlercode (z. B. HTML-403 bei
+  fehlender Aufrufberechtigung) verwerfen kein Ticket.
+- Umfragen bleiben wie sie sind (Vergütung nur registriert); Gäste mit
+  Einwilligung bekommen nach einer vergüteten Umfrage „Konto erstellen".
 
 ## Produktentscheidung 20.09.2026: lose Ware wird angenommen
 

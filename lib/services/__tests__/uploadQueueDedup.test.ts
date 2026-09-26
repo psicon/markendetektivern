@@ -49,6 +49,15 @@ jest.mock('../productSubmit', () => ({
   uploadProductImage: jest.fn(async () => 'crowduploads/u1/sess/produkt_1/images/front_x.jpg'),
 }));
 jest.mock('../ui/toast', () => ({ showInfoToast: jest.fn() }));
+// Seit Stufe 1 (25.09.2026) fragt die Warteschlange die angemeldete uid und
+// die bestätigte Gast-Übernahme ab; beides ist hier ohne Belang.
+jest.mock('@/lib/firebase', () => ({
+  auth: { currentUser: { uid: 'u1', isAnonymous: false, providerData: [{ providerId: 'password' }] } },
+}));
+jest.mock('../gastUebernahme', () => ({
+  GastUebernahme: { zielVon: jest.fn(() => null), beiAenderung: jest.fn(() => jest.fn()) },
+}));
+jest.mock('../gastBestand', () => ({ GastBestand: { merke: jest.fn(async () => undefined) } }));
 
 import * as FileSystem from 'expo-file-system';
 
@@ -130,10 +139,13 @@ test('ein anderer Produkt-Slot derselben Sitzung bleibt ein eigener Auftrag', as
   expect(await auftraege(q)).toHaveLength(2);
 });
 
-test('ein anderes Konto teilt sich keinen Auftrag', async () => {
+test('eine andere Wizard-Sitzung teilt sich keinen Auftrag', async () => {
+  // Der Schlüssel ist seit Stufe 1 Sitzung + Slot, ohne uid (derselbe Slot
+  // bleibt derselbe Auftrag, auch wenn aus dem Gast ein Konto wurde — siehe
+  // gastQueue.test.ts). Getrennt werden Personen über die Zufalls-sessionId.
   const q = frischeQueue();
   const a = await q.enqueueProductUpload(EINGABE as never);
-  const b = await q.enqueueProductUpload({ ...EINGABE, uid: 'u2' } as never);
+  const b = await q.enqueueProductUpload({ ...EINGABE, uid: 'u2', sessionId: 'c0ffee00c0ffee00c0ffee00' } as never);
   expect(b).not.toBe(a);
   expect(await auftraege(q)).toHaveLength(2);
 });

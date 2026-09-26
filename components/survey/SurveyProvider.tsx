@@ -18,10 +18,13 @@ import {
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useStandortPflicht } from '@/hooks/useStandortPflicht';
+import type { StandortPflicht } from '@/lib/services/standortPflicht';
 import { useTokens } from '@/hooks/useTokens';
 import { router } from 'expo-router';
 
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { AuthRueckkehr } from '@/lib/services/authRueckkehr';
+import { safePush } from '@/lib/utils/safeNav';
 import { hasValidCashbackConsent } from '@/lib/services/cashbackService';
 import { formatCents } from '@/lib/types/cashback';
 import {
@@ -93,6 +96,14 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
     // sich (Duplikat). Direkt zum Consent; from=rewards landet nach dem
     // Akzeptieren auf Rewards (siehe goAfterConsent), kein Auto-Scanner.
     router.push('/cashback/consent?from=rewards' as any);
+  }, []);
+
+  // Gäste: vergütete Umfragen gibt es nur mit Konto — „Zum Cashback" führte
+  // sie in eine Einwilligung, nach der immer noch das Konto fehlte
+  // (Prüfrunden 1+2). Nach der Anmeldung zurück zu den Belohnungen.
+  const goToKonto = useCallback(async () => {
+    await AuthRueckkehr.merke('/(tabs)/rewards');
+    safePush('/auth/register');
   }, []);
 
   const [poll, setPoll] = useState<Poll | null>(null);
@@ -209,6 +220,13 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
         // Glow-Banner statt grauem Mini-Toast (ClickUp 86ca8hqt8). Der CF
         // schreibt den Betrag gleich gut → optimistisch sofort feiern.
         showBanner(bannerDataFromCashbackPayout(p.rewardCents!));
+      } else if (pays && !registered) {
+        showCashbackNudgeToast(
+          `${formatCents(p.rewardCents!)} Guthaben gibt's mit Konto – für Umfragen wie diese.`,
+          () => void goToKonto(),
+          scheme,
+          'Konto erstellen',
+        );
       } else if (pays && !eligible) {
         // Betrag ZUERST — der Hinweis-Toast kürzt lange Texte (2 Zeilen +
         // Action-Pille), sonst wird der Betrag abgeschnitten (86ca…).
@@ -222,7 +240,7 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
       }
       setActivityNonce((n) => n + 1); // Tile-Liste neu laden
     },
-    [poll, user?.uid, scheme, isAnonymous, goToCashback, showBanner],
+    [poll, user?.uid, scheme, isAnonymous, goToCashback, goToKonto, showBanner],
   );
 
   const handleClose = useCallback(() => {
@@ -249,7 +267,20 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
   // Sheets — ein zweites Modal darüber würde iOS einfrieren.
   const brauchtFreigabe = !!poll && pollZahltPraemie(poll) && !!user?.uid && !isAnonymous;
   const pflicht = useStandortPflicht(visible && brauchtFreigabe);
-  const gesperrt = brauchtFreigabe && pflicht.stand !== 'erfuellt';
+  // Was das Sheet zeigt. Während der Ausblend-Animation (visible=false, das
+  // Modal bleibt ~260 ms eingehängt) bleibt die zuletzt gezeigte Ansicht
+  // stehen — sonst sprang es beim Schließen aus der Sperre auf die Fragen
+  // bzw. klappte auf den Platzhalter zusammen (der Hook setzt den Stand
+  // beim Deaktivieren auf null).
+  const liveAnsicht: 'runner' | 'platzhalter' | Exclude<StandortPflicht, 'erfuellt'> =
+    !brauchtFreigabe || pflicht.stand === 'erfuellt'
+      ? 'runner'
+      : pflicht.stand === null
+        ? 'platzhalter'
+        : pflicht.stand;
+  const letzteAnsichtRef = useRef(liveAnsicht);
+  if (visible) letzteAnsichtRef.current = liveAnsicht;
+  const ansicht = visible ? liveAnsicht : letzteAnsichtRef.current;
 
   return (
     <SurveyContext.Provider value={{ showSurvey, activityNonce }}>
@@ -260,13 +291,12 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
         onClose={handleClose}
         registerPresence={false}
       >
-        {poll && gesperrt ? (
-          // 'erfuellt' kommt hier nicht vor (gesperrt) — nur für den Typ.
-          pflicht.stand === null || pflicht.stand === 'erfuellt' ? (
+        {poll && ansicht !== 'runner' ? (
+          ansicht === 'platzhalter' ? (
             <View style={{ height: 160 }} />
           ) : (
             <StandortPflichtHinweis
-              stand={pflicht.stand}
+              stand={ansicht}
               art="umfrage"
               laeuft={pflicht.laeuft}
               onErfuellen={() => void pflicht.erfuellen()}

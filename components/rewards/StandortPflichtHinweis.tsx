@@ -16,31 +16,48 @@ import type { StandortPflicht } from '@/lib/services/standortPflicht';
  * Ton nach Projektregel: der Nutzen und der nächste Schritt, kein Mangel.
  */
 
-export type RewardArt = 'bon' | 'foto' | 'umfrage';
+export type RewardArt = 'bon' | 'bon_review' | 'foto' | 'umfrage';
 
+// Kurz und mit dem Nutzen (User-Vorgabe 25.09.2026: „zu verbal", nicht
+// „gehört zur Teilnahme"). Kein vorgeschobener Grund: bei Bons und Umfragen
+// wird der Gerätestandort gar nicht gespeichert — also nichts behaupten.
 const WOFUER: Record<RewardArt, string> = {
-  bon: 'Die Standortfreigabe gehört zur Teilnahme am Belohnungsprogramm. Bei Bons zählt vor allem die Filialadresse vom Bon — danach geht es direkt zum Scanner.',
-  foto: 'Die Standortfreigabe gehört zur Teilnahme am Belohnungsprogramm — so landen deine Fotos bei dem Markt, in dem du gerade stehst.',
-  umfrage: 'Die Standortfreigabe gehört zur Teilnahme am Belohnungsprogramm — danach geht es direkt mit der Umfrage weiter.',
+  bon: 'Einmal erlauben – dann geht’s direkt zum Scanner und du sammelst Belohnungen.',
+  bon_review: 'Einmal erlauben – dein Foto bleibt erhalten und geht danach direkt raus.',
+  foto: 'Einmal erlauben – so landen deine Fotos beim richtigen Markt und du sammelst Belohnungen.',
+  umfrage: 'Einmal erlauben – dann geht’s direkt mit der Umfrage weiter.',
 };
 
 const TEXTE: Record<Exclude<StandortPflicht, 'erfuellt'>, { titel: string; taste: string; icon: string }> = {
-  fragen: { titel: 'Standort freigeben', taste: 'Standort freigeben', icon: 'map-marker-radius-outline' },
-  einstellungen: { titel: 'Standort in den Einstellungen freigeben', taste: 'Einstellungen öffnen', icon: 'cog-outline' },
-  dienste_aus: { titel: 'Ortungsdienste einschalten', taste: 'Ortungsdienste einschalten', icon: 'crosshairs-gps' },
+  fragen: { titel: 'Noch ein kurzer Schritt', taste: 'Weiter', icon: 'map-marker-radius-outline' },
+  einstellungen: { titel: 'Standort in den Einstellungen erlauben', taste: 'Einstellungen öffnen', icon: 'cog-outline' },
+  dienste_aus: { titel: 'Ortung einschalten', taste: 'Ortung einschalten', icon: 'crosshairs-gps' },
 };
 
 function wegBeschreibung(stand: Exclude<StandortPflicht, 'erfuellt'>): string | null {
   if (stand === 'einstellungen') {
-    return Platform.OS === 'ios'
-      ? 'Dort unter „Standort" „Beim Verwenden der App" wählen.'
-      : 'Dort unter „Berechtigungen" den Standort erlauben.';
+    return Platform.OS === 'ios' ? 'Standort → „Beim Verwenden der App“' : 'Berechtigungen → Standort → Zulassen';
   }
   if (stand === 'dienste_aus' && Platform.OS === 'ios') {
-    return 'Einstellungen → Datenschutz & Sicherheit → Ortungsdienste.';
+    return 'Datenschutz → Ortungsdienste';
   }
   return null;
 }
+
+/** iOS kann die Ortungsdienste nicht direkt öffnen — die Taste sagt, was passiert. */
+function tastenText(stand: Exclude<StandortPflicht, 'erfuellt'>): string {
+  if (stand === 'dienste_aus' && Platform.OS === 'ios') return 'Einstellungen öffnen';
+  return TEXTE[stand].taste;
+}
+
+/**
+ * Vor dem SYSTEMDIALOG (Stand „fragen") heißt die Taste neutral „Weiter" und
+ * es gibt keinen eigenen Ausstieg — App Review lehnt Vorab-Hinweise ab, die
+ * das Ablehnen vorwegnehmen (5.1.1(iv), „Continue"/„Next" statt „Allow"/
+ * „Later"). Verlassen geht weiter über das X im Kopf bzw. im Sheet; die
+ * Wahl selbst trifft der Nutzer im Systemdialog.
+ */
+const VOR_SYSTEMDIALOG: Exclude<StandortPflicht, 'erfuellt'> = 'fragen';
 
 interface Props {
   stand: Exclude<StandortPflicht, 'erfuellt'>;
@@ -129,7 +146,7 @@ export function StandortPflichtHinweis({ stand, art, laeuft, onErfuellen, onZuru
           <ActivityIndicator color="#fff" />
         ) : (
           <Text style={{ color: '#fff', fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 15 }}>
-            {t.taste}
+            {tastenText(stand)}
           </Text>
         )}
       </Pressable>
@@ -143,14 +160,16 @@ export function StandortPflichtHinweis({ stand, art, laeuft, onErfuellen, onZuru
           color: theme.textMuted,
           textAlign: 'center',
         }}>
-        Der Standort wird nur zu deinen Einreichungen gespeichert — nicht im Hintergrund verfolgt.
+        Nur für deine Einreichungen – nie im Hintergrund.
       </Text>
 
-      <Pressable onPress={onZurueck} hitSlop={10} style={{ paddingVertical: 6 }}>
-        <Text style={{ fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 14, color: theme.textSub }}>
-          {zurueckLabel}
-        </Text>
-      </Pressable>
+      {stand === VOR_SYSTEMDIALOG ? null : (
+        <Pressable onPress={onZurueck} hitSlop={10} style={{ paddingVertical: 6 }}>
+          <Text style={{ fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 14, color: theme.textSub }}>
+            {zurueckLabel}
+          </Text>
+        </Pressable>
+      )}
     </View>
   );
 }

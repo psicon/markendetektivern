@@ -75,6 +75,7 @@ const { aktionZumZeitpunkt, wirksameAktionId } = require('./lib/campaignZeit');
 const { laufBeginnen, laufBeenden, entscheidungBeanspruchen, entscheidungFreigeben, aktiveLaeufe } = require('./lib/laufAnspruch');
 const { resolveMerchant } = require('./lib/merchant');
 const { sendCashbackReady } = require('./lib/push');
+const { erstelleGastUebernahme, kontoPruefen, tokenPruefen } = require('./lib/gastUebernahme');
 const {
   computeDHash,
   hammingDistance,
@@ -422,6 +423,10 @@ const DEFAULT_CONFIG = {
   // (cashback_campaigns). Keine Aktion → Bon verarbeitet + Produkte
   // getrackt, aber 0 Vergütung. Default false = Dauer-Cashback (kein Change).
   campaignsEnabled: false,
+  // Übernahme von Gast-Einreichungen in ein bestehendes Konto (Umbau „erst
+  // einreichen, dann Konto"). Aus = Tickets werden geprüft, aber nicht
+  // eingelöst (`pausiert`). Scharf nur über cashback_config/v1, ohne Deploy.
+  gastUebernahmeAktiv: false,
 };
 
 const CAMPAIGNS_COL = 'cashback_campaigns';
@@ -2711,6 +2716,18 @@ exports.requestPayout = onRequest(
       return;
     }
     const uid = decoded.uid;
+    // Auszahlen nur mit Konto (Umbau „erst einreichen, dann Konto", Schritt 9).
+    // Gäste sammeln Guthaben, auszahlen kann erst, wer sich registriert hat.
+    // Maßgeblich ist getUser().providerData, NIE der Token-Claim
+    // sign_in_provider: direkt nach linkWithCredential kann er noch
+    // 'anonymous' tragen. Die Rückbuchung in processPayout bleibt als zweite
+    // Schranke. Scheitert die Prüfung technisch → 503, keine Buchung.
+    const kontoFehler = await kontoPruefen(admin, uid, { emailPflicht: true });
+    if (kontoFehler) {
+      logger.info('payout-konto-abgelehnt', { uid, code: kontoFehler.body.code });
+      res.status(kontoFehler.http).json(kontoFehler.body);
+      return;
+    }
     // Methode ist OPTIONAL — die konkrete Auszahlungsart wählt der User auf
     // der Tremendous-Hosted-Page. Kommt doch eine gültige mit, speichern
     // wir sie als Hinweis; sonst null.
@@ -3394,5 +3411,72 @@ exports.sweepStuckReceipts = onSchedule(
       }
     }
     logger.warn('sweep-stuck-receipts', { candidates: stuck.length, republished: n, oldestMin: Math.round((Date.now() - Math.min(...stuck.map((d) => d.data().createdAt.toMillis()))) / 60000) });
+  },
+);
+
+// ─── Gast-Übernahme: Ticket vorbereiten / einlösen (Stufe 1) ────────
+//
+// Umbau „erst einreichen, dann Konto" (Schritte 12, 13, 17). Meldet sich ein
+// Gast bei einem BESTEHENDEN Konto an, sichert die App vorher (noch als Gast)
+// einen Besitznachweis: nur den SHA-256-Hash eines Geheimnisses. Nach dem
+// Wechsel löst das Zielkonto das Geheimnis ein.
+//
+// Stufe 1 prüft beim Einlösen alles und antwortet dann `pausiert` — gebunden
+// und umgebucht wird erst mit Stufe 2, auch wenn gastUebernahmeAktiv schon
+// true ist. Logik und Begründungen: lib/gastUebernahme.js.
+//
+// Beide Endpunkte: nur POST, Bearer mit checkRevoked, Fehler als JSON {code}.
+// Geheimnis und Hash werden nie geloggt — auch nicht im Fehlerfall.
+const gastUebernahme = erstelleGastUebernahme({ db, admin, logger, loadConfig, zeit: () => Date.now() });
+
+exports.gastUebernahmeVorbereiten = onRequest(
+  { region: REGION, timeoutSeconds: 30, memory: '512MiB', cors: true, invoker: 'public' },
+  async (req, res) => {
+    if (req.method !== 'POST') {
+      res.status(405).json({ code: 'method_not_allowed' });
+      return;
+    }
+    const auth = await tokenPruefen(admin, req, logger);
+    if (auth.fehler) {
+      res.status(auth.fehler.http).json(auth.fehler.body);
+      return;
+    }
+    try {
+      const { http, body } = await gastUebernahme.vorbereiten({
+        gastUid: auth.uid,
+        ticketHash: (req.body || {}).ticketHash,
+      });
+      res.status(http).json(body);
+    } catch (e) {
+      logger.error('gastUebernahmeVorbereiten-failed', { uid: auth.uid, err: e.message });
+      res.status(500).json({ code: 'internal' });
+    }
+  },
+);
+
+exports.gastUebernahmeEinloesen = onRequest(
+  { region: REGION, timeoutSeconds: 120, memory: '512MiB', cors: true, invoker: 'public' },
+  async (req, res) => {
+    if (req.method !== 'POST') {
+      res.status(405).json({ code: 'method_not_allowed' });
+      return;
+    }
+    const auth = await tokenPruefen(admin, req, logger);
+    if (auth.fehler) {
+      res.status(auth.fehler.http).json(auth.fehler.body);
+      return;
+    }
+    const body = req.body || {};
+    try {
+      const { http, body: antwortBody } = await gastUebernahme.einloesen({
+        zielUid: auth.uid,
+        gastUid: body.vonUid,
+        geheimnis: body.geheimnis,
+      });
+      res.status(http).json(antwortBody);
+    } catch (e) {
+      logger.error('gastUebernahmeEinloesen-failed', { uid: auth.uid, err: e.message });
+      res.status(500).json({ code: 'internal' });
+    }
   },
 );

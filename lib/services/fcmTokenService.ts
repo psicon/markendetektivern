@@ -22,6 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules, Platform, TurboModuleRegistry } from 'react-native';
 import { doc, getDoc, setDoc, serverTimestamp } from '@react-native-firebase/firestore';
 import { db } from '@/lib/firebase';
+import { anfragenOhneHaenger } from './berechtigungsWaechter';
 import { berechtigungAusExpo } from './pushPermissionStatus';
 
 let _registered = false;
@@ -420,7 +421,15 @@ export async function harteBerechtigungAnfragen(uid: string): Promise<boolean> {
     // oben). iOS: über RNFB, weil dort auch die provisorische Stufe hängt.
     if (Platform.OS === 'android') {
       const Notifications = require('expo-notifications');
-      const antwort = await Notifications.requestPermissionsAsync();
+      // Mit Wächter: Ist die Sperre endgültig, antwortet Android ohne Dialog,
+      // und die Antwort kam sonst erst beim nächsten Aufwachen der App — das
+      // Sheet schloss, und nichts passierte (Prüfung 25.09.2026,
+      // berechtigungsWaechter.ts). So geht es nach kurzer Zeit mit dem
+      // gelesenen Stand weiter (→ Einstellungs-Umweg).
+      const antwort = await anfragenOhneHaenger<any>(
+        () => Notifications.requestPermissionsAsync(),
+        () => Notifications.getPermissionsAsync(),
+      );
       // Dieselbe Einordnung wie beim Start (ablehnungEinordnen): nach der
       // ersten Ablehnung würde Android noch einmal fragen — das ist nicht
       // 'permission_denied'. Sonst wechselte das Feld für dasselbe Gerät bei

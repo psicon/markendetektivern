@@ -36,7 +36,7 @@ import type { ReceiptDoc } from '@/lib/types/cashback';
 
 // Override via env if you ever run a staging deploy. Region is locked
 // to europe-west3 to match the Cloud Function spec.
-const FUNCTIONS_BASE =
+export const FUNCTIONS_BASE =
   process.env.EXPO_PUBLIC_CASHBACK_FN_BASE ||
   'https://europe-west3-markendetektive-895f7.cloudfunctions.net';
 
@@ -46,7 +46,7 @@ const FUNCTIONS_BASE =
  * minutenlang. 30s-Abort wirft 'upload_timeout'-artig; die Upload-Queue
  * uebernimmt den Retry.
  */
-async function fetchWithTimeout(
+export async function fetchWithTimeout(
   url: string,
   init: RequestInit,
   timeoutMs = 30_000,

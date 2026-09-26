@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { signInWithCustomToken } from '@react-native-firebase/auth';
 import { auth } from '@/lib/firebase';
+import { GastBestand } from '@/lib/services/gastBestand';
 import { isEffectivelyAnonymous } from '@/lib/utils/authIdentity';
 import { findLegacyAuthKey, parseLegacyAuthRecord } from '@/lib/utils/legacyAuthRecord';
 
@@ -104,6 +105,13 @@ async function doAttempt(): Promise<boolean> {
       // User hat sich seit dem Update AKTIV in ein Konto eingeloggt —
       // niemals aus einem bewusst gewählten Konto herausreißen.
       await AsyncStorage.setItem(KEY_STATE, 'done');
+      return false;
+    }
+    // Gast-Übernahme (25.09.2026): Hat der aktuelle Gast etwas eingereicht,
+    // wäre die Rettung ein uid-Wechsel OHNE Besitznachweis — seine Bons und
+    // Fotos blieben an der verlassenen uid. Dann pausieren: kein Zustand
+    // ändert sich, kein Versuch wird verbraucht. (5.x-Konten trugen kein Geld.)
+    if (current && isEffectivelyAnonymous(current) && (await GastBestand.hat(current.uid))) {
       return false;
     }
 

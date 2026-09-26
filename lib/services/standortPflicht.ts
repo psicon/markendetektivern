@@ -1,6 +1,8 @@
 import * as Location from 'expo-location';
 import { Linking, Platform } from 'react-native';
 
+import { anfragenOhneHaenger } from '@/lib/services/berechtigungsWaechter';
+
 /**
  * Standortpflicht für das Reward-Programm (Bons, Produktfotos, vergütete
  * Umfragen). Entscheidung 24.09.2026, ab 6.0.20.
@@ -39,6 +41,12 @@ export type StandortPflicht =
 
 async function diensteAn(): Promise<boolean> {
   try {
+    if (Platform.OS === 'android') {
+      // Hauptschalter der Ortung, nicht „GPS oder Netzwerk-Anbieter": ein
+      // WLAN-Tablet ohne GPS-Chip hätte sonst trotz eingeschalteter Ortung
+      // nie Zugang (hasServicesEnabledAsync prüft auf Android nur die Anbieter).
+      return (await Location.getProviderStatusAsync()).locationServicesEnabled;
+    }
     return await Location.hasServicesEnabledAsync();
   } catch {
     return true;
@@ -46,12 +54,16 @@ async function diensteAn(): Promise<boolean> {
 }
 
 /**
- * Kam eine Absage schneller, als ein Mensch tippen kann, wurde gar kein
- * Systemdialog gezeigt. Nur dann ist der Umweg über die Einstellungen der
- * richtige nächste Schritt — wer einen Dialog gesehen und abgelehnt hat,
- * wird nicht ungefragt in die Einstellungen geschickt.
+ * Kam eine Absage schneller, als ein Mensch tippen kann, konnte gar kein
+ * Dialog erscheinen (etwa ohne Google-Play-Dienste). Nur für den
+ * Einschalt-Dialog der Ortungsdienste genutzt — und nur als Abkürzung:
+ * ein langsames Gerät landet schlimmstenfalls beim zweiten Tipp in den
+ * Einstellungen (siehe `letzteDiensteAbsageMs`), nie in einer Schleife.
  */
 const OHNE_DIALOG_MS = 400;
+/** Zweiter Tipp nach einer Absage innerhalb dieser Zeit → direkt in die Einstellungen. */
+const ZWEITER_TIPP_MS = 2 * 60 * 1000;
+let letzteDiensteAbsageMs = 0;
 
 const schlafen = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -81,18 +93,45 @@ async function einstellungenOeffnen(stand: StandortPflicht): Promise<StandortPfl
   }
 }
 
+/** Systemseite der Ortung (Android). NICHT awaiten: RNs sendIntent löst nie auf. */
+function ortungsSeiteOeffnen(): null {
+  Linking.sendIntent('android.settings.LOCATION_SOURCE_SETTINGS').catch(() => {
+    Linking.openSettings().catch(() => {});
+  });
+  return null;
+}
+
+/**
+ * Systemanfrage mit Wächter: kommt kein Dialog, wird nicht bis zum nächsten
+ * Aufwachen der App gewartet (Vorfall 25.09.2026, berechtigungsWaechter.ts).
+ */
+function anfragen(): Promise<Location.LocationPermissionResponse> {
+  return anfragenOhneHaenger(
+    () => Location.requestForegroundPermissionsAsync(),
+    () => Location.getForegroundPermissionsAsync(),
+  );
+}
+
 /**
  * Führt den nächsten Schritt aus und liefert den Stand danach — oder `null`,
  * wenn der Nutzer in die Einstellungen gewechselt ist. Dann ändert sich der
  * Stand erst beim Zurückkehren; das fängt `useStandortPflicht` über den
  * AppState ab.
+ *
+ * `gilt` sagt, ob der Aufrufer das Ergebnis noch will. Ein abgebrochener
+ * Versuch darf später nicht plötzlich die Einstellungen öffnen (Prüfung
+ * 25.09.2026: ein nach dem Zeitlimit verwaister Aufruf sprang Minuten später
+ * in die Einstellungen).
  */
-export async function standortPflichtErfuellen(stand: StandortPflicht): Promise<StandortPflicht | null> {
+export async function standortPflichtErfuellen(
+  stand: StandortPflicht,
+  gilt: () => boolean = () => true,
+): Promise<StandortPflicht | null> {
   if (stand === 'erfuellt') return stand;
 
   if (stand === 'fragen') {
     try {
-      await Location.requestForegroundPermissionsAsync();
+      await anfragen();
     } catch {
       // Stand danach frisch lesen — der entscheidet.
     }
@@ -102,20 +141,29 @@ export async function standortPflichtErfuellen(stand: StandortPflicht): Promise<
   if (stand === 'einstellungen' && Platform.OS === 'android') {
     // Android meldet canAskAgain=false auch nach einem weggetippten
     // Erstdialog oder einer verfallenen „Nur dieses Mal"-Freigabe — dann
-    // käme der Dialog noch. Erst versuchen; nur ohne Dialog in die
-    // Einstellungen.
-    const t0 = Date.now();
+    // käme der Dialog noch. Erst versuchen. Entschieden wird am STAND danach,
+    // nicht an der Zeit (langsame Geräte brauchen auch ohne Dialog > 400 ms):
+    // erteilt → weiter; wieder fragbar → der Dialog lief, Nutzer lehnte ab;
+    // weiterhin „einstellungen" → in die Einstellungen, wie der Knopf sagt.
+    // Der Wächter sorgt dafür, dass das ohne Dialog sofort geht.
     try {
-      const r = await Location.requestForegroundPermissionsAsync();
-      if (r.granted) return pruefeStandortPflicht();
+      await anfragen();
     } catch {
-      // wie „ohne Dialog" behandeln
+      // Stand danach frisch lesen — der entscheidet.
     }
-    if (Date.now() - t0 >= OHNE_DIALOG_MS) return pruefeStandortPflicht();
+    const danach = await pruefeStandortPflicht();
+    if (danach !== 'einstellungen') return danach;
+    if (!gilt()) return null;
     return einstellungenOeffnen(stand);
   }
 
   if (stand === 'dienste_aus' && Platform.OS === 'android') {
+    // Zweiter Tipp kurz nach einer Absage: direkt auf die Systemseite.
+    if (letzteDiensteAbsageMs > 0 && Date.now() - letzteDiensteAbsageMs < ZWEITER_TIPP_MS) {
+      letzteDiensteAbsageMs = 0;
+      if (!gilt()) return null;
+      return ortungsSeiteOeffnen();
+    }
     const t0 = Date.now();
     try {
       // Googles Einschalt-Dialog: ein Tipp, kein Umweg über die Einstellungen.
@@ -126,17 +174,15 @@ export async function standortPflichtErfuellen(stand: StandortPflicht): Promise<
       await schlafen(600);
       return pruefeStandortPflicht();
     } catch {
-      // „Nein danke" im Dialog → nicht ungefragt weiterleiten.
-      if (Date.now() - t0 >= OHNE_DIALOG_MS) return pruefeStandortPflicht();
       // Kein Dialog möglich (etwa ohne Play-Dienste) → Systemseite der Ortung.
-      try {
-        await Linking.sendIntent('android.settings.LOCATION_SOURCE_SETTINGS');
-        return null;
-      } catch {
-        return einstellungenOeffnen(stand);
-      }
+      if (Date.now() - t0 < OHNE_DIALOG_MS) return gilt() ? ortungsSeiteOeffnen() : null;
+      // „Nein danke" im Dialog → nicht ungefragt weiterleiten; ein zweiter
+      // Tipp führt direkt auf die Systemseite.
+      letzteDiensteAbsageMs = Date.now();
+      return pruefeStandortPflicht();
     }
   }
 
+  if (!gilt()) return null;
   return einstellungenOeffnen(stand);
 }

@@ -14,7 +14,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import React, { useCallback, useLayoutEffect, useMemo, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -152,6 +152,10 @@ export default function CashbackReviewScreen() {
   // Bild bleibt erhalten (Routen-Parameter), nach der Freigabe geht es hier
   // weiter.
   const pflicht = useStandortPflicht();
+  // Wiedereintritts-Sperre für „Einreichen": gilt ab dem ersten Tipp bis zur
+  // Navigation und fällt nur auf den Abbruchwegen. `submitting` allein reicht
+  // nicht, weil es erst nach der (kurzen) Standortprüfung gesetzt wird.
+  const einreichenLaeuftRef = useRef(false);
 
   const [checks, setChecks] = useState<Record<'corners' | 'date' | 'items', boolean>>({
     corners: false,
@@ -227,7 +231,13 @@ export default function CashbackReviewScreen() {
       return;
     }
     // Fehlt die Freigabe, zeigt der Screen den Sperrhinweis (Render unten).
-    if ((await pflicht.pruefen()) !== 'erfuellt') return;
+    if (einreichenLaeuftRef.current) return;
+    einreichenLaeuftRef.current = true;
+    // pruefeStandortPflicht wirft nie (Lesefehler → erfüllt).
+    if ((await pflicht.pruefen()) !== 'erfuellt') {
+      einreichenLaeuftRef.current = false;
+      return;
+    }
     setSubmitting(true);
     // Hash-Fallback (86cb6twnp): schlug das Hashen beim Aufnehmen fehl
     // (Heap/IO), einmal nachziehen statt hart zu blockieren. Der Server
@@ -238,6 +248,7 @@ export default function CashbackReviewScreen() {
       if (bytesHash.length !== 64) {
         setSubmitError('Das Bild konnte nicht geprüft werden — bitte nimm den Bon noch einmal auf.');
         setSubmitting(false);
+        einreichenLaeuftRef.current = false;
         return;
       }
     }
@@ -262,6 +273,7 @@ export default function CashbackReviewScreen() {
       console.warn('⚠️ enqueueBon failed', e);
       setSubmitError('Konnte nicht vorgemerkt werden — bitte nochmal.');
       setSubmitting(false);
+      einreichenLaeuftRef.current = false;
       return;
     }
     // Submit-Feedback — leichte Haptik. Die volle Banner+Celebration kommt erst
@@ -408,10 +420,11 @@ export default function CashbackReviewScreen() {
         <View style={{ flex: 1, justifyContent: 'center' }}>
           <StandortPflichtHinweis
             stand={pflicht.stand}
-            art="bon"
+            art="bon_review"
             laeuft={pflicht.laeuft}
             onErfuellen={() => void pflicht.erfuellen()}
             onZurueck={handleDismiss}
+            zurueckLabel="Bon verwerfen"
           />
         </View>
       </View>
