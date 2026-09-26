@@ -56,6 +56,15 @@ const MAX_RETRY_DELAY_MS = 5 * 60_000;
 // infinite background spin on a permanently broken job (corrupt image, revoked
 // auth, server reject).
 const MAX_AUTO_ATTEMPTS = 5;
+// Zeitdeckel auf den abschließenden Firestore-Schreibvorgang. Firestore-Writes
+// lösen offline NIE auf und scheitern auch nicht (Projektregel) — ohne Deckel
+// hängt `runJob` unbegrenzt, sobald das Netz WÄHREND eines Auftrags ausfällt,
+// `processing` bleibt `true`, und die Warteschlange nimmt bis zum App-Neustart
+// keinen Auftrag mehr an: ohne Fehler, ohne Wiederholung, ohne Hinweis.
+// Großzügig bemessen — geschrieben wird ein kleines Dokument, davor liest
+// `submitProduct` noch den Profil-Kontext; 30 s sind ein Vielfaches davon und
+// immer noch die Hälfte des Bild-Deckels (60 s).
+const SUBMIT_TIMEOUT_MS = 30_000;
 
 export type UploadJobStatus = 'queued' | 'uploading' | 'failed';
 
@@ -503,20 +512,40 @@ async function runJob(job: UploadJob) {
       zurueckstellen(job.id);
       return;
     }
-    await submitProduct(job.uid, {
-      sessionId: job.sessionId,
-      productIndex: job.productIndex,
-      marketId: job.marketId,
-      marketName: job.marketName,
-      marketLand: job.marketLand,
-      productName: job.productName,
-      ean: job.ean,
-      campaignId: job.campaignId,
-      campaignResolve: job.campaignResolve ?? null,
-      images: uploaded,
-      capture: job.capture ?? null,
-      clientVersion: job.clientVersion ?? null,
-    }, { docUid: job.docUid ?? job.uid });
+    // Zeitdeckel statt unbegrenztem Warten (siehe SUBMIT_TIMEOUT_MS). Läuft er
+    // ab, wirft dieser Block — der `catch` unten markiert den Auftrag dann als
+    // 'failed', und der bestehende Auto-Wiederholungs-Pfad greift.
+    //
+    // Der Schreibvorgang kann danach trotzdem noch durchgehen. Das ist
+    // ungefährlich: die Doc-ID ist deterministisch (`productSubmissionDocId`),
+    // die Wiederholung trifft also dasselbe Dokument, und ein zweiter
+    // Schreibvorgang darauf gilt nach Bestätigung per Lesevorgang als
+    // „liegt schon vor" (`submitProduct`).
+    let deckel: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const durch = await Promise.race([
+        submitProduct(job.uid, {
+          sessionId: job.sessionId,
+          productIndex: job.productIndex,
+          marketId: job.marketId,
+          marketName: job.marketName,
+          marketLand: job.marketLand,
+          productName: job.productName,
+          ean: job.ean,
+          campaignId: job.campaignId,
+          campaignResolve: job.campaignResolve ?? null,
+          images: uploaded,
+          capture: job.capture ?? null,
+          clientVersion: job.clientVersion ?? null,
+        }, { docUid: job.docUid ?? job.uid }).then(() => true),
+        new Promise<false>((res) => {
+          deckel = setTimeout(() => res(false), SUBMIT_TIMEOUT_MS);
+        }),
+      ]);
+      if (!durch) throw new Error('submit_timeout');
+    } finally {
+      if (deckel) clearTimeout(deckel);
+    }
     // Success → the submission now lives in Firestore (status 'pending')
     // and shows up in the overview list. Drop the local job + its files.
     await deleteJobFiles(job.id);
@@ -540,18 +569,26 @@ async function runJob(job: UploadJob) {
 }
 
 export async function processQueue(): Promise<void> {
-  await ensureLoaded();
+  // Der Riegel fällt VOR dem ersten `await` und wird im `finally` wieder
+  // freigegeben. Zuvor lagen zwischen Prüfung und Setzen zwei `await`s: zwei
+  // gleichzeitige Aufrufer (Netz-Listener, AppState-Listener,
+  // `kickUploadQueue`, jedes Einreihen) rutschten beide durch und starteten
+  // ZWEI Schleifen — Aufträge liefen parallel statt nacheinander, und die
+  // erste Schleife, die leerlief, gab den Riegel frei, während die zweite noch
+  // hochlud. Der Rumpf einer async-Funktion läuft bis zum ersten `await`
+  // synchron — Prüfen und Setzen sind damit untrennbar.
   if (pausiert || processing) return;
-  // Don't burn per-image upload timeouts when we're clearly offline — leave
-  // jobs 'queued' (the overview shows the offline hint) and let the network
-  // listener resume us on reconnect. A fresh probe avoids stalling on a stale
-  // "offline" reading right after the app wakes.
-  if (!isOnline()) {
-    await refreshNetwork();
-    if (!isOnline()) return;
-  }
   processing = true;
   try {
+    await ensureLoaded();
+    // Don't burn per-image upload timeouts when we're clearly offline — leave
+    // jobs 'queued' (the overview shows the offline hint) and let the network
+    // listener resume us on reconnect. A fresh probe avoids stalling on a stale
+    // "offline" reading right after the app wakes.
+    if (!isOnline()) {
+      await refreshNetwork();
+      if (!isOnline()) return;
+    }
     let next = pickNext();
     while (next && !pausiert) {
       await runJob(next);

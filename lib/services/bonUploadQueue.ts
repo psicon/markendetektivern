@@ -616,16 +616,19 @@ async function runJob(job: BonJob) {
 }
 
 export async function processQueue(): Promise<void> {
-  await ensureLoaded();
+  // Riegel VOR dem ersten `await` (Gegenstück zu uploadQueue.ts): sonst
+  // rutschen zwei gleichzeitige Aufrufer (Netz-, AppState-Listener,
+  // kickBonQueue, enqueueBon) an der Prüfung vorbei und starten zwei Schleifen.
   if (pausiert || processing) return;
-  // Don't burn the 60s upload watchdog / enqueue when clearly offline; jobs
-  // stay 'queued' and the network listener resumes on reconnect.
-  if (!isOnline()) {
-    await refreshNetwork();
-    if (!isOnline()) return;
-  }
   processing = true;
   try {
+    await ensureLoaded();
+    // Don't burn the 60s upload watchdog / enqueue when clearly offline; jobs
+    // stay 'queued' and the network listener resumes on reconnect.
+    if (!isOnline()) {
+      await refreshNetwork();
+      if (!isOnline()) return;
+    }
     let next = pickNext();
     while (next && !pausiert) {
       await runJob(next);
