@@ -39,11 +39,17 @@ describe('productSubmissionCopy (86cbam5ep)', () => {
   });
 
   it('Copy-Ton: nie „abgelehnt"/„falsch"/„Fehler" in Nutzer-Texten', () => {
-    const codes = ['ean_fehlt', 'kein_produktname', 'produkt_bereits_verguetet', 'doppelt_eingereicht', 'bilder_wiederverwendet', 'fotos_unpassend', 'unbekannt'];
+    const codes = ['ean_fehlt', 'kein_produktname', 'produkt_bereits_verguetet', 'doppelt_eingereicht', 'bilder_wiederverwendet', 'fotos_unpassend', 'preis_fehlt', 'unbekannt'];
     for (const code of codes) {
       const c = describeSubmission({ status: 'rejected', rejectReason: code });
       expect(`${c.label} ${c.headline} ${c.body}`).not.toMatch(/abgelehnt|falsch|Fehler/i);
     }
+  });
+
+  it('preis_fehlt (Preis-Pflicht seit 26.09.2026) hat einen eigenen Text, nicht den Standardtext', () => {
+    const c = describeSubmission({ status: 'rejected', rejectReason: 'preis_fehlt' });
+    expect(c.headline).toMatch(/kein Preis/);
+    expect(c.body).toMatch(/Preisschild|Kassenbon/);
   });
 
   it('primaryReasonCode bevorzugt holdReasons und strippt den Suffix', () => {

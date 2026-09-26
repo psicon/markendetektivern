@@ -32,6 +32,8 @@ describe('submitProduct — ein Produkt-Slot, ein Dokument', () => {
     ref: jest.fn((_s: unknown, p: string) => ({ path: p })),
     putFile: jest.fn(() => ({ on: jest.fn(), cancel: jest.fn() })),
   }));
+  // productSubmit zieht über die Upload-Prüfung expo-file-system nach.
+  jest.mock('expo-file-system', () => ({ getInfoAsync: jest.fn(async () => ({ exists: false })) }));
   jest.mock('@/lib/firebase', () => ({
     db: { __mockDb: true },
     storage: { __mockStorage: true },

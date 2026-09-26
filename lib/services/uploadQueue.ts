@@ -64,6 +64,15 @@ export interface UploadJobStep {
   /** Persistent uri (copied into QUEUE_DIR on enqueue). */
   uri: string;
   fileName?: string;
+  /**
+   * Schon hochgeladen (26.09.2026): ein Neuversuch lädt diesen Schritt nicht
+   * erneut über Mobilfunk hoch. Gesetzt, sobald die Upload-Prüfung keine
+   * Abweichung fand. War sie nicht möglich („ungeprueft", siehe
+   * storageUploadPruefung.ts), wäre ein zweiter Upload genauso ungeprüft und
+   * brächte keine Sicherheit. Gilt nur für dieselbe uid — nach dem Umzug ins
+   * Konto liegt der Pfad unter der alten uid.
+   */
+  hochgeladen?: { uid: string; pfad: string };
 }
 
 export interface UploadJob {
@@ -223,6 +232,14 @@ function setJob(id: string, patch: Partial<UploadJob>) {
     emit();
     void persist();
   }
+}
+
+/** Einen hochgeladenen Schritt am Auftrag vermerken (persistiert, damit er
+ *  auch einen App-Neustart übersteht). */
+function merkeHochgeladen(id: string, key: ProductPhotoStep, hochgeladen: { uid: string; pfad: string }) {
+  const j = getJob(id);
+  if (!j) return;
+  setJob(id, { steps: j.steps.map((s) => (s.key === key ? { ...s, hochgeladen } : s)) });
 }
 
 /** Progress-only update → emit (ephemeral, NOT persisted to avoid hammering
@@ -468,6 +485,10 @@ async function runJob(job: UploadJob) {
     const steps = job.steps;
     for (let i = 0; i < steps.length; i++) {
       const s = steps[i];
+      if (s.hochgeladen?.uid === job.uid) {
+        uploaded[s.key] = s.hochgeladen.pfad;
+        continue;
+      }
       const path = await uploadProductImage(s.uri, job.uid, job.sessionId, job.productIndex, s.key, {
         fileName: s.fileName,
         onProgress: (pct) => {
@@ -475,6 +496,7 @@ async function runJob(job: UploadJob) {
         },
       });
       uploaded[s.key] = path;
+      merkeHochgeladen(job.id, s.key, { uid: job.uid, pfad: path });
     }
     // Kontowechsel während des Hochladens: nicht mit fremdem Token einreichen.
     if (aktuelleUid() !== job.uid) {

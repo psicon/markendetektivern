@@ -40,6 +40,7 @@ import {
 } from '@react-native-firebase/firestore';
 import { putFile, ref as storageRef } from '@react-native-firebase/storage';
 import journeyTrackingService from '@/lib/services/journeyTrackingService';
+import { uploadPruefungVorbereiten } from '@/lib/services/storageUploadPruefung';
 import type { CaptureContext, ClientVersion } from '@/lib/services/captureContext';
 
 // ─── Step config ────────────────────────────────────────────────────
@@ -320,6 +321,7 @@ export async function uploadProductImage(
 
   const storagePath = productImagePath(uid, sessionId, index, step, opts?.fileName);
   const ref = storageRef(storage, storagePath);
+  const pruefung = await uploadPruefungVorbereiten(localUri, storagePath, 'image/jpeg');
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
@@ -329,7 +331,7 @@ export async function uploadProductImage(
       clearTimeout(timer);
       fn();
     };
-    const task = putFile(ref, localUri, { contentType: 'image/jpeg' });
+    const task = putFile(ref, localUri, pruefung.metadata);
     const timer = setTimeout(() => {
       try {
         task.cancel();
@@ -346,7 +348,18 @@ export async function uploadProductImage(
         if (total > 0) opts?.onProgress?.((snap.bytesTransferred / total) * 100);
       },
       (err: any) => done(() => reject(err)),
-      () => done(() => resolve()),
+      // Die Erfolgsmeldung allein beweist nichts (Android-SDK schneidet ab,
+      // siehe storageUploadPruefung.ts). Ein unvollständiges Foto scheitert
+      // hier; der Neuversuch der Warteschlange überschreibt es unter
+      // demselben Pfad, bevor submitProduct das Dokument schreibt.
+      // RNFB setzt `task.snapshot` unmittelbar vor diesem Aufruf auf den
+      // Abschluss-Snapshot (StorageTask.js wrapSnapshotEventListener).
+      () =>
+        done(() => {
+          const fehler = pruefung.pruefeAbschluss(task.snapshot);
+          if (fehler) reject(fehler);
+          else resolve();
+        }),
     );
   });
 

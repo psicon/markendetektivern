@@ -32,6 +32,7 @@ import {
 import { ref as storageRef, putFile } from '@react-native-firebase/storage';
 
 import { db } from '@/lib/firebase';
+import { uploadPruefungVorbereiten } from '@/lib/services/storageUploadPruefung';
 import type { ReceiptDoc } from '@/lib/types/cashback';
 
 // Override via env if you ever run a staging deploy. Region is locked
@@ -124,11 +125,12 @@ export async function uploadBonImage(
   const timeoutMs = opts?.timeoutMs ?? 60_000;
   const firstTickWaitMs = Math.max(timeoutMs, 30_000);
   let sizeBytes = 0;
+  const pruefung = await uploadPruefungVorbereiten(localUri, storagePath, 'image/jpeg');
 
   await new Promise<void>((resolve, reject) => {
     let task: any;
     try {
-      task = putFile(ref, localUri, { contentType: 'image/jpeg' });
+      task = putFile(ref, localUri, pruefung.metadata);
     } catch (err: any) {
       console.error('[bonUpload] putFile_threw', {
         code: err?.code,
@@ -192,6 +194,18 @@ export async function uploadBonImage(
       },
       () => {
         clearInterval(watchdog);
+        // Die Erfolgsmeldung allein beweist nichts (Android-SDK schneidet ab,
+        // siehe storageUploadPruefung.ts). Der Neuversuch der Warteschlange
+        // lädt unter einem neuen Dateinamen hoch. Das abgeschnittene Objekt
+        // bleibt liegen: storage.rules lässt den Besitzer nicht löschen
+        // (`request.resource` ist beim Löschen null), und ohne Aufruf von
+        // enqueueCashback verweist kein Bon darauf. `task.snapshot` ist hier
+        // der Abschluss-Snapshot (von RNFB direkt vor diesem Aufruf gesetzt).
+        const fehler = pruefung.pruefeAbschluss(task.snapshot);
+        if (fehler) {
+          reject(fehler);
+          return;
+        }
         console.error('[bonUpload] complete', { sizeBytes });
         opts?.onProgress?.(100, sizeBytes, sizeBytes);
         resolve();

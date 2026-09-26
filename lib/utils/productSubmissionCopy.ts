@@ -90,6 +90,12 @@ const REASON_COPY: Record<string, { headline: string; body: string }> = {
     headline: 'Ein Foto ist beschädigt angekommen',
     body: 'Das lag an der Übertragung, nicht an dir. Beim nächsten Mal mit stabiler Verbindung hochladen — dann zählt der Datensatz.',
   },
+  // 26.09.2026 (Entscheidung Patrick): der Preis ist Pflicht. Vergibt die
+  // Morgenrunde, wenn das Preisfoto weder Preisschild noch Kassenbon zeigt.
+  preis_fehlt: {
+    headline: 'Auf dem Preisfoto war kein Preis zu sehen',
+    body: 'Beim nächsten Produkt einfach das Preisschild am Regal oder deinen Kassenbon fotografieren — dann zählt der Datensatz.',
+  },
 };
 
 const DEFAULT_HELD = {
