@@ -21,42 +21,39 @@ import { showInfoToast, showRetryableErrorToast } from '@/lib/services/ui/toast'
 // die Live-Subscription (subscribeMySharedLists) treibt die UI sofort aus dem
 // latenzkompensierten lokalen Cache. Ein echter Server-Reject (z.B.
 // permission-denied) landet im catch → Retry-Toast, der dieselbe Aktion
-// erneut feuert — genau EINMAL je Toast: der Knopf im Toast schließt ihn
-// nicht, und ein zweiter Tipp nach erfolgreicher Wiederholung scheiterte
-// zwangsläufig (dann schon kein Mitglied mehr) und meldete einen Fehler, den
-// es nicht gibt.
-function einmal(aktion: () => void): () => void {
-  let benutzt = false;
-  return () => {
-    if (benutzt) return;
-    benutzt = true;
-    aktion();
-  };
-}
-
+// erneut feuert (showRetryableErrorToast schließt sich dabei und feuert einmal).
 function fireRotate(listId: string) {
-  // Der neue Link gilt erst, wenn der Server ihn hat. Offline löst der Write
-  // erst beim Wiederverbinden auf — bis dahin nicht „erstellt" melden.
+  // Ein neuer Link gilt erst, wenn der Server ihn hat. Offline zeigte das
+  // Sheet sonst den unbestätigten Code als QR/Link an — wer ihn weitergab,
+  // verschickte eine Einladung, die (auf Android nach App-Ende sogar für
+  // immer) ins Leere läuft.
   if (!isOnline()) {
-    showInfoToast('Der neue Link wird aktiv, sobald du wieder online bist.', 'info');
+    showInfoToast('Für einen neuen Link brauchst du eine Internetverbindung.', 'info');
+    return;
   }
   void SharedListService.rotateInvite(listId)
     .then(() => showInfoToast('Neuer Link erstellt — 48 Stunden gültig.', 'success'))
-    .catch(() =>
-      showRetryableErrorToast('Konnte keinen neuen Link erstellen.', einmal(() => fireRotate(listId))),
-    );
+    .catch(() => showRetryableErrorToast('Konnte keinen neuen Link erstellen.', () => fireRotate(listId)));
 }
 
 function fireRename(listId: string, name: string) {
   void SharedListService.rename(listId, name).catch(() =>
-    showRetryableErrorToast('Konnte die Liste nicht umbenennen.', einmal(() => fireRename(listId, name))),
+    showRetryableErrorToast('Konnte die Liste nicht umbenennen.', () => fireRename(listId, name)),
   );
 }
 
+/** Verweigert/nicht gefunden heißt beim Verlassen: schon kein Mitglied mehr
+ *  (die Rules verlangen die Mitgliedschaft) — das Ziel ist erreicht. */
+function schonDraussen(e: any): boolean {
+  const code = String(e?.code ?? '');
+  return code.includes('permission-denied') || code.includes('not-found');
+}
+
 function fireLeave(listId: string) {
-  void SharedListService.leaveList(listId).catch(() =>
-    showRetryableErrorToast('Konnte die Liste nicht verlassen.', einmal(() => fireLeave(listId))),
-  );
+  void SharedListService.leaveList(listId).catch((e) => {
+    if (schonDraussen(e)) return;
+    showRetryableErrorToast('Konnte die Liste nicht verlassen.', () => fireLeave(listId));
+  });
 }
 
 /**
