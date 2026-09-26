@@ -53,6 +53,8 @@
         </array>
       </dict>
     </array>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
     <key>CFBundleVersion</key>
     <string>1274</string>
     <key>FacebookAdvertiserIDCollectionEnabled</key>
