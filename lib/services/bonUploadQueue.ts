@@ -39,6 +39,7 @@ import { isEffectivelyAnonymous } from '@/lib/utils/authIdentity';
 import type { BonGeraeteOrt, ClientVersion } from './captureContext';
 import { GastBestand } from './gastBestand';
 import { GastUebernahme } from './gastUebernahme';
+import { UPLOAD_UNVOLLSTAENDIG } from './storageUploadPruefung';
 import journeyTrackingService from './journeyTrackingService';
 import { isOnline, refreshNetwork, subscribeNetwork } from './network';
 import {
@@ -242,6 +243,10 @@ function humanError(e: any): string {
   if (code === 'upload_timeout' || code === 'enqueue_timeout' || code === 'network_failed')
     return 'Der Upload braucht zu lange. Prüfe deine Verbindung und versuch es erneut.';
   if (code === 'rate_limited') return 'Du hast heute schon einen Bon eingereicht. Morgen geht es weiter.';
+  // Abgeschnittener Upload (Android-Storage-SDK, 26.09.2026): kein Fehler des
+  // Nutzers, der Neuversuch läuft automatisch.
+  if (code === UPLOAD_UNVOLLSTAENDIG)
+    return 'Die Übertragung wurde unterbrochen — wir laden deinen Bon gleich automatisch noch einmal hoch.';
   // Server-Alters-Gate beim Einreichen (EXIF-Aufnahmedatum): nicht heilbar durch
   // Wiederholen — dasselbe Foto bleibt gleich alt. Frist positiv nennen.
   if (code === 'bon_too_old') return 'Dieser Bon liegt außerhalb der Frist — wir nehmen Bons der letzten 7 Tage an. Beim nächsten Einkauf lohnt sich das Foto direkt an der Kasse.';
