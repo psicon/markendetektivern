@@ -14,7 +14,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -184,9 +184,22 @@ export default function CashbackReviewScreen() {
     }),
     [params.uri, params.width, params.height, params.hash, params.brightness, params.size],
   );
+  const quelle = ((params.source as string) || 'live_camera') as 'live_camera' | 'upload';
   // Standort zum Zeitpunkt der Aufnahme — startet sofort, fragt nie nach der
-  // Freigabe und hält das Einreichen höchstens ein paar Sekunden auf.
-  const aufnahmeKontext = useAufnahmeKontext(bon.capturedAt);
+  // Freigabe und hält das Einreichen höchstens ein paar Sekunden auf. Nur bei
+  // der Kamera: bei einem Bild aus der Galerie wäre es der Ort des Einreichens
+  // (meist zuhause), nicht der Aufnahmeort, den der Zweck-Text nennt.
+  const aufnahmeKontext = useAufnahmeKontext(bon.capturedAt, quelle === 'live_camera');
+  // Der Nutzer hat die Seite verlassen („Nochmal", X, Zurück), während das
+  // Einreichen noch auf die Messung wartet → den verworfenen Bon nicht mehr
+  // einreichen und nicht auf dessen Statusseite springen.
+  const verlassenRef = useRef(false);
+  useEffect(
+    () => () => {
+      verlassenRef.current = true;
+    },
+    [],
+  );
 
   const verdict = useMemo(() => verdictFor(bon), [bon]);
   const allChecked = checks.corners && checks.date && checks.items;
@@ -205,6 +218,7 @@ export default function CashbackReviewScreen() {
   const blockerHint = allChecked && !verdict.sizeOk ? verdict.sizeLabel : null;
 
   const handleRetake = useCallback(() => {
+    verlassenRef.current = true;
     router.replace('/cashback/capture');
   }, []);
 
@@ -213,6 +227,7 @@ export default function CashbackReviewScreen() {
   // freshly-mounted stack with replace-style entry can land on the
   // hidden index splash; navigate is robust either way.
   const handleDismiss = useCallback(() => {
+    verlassenRef.current = true;
     router.navigate('/(tabs)/rewards');
   }, []);
 
@@ -238,6 +253,7 @@ export default function CashbackReviewScreen() {
     // Fehlt die Freigabe, zeigt der Screen den Sperrhinweis (Render unten).
     if (einreichenLaeuftRef.current) return;
     einreichenLaeuftRef.current = true;
+    verlassenRef.current = false;
     // pruefeStandortPflicht wirft nie (Lesefehler → erfüllt).
     if ((await pflicht.pruefen()) !== 'erfuellt') {
       einreichenLaeuftRef.current = false;
@@ -257,12 +273,17 @@ export default function CashbackReviewScreen() {
         return;
       }
     }
+    const kontext = await aufnahmeKontext();
+    if (verlassenRef.current) {
+      setSubmitting(false);
+      einreichenLaeuftRef.current = false;
+      return;
+    }
     // Hand the receipt to the persistent background upload queue: it copies
     // the image to a durable dir + creates the placeholder mirror, then uploads
     // in the background with NetInfo auto-resume. Survives LEAVING this screen
     // and an app kill → no more zombie "Wird hochgeladen" docs. enqueueBon only
     // does local work (file copy + AsyncStorage), so it never hangs offline.
-    const captureContext = bonGeraeteOrt(await aufnahmeKontext());
     let localId: string;
     try {
       localId = await enqueueBon({
@@ -272,9 +293,9 @@ export default function CashbackReviewScreen() {
         width: bon.width,
         height: bon.height,
         capturedAt: bon.capturedAt,
-        source: ((params.source as string) || 'live_camera') as 'live_camera' | 'upload',
+        source: quelle,
         campaignId: getSelectedCampaignId(),
-        captureContext,
+        captureContext: kontext ? bonGeraeteOrt(kontext) : null,
         clientVersion: clientVersion(),
       });
     } catch (e) {
@@ -294,7 +315,7 @@ export default function CashbackReviewScreen() {
         uploadUri: bon.uri, // local preview while the upload runs
       },
     });
-  }, [bon, canSubmit, user?.uid, params.source, pflicht.pruefen, aufnahmeKontext]);
+  }, [bon, canSubmit, user?.uid, quelle, pflicht.pruefen, aufnahmeKontext]);
 
   const verdictColor = (ok: boolean) => (ok ? theme.primary ?? '#0d8575' : '#d6603a');
 

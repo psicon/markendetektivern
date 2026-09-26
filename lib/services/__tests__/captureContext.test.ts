@@ -330,6 +330,50 @@ describe('Bons: Standort bei der Aufnahme, nicht beim Hochladen', () => {
     }
   });
 
+  it('Android: kein ungefragter Google-Dialog „Standortgenauigkeit" bei der Bon-Messung', async () => {
+    mockLocation.getLastKnownPositionAsync.mockResolvedValue(null);
+    await aufnahmeKontextStarten(1)();
+    expect(mockLocation.getCurrentPositionAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ mayShowUserSettingsDialog: false }),
+    );
+  });
+
+  it('Produktfotos behalten ihr bisheriges Verhalten (kein Zusatz-Parameter)', async () => {
+    await erfasseCaptureContext();
+    expect(mockLocation.getCurrentPositionAsync.mock.calls[0][0]).not.toHaveProperty('mayShowUserSettingsDialog');
+  });
+
+  it('scheitert die frische Messung, bleibt ein älterer bekannter Fix erhalten', async () => {
+    const alt = Date.now() - 30 * 60 * 1000;
+    mockLocation.getLastKnownPositionAsync.mockResolvedValue(fix(alt));
+    mockLocation.getCurrentPositionAsync.mockRejectedValue(Object.assign(new Error('x'), { code: 'E_SETTINGS' }));
+    const k = await erfasseCaptureContext();
+    expect(k.gpsStatus).toBe('granted_precise');
+    expect(k.gps?.fixAt).toBe(alt);
+  });
+
+  it('Ortung erst beim Einreichen eingeschaltet → einmal neu gemessen', async () => {
+    (mockLocation as any).hasServicesEnabledAsync = jest.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
+    try {
+      const holen = aufnahmeKontextStarten(1);
+      await Promise.resolve();
+      mockLocation.getLastKnownPositionAsync.mockResolvedValue(fix(Date.now()));
+      const k = await holen();
+      expect(k.gpsStatus).toBe('granted_precise');
+      expect(k.gps).not.toBeNull();
+    } finally {
+      delete (mockLocation as any).hasServicesEnabledAsync;
+    }
+  });
+
+  it('nach einem echten Messfehler wird NICHT erneut gemessen', async () => {
+    mockLocation.getCurrentPositionAsync.mockRejectedValue(new Error('kaputt'));
+    const k = await aufnahmeKontextStarten(1)();
+    expect(k.gpsStatus).toBe('unavailable');
+    expect(k.gpsError).toBe('kaputt');
+    expect(mockLocation.getForegroundPermissionsAsync).toHaveBeenCalledTimes(1);
+  });
+
   it('schickt vom Kontext nur das Gerätesignal mit, keine IP-Ortung', async () => {
     mockJourney.getCurrentJourneyLocation.mockReturnValue({ lat: 1, lon: 2, city: 'X', geohash5: 'a', source: 'ip' });
     mockJourney.getCurrentJourneyId.mockReturnValue('j1');
