@@ -89,10 +89,12 @@ function manufacturerEqual(a, b) {
   return levenshtein(x, y) <= 2;
 }
 
-// NUR server-geschriebene OCR-Felder (crowd-upload-namer, Admin-SDK) als
-// Vergleichswerte. Top-Level `priceCents`/`manufacturer` wären client-
-// schreibbar (crowd_uploads create erlaubt beliebige Felder) — ein Nutzer
-// könnte sich sonst durch einen erfundenen Preis aus der Sperre schreiben.
+// NUR server-geschriebene Felder als Vergleichswerte — der Aufrufer liefert sie
+// über src/werte.js policyOf: Preis vom Namer (`priceOcr`) oder nachgelesen
+// (`priceRescueOcr`), Hersteller NUR vom Namer. Beide sind per firestore.rules
+// beim Anlegen gesperrt (seit 26.09.2026). Top-Level `priceCents`/
+// `manufacturer` wären vom Client frei wählbar — ein Nutzer könnte sich sonst
+// durch einen erfundenen Preis aus der Sperre schreiben.
 function priceOf(u) {
   const p = u && u.priceOcr && u.priceOcr.priceCents;
   return Number.isFinite(p) && p > 0 ? Math.round(p) : null;
@@ -190,6 +192,24 @@ function evaluateDuplicate(candidate, others) {
   return { verdict: 'locked', reason: REASON.SAME_USER, updatedFields: [], ...base };
 }
 
+/**
+ * Doppel-Befund zum Speichern am Dokument (`review.precheck.dup`) — dieselbe
+ * Form für Morgenrunde und Prüfkonsole. Ohne ihn fehlt beim Zurückholen einer
+ * Sperr-Ablehnung die Referenz („Früher/Anders").
+ *
+ * Bewusst OHNE `priorUserId` und `diff`: der Einreicher darf sein Dokument
+ * lesen (firestore.rules), und die Referenz kann einem anderen Nutzer gehören —
+ * dessen uid, Preis und Markt gehören nicht in fremde Dokumente.
+ */
+function dupZumSpeichern(dup) {
+  if (!dup) return null;
+  return {
+    verdict: dup.verdict ?? 'ok', reason: dup.reason ?? null, priorId: dup.priorId ?? null,
+    sameUser: dup.sameUser ?? null, lockUntil: dup.lockUntil ?? null,
+    updatedFields: Array.isArray(dup.updatedFields) ? dup.updatedFields : [],
+  };
+}
+
 /** Vollständigkeits-Vorprüfung (dieselben Regeln wie die manuellen Freigabe-Runden 08/2026). */
 function completenessCheck(u, requiredSteps) {
   const problems = [];
@@ -202,4 +222,4 @@ function completenessCheck(u, requiredSteps) {
   return { ok: problems.length === 0, problems, missing };
 }
 
-module.exports = { LOCK_DAYS, LOCK_MS, SAME_USER_LOCK_MS, REASON, evaluateDuplicate, dataDiffers, manufacturerEqual, completenessCheck, normText, ms };
+module.exports = { LOCK_DAYS, LOCK_MS, SAME_USER_LOCK_MS, REASON, evaluateDuplicate, dataDiffers, manufacturerEqual, completenessCheck, dupZumSpeichern, normText, ms };

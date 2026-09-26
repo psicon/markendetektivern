@@ -146,6 +146,19 @@ describe('Nachlese-Fehler sind kein Urteil (Gegenprüfung 24.09.)', () => {
     expect(entscheideFall(fall({ dup, preisFehlt: true })).entscheidung).toBe('ablehnen');
     expect(entscheideFall(fall({ dup, preisFehlt: false, rettungFehler: { preis: '429' } })).entscheidung).toBe('ablehnen');
   });
+  it('Arbeitszeit abgelaufen: Sperre, die am fehlenden Preis hängt → offen, nicht abgelehnt (26.09.)', () => {
+    const { rettungNichtGeschafft } = require('../src/fotoRundeRegeln');
+    const rf = rettungNichtGeschafft();
+    expect(rf.preis).toBe('zeit_abgelaufen');
+    const dup = { verdict: 'locked', reason: 'sperre_30_tage_gleicher_nutzer', lockUntil: 1 };
+    expect(entscheideFall(fall({ dup, preisFehlt: true, rettungFehler: rf })))
+      .toMatchObject({ entscheidung: 'offen', grund: 'nachlesen_gescheitert', ctx: { hinweis: 'zeit_abgelaufen' } });
+    // Name und Barcode wie bisher: nicht nachgelesen ist kein „fehlt".
+    expect(entscheideFall(fall({ comp: { ok: false, problems: ['kein_produktname'], missing: [] }, rettungFehler: rettungNichtGeschafft() })).entscheidung).toBe('offen');
+    expect(entscheideFall(fall({ comp: { ok: false, problems: ['ean_fehlt'], missing: [] }, rettungFehler: rettungNichtGeschafft() })).entscheidung).toBe('offen');
+    // Liegt ein Preis vor, bleibt die Sperre ein Urteil über die Einreichung.
+    expect(entscheideFall(fall({ dup, preisFehlt: false, rettungFehler: rettungNichtGeschafft() })).entscheidung).toBe('ablehnen');
+  });
 });
 
 describe('Nachlesen: lesbar heißt nicht wortgleich (Hinweis APP_ORIGINAL 24.09.)', () => {

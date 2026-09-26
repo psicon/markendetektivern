@@ -1,5 +1,5 @@
 'use strict';
-const { evaluateDuplicate, dataDiffers, manufacturerEqual, completenessCheck, LOCK_MS, SAME_USER_LOCK_MS, REASON } = require('../src/duplicatePolicy');
+const { evaluateDuplicate, dataDiffers, manufacturerEqual, completenessCheck, dupZumSpeichern, LOCK_MS, SAME_USER_LOCK_MS, REASON } = require('../src/duplicatePolicy');
 
 const DAY = 24 * 60 * 60 * 1000;
 const T0 = Date.parse('2026-09-01T10:00:00Z');
@@ -140,5 +140,23 @@ describe('completenessCheck', () => {
     expect(r.ok).toBe(false);
     expect(r.problems).toEqual(['unvollstaendig', 'ean_fehlt', 'kein_produktname']);
     expect(r.missing).toHaveLength(6);
+  });
+});
+
+describe('dupZumSpeichern', () => {
+  const T = Date.UTC(2026, 8, 25, 8, 0, 0);
+  it('behält Referenz, Frist und Unterschiede — ohne fremde uid und fremde Werte', () => {
+    const prior = { id: 'p', userId: 'andere', ean: '4061464833821', status: 'approved', createdAt: T - 40 * 86400000, marketId: 'm2', priceOcr: { priceCents: 199 } };
+    const kand = { id: 'k', userId: 'ich', ean: '4061464833821', status: 'pending', createdAt: T, marketId: 'm1', priceOcr: { priceCents: 229 } };
+    const d = evaluateDuplicate(kand, [prior]);
+    expect(d.priorUserId).toBe('andere');
+    const s = dupZumSpeichern(d);
+    expect(s).toEqual({ verdict: 'ok', reason: null, priorId: 'p', sameUser: false, lockUntil: d.lockUntil, updatedFields: ['price', 'market'] });
+    expect(JSON.stringify(s)).not.toContain('andere');
+    expect(JSON.stringify(s)).not.toContain('199');
+  });
+  it('Kurzform der Runde ohne EAN ({verdict, reason, lockUntil}) und null', () => {
+    expect(dupZumSpeichern({ verdict: 'ok', reason: null, lockUntil: null })).toEqual({ verdict: 'ok', reason: null, priorId: null, sameUser: null, lockUntil: null, updatedFields: [] });
+    expect(dupZumSpeichern(null)).toBeNull();
   });
 });

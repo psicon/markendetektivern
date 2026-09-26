@@ -139,11 +139,53 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Felder, die ausschließlich Server-Prozesse an crowd_uploads schreiben
+    // (Namer, Morgenrunde, Rettungs-Skripte, Prüfkonsole, Vergütung, Orts-
+    // bewertung). Die App schreibt keines davon (grep lib/app/components,
+    // auch in der Git-Historie von productSubmit.ts). Die Morgenrunde und die
+    // Prüfkonsole vertrauen ihnen: ein beim Anlegen mitgeschickter
+    // `priceRescueOcr` löste die 24-h-Eigensperre, eine `eanRescueOcr` umginge
+    // die Prüfziffer, `productNameOcrAt` ließe den Namer die Einreichung
+    // überspringen, `priceReceipt` bestimmte Aktionsgebiet und Ortsquelle.
+    // Sperrliste statt Whitelist: neue App-Felder (Kontext, Version) bleiben
+    // ohne Regel-Deploy möglich, alte Clients werden nicht ausgesperrt.
+    function crowdUploadServerFelder() {
+      return [
+        // Namer (crowd-upload-namer)
+        'productNameOcr', 'productNameOcrAt', 'productNameOcrFehler',
+        'productNameOcrConfidence', 'priceOcr', 'manufacturerOcr',
+        'priceImageKind', 'priceReceipt',
+        'productNameOcrBildDefekt', 'productNameOcrFehlerErst',
+        'productNameOcrNachgelesenAt', 'namerNachlesenAb',
+        'namerNachlesenVersuch', 'namerLauf',
+        // Nachlesen (Morgenrunde + Ops-Skripte, inkl. Alt-Marker je Feld)
+        'productNameRescueOcr', 'productNameRescueAlternative', 'eanRescueOcr',
+        'priceRescueOcr', 'manufacturerRescueOcr', 'rescueAt', 'rescueQuelle',
+        'productNameRescueAt', 'productNameRescueQuelle',
+        'eanRescueAt', 'eanRescueQuelle',
+        // Prüfung (Morgenrunde + Prüfkonsole)
+        'review', 'reviewedBy', 'reviewedAt', 'reviewNote', 'holdReasons',
+        'rejectReason', 'loseWare', 'frischwareOhneAngaben',
+        // Vergütung (crowd-upload-reward)
+        'rewardResult', 'rewardCents', 'rewardNotCreditedReason',
+        'rewardCheckedAt', 'rewardSkipped', 'rewardSkippedReason',
+        'rewardRegion', 'rewardLocationRule', 'rewardPushSentAt',
+        // Ortsbewertung (crowd-upload-location)
+        'probableLocation', 'probableLocationAt', 'exifGps',
+        'journeyLocationMatch', 'userLocationBackfilled'
+      ];
+    }
+
     // Produkt-Foto Crowd-Uploads — User legt eigene Pending-Einträge an
-    // + liest sie; Review/Vergütung läuft serverseitig.
+    // + liest sie; Review/Vergütung läuft serverseitig. `status` schreibt die
+    // App seit dem ersten Stand (e323ff1) immer als 'pending'; jeder andere
+    // Wert wäre eine selbst erteilte Freigabe.
     match /crowd_uploads/{uploadId} {
       allow create: if signedIn()
-                     && request.resource.data.userId == request.auth.uid;
+                     && request.resource.data.userId == request.auth.uid
+                     && !request.resource.data.keys().hasAny(crowdUploadServerFelder())
+                     && (!('status' in request.resource.data)
+                         || request.resource.data.status == 'pending');
       allow read: if signedIn() && resource.data.userId == request.auth.uid;
       allow update, delete: if false;
     }

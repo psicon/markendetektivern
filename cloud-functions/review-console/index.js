@@ -14,13 +14,24 @@
  *    `force:true` + Notiz übersteuert bewusst und wird am Doc vermerkt.
  *  - Batch = pro ID eigene Transaktion + Ergebnis pro ID. Kein „alles oder nichts".
  *  - reviewNote immer positiv formuliert (Copy-Ton-Regel, CLAUDE.md).
+ *
+ * Ausroll-Reihenfolge seit 26.09.2026 (effektive Werte aus src/werte.js):
+ *  1. firestore.rules — sperrt die Namer-/Nachlese-Felder beim Anlegen. Vorher
+ *     vertraute die Konsole fälschbaren *RescueOcr-Werten.
+ *  2. diese Codebase SOLO (Multi-Codebase-Deploys flaken, CLAUDE.md).
+ *  3. hosting:md-receipt-admin — pruefen.html fällt zwar auf die Rohfelder
+ *     zurück, zeigt nachgelesene Werte aber erst mit dieser Codebase.
  */
 
 const admin = require('firebase-admin');
 const { FieldValue } = require('firebase-admin/firestore');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const logger = require('firebase-functions/logger');
-const { evaluateDuplicate, completenessCheck, REASON, ms } = require('./src/duplicatePolicy');
+const { REASON, dupZumSpeichern, ms } = require('./src/duplicatePolicy');
+const {
+  INDEX_FELDER, safeStatus, rowOf, stripPolicy, precheckOf, precheckFuerFall,
+  nachbarnAus, gruppiereNachEan, eanIndex, baueFotoListe,
+} = require('./src/einreichung');
 const { ortVonEinreichung, ortVonBon, ortsverzeichnisAusBons } = require('./src/ort');
 const { pruefeOrtsanforderung } = require('./src/locationGate');
 
@@ -29,14 +40,7 @@ const db = admin.firestore();
 
 const REGION = 'europe-west1';
 const COL = 'crowd_uploads';
-const REQUIRED_STEPS = ['front', 'rueckseite', 'hersteller', 'ean', 'naehrwerte', 'zutaten', 'preis'];
 const MAX_BATCH = 100;
-// Werte, die in der Konsole in HTML-Attribute wandern, dürfen NUR aus einer
-// bekannten Menge kommen — crowd_uploads ist client-anlegbar (die Rules
-// erlauben create mit beliebigen Feldern), ein freier `status` wäre sonst ein
-// XSS-Vektor im Admin-Browser.
-const UPLOAD_STATUSES = new Set(['pending', 'approved', 'rejected']);
-const safeStatus = (v) => (UPLOAD_STATUSES.has(v) ? v : 'unknown');
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 500;
 
@@ -76,76 +80,36 @@ function noteFor(reason, ctx = {}) {
   }
 }
 
-function rowOf(d) {
-  const x = d.data() || {};
-  // Anzeige = dieselbe Quelle wie die Doppel-Regel: NUR die server-geschriebenen
-  // OCR-Felder. Ein client-gesetztes Top-Level-Feld darf weder die Regel noch
-  // die Anzeige beeinflussen (crowd_uploads ist client-anlegbar).
-  const price = x.priceOcr && Number.isFinite(x.priceOcr.priceCents) ? x.priceOcr.priceCents : null;
-  const manufacturer = x.manufacturerOcr && typeof x.manufacturerOcr.name === 'string' ? x.manufacturerOcr.name : null;
-  return {
-    id: d.id,
-    status: safeStatus(x.status),
-    statusRaw: typeof x.status === 'string' ? x.status.slice(0, 40) : null,
-    userId: x.userId ?? null,
-    campaignId: x.campaignId ?? null,
-    marketId: x.marketId ?? null,
-    marketName: x.marketName ?? null,
-    marketLand: x.marketLand ?? null,
-    productName: x.productName ?? null,
-    productNameOcr: x.productNameOcr ?? null,
-    ean: x.ean ?? null,
-    images: x.images ?? {},
-    stepCount: x.stepCount ?? Object.keys(x.images || {}).length,
-    createdAt: ms(x.createdAt),
-    updatedAt: ms(x.updatedAt),
-    reviewedAt: ms(x.reviewedAt),
-    reviewedBy: x.reviewedBy ?? null,
-    holdReasons: Array.isArray(x.holdReasons) ? x.holdReasons : [],
-    rejectReason: x.rejectReason ?? null,
-    reviewNote: x.reviewNote ?? null,
-    rewardCents: x.rewardCents ?? null,
-    rewardResult: x.rewardResult ?? null,
-    rewardNotCreditedReason: x.rewardNotCreditedReason ?? null,
-    // Woher das Aktionskennzeichen stammt und worauf der Client es stützte
-    // (86cbet2nw) — im Prüf-Werkzeug sichtbar, damit ein fehlender Betrag
-    // beim Fall selbst auffällt statt erst bei einem Ledger-Abgleich.
-    campaignQuelle: x.campaignQuelle ?? null,
-    campaignResolve: x.campaignResolve ?? null,
-    rewardSkipped: x.rewardSkipped ?? null,
-    rewardSkippedReason: x.rewardSkippedReason ?? null,
-    rewardLocationRule: x.rewardLocationRule ?? null,
-    clientVersion: x.clientVersion ?? null,
-    capture: x.capture
-      ? { gpsStatus: x.capture.gpsStatus ?? null, confirmedPlace: x.capture.confirmedPlace ?? null, capturedAt: ms(x.capture.capturedAt), hasGps: !!x.capture.gps }
-      : null,
-    priceCents: Number.isFinite(price) ? price : null,
-    manufacturer,
-    // Was das „Preis"-Bild zeigt und — falls Kassenbon — dessen Filialadresse.
-    priceImageKind: typeof x.priceImageKind === 'string' ? x.priceImageKind : null,
-    priceReceipt: x.priceReceipt
-      ? { merchant: x.priceReceipt.merchant ?? null, street: x.priceReceipt.street ?? null, zip: x.priceReceipt.zip ?? null, city: x.priceReceipt.city ?? null, bonDate: x.priceReceipt.bonDate ?? null, complete: !!x.priceReceipt.complete }
-      : null,
-    review: x.review ?? null,
-    // Für die Doppel-Regel (nicht im UI nötig, aber im Kandidaten-Vergleich)
-    _policy: { id: d.id, userId: x.userId ?? null, ean: x.ean ?? null, marketId: x.marketId ?? null, status: safeStatus(x.status), createdAt: ms(x.createdAt), priceOcr: x.priceOcr ?? null, manufacturerOcr: x.manufacturerOcr ?? null },
-  };
-}
-
-/** Alle Einreichungen zu einer EAN-Menge (Chunks à 30 für `in`-Queries). */
+/**
+ * Alle Einreichungen zu einer EAN-Menge (Chunks à 30 für `in`-Queries), über
+ * BEIDE EAN-Felder: eine nur nachgelesene EAN (`eanRescueOcr`) ist genauso
+ * Nachbar wie eine gescannte — die Runde gruppiert über eanOf. Ergebnis je
+ * effektiver EAN (`row.anzeigeEan`).
+ */
 async function loadByEans(eans) {
-  const out = new Map(); // ean → rows
   const list = [...new Set(eans.filter(Boolean))];
+  const docs = [];
   for (let i = 0; i < list.length; i += 30) {
     const chunk = list.slice(i, i + 30);
-    const snap = await db.collection(COL).where('ean', 'in', chunk).get();
-    for (const d of snap.docs) {
-      const r = rowOf(d);
-      if (!out.has(r.ean)) out.set(r.ean, []);
-      out.get(r.ean).push(r);
-    }
+    const [gescannt, nachgelesen] = await Promise.all([
+      db.collection(COL).where('ean', 'in', chunk).get(),
+      db.collection(COL).where('eanRescueOcr', 'in', chunk).get(),
+    ]);
+    docs.push(...gescannt.docs, ...nachgelesen.docs);
   }
-  return out;
+  return gruppiereNachEan(docs);
+}
+
+/**
+ * Nachbarn derselben effektiven EAN IN der Transaktion — beide Abfragen, sonst
+ * sieht die Doppel-Regel eine parallele Freigabe über das andere Feld nicht.
+ * Nacheinander gelesen: alle Reads stehen vor dem ersten Write, parallele
+ * Transaktions-Reads bringen bei zwei Abfragen nichts.
+ */
+async function nachbarnInTx(tx, ean, ohneId) {
+  const gescannt = await tx.get(db.collection(COL).where('ean', '==', ean));
+  const nachgelesen = await tx.get(db.collection(COL).where('eanRescueOcr', '==', ean));
+  return nachbarnAus([...gescannt.docs, ...nachgelesen.docs], ean, ohneId);
 }
 
 /**
@@ -167,22 +131,6 @@ const BON_URTEIL = {
   mensch_hat_entschieden: 'hold',
 };
 const bonUrteil = (row) => BON_URTEIL[row.reviewReason] || (row.reconOk === false ? 'hold' : 'ok');
-
-/** Vorprüfung eines Kandidaten gegen die Einreichungen derselben EAN. */
-function precheckOf(row, sameEanRows) {
-  const completeness = completenessCheck({ images: row.images, ean: row.ean, productName: row.productName, productNameOcr: row.productNameOcr }, REQUIRED_STEPS);
-  const others = (sameEanRows || []).filter((r) => r.id !== row.id).map((r) => r._policy);
-  const dup = row.ean ? evaluateDuplicate(row._policy, others) : { verdict: 'ok', reason: null, priorId: null, priorUserId: null, sameUser: null, lockUntil: null, updatedFields: [], diff: null };
-  const reasons = [...completeness.problems];
-  if (dup.verdict === 'locked' || dup.verdict === 'hold') reasons.push(dup.reason);
-  const verdict = !completeness.ok ? 'incomplete' : dup.verdict === 'ok' ? 'ok' : dup.verdict;
-  return { verdict, reasons, missing: completeness.missing, dup };
-}
-
-function stripPolicy(row) {
-  const { _policy, ...rest } = row;
-  return rest;
-}
 
 // ─── Listen + Statistik ─────────────────────────────────────────────
 
@@ -207,13 +155,13 @@ exports.reviewListUploads = onCall({ region: REGION, memory: '512MiB', timeoutSe
   if (p.userId) rows = rows.filter((r) => r.userId === String(p.userId));
   if (p.campaignId) rows = rows.filter((r) => (p.campaignId === 'none' ? !r.campaignId : r.campaignId === String(p.campaignId)));
   if (p.marketId) rows = rows.filter((r) => r.marketId === String(p.marketId));
-  if (p.ean) rows = rows.filter((r) => String(r.ean || '').includes(String(p.ean).replace(/\D/g, '')));
+  if (p.ean) rows = rows.filter((r) => String(r.anzeigeEan || '').includes(String(p.ean).replace(/\D/g, '')));
   if (from) rows = rows.filter((r) => (r.createdAt ?? 0) >= from);
   if (to) rows = rows.filter((r) => (r.createdAt ?? 0) <= to);
   if (p.holdReason) rows = rows.filter((r) => r.holdReasons.some((h) => String(h).startsWith(String(p.holdReason))) || r.rejectReason === p.holdReason);
   if (q) {
     rows = rows.filter((r) =>
-      [r.productName, r.productNameOcr, r.ean, r.userId, r.marketName, r.marketId, r.manufacturer, r.id]
+      [r.anzeigeName, r.productName, r.productNameOcr, r.productNameRescueOcr, r.anzeigeEan, r.ean, r.userId, r.marketName, r.marketId, r.manufacturer, r.id]
         .some((v) => v && String(v).toLowerCase().includes(q)),
     );
   }
@@ -225,12 +173,13 @@ exports.reviewListUploads = onCall({ region: REGION, memory: '512MiB', timeoutSe
   const allPending = status === 'pending' && !p.userId
     ? rows.filter((r) => r.status === 'pending')
     : (await db.collection(COL).where('status', '==', 'pending').get()).docs.map(rowOf);
-  const byEan = allPending.length ? await loadByEans(allPending.map((r) => r.ean)) : new Map();
-  const preById = new Map(allPending.map((r) => [r.id, precheckOf(r, byEan.get(r.ean) || [])]));
+  // Effektive EAN (auch nur nachgelesen) — wie reviewCases und die Runde.
+  const byEan = allPending.length ? await loadByEans(allPending.map((r) => r.anzeigeEan)) : new Map();
+  const preById = new Map(allPending.map((r) => [r.id, precheckOf(r, byEan.get(r.anzeigeEan) || [])]));
   let lockedPendingCount = 0;
   for (const pre of preById.values()) if (pre.verdict === 'locked') lockedPendingCount++;
   for (const r of rows) {
-    r.precheck = r.status === 'pending' ? preById.get(r.id) ?? precheckOf(r, byEan.get(r.ean) || []) : r.review?.precheck ?? null;
+    r.precheck = r.status === 'pending' ? preById.get(r.id) ?? precheckOf(r, byEan.get(r.anzeigeEan) || []) : r.review?.precheck ?? null;
   }
   if (p.precheck && p.precheck !== 'all') rows = rows.filter((r) => r.precheck && r.precheck.verdict === p.precheck);
 
@@ -263,13 +212,16 @@ exports.reviewGetUpload = onCall({ region: REGION }, async (req) => {
   const d = await db.collection(COL).doc(id).get();
   if (!d.exists) throw new HttpsError('not-found', 'Einreichung nicht gefunden.');
   const row = rowOf(d);
-  const [sameEanSnap, sameUserSnap] = await Promise.all([
-    row.ean ? db.collection(COL).where('ean', '==', row.ean).get() : null,
+  // Nachbarn über BEIDE EAN-Felder, gezählt nach effektiver EAN — dasselbe
+  // Urteil wie reviewCases und die Runde.
+  const [gescannt, nachgelesen, sameUserSnap] = await Promise.all([
+    row.anzeigeEan ? db.collection(COL).where('ean', '==', row.anzeigeEan).get() : null,
+    row.anzeigeEan ? db.collection(COL).where('eanRescueOcr', '==', row.anzeigeEan).get() : null,
     row.userId ? db.collection(COL).where('userId', '==', row.userId).get() : null,
   ]);
-  const sameEan = sameEanSnap ? sameEanSnap.docs.map(rowOf).filter((r) => r.id !== id) : [];
+  const sameEan = row.anzeigeEan ? nachbarnAus([...gescannt.docs, ...nachgelesen.docs], row.anzeigeEan, id) : [];
   const sameUser = sameUserSnap ? sameUserSnap.docs.map(rowOf).filter((r) => r.id !== id).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)).slice(0, 30) : [];
-  const precheck = row.status === 'pending' ? precheckOf(row, sameEan) : row.review?.precheck ?? precheckOf(row, sameEan);
+  const precheck = precheckFuerFall(row, sameEan);
   const prior = precheck.dup && precheck.dup.priorId ? sameEan.find((r) => r.id === precheck.dup.priorId) : null;
   return { row: stripPolicy(row), precheck, prior: prior ? stripPolicy(prior) : null, sameEan: sameEan.map(stripPolicy), sameUser: sameUser.map(stripPolicy) };
 });
@@ -321,18 +273,14 @@ exports.reviewDecideUploads = onCall({ region: REGION, timeoutSeconds: 120 }, as
 
         if (decision === 'approve') {
           if (row.status !== 'pending') return { id, outcome: 'skipped', reason: `status_${row.status}` };
-          // Tatsachen JETZT: alle Einreichungen derselben EAN (Reads in der
-          // Transaktion, damit ein paralleler Approve derselben EAN kollidiert).
-          let others = [];
-          if (row.ean) {
-            const same = await tx.get(db.collection(COL).where('ean', '==', row.ean));
-            others = same.docs.map(rowOf).filter((r) => r.id !== id);
-          }
+          // Tatsachen JETZT: alle Einreichungen derselben effektiven EAN (Reads
+          // in der Transaktion, damit ein paralleler Approve derselben EAN kollidiert).
+          const others = row.anzeigeEan ? await nachbarnInTx(tx, row.anzeigeEan, id) : [];
           const precheck = precheckOf(row, others);
           if (precheck.verdict !== 'ok' && !force) {
             return { id, outcome: 'blocked', reason: precheck.reasons[0] || precheck.verdict, precheck };
           }
-          const review = { precheck: { verdict: precheck.verdict, reasons: precheck.reasons, dup: precheck.dup }, decidedBy: adminUid, forced: force, ...(force ? { forcedNote: note } : {}) };
+          const review = { precheck: { verdict: precheck.verdict, reasons: precheck.reasons, dup: dupZumSpeichern(precheck.dup) }, decidedBy: adminUid, forced: force, ...(force ? { forcedNote: note } : {}) };
           tx.update(ref, { status: 'approved', reviewedAt: ts, reviewedBy: adminUid, updatedAt: ts, review, holdReasons: FieldValue.delete(), rejectReason: FieldValue.delete(), ...(note && !force ? { reviewNote: note } : {}) });
           return { id, outcome: 'approved', precheck: review.precheck };
         }
@@ -342,8 +290,7 @@ exports.reviewDecideUploads = onCall({ region: REGION, timeoutSeconds: 120 }, as
           // Für Sperr-Gründe die Frist aus den Tatsachen holen (Notiz nennt das Datum).
           let ctx = { note };
           if (reason === REASON.SAME_USER || reason === REASON.OTHER_USER) {
-            const same = row.ean ? await tx.get(db.collection(COL).where('ean', '==', row.ean)) : null;
-            const pre = precheckOf(row, same ? same.docs.map(rowOf).filter((r) => r.id !== id) : []);
+            const pre = precheckOf(row, row.anzeigeEan ? await nachbarnInTx(tx, row.anzeigeEan, id) : []);
             ctx = { note, lockUntil: pre.dup && pre.dup.lockUntil };
           }
           tx.update(ref, {
@@ -631,28 +578,14 @@ exports.reviewQueue = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
   // ab, ohne dass jemand mit veralteten Nachbarn arbeitet.
   const openSnap = await db.collection(COL).where('status', '==', 'pending').get();
   const byEan = eanIndexAusCache();
-  if (byEan) return baueFotoListe(openSnap, byEan, p, q);
+  if (byEan) return baueFotoListe(openSnap.docs, byEan, p, q);
 
-  const allSnap = await db.collection(COL)
-    .select('userId', 'ean', 'marketId', 'status', 'createdAt', 'priceOcr', 'manufacturerOcr').get();
-  const frisch = new Map();
-  for (const d of allSnap.docs) {
-    const x = d.data();
-    if (!x.ean) continue;
-    if (!frisch.has(x.ean)) frisch.set(x.ean, []);
-    // WICHTIG: dieselbe Form wie `rowOf` sie liefert, also mit `_policy`.
-    // Vorher standen hier flache Objekte ohne dieses Feld — `precheckOf` liest
-    // aber genau `_policy`, bekam also eine Liste aus lauter `undefined` und
-    // meldete jede Einreichung als unauffällig. Folge: 83 Fälle, die die
-    // Doppel-Regel sperrt oder zurückhält, erschienen in der Warteschlange als
-    // grün, und der Filter „Sperre" lieferte immer eine leere Liste — während
-    // dasselbe Urteil im geöffneten Fall korrekt stand. Zwei Bildschirme, die
-    // sich widersprechen.
-    const policy = { id: d.id, userId: x.userId ?? null, ean: x.ean ?? null, marketId: x.marketId ?? null, status: safeStatus(x.status), createdAt: ms(x.createdAt), priceOcr: x.priceOcr ?? null, manufacturerOcr: x.manufacturerOcr ?? null };
-    frisch.get(x.ean).push({ ...policy, _policy: policy });
-  }
+  // Beide EAN-Felder und beide Preis-Felder: Gruppe und Doppel-Regel wie in
+  // der Runde (src/werte.js policyOf). Form wie `rowOf`, siehe eanIndex.
+  const allSnap = await db.collection(COL).select(...INDEX_FELDER).get();
+  const frisch = eanIndex(allSnap.docs);
   eanCache = { index: frisch, stand: Date.now() };
-  return baueFotoListe(openSnap, frisch, p, q);
+  return baueFotoListe(openSnap.docs, frisch, p, q);
 });
 
 /** Zwischenspeicher des EAN-Nachbarschafts-Index (siehe reviewQueue). */
@@ -660,25 +593,6 @@ let eanCache = null;
 const EAN_TTL_MS = 2 * 60 * 1000;
 function eanIndexAusCache() {
   return eanCache && Date.now() - eanCache.stand < EAN_TTL_MS ? eanCache.index : null;
-}
-
-/** Die Warteschlange der Produktfotos aus dem offenen Bestand und dem Index. */
-function baueFotoListe(openSnap, byEan, p, q) {
-  let rows = openSnap.docs.map((d) => {
-    const r = rowOf(d);
-    const pre = precheckOf(r, byEan.get(r.ean) || []);
-    return {
-      id: r.id, userId: r.userId, productName: r.productName || r.productNameOcr, ean: r.ean,
-      marketName: r.marketName || r.marketId, createdAt: r.createdAt, campaignId: r.campaignId,
-      priceCents: r.priceCents, manufacturer: r.manufacturer, priceImageKind: r.priceImageKind,
-      stepCount: r.stepCount, verdict: pre.verdict, reasons: pre.reasons,
-    };
-  });
-  if (q) rows = rows.filter((r) => [r.id, r.userId, r.productName, r.ean, r.marketName].some((v) => v && String(v).toLowerCase().includes(q)));
-  if (p.verdict && p.verdict !== 'all') rows = rows.filter((r) => r.verdict === p.verdict);
-  rows.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-  const counts = rows.reduce((acc, r) => ((acc[r.verdict] = (acc[r.verdict] || 0) + 1), acc), {});
-  return { type: 'photos', rows, total: rows.length, counts };
 }
 
 /** Bis 6 Fälle vollständig — mit fertigen Bild-URLs, für Anzeige + Vorladen. */
@@ -787,12 +701,15 @@ exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
       });
     }
   }));
-  // EAN-Nachbarn für die Doppel-Regel: nur die betroffenen EANs.
-  const eans = [...new Set(present.map((s) => s.data().ean).filter(Boolean))];
+  // EAN-Nachbarn für die Doppel-Regel: nur die betroffenen (effektiven) EANs.
+  const rows = present.map(rowOf);
+  const eans = [...new Set(rows.map((r) => r.anzeigeEan).filter(Boolean))];
   const byEan = eans.length ? await loadByEans(eans) : new Map();
-  const cases = await Promise.all(present.map(async (s) => {
-    const row = rowOf(s);
-    const pre = precheckOf(row, byEan.get(row.ean) || []);
+  const cases = await Promise.all(present.map(async (s, i) => {
+    const row = rows[i];
+    const nachbarn = row.anzeigeEan ? byEan.get(row.anzeigeEan) || [] : [];
+    const pre = precheckFuerFall(row, nachbarn);
+    const defekt = new Set(row.bildDefekt.map((b) => b.slot));
     const bilder = await Promise.all(REQUIRED_STEPS_ORDER.map(async (step) => {
       const path = row.images && row.images[step];
       return {
@@ -800,10 +717,12 @@ exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
         url: thumbUrl(path, 520),          // Kachel
         full: await imageUrl(path),        // Lupe
         fehlt: !path,
+        // Vom Namer als abgeschnitten erkannt (unser Upload-Fehler, nicht der des Nutzers).
+        defekt: defekt.has(step),
       };
     }));
-    const prior = pre.dup && pre.dup.priorId ? (byEan.get(row.ean) || []).find((r) => r.id === pre.dup.priorId) : null;
-    const eigene = (byEan.get(row.ean) || []).filter((r) => r.id !== row.id).length;
+    const prior = pre.dup && pre.dup.priorId ? nachbarn.find((r) => r.id === pre.dup.priorId) : null;
+    const eigene = nachbarn.filter((r) => r.id !== row.id).length;
     const nutzer = nutzerInfo.get(row.userId) || null;
     const aktion = row.campaignId ? aktionInfo.get(row.campaignId) || null : null;
     // Was eine Freigabe auslöst — in Cent, mit Grund, wenn es nichts wird.

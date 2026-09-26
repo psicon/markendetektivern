@@ -132,6 +132,15 @@ function eanAusLesungen(a, b, pruefzifferOk) {
 
 const normName = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9äöüß]/g, '');
 
+/**
+ * Nachlese-Fehler eines Falls, den die Runde in ihrer Arbeitszeit nicht mehr
+ * erreicht hat. Gilt für ALLE Angaben, auch den Preis: fehlte `preis`, wurde
+ * eine Sperre, die nur am fehlenden Preis hängt, abgelehnt statt offen gelassen
+ * — ein Werkzeugfehler als Urteil (gefunden 26.09.2026, greift ab etwa doppeltem
+ * Tagesvolumen).
+ */
+const rettungNichtGeschafft = () => ({ name: 'zeit_abgelaufen', ean: 'zeit_abgelaufen', preis: 'zeit_abgelaufen' });
+
 function ablehnen(grund, ctx = {}) { return { entscheidung: 'ablehnen', grund, ctx }; }
 function offen(grund, ctx = {}) { return { entscheidung: 'offen', grund, ctx }; }
 
@@ -171,4 +180,4 @@ function notbremse(plan, { schnittQuote = null, bildMaxAnteil = 0.1, bildMin = 5
   return ergebnis;
 }
 
-module.exports = { entscheideFall, notbremse, nameAusLesungen, eanAusLesungen, BILD_GRUENDE };
+module.exports = { entscheideFall, notbremse, nameAusLesungen, eanAusLesungen, rettungNichtGeschafft, BILD_GRUENDE };

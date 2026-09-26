@@ -369,6 +369,117 @@ describe('Ratings, Feedback, Telemetrie, Push-Tokens', () => {
     await assertFails(setDoc(doc(mallory(), slot), { userId: MALLORY }));
     await assertFails(getDoc(doc(mallory(), slot)));
   });
+
+  // Genau die Nutzlast von `submitProduct` (lib/services/productSubmit.ts)
+  // inklusive `collectContext` — mit ALLEN optionalen Teilen, damit eine
+  // Sperrliste, die versehentlich ein App-Feld trifft, hier auffällt.
+  const appAnlage = () => ({
+    userId: ALICE,
+    sessionId: '94ea55c3fd9caddfbce6bd1c',
+    productIndex: 1,
+    marketId: 'm1',
+    marketName: 'Aldi Süd',
+    marketLand: 'DE',
+    productName: null,
+    ean: '4061458000000',
+    campaignId: 'produkt-fotos-oktober-2026',
+    campaignResolve: 'live',
+    images: { front: 'crowduploads/a/front_x.jpg', ean: 'crowduploads/a/ean_x.jpg' },
+    stepCount: 2,
+    status: 'pending',
+    clientVersion: { app: '6.0.20', build: '1247', platform: 'android' },
+    favoriteMarket: { id: 'm1', name: 'Aldi Süd' },
+    userLocation: { address: null, city: 'Köln', bundesland: 'NRW' },
+    journeyLocation: { lat: 50.95, lon: 6.95, city: 'Köln', geohash5: '50.95_6.95', source: 'ip' },
+    journeyId: 'j1',
+    capture: {
+      capturedAt: new Date(),
+      gpsStatus: 'ok',
+      gps: { lat: 50.9412, lon: 6.9583, accuracyM: 12, fixAt: new Date() },
+      confirmedPlace: { city: 'Köln' },
+    },
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  test('crowd_uploads: die echte App-Anlage geht durch (alle optionalen Felder)', async () => {
+    await assertSucceeds(setDoc(doc(alice(), 'crowd_uploads/app_voll'), appAnlage()));
+    // Altbestand/Tests ohne status bleiben erlaubt — ohne status greift
+    // weder Runde noch Vergütung.
+    await assertSucceeds(setDoc(doc(alice(), 'crowd_uploads/app_ohne_status'), { userId: ALICE }));
+  });
+
+  test('ANGRIFF: Server-Felder beim Anlegen mitschicken scheitert', async () => {
+    const faelle = {
+      priceRescueOcr: { priceCents: 229, currency: 'EUR', priceImageKind: 'preisschild' },
+      eanRescueOcr: '4061458000001',
+      productNameRescueOcr: 'Erfundener Name',
+      manufacturerRescueOcr: { name: 'DMK' },
+      rescueQuelle: 'erfunden',
+      productNameOcr: 'Erfundener Name',
+      productNameOcrAt: new Date(),
+      priceOcr: { priceCents: 229, source: 'preisschild' },
+      manufacturerOcr: { name: 'DMK', source: 'hersteller' },
+      priceReceipt: { zip: '50667', complete: true },
+      productNameOcrBildDefekt: [],
+      namerNachlesenAb: new Date(),
+      namerLauf: { eventId: 'x' },
+      review: { precheck: { verdict: 'ok' } },
+      reviewedBy: 'admin',
+      rewardResult: 'credited',
+      rewardCents: 500,
+      rewardPushSentAt: new Date(),
+      probableLocation: { source: 'gps' },
+      exifGps: { lat: 1, lon: 2 },
+    };
+    for (const [feld, wert] of Object.entries(faelle)) {
+      await assertFails(setDoc(doc(alice(), `crowd_uploads/angriff_${feld}`), { ...appAnlage(), [feld]: wert }));
+    }
+  });
+
+  // Die VOLLSTÄNDIGE Sperrliste, unabhängig von der Regel abgeschrieben (gleiche
+  // Reihenfolge wie crowdUploadServerFelder()). Fällt dort ein Name heraus,
+  // scheitert dieser Test — die Regel prüft nur Schlüssel, der Wert ist egal.
+  // Darunter die Felder, die den Nachlauf des Namers steuern
+  // (namerNachlesenVersuch, productNameOcrFehlerErst).
+  const SERVER_FELDER = [
+    'productNameOcr', 'productNameOcrAt', 'productNameOcrFehler',
+    'productNameOcrConfidence', 'priceOcr', 'manufacturerOcr',
+    'priceImageKind', 'priceReceipt',
+    'productNameOcrBildDefekt', 'productNameOcrFehlerErst',
+    'productNameOcrNachgelesenAt', 'namerNachlesenAb',
+    'namerNachlesenVersuch', 'namerLauf',
+    'productNameRescueOcr', 'productNameRescueAlternative', 'eanRescueOcr',
+    'priceRescueOcr', 'manufacturerRescueOcr', 'rescueAt', 'rescueQuelle',
+    'productNameRescueAt', 'productNameRescueQuelle',
+    'eanRescueAt', 'eanRescueQuelle',
+    'review', 'reviewedBy', 'reviewedAt', 'reviewNote', 'holdReasons',
+    'rejectReason', 'loseWare', 'frischwareOhneAngaben',
+    'rewardResult', 'rewardCents', 'rewardNotCreditedReason',
+    'rewardCheckedAt', 'rewardSkipped', 'rewardSkippedReason',
+    'rewardRegion', 'rewardLocationRule', 'rewardPushSentAt',
+    'probableLocation', 'probableLocationAt', 'exifGps',
+    'journeyLocationMatch', 'userLocationBackfilled',
+  ];
+
+  test('ANGRIFF: JEDES Feld der Sperrliste beim Anlegen scheitert (47 Felder)', async () => {
+    expect(SERVER_FELDER).toHaveLength(47);
+    expect(new Set(SERVER_FELDER).size).toBe(SERVER_FELDER.length);
+    for (const feld of SERVER_FELDER) {
+      await assertFails(setDoc(doc(alice(), `crowd_uploads/liste_${feld}`), { ...appAnlage(), [feld]: 'x' }));
+    }
+  });
+
+  test('Gegenprobe: die App-Anlage trägt keines der gesperrten Felder', () => {
+    const app = Object.keys(appAnlage());
+    expect(app.filter((k) => SERVER_FELDER.includes(k))).toEqual([]);
+  });
+
+  test('ANGRIFF: Anlage mit einem anderen status als pending scheitert', async () => {
+    for (const status of ['approved', 'rejected', 'Pending', null]) {
+      await assertFails(setDoc(doc(alice(), `crowd_uploads/status_${String(status)}`), { ...appAnlage(), status }));
+    }
+  });
   test('ratingFunnelEvents: eigenes schreiben ok, Spoof/Unauth/Read/Delete nie', async () => {
     const own = `ratingFunnelEvents/${ALICE}_6.0.12_requested`;
     const gut = {

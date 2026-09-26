@@ -93,7 +93,10 @@ jest.mock('firebase-admin', () => ({
 jest.mock('firebase-admin/firestore', () => ({ FieldValue: { serverTimestamp: () => mockSentinel } }));
 jest.mock('firebase-functions/logger', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }));
 jest.mock('@google/genai', () => ({
-  GoogleGenAI: jest.fn().mockImplementation(() => ({ models: { generateContent: (...a) => mockGenerate(...a) } })),
+  // Einfache Funktion statt jest.fn().mockImplementation: das Root-jest setzt
+  // resetMocks und löschte die Implementierung vor jedem Test — `new GoogleGenAI()`
+  // lieferte dann nichts, und 41 Tests scheiterten als „Technikfehler".
+  GoogleGenAI: function GoogleGenAI() { return { models: { generateContent: (...a) => mockGenerate(...a) } }; },
   Type: { OBJECT: 'OBJECT', BOOLEAN: 'BOOLEAN', STRING: 'STRING', INTEGER: 'INTEGER' },
 }));
 jest.mock('../src/resolverAufruf', () => ({ resolverAufruf: (...a) => mockResolver(...a) }));

@@ -27,7 +27,8 @@
  *
  * Schalter: `cashback_config/v1.fotoWorker === true` → scharf. Sonst
  * Trockenlauf: liest, prüft, schreibt nur den Bericht (plus nachgelesene
- * Angaben in die eigenen *RescueOcr-Felder, die nichts entscheiden).
+ * Angaben in die eigenen *RescueOcr-Felder — die zählen danach in Runde UND
+ * Prüfkonsole mit, siehe src/werte.js).
  */
 const crypto = require('crypto');
 const fs = require('fs');
@@ -36,8 +37,10 @@ const admin = require('firebase-admin');
 const { FieldValue } = require('firebase-admin/firestore');
 const logger = require('firebase-functions/logger');
 const { GoogleGenAI } = require('@google/genai');
-const { evaluateDuplicate, completenessCheck } = require('./duplicatePolicy');
-const { entscheideFall, notbremse, nameAusLesungen, eanAusLesungen, BILD_GRUENDE } = require('./fotoRundeRegeln');
+const { evaluateDuplicate, completenessCheck, dupZumSpeichern } = require('./duplicatePolicy');
+const { entscheideFall, notbremse, nameAusLesungen, eanAusLesungen, rettungNichtGeschafft, BILD_GRUENDE } = require('./fotoRundeRegeln');
+// Werte-Helfer gemeinsam mit der Prüfkonsole (index.js/einreichung.js) — eine Quelle.
+const { eanOf, nameOf, preisOf, policyOf, pruefzifferOk, vollstaendigkeitOf } = require('./werte');
 const { warnungen } = require('./warnungen');
 const { mitWiederholung, arbeite, schlafe } = require('./ki');
 
@@ -61,17 +64,6 @@ const fmtDate = (m) => (m ? new Date(m).toLocaleDateString('de-DE', { day: '2-di
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const berlinTag = (t) => new Date(t).toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
 const berlinZeit = (t) => new Date(t).toLocaleTimeString('sv-SE', { timeZone: 'Europe/Berlin' }).replace(/:/g, '');
-
-/** Geretteter Wert zählt wie ein gelesener — beim Preis ja, beim Hersteller für
- *  die Doppel-Regel NICHT: „Kaufland Stiftung & Co." (Markeninhaber) und „DMK"
- *  (Produzent) stehen auf derselben Packung (gemessen 20.09.). */
-const eanOf = (x) => x.ean || x.eanRescueOcr || null;
-const nameOf = (x) => x.productName || x.productNameOcr || x.productNameRescueOcr || null;
-const preisOf = (x) => (x.priceOcr && Number.isFinite(x.priceOcr.priceCents) && x.priceOcr.priceCents > 0 ? x.priceOcr : x.priceRescueOcr || null);
-const policyOf = (id, x) => ({
-  id, userId: x.userId ?? null, ean: eanOf(x), marketId: x.marketId ?? null,
-  status: x.status, createdAt: ms(x.createdAt), priceOcr: preisOf(x), manufacturerOcr: x.manufacturerOcr ?? null,
-});
 
 /** Interner Vermerk am Dokument. Was der NUTZER liest, steht in
  *  lib/utils/productSubmissionCopy.ts (REASON_COPY) — jeder Grund hier braucht dort einen Eintrag. */
@@ -105,16 +97,6 @@ async function frage(ai, bucket, images, slots, text) {
     config: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 8000, thinkingConfig: { thinkingLevel: 'LOW' } },
   }));
   return JSON.parse(String(r.text ?? '').replace(/^```json\s*|```\s*$/g, ''));
-}
-
-/** GTIN-Prüfziffer (8/12/13/14 Stellen). */
-function pruefzifferOk(code) {
-  if (!/^\d{8}$|^\d{12}$|^\d{13}$|^\d{14}$/.test(code)) return false;
-  const z = code.split('').map(Number);
-  const p = z.pop();
-  let summe = 0;
-  z.reverse().forEach((v, i) => { summe += v * (i % 2 === 0 ? 3 : 1); });
-  return (10 - (summe % 10)) % 10 === p;
 }
 
 /**
@@ -236,7 +218,9 @@ async function bildAudit(ai, bucket, x) {
 
 function regelVersion() {
   const h = crypto.createHash('sha1');
-  for (const f of ['duplicatePolicy.js', 'fotoRundeRegeln.js']) h.update(fs.readFileSync(path.join(__dirname, f)));
+  // werte.js gehört dazu: es bestimmt, welche EAN, welcher Preis und welcher
+  // Hersteller in die Regeln eingehen.
+  for (const f of ['duplicatePolicy.js', 'fotoRundeRegeln.js', 'werte.js']) h.update(fs.readFileSync(path.join(__dirname, f)));
   return h.digest('hex').slice(0, 10);
 }
 
@@ -354,7 +338,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       rettungFehler.set(d.id, { alles: String(e.message).slice(0, 120) });
     }
   }, PARALLEL_KI, frist);
-  nichtNachgelesen.forEach((d) => rettungFehler.set(d.id, { name: 'zeit_abgelaufen', ean: 'zeit_abgelaufen' }));
+  nichtNachgelesen.forEach((d) => rettungFehler.set(d.id, rettungNichtGeschafft()));
 
   // 2) Bilddateien: leer, unlesbar, oder aus einer früheren Einreichung bekannt
   const storage = admin.storage().bucket(bucket);
@@ -383,7 +367,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   const vor = new Map();
   for (const d of pending) {
     const x = d.x;
-    const comp = completenessCheck({ images: x.images, ean: eanOf(x), productName: x.productName, productNameOcr: x.productNameOcr || x.productNameRescueOcr }, REQUIRED);
+    const comp = completenessCheck(vollstaendigkeitOf(x), REQUIRED);
     const metas = metaVon.get(d.id) || [];
     vor.set(d.id, { comp, leer: metas.filter((m) => m.size === 0).map((m) => m.k), unlesbar: metas.filter((m) => m.size < 0).map((m) => m.k) });
   }
@@ -440,7 +424,13 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   if (!dryRun) {
     for (const p of plan) {
       if (p.entscheidung === 'offen') continue;
-      const precheck = { verdict: p.comp.ok ? (p.dup.verdict === 'ok' ? 'ok' : p.dup.verdict) : 'incomplete', reasons: [...p.comp.problems, ...(p.dup.reason ? [p.dup.reason] : [])] };
+      // Mit Doppel-Befund (Referenz, „Anders"): ohne ihn fehlt in der Prüfkonsole
+      // genau bei den Sperr-Ablehnungen die Grundlage fürs Zurückholen.
+      const precheck = {
+        verdict: p.comp.ok ? (p.dup.verdict === 'ok' ? 'ok' : p.dup.verdict) : 'incomplete',
+        reasons: [...p.comp.problems, ...(p.dup.reason ? [p.dup.reason] : [])],
+        dup: dupZumSpeichern(p.dup),
+      };
       const bild = p.audit ? { echt: p.audit.echt, loseWare: p.audit.loseWare, traegtAngaben: p.audit.traegtAngaben, gleicheAnsicht: p.audit.gleicheAnsicht, grund: p.audit.grund } : null;
       try {
       await db.runTransaction(async (tx) => {
@@ -584,4 +574,4 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   return { ...bericht, laufAt: new Date().toISOString() };
 }
 
-module.exports = { taeglicheRunde, noteFor, pruefzifferOk };
+module.exports = { taeglicheRunde, noteFor };

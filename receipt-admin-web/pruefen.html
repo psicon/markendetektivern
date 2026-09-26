@@ -60,6 +60,10 @@
       figure img{display:block;width:100%;aspect-ratio:3/4;object-fit:cover;background:#fff;cursor:zoom-in}
       figure .ph{display:flex;align-items:center;justify-content:center;width:100%;aspect-ratio:3/4;color:var(--no);font-size:12px;font-weight:700;background:var(--panel2)}
       figcaption{padding:6px 9px;font-size:11.5px;font-weight:700;color:var(--fg2);display:flex;justify-content:space-between}
+      /* Vom Namer als abgeschnitten erkannt — unser Upload-Fehler, nicht der des Nutzers. */
+      figure .defekt{padding:5px 9px;font-size:11.5px;font-weight:700;color:var(--no);background:var(--no-bg);border-top:1px solid var(--no)}
+      /* Wert stammt aus der späteren Nachlesung, nicht vom Nutzer oder der Ersterkennung. */
+      .nl{font-weight:600;font-size:11px;color:var(--fg3);margin-left:6px;white-space:nowrap}
       /* Bon: hohes Bild */
       .bon{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;text-align:center}
       .bon img{max-width:100%;max-height:74vh;border-radius:8px;background:#fff;cursor:zoom-in}
@@ -215,7 +219,23 @@
         ['status_rejected', 'war schon abgelehnt'],
         ['not_found', 'nicht gefunden'],
         ['already_booked', 'war bereits gebucht'],
+        // Gründe, die nur die Morgenrunde vergibt (keine Taste, nur Anzeige).
+        ['gleiche_ansicht_mehrfach', 'Fast alle Fotos zeigen dieselbe Ansicht'],
       ]]);
+
+      /**
+       * Wer entschieden hat — aus `review.decidedBy`. Vorher hieß alles außer
+       * der Morgenrunde „Prüfkonsole", auch die Hand-Skripte (ops-skript-*) und
+       * Testläufe, deren Urteile teils nach älteren Regeln gerechnet wurden.
+       */
+      function entscheiderName(decidedBy) {
+        const d = typeof decidedBy === 'string' ? decidedBy : '';
+        if (d === 'worker-fotorunde') return 'Morgenrunde';
+        if (/^ops-skript-/.test(d)) return 'Handrunde (Skript)';
+        if (d === 'pruef-test') return 'Test';
+        if (/^[A-Za-z0-9]{28}$/.test(d)) return 'Prüfkonsole';
+        return d ? d.slice(0, 40) : 'unbekannt';
+      }
 
       // Der Ort als ANTWORT, nicht als Quellenkürzel. Vorher stand hier das
       // Wort „GPS" — das sagt, woher die Angabe kommt, aber nicht, wo jemand war.
@@ -384,8 +404,10 @@
           const done = S.done.has(r.id);
           const v = r.verdict || 'ok';
           const titel = S.type === 'photos' ? (r.productName || '(ohne Name)') : (r.merchantName || 'Unbekannter Markt');
+          // Name und EAN sind die effektiven Werte (wie in der Morgenrunde);
+          // nachgelesene sind als solche erkennbar.
           const zeile2 = S.type === 'photos'
-            ? `${r.ean || 'keine EAN'} · ${ago(r.createdAt)}`
+            ? `${r.nameNachgelesen ? 'Name nachgelesen · ' : ''}${r.ean || 'keine EAN'}${r.eanNachgelesen ? ' (nachgelesen)' : ''} · ${ago(r.createdAt)}`
             : `${euro(r.bonTotalCents)} · ${r.bonDate || '?'} · ${ago(r.createdAt)}`;
           return `<div class="qi ${i === S.idx ? 'on' : ''} ${done ? 'done' : ''}" data-i="${i}">
             <span class="dot d-${esc(v)}"></span>
@@ -456,22 +478,48 @@
       }
 
       function renderPhoto(c) {
-        const r = c.row, p = c.precheck || {};
+        const r = c.row, p = c.precheck || {}, h = r.herkunft || {};
+        // Rückfall auf die Rohfelder, falls die Seite vor der Codebase
+        // ausgerollt wurde (oder die zurückgerollt ist) — sonst stünde jeder
+        // Fall als „(ohne Name)" / Barcode „—" da und würde womöglich abgelehnt.
+        const name = r.anzeigeName ?? (r.productName || r.productNameOcr);
+        const ean = r.anzeigeEan ?? r.ean;
+        const preisBild = r.priceImageKindAnzeige ?? r.priceImageKind;
+        const nl = (text) => `<span class="nl">${esc(text || 'nachgelesen')}</span>`;
         const shots = (c.bilder || []).map((b) => `<figure>
             ${b.url ? `<img src="${b.url}" data-full="${b.full || b.url}" data-cap="${esc(b.label)}" alt="${esc(b.label)}" loading="lazy">` : `<div class="ph">${b.fehlt ? 'fehlt' : 'nicht ladbar'}</div>`}
+            ${b.defekt ? '<div class="defekt">Foto beim Hochladen beschädigt</div>' : ''}
             <figcaption><span>${esc(b.label)}</span>${b.fehlt ? '<span style="color:var(--no)">fehlt</span>' : ''}</figcaption>
           </figure>`).join('');
+        // Ein entschiedener Fall zeigt das Urteil vom Entscheidungszeitpunkt —
+        // sonst widerspricht die Direktansicht dem Tagesbericht.
+        const entscheider = entscheiderName(r.review && r.review.decidedBy);
+        const urteilHerkunft = p.quelle === 'gespeichert'
+          ? `<small style="color:var(--fg3)">Vorprüfung bei der Entscheidung (${esc(entscheider)})${r.review && r.review.forced ? ' · trotz Vorprüfung freigegeben' : ''}</small>`
+          : p.quelle === 'nachtraeglich'
+            ? '<small style="color:var(--fg3)">Heute neu berechnet — bei der Entscheidung wurde kein Urteil gespeichert</small>'
+            : '';
+        // Der tatsächliche Ablehngrund: Bild-Gründe (gleiche Ansicht, wieder-
+        // verwendet) stehen nicht in der Vorprüfung — ohne diese Zeile stand
+        // über einem abgelehnten Fall nur „Alle Prüfungen bestanden".
+        const ablehnGrund = r.status === 'rejected' ? (r.rejectReason || (r.review && r.review.reason)) : null;
+        const entschieden = ablehnGrund
+          ? `<div class="folge zahlt-nicht">Abgelehnt wegen: <b>${esc(REASON_DE[ablehnGrund] || ablehnGrund)}</b></div>`
+          : '';
+        const dupHeute = p.dupQuelle === 'heute' ? ' <span class="nl">heute berechnet</span>' : '';
         const dup = p.dup && p.dup.priorId
-          ? `<div class="kv"><div class="k">Früher</div><div class="v">${c.prior ? `${esc(c.prior.status)} · ${esc(fmtDate(c.prior.createdAt))} · ${p.dup.sameUser ? 'selber Nutzer' : 'anderer Nutzer'}` : esc(short(p.dup.priorId, 10))}</div>
+          ? `<div class="kv"><div class="k">Früher</div><div class="v">${c.prior ? `${esc(c.prior.status)} · ${esc(fmtDate(c.prior.createdAt))} · ${p.dup.sameUser ? 'selber Nutzer' : 'anderer Nutzer'}` : esc(short(p.dup.priorId, 10))}${dupHeute}</div>
              <div class="k">Anders</div><div class="v">${(p.dup.updatedFields || []).length ? esc((p.dup.updatedFields || []).map((f) => ({ price: 'Preis', manufacturer: 'Hersteller', market: 'Markt' }[f] || f)).join(', ')) : '— nichts'}</div></div>`
           : '';
         return `<div class="case">
           <div class="shots">${shots}</div>
           <div class="facts">
             <div class="eyebrow">Produktfoto-Einreichung</div>
-            <h2>${esc(r.productName || r.productNameOcr || '(ohne Name)')}</h2>
+            <h2>${esc(name || '(ohne Name)')}${h.nameQuelle === 'nachgelesen' ? nl() : ''}</h2>
             <div class="verdict v-${esc(p.verdict || 'ok')}">${esc(VERDICT_DE[p.verdict] || p.verdict || '')}
-              ${(p.reasons || []).length ? `<small>${esc((p.reasons || []).map((x) => REASON_DE[x] || x).join(' · '))}</small>` : '<small>Alle Prüfungen bestanden</small>'}</div>
+              ${(p.reasons || []).length ? `<small>${esc((p.reasons || []).map((x) => REASON_DE[x] || x).join(' · '))}</small>` : '<small>Vollständig, kein Doppel</small>'}
+              ${urteilHerkunft}</div>
+            ${entschieden}
             <div class="folge ${c.folge && c.folge.buchtCent > 0 ? 'zahlt' : 'zahlt-nicht'}">
               ${c.folge && c.folge.buchtCent > 0
                 ? `Freigabe bucht <b>${euro(c.folge.buchtCent)}</b>`
@@ -479,10 +527,10 @@
             </div>
             ${nutzerZeile(c.nutzer)}
             <div class="kv">
-              <div class="k">Barcode</div><div class="v">${esc(r.ean || '—')}</div>
+              <div class="k">Barcode</div><div class="v">${esc(ean || '—')}${h.eanNachgelesen ? nl() : ''}</div>
               <div class="k">Markt</div><div class="v">${esc(r.marketName || r.marketId || '—')}</div>
-              <div class="k">Preis</div><div class="v">${euro(r.priceCents)} <span style="color:var(--fg3)">${esc(PREISBILD_DE[r.priceImageKind] || 'Herkunft unklar')}</span></div>
-              <div class="k">Hersteller</div><div class="v">${esc(r.manufacturer || '—')}</div>
+              <div class="k">Preis</div><div class="v">${euro(r.priceCents)} <span style="color:var(--fg3)">${esc(PREISBILD_DE[preisBild] || 'Herkunft unklar')}</span>${h.preisNachgelesen ? nl() : ''}</div>
+              <div class="k">Hersteller</div><div class="v">${esc(r.manufacturer || '—')}${h.herstellerNachgelesen ? nl('nachgelesen · zählt nicht für die Doppel-Prüfung') : ''}</div>
               <div class="k">Ort</div><div class="v">${ortZeile(c.ort)}</div>
               <div class="k">Eingereicht</div><div class="v">${esc(fmtDateTime(r.createdAt))}</div>
               <div class="k">Aktion</div><div class="v">${c.aktion ? esc(c.aktion.titel) : '<span style="color:var(--warn)">keine Aktion zugeordnet</span>'}${r.campaignQuelle ? ' <span style="color:var(--fg3)">(vom Server ergänzt)</span>' : ''}</div>
