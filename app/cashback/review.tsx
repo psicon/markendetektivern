@@ -33,10 +33,12 @@ const { height: SCREEN_H } = Dimensions.get('window');
 
 import { StandortPflichtHinweis } from '@/components/rewards/StandortPflichtHinweis';
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
+import { useAufnahmeKontext } from '@/hooks/useAufnahmeKontext';
 import { useStandortPflicht } from '@/hooks/useStandortPflicht';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { enqueueBon } from '@/lib/services/bonUploadQueue';
+import { bonGeraeteOrt, clientVersion } from '@/lib/services/captureContext';
 import { getSelectedCampaignId } from '@/lib/services/cashbackUpload';
 import { hashImageFile, verdictFor, type CapturedBon } from '@/lib/utils/cashbackImage';
 
@@ -182,6 +184,9 @@ export default function CashbackReviewScreen() {
     }),
     [params.uri, params.width, params.height, params.hash, params.brightness, params.size],
   );
+  // Standort zum Zeitpunkt der Aufnahme — startet sofort, fragt nie nach der
+  // Freigabe und hält das Einreichen höchstens ein paar Sekunden auf.
+  const aufnahmeKontext = useAufnahmeKontext(bon.capturedAt);
 
   const verdict = useMemo(() => verdictFor(bon), [bon]);
   const allChecked = checks.corners && checks.date && checks.items;
@@ -257,6 +262,7 @@ export default function CashbackReviewScreen() {
     // in the background with NetInfo auto-resume. Survives LEAVING this screen
     // and an app kill → no more zombie "Wird hochgeladen" docs. enqueueBon only
     // does local work (file copy + AsyncStorage), so it never hangs offline.
+    const captureContext = bonGeraeteOrt(await aufnahmeKontext());
     let localId: string;
     try {
       localId = await enqueueBon({
@@ -268,6 +274,8 @@ export default function CashbackReviewScreen() {
         capturedAt: bon.capturedAt,
         source: ((params.source as string) || 'live_camera') as 'live_camera' | 'upload',
         campaignId: getSelectedCampaignId(),
+        captureContext,
+        clientVersion: clientVersion(),
       });
     } catch (e) {
       console.warn('⚠️ enqueueBon failed', e);
@@ -286,7 +294,7 @@ export default function CashbackReviewScreen() {
         uploadUri: bon.uri, // local preview while the upload runs
       },
     });
-  }, [bon, canSubmit, user?.uid, params.source, pflicht.pruefen]);
+  }, [bon, canSubmit, user?.uid, params.source, pflicht.pruefen, aufnahmeKontext]);
 
   const verdictColor = (ok: boolean) => (ok ? theme.primary ?? '#0d8575' : '#d6603a');
 

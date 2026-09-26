@@ -3,7 +3,7 @@ import * as Application from 'expo-application';
 import { Platform } from 'react-native';
 
 import journeyTrackingService from '@/lib/services/journeyTrackingService';
-import { anfragenOhneHaenger } from '@/lib/services/berechtigungsWaechter';
+import { anfragenOhneHaenger, mitZeitlimit } from '@/lib/services/berechtigungsWaechter';
 
 /**
  * Sammelt den Orts- und Zeitkontext im Moment der AUFNAHME.
@@ -245,6 +245,26 @@ async function holeGps(
 }
 
 /**
+ * Kontext ohne Messergebnis — etwa wenn die Messung beim Einreichen noch
+ * nicht fertig war. Der Grund steht in `gpsStatus`, damit „zu langsam" nicht
+ * wie „alte App ohne Feld" aussieht.
+ */
+export function captureContextOhneMessung(capturedAt: number, gpsStatus: GpsStatus): CaptureContext {
+  return { capturedAt, gps: null, gpsStatus, confirmedPlace: null, journeyLocation: null, journeyId: null };
+}
+
+/**
+ * Was ein Bon vom Aufnahme-Kontext mitschickt: nur das Gerätesignal. Die
+ * IP-Ortung reist bei Bons schon im Journey-Block mit, und mehr liest der
+ * Server nicht (cashback-pipeline/lib/clientKontext.js).
+ */
+export type BonGeraeteOrt = Pick<CaptureContext, 'gpsStatus' | 'gps' | 'gpsError'>;
+
+export function bonGeraeteOrt(k: CaptureContext): BonGeraeteOrt {
+  return { gpsStatus: k.gpsStatus, gps: k.gps, ...(k.gpsError ? { gpsError: k.gpsError } : {}) };
+}
+
+/**
  * Erfasst den Kontext zum Aufnahme-/Einreichzeitpunkt.
  *
  * Wirft nie: fehlende Ortsangaben sind Zusatzdaten und dürfen eine
@@ -291,4 +311,40 @@ export async function erfasseCaptureContext(opts?: {
   }
 
   return basis;
+}
+
+/**
+ * Längste Wartezeit beim Einreichen eines Bons. Die Messung startet schon beim
+ * Öffnen der Prüfseite und ist bis zum Tipp auf „Einreichen" fast immer
+ * fertig — das Limit greift nur, wenn kein GPS-Fix kommt.
+ */
+export const AUFNAHME_KONTEXT_MS = 5000;
+
+function aufnahmeKontextMessen(capturedAt: number): Promise<CaptureContext> {
+  return mitZeitlimit(
+    erfasseCaptureContext({ capturedAt }).catch(() => captureContextOhneMessung(capturedAt, 'unavailable')),
+    AUFNAHME_KONTEXT_MS,
+    captureContextOhneMessung(capturedAt, 'timeout'),
+  );
+}
+
+/**
+ * Startet die Messung für einen Bon SOFORT (beim Öffnen der Prüfseite) und
+ * liefert eine Funktion, die das Ergebnis beim Einreichen abholt.
+ *
+ * Gemessen wird bei der Aufnahme, nicht beim Hochladen: die Warteschlange kann
+ * Stunden später an einem anderen Ort laufen. Fragt nie nach der Freigabe —
+ * das macht nur die Standortpflicht. Wurde sie erst beim Einreichen erteilt,
+ * zeigt die frühe Messung „nicht erteilt"; dann wird einmal neu gemessen.
+ * Wirft nie.
+ */
+export function aufnahmeKontextStarten(capturedAt: number): () => Promise<CaptureContext> {
+  const frueh = aufnahmeKontextMessen(capturedAt);
+  return async () => {
+    const ergebnis = await frueh;
+    if (ergebnis.gpsStatus === 'not_asked' || ergebnis.gpsStatus === 'denied') {
+      return aufnahmeKontextMessen(capturedAt);
+    }
+    return ergebnis;
+  };
 }

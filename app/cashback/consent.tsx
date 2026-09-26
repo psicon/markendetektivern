@@ -442,26 +442,28 @@ function RewardsMarquee({
 // löst der Knopf einen Standort-Dialog aus, von dem vorher nie die Rede
 // war, und die Bedingung wäre weder informiert noch durchsetzbar.
 //
-// Was der Ort je Verdien-Weg konkret ist (Entscheidung 05.09.2026, damit die
-// Zusage zur Datenwirkung passt): Bei BONS liest die Pipeline die Filial-
-// adresse (Straße/PLZ/Ort) direkt vom Bon-Kopf ab — GPS fließt dort NICHT in
-// den Datensatz (die IP-basierte Journey-Ortung, ~5-km-Raster, bleibt wie
-// bisher als receipts.journey.location gespeichert; die Datenschutzerklärung
-// nennt die IP-Ortung). Bei PRODUKTFOTOS gehört der präzise Aufnahmeort zum
-// Datensatz (Wizard + crowd-upload-reward). Die Standortfreigabe bleibt
+// Was der Ort je Verdien-Weg konkret ist: Bei BONS liest die Pipeline die
+// Filialadresse (Straße/PLZ/Ort) vom Bon-Kopf ab; seit 26.09.2026 (Entscheidung
+// Patrick) kommt zusätzlich der Gerätestandort beim Fotografieren dazu
+// (receipts.capture.gps, gleiche Felder wie bei Produktfotos; die IP-basierte
+// Journey-Ortung bleibt receipts.journey.location). Vorher (05.09.2026) floss
+// bei Bons kein GPS in den Datensatz. Bei PRODUKTFOTOS gehört der präzise
+// Aufnahmeort zum Datensatz (Wizard + crowd-upload-reward). Der iOS-Zweck-Text
+// nennt beides. Die Standortfreigabe bleibt
 // programmweite Bedingung (nicht gelockert). Die frühere Zusatzzeile dazu
 // („Bei Bons nehmen wir die Filialadresse …") steht seit 25.09.2026 NICHT
 // mehr im Screen (Entscheidung Patrick: zu viel Text) — das Badge „Mit
 // Standortfreigabe" und die verlinkte Datenschutzerklärung tragen die
 // Information (unter iOS zusätzlich der Zweck-Text im Systemdialog; unter
-// Android zeigt der Systemdialog keinen App-Text). Dass Produktfotos den
-// genauen Aufnahmeort speichern, muss deshalb die Datenschutzerklärung
-// nennen (siehe OFFEN FÜR DEN ANWALT unten). Keine neue Datenkategorie →
-// consentVersion bewusst NICHT gebumpt.
+// Android zeigt der Systemdialog keinen App-Text). Dass Produktfotos und
+// Bons den genauen Aufnahmeort speichern, muss deshalb die
+// Datenschutzerklärung nennen (siehe OFFEN FÜR DEN ANWALT unten). Die
+// Freigabe war schon Bedingung und der genaue Standort bei Produktfotos schon
+// erhoben → consentVersion bewusst NICHT gebumpt (keine Re-Consent-Welle).
 // OFFEN FÜR DEN ANWALT (Stand 05.09.2026, verlinkte Datenschutzerklärung
 // „Stand 10. Juni 2026"): (1) Sie sagt zweimal „kein Zugriff auf den genauen
-// Gerätestandort (GPS)" — Produktfotos speichern aber präzises GPS und dieser
-// Screen macht die Freigabe zur Bedingung. (2) Die Aufzählung der erkannten
+// Gerätestandort (GPS)" — Produktfotos und seit 26.09. auch Bons speichern
+// aber präzises GPS, und dieser Screen macht die Freigabe zur Bedingung. (2) Die Aufzählung der erkannten
 // Bon-Daten („Markt, Datum, Artikel, Preise, Gesamtbetrag") muss um die
 // Filialadresse laut Bon ergänzt werden, beim Zweck Markt-Statistiken die
 // Auswertung nach PLZ/Ort. Beides sind Doc-Änderungen, kein App-Code.

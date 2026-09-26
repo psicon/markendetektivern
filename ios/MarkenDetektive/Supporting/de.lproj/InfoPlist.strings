@@ -1,5 +1,5 @@
 NSCameraUsageDescription = "Diese App benötigt Zugriff auf die Kamera, um Barcodes von Produkten zu scannen und Preise zu vergleichen.";
-NSLocationWhenInUseUsageDescription = "Bei Produktfotos wird dein Standort erfasst und dem Datensatz zugeordnet — so ist nachvollziehbar, wo ein Produkt zu finden war. Bei Bons lesen wir die Filialadresse direkt vom Bon ab. Die Standortfreigabe ist Voraussetzung für die Teilnahme am Cashback-Programm (Bons, Produktfotos und vergütete Umfragen). Bei der Registrierung und im Profil kannst du deinen Einkaufsort außerdem per Standort wählen.";
+NSLocationWhenInUseUsageDescription = "Bei Produktfotos wird dein Standort erfasst und dem Datensatz zugeordnet — so ist nachvollziehbar, wo ein Produkt zu finden war. Bei Bons erfassen wir den Aufnahmeort ebenso, zusätzlich zur Filialadresse vom Bon. Die Standortfreigabe ist Voraussetzung für die Teilnahme am Cashback-Programm (Bons, Produktfotos und vergütete Umfragen). Bei der Registrierung und im Profil kannst du deinen Einkaufsort außerdem per Standort wählen.";
 NSPhotoLibraryUsageDescription = "Diese App benötigt Zugriff auf deine Fotos, um dein Profilbild aus der Galerie auszuwählen.";
 CFBundleDisplayName = "MarkenDetektive";
 CFBundleName = "MarkenDetektive";

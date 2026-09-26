@@ -36,6 +36,7 @@ import { AppState } from 'react-native';
 import { prepareForUpload } from '@/lib/utils/cashbackImage';
 import { auth } from '@/lib/firebase';
 import { isEffectivelyAnonymous } from '@/lib/utils/authIdentity';
+import type { BonGeraeteOrt, ClientVersion } from './captureContext';
 import { GastBestand } from './gastBestand';
 import { GastUebernahme } from './gastUebernahme';
 import journeyTrackingService from './journeyTrackingService';
@@ -91,6 +92,12 @@ export interface BonJob {
   /** Mirror-Write (users/{uid}/cashback_status) schlug fehl — der Job ist
    *  dann NUR über die lokale Queue-Anzeige sichtbar (history.tsx). */
   mirrorFailed?: boolean;
+  /** Standort-Kontext aus dem Moment der AUFNAHME. Reist im Auftrag mit, weil
+   *  der Upload später und woanders laufen kann. Fehlt bei Aufträgen aus
+   *  älteren App-Versionen — dann wird nichts mitgeschickt. */
+  captureContext?: BonGeraeteOrt | null;
+  /** App-Version, die den Bon aufgenommen hat (nicht die, die hochlädt). */
+  clientVersion?: ClientVersion | null;
 }
 
 export interface EnqueueBonInput {
@@ -102,6 +109,10 @@ export interface EnqueueBonInput {
   capturedAt: number;
   source: 'live_camera' | 'upload';
   campaignId: string | null;
+  /** Standort-Kontext aus dem Moment der AUFNAHME (Prüfseite), siehe BonJob. */
+  captureContext?: BonGeraeteOrt | null;
+  /** App-Version, die den Bon AUFGENOMMEN hat. */
+  clientVersion?: ClientVersion | null;
 }
 
 type Listener = (jobs: BonJob[]) => void;
@@ -273,6 +284,8 @@ export async function enqueueBon(input: EnqueueBonInput): Promise<string> {
     capturedAt: input.capturedAt,
     source: input.source,
     campaignId: input.campaignId,
+    captureContext: input.captureContext ?? null,
+    clientVersion: input.clientVersion ?? null,
     status: 'queued',
     progress: 0,
     attempts: 0,
@@ -548,6 +561,11 @@ async function runJob(job: BonJob) {
       source: job.source,
       campaignId: job.campaignId,
       journey,
+      // Aus dem Moment der Aufnahme, nicht jetzt gemessen — der Upload kann
+      // Tage später woanders laufen. Altaufträge ohne Feld schicken nichts
+      // (der Server behandelt Fehlen wie eine alte App).
+      ...(job.captureContext ? { captureContext: job.captureContext } : {}),
+      ...(job.clientVersion ? { clientVersion: job.clientVersion } : {}),
     });
 
     // Dedup: the CF folded this into an existing receipt → drop our placeholder.
