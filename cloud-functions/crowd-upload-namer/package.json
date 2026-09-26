@@ -3,7 +3,7 @@
   "description": "OCR the product name from crowd-uploaded product photos (front/price tag) via Gemini, after submission",
   "main": "index.js",
   "scripts": {
-    "test": "node --test __tests__/lesung.test.js"
+    "test": "node --test __tests__/*.test.js"
   },
   "engines": {
     "node": "22"

@@ -20,14 +20,22 @@
  *
  * Mirrors the Gemini setup of cloud-functions/ai-product-comparison
  * (@google/genai, gemini-3.5-flash, GEMINI_API_KEY secret, europe-west1).
+ *
+ * Seit 26.09.2026: defekte (abgeschnittene) Fotos werden vorab erkannt und
+ * weggelassen (src/bild.js, src/fotos.js), und vorübergehend gescheiterte
+ * Lesungen holt der Nachlauf `namerNachlauf` in dieselben Felder nach
+ * (src/ablauf.js) — statt erst die Morgenrunde am nächsten Tag.
  */
 
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineSecret } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
 const { GoogleGenAI, Type } = require('@google/genai');
-const { NAME_STEPS, STEP_LABEL, PROMPT, leseMitWiederholung, auswerten, patchFelder } = require('./src/lesung');
+const { leseMitWiederholung } = require('./src/lesung');
+const { leseEinreichung } = require('./src/fotos');
+const { erstlaufBeginnen, erstlaufAbschliessen, nachlauf } = require('./src/ablauf');
 
 // Backend-Umschaltung (Incident 19.08.2026): AI-Studio-Keys haengen am
 // monatlichen Spending-Cap der Rechnungskontostufe — bei Erreichen liefern
@@ -51,21 +59,39 @@ function getGenAIClient() {
 }
 
 admin.initializeApp();
+const db = admin.firestore();
 
 const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 
 const REGION = 'europe-west1';
 const MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
 
-async function downloadAsInlineData(path) {
+const WERTE = {
+  stamp: () => admin.firestore.FieldValue.serverTimestamp(),
+  ts: (ms) => admin.firestore.Timestamp.fromMillis(ms),
+  loeschen: () => admin.firestore.FieldValue.delete(),
+};
+
+/** Foto aus Storage; null, wenn es die Datei nicht gibt. Andere Fehler werfen (→ später nachlesen). */
+async function ladeBild(pfad) {
   try {
-    const [buf] = await admin.storage().bucket().file(path).download();
-    if (!buf || !buf.length) return null;
-    return { inlineData: { mimeType: 'image/jpeg', data: buf.toString('base64') } };
+    const [buf] = await admin.storage().bucket().file(pfad).download();
+    return buf;
   } catch (e) {
-    logger.warn('image download failed', { path, err: e.message });
-    return null;
+    if (e && (e.code === 404 || /No such object/i.test(String(e.message)))) return null;
+    throw e;
   }
+}
+
+/** Dieselbe Lesung für Erstlauf und Nachlauf (src/fotos.js). */
+function lesen(daten, { beobachter = null, id = null } = {}) {
+  return leseEinreichung({
+    images: daten.images || {},
+    ladeBild,
+    id,
+    logger,
+    lese: (parts, opts = {}) => leseMitWiederholung({ ai: getGenAIClient(), model: MODEL, parts, Type, beobachter, ...opts }),
+  });
 }
 
 exports.onCrowdUploadNameOcr = onDocumentCreated(
@@ -73,66 +99,77 @@ exports.onCrowdUploadNameOcr = onDocumentCreated(
     document: 'crowd_uploads/{id}',
     region: REGION,
     memory: '512MiB',
-    // 300 s: bis zu drei Lesungen mit Pausen (src/lesung.js). Mit 120 s konnte
-    // ein langsamer dritter Versuch die Funktion abbrechen — dann stünde gar
-    // kein Vermerk am Dokument.
+    // Ungünstigster Fall rund 4 min: Wiederholungen bis ~130 s (src/lesung.js)
+    // plus 2 Dekodier-Rückfälle à höchstens 60 s (src/fotos.js), dazu das
+    // Prüfen der übrigen Fotos (Downloads in der Region, Sekunden). Endet der
+    // Lauf ohne Schreiben, übernimmt der Nachlauf (Sicherheitsnetz in src/ablauf.js).
     timeoutSeconds: 300,
     secrets: [GEMINI_API_KEY],
   },
   async (event) => {
     const snap = event.data;
     if (!snap) return;
-    const data = snap.data() || {};
     const id = event.params.id;
 
-    // Idempotent: only OCR once per doc.
-    if (data.productNameOcrAt) return;
-
-    const stamp = () => admin.firestore.FieldValue.serverTimestamp();
-    const images = data.images || {};
-    const parts = [{ text: PROMPT }];
-    for (const step of NAME_STEPS) {
-      const path = images[step];
-      if (!path) continue;
-      const part = await downloadAsInlineData(path);
-      // Jedes Bild bekommt seine Beschriftung davor — sonst rät das Modell,
-      // welche Ansicht es gerade sieht.
-      if (part) parts.push({ text: `${STEP_LABEL[step] || step}:` }, part);
+    const anspruch = await erstlaufBeginnen({ db, ref: snap.ref, eventId: event.id, jetzt: Date.now(), werte: WERTE });
+    if (anspruch.ohneSperre) logger.warn('namer: Sperre nicht setzbar, lese ohne', { id, err: anspruch.fehler });
+    if (anspruch.urteil !== 'frei') {
+      const sperre = anspruch.sperre || null;
+      logger.info('namer: nichts zu tun', { id, urteil: anspruch.urteil, gleicheZustellung: Boolean(sperre && sperre.eventId === event.id) });
+      return;
     }
+    const daten = anspruch.daten || snap.data() || {};
 
-    // No usable image → mark attempted (so we don't retry forever) and stop.
-    if (parts.length === 1) {
-      await snap.ref.set({ productNameOcr: null, productNameOcrAt: stamp() }, { merge: true });
+    const ausgang = await lesen(daten, { id });
+    const r = await erstlaufAbschliessen({ db, ref: snap.ref, lauf: anspruch.lauf, ausgang, jetzt: Date.now(), werte: WERTE });
+    if (r.status !== 'geschrieben') {
+      // Dokument gelöscht, oder ein anderer Lauf hat den Fall inzwischen: nichts überschreiben.
+      logger.warn('namer: Ergebnis verworfen', { id, status: r.status, ausgang: ausgang.art });
+      return;
+    }
+    const { felder, ergebnis } = r;
+
+    if (ergebnis) {
+      const { name, confidence, priceImageKind, receipt } = ergebnis;
+      logger.info('name ocr done', {
+        id, name, confidence, versuche: ausgang.versuche, filled: Boolean(felder.productName), priceImageKind,
+        bonOrt: receipt ? `${receipt.zip || '?'} ${receipt.city || '?'}` : null,
+        gesendet: ausgang.gesendet, defekt: ausgang.defekt.map((d) => d.slot), ungeprueft: ausgang.ungeprueft,
+      });
+    } else if (ausgang.art === 'ohne_bild') {
       logger.info('no name image to ocr', { id });
-      return;
+    } else {
+      // „Versucht" mit GRUND — damit niemand „kein Name" für „nicht lesbar"
+      // hält (bis 24.09.2026 sah ein technischer Fehler genau so aus).
+      logger.error('gemini name ocr failed', {
+        id, ausgang: ausgang.art, versuche: ausgang.versuche, defekt: ausgang.defekt.map((d) => d.slot),
+        nachlauf: Boolean(felder.namerNachlesenVersuch), err: ausgang.fehler ? ausgang.fehler.message : ausgang.art,
+      });
     }
+  },
+);
 
-    let ergebnis;
-    let versuche = 1;
-    try {
-      const gelesen = await leseMitWiederholung({ ai: getGenAIClient(), model: MODEL, parts, Type });
-      versuche = gelesen.versuche;
-      ergebnis = auswerten(gelesen.parsed, { hatPreisBild: Boolean(images.preis) });
-    } catch (e) {
-      // Auch nach Wiederholung gescheitert. „Versucht" markieren, damit der
-      // Trigger nicht kreist — aber mit dem GRUND, damit ein Nachlesen die
-      // Fälle findet und niemand „kein Name" für „nicht lesbar" hält (bis
-      // 24.09.2026 sah ein technischer Fehler genau so aus).
-      logger.error('gemini name ocr failed', { id, versuche: e.versuche, err: e.message });
-      await snap.ref.set({
-        productNameOcr: null,
-        productNameOcrAt: stamp(),
-        productNameOcrFehler: { grund: String(e.message || e).slice(0, 200), versuche: e.versuche || null, at: stamp() },
-      }, { merge: true });
-      return;
-    }
-
-    const patch = {
-      ...patchFelder(ergebnis, { userName: data.productName }),
-      productNameOcrAt: stamp(),
-    };
-    await snap.ref.set(patch, { merge: true });
-    const { name, confidence, priceImageKind, receipt } = ergebnis;
-    logger.info('name ocr done', { id, name, confidence, versuche, filled: !!patch.productName, priceImageKind, bonOrt: receipt ? `${receipt.zip || '?'} ${receipt.city || '?'}` : null });
+/**
+ * Nachlauf für vorübergehend gescheiterte Lesungen (src/ablauf.js). Alle
+ * 15 Minuten: die Ortsprüfung der Vergütung läuft einmalig bei der Freigabe
+ * und braucht priceReceipt bis dahin. maxInstances 1 + concurrency 1: nie
+ * zwei Durchgänge parallel (Gen2 nähme sonst mehrere Anfragen in dieselbe
+ * Instanz). retryCount 0: der nächste Takt ist die Wiederholung.
+ */
+exports.namerNachlauf = onSchedule(
+  {
+    region: REGION,
+    schedule: '*/15 * * * *',
+    timeZone: 'Europe/Berlin',
+    retryCount: 0,
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    maxInstances: 1,
+    concurrency: 1,
+    secrets: [GEMINI_API_KEY],
+  },
+  async () => {
+    const bericht = await nachlauf({ db, werte: WERTE, lesen, logger });
+    if (bericht.gefunden) logger.info('namer-nachlauf: Durchgang', bericht);
   },
 );

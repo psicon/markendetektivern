@@ -2,8 +2,8 @@
 
 /**
  * Die Lesung selbst: Prompt, Schema, Gemini-Aufruf mit Wiederholung und die
- * Auswertung zum Dokument-Patch. Getrennt vom Trigger, damit das Nachlese-
- * Skript für betroffene Einreichungen EXAKT dieselbe Logik nutzt.
+ * Auswertung zum Dokument-Patch. Getrennt vom Trigger, damit der Nachlauf
+ * (src/ablauf.js) EXAKT dieselbe Logik nutzt.
  *
  * Vorfall 22.–24.09.2026: Vertex lehnte seit dem 22.09. ~13 Uhr UTC einen Teil
  * der Anfragen mit `thinkingConfig: { thinkingBudget: 0 }` ab — 400 „Thinking
@@ -24,7 +24,13 @@
 const NAME_STEPS = ['front', 'preis', 'hersteller'];
 // Beschriftung der Bilder im Prompt — ohne sie weiß das Modell nicht, WELCHES
 // Bild welche Ansicht ist, und ordnet Preis/Hersteller falsch zu.
-const STEP_LABEL = { front: 'Bild „Produktvorderseite"', preis: 'Bild „Preis"', hersteller: 'Bild „Herstellerangabe"' };
+// „rueckseite" nur als Ersatz, wenn front oder hersteller defekt ist (src/fotos.js).
+const STEP_LABEL = {
+  front: 'Bild „Produktvorderseite"',
+  preis: 'Bild „Preis"',
+  hersteller: 'Bild „Herstellerangabe"',
+  rueckseite: 'Bild „Rückseite"',
+};
 // Below this we keep the OCR as a suggestion but don't auto-fill the name.
 const MIN_CONFIDENCE = 0.45;
 
@@ -127,24 +133,67 @@ function extractText(response) {
  * Bild ungültig) — nein, der käme beim nächsten Mal genauso.
  */
 function istVoruebergehend(err) {
+  // Ausdrücklich eingestuft (src/fotos.js: Download-Fehler ja, Dekodierfehler nein).
+  if (err && typeof err.voruebergehend === 'boolean') return err.voruebergehend;
   const text = `${err && err.name} ${err && err.message} ${err && err.status} ${err && err.code}`;
   if (err instanceof SyntaxError) return true; // abgeschnittenes JSON
   return /\b(429|500|502|503|504)\b|RESOURCE_EXHAUSTED|UNAVAILABLE|DEADLINE_EXCEEDED|INTERNAL|fetch failed|ECONNRESET|ETIMEDOUT|EAI_AGAIN|socket hang up|empty gemini response|abort|timed? ?out/i.test(text);
+}
+
+/**
+ * Die 60-s-Grenze je Anfrage (ANFRAGE_TIMEOUT_MS). Das SDK schickt sie als
+ * X-Server-Timeout mit, darum melden sich 504 und Abbruch gleichermaßen erst
+ * nach rund 60 s — jeder solche Versuch kostet eine volle Minute.
+ */
+function istZeitgrenze(err) {
+  const text = `${err && err.name} ${err && err.message} ${err && err.status} ${err && err.code}`;
+  return /\b504\b|DEADLINE_EXCEEDED|abort|timed? ?out/i.test(text);
+}
+
+/** Mengenlimit (projektweit geteilt, u. a. mit der Bon-Pipeline). */
+function istMengenlimit(err) {
+  const text = `${err && err.message} ${err && err.status} ${err && err.code}`;
+  return /\b429\b|RESOURCE_EXHAUSTED/.test(text);
+}
+
+/**
+ * Konnte Gemini ein Bild nicht dekodieren? (25.09.2026: 400 „Failed to decode
+ * image data" wegen eines abgeschnittenen Hersteller-Fotos.) Dann lohnt eine
+ * Lesung OHNE das verdächtige Foto (src/fotos.js), keine Wiederholung.
+ * Weitere Wortlaute für kaputte Bilder („Provided image is not valid",
+ * „Unable to process input image") zählen mit: ein solcher 400 endete vorher
+ * ohnehin endgültig, der Rückfall kostet höchstens 2 Aufrufe.
+ */
+function istBildFehler(err) {
+  const text = `${err && err.message} ${err && err.status}`;
+  return /\b400\b|INVALID_ARGUMENT/.test(text) &&
+    /decod|image data|image is not valid|invalid image|unable to process (the )?input image|corrupt/i.test(text);
 }
 
 const schlafenStandard = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Ruft Gemini auf und gibt das geparste JSON zurück. Vorübergehende Fehler
- * werden wiederholt (Standard: 4 Versuche, Pausen 3 s, 10 s, 20 s) — vorher
- * endete jeder Aussetzer dauerhaft als „kein Name". Die Pausen sind so lang,
- * weil Vertex bei Überlastung (429) mit kurzen Abständen beim Nachlesen der
- * 44 betroffenen Einreichungen dreimal hintereinander ablehnte. Schlimmster
- * Fall 4 × 60 s + 33 s < 300 s Funktionszeit. Wirft den letzten Fehler, mit
- * `versuche` am Fehlerobjekt.
+ * werden wiederholt — vorher endete jeder Aussetzer dauerhaft als „kein Name".
+ *
+ * Zeitbudget (26.09.2026): höchstens 3 Versuche mit Pausen 3 s und 10 s, und
+ * höchstens 2 Versuche, die an der 60-s-Grenze scheitern (504/Abbruch).
+ * Vorher 4 Versuche mit bis zu 20 s Pause: bis 267 s gemessen, knapp unter
+ * dem Funktionslimit, und gegen die projektweiten 429-Spitzen halfen Pausen
+ * im Sekundenbereich nicht (die Morgenrunde las Stunden später 11 von 11).
+ * Was hier scheitert, übernimmt der Nachlauf (src/ablauf.js).
+ *
+ * `beobachter` (optional) erfährt jeden einzelnen Versuch — der Nachlauf
+ * zählt damit 429 in Folge. Wirft den letzten Fehler, mit `versuche` am
+ * Fehlerobjekt.
  */
-async function leseMitWiederholung({ ai, model, parts, Type, versuche = 4, pausenMs = [3000, 10000, 20000], schlafen = schlafenStandard }) {
+async function leseMitWiederholung({
+  ai, model, parts, Type,
+  versuche = 3, zeitgrenzeVersuche = 2, pausenMs = [3000, 10000],
+  schlafen = schlafenStandard, beobachter = null,
+}) {
   let letzter = null;
+  let zeitgrenzen = 0;
   // Lehnt Google künftig auch die neue Denk-Einstellung ab, versucht der
   // nächste Durchgang es ohne — statt wieder alles als „kein Name" zu speichern.
   let ohneDenken = false;
@@ -158,16 +207,19 @@ async function leseMitWiederholung({ ai, model, parts, Type, versuche = 4, pause
       const rawText = extractText(response);
       if (!rawText || !rawText.trim()) throw new Error('empty gemini response');
       const parsed = JSON.parse(rawText);
+      if (beobachter) beobachter({ ok: true });
       return { parsed, versuche: v };
     } catch (e) {
       letzter = e instanceof Error ? e : new Error(String(e));
       letzter.versuche = v;
+      if (beobachter) beobachter({ ok: false, fehler: letzter });
       if (v === versuche) break;
-      if (!ohneDenken && istDenkEinstellungAbgelehnt(e)) {
+      if (!ohneDenken && istDenkEinstellungAbgelehnt(letzter)) {
         ohneDenken = true;
         continue;
       }
-      if (!istVoruebergehend(e)) break;
+      if (!istVoruebergehend(letzter)) break;
+      if (istZeitgrenze(letzter) && ++zeitgrenzen >= zeitgrenzeVersuche) break;
       await schlafen(pausenMs[Math.min(v - 1, pausenMs.length - 1)]);
     }
   }
@@ -209,9 +261,20 @@ function auswerten(parsed, { hatPreisBild }) {
 /**
  * Die Felder fürs Dokument (ohne Zeitstempel — den setzt der Aufrufer).
  * Nutzereingabe gewinnt immer: `productName` nur, wenn der Nutzer nichts
- * eingetragen hat UND die Lesung sicher genug ist.
+ * eingetragen hat UND die Lesung sicher genug ist. `nameErlaubt: false`
+ * (Einreichung inzwischen entschieden): gar kein `productName` — sonst stünde
+ * nachträglich ein Name da, den niemand geprüft hat.
+ *
+ * `herstellerGelesen: false` (Herstellerfoto defekt oder im Dekodier-Rückfall
+ * weggelassen, src/fotos.js): `manufacturerOcr` bleibt leer. Gelesen wurde der
+ * Hersteller dann von Rückseite, Vorderseite oder Preis — dort steht oft der
+ * Markeninhaber („Kaufland Stiftung") statt des Produzenten („DMK"), und die
+ * Doppel-Regel wertet jeden Namen in manufacturerOcr als Vergleichswert: ein
+ * solcher Unterschied gäbe eine echte Dublette frei (CLAUDE.md, 20.09.2026).
+ * Leer ist fail-closed wie vor dem Rückfall; die Morgenrunde liest den
+ * Hersteller dann in manufacturerRescueOcr nach, das nicht für die Sperre zählt.
  */
-function patchFelder(ergebnis, { userName }) {
+function patchFelder(ergebnis, { userName, nameErlaubt = true, herstellerGelesen = true }) {
   const { name, confidence, priceCents, manufacturer, priceImageKind, receipt } = ergebnis;
   const patch = {
     productNameOcr: name || null,
@@ -219,7 +282,7 @@ function patchFelder(ergebnis, { userName }) {
     // Vergleichsdaten der Doppel-Regel (Review-Konsole). Nur OCR-Vorschläge,
     // nie Nutzer-Eingaben überschreibend; fehlend = null (fail-closed dort).
     priceOcr: priceCents != null ? { priceCents, source: priceImageKind === 'kassenbon' || priceImageKind === 'beides' ? 'bon' : 'preisschild' } : null,
-    manufacturerOcr: manufacturer ? { name: manufacturer, source: 'hersteller' } : null,
+    manufacturerOcr: manufacturer && herstellerGelesen ? { name: manufacturer, source: 'hersteller' } : null,
     // Was das Preis-Bild zeigt + (falls Bon) die Filialadresse. Gibt der
     // Einreichung eine harte Ortsangabe und erlaubt den Abgleich des in der
     // App gewählten Marktes gegen den Bon.
@@ -227,7 +290,7 @@ function patchFelder(ergebnis, { userName }) {
     priceReceipt: receipt,
   };
   const nutzer = (userName == null ? '' : String(userName)).trim();
-  if (!nutzer && name && confidence >= MIN_CONFIDENCE) patch.productName = name;
+  if (nameErlaubt && !nutzer && name && confidence >= MIN_CONFIDENCE) patch.productName = name;
   return patch;
 }
 
@@ -241,6 +304,9 @@ module.exports = {
   geminiKonfig,
   extractText,
   istVoruebergehend,
+  istZeitgrenze,
+  istMengenlimit,
+  istBildFehler,
   istDenkEinstellungAbgelehnt,
   leseMitWiederholung,
   auswerten,
