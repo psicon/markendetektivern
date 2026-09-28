@@ -12,8 +12,9 @@
  * matching pending `capture()` is settled (see aufnahmeZuordnung.ts).
  * Two-stage deadline: AUFNAHME_START_LIMIT_MS until the camera acknowledges
  * the capture, then AUFNAHME_BILD_LIMIT_MS for the (slow) image processing.
- * No answer → rejected with code `timeout`; a late answer for an expired ID
- * is discarded and its file deleted.
+ * No answer → rejected with code `timeout` (stage 1) or `timeout_bild`
+ * (stage 2); a late answer for an expired ID is discarded and its file
+ * deleted.
  *
  * On Android, or on an iOS binary that predates the native view, the
  * native view manager is absent → `isBonScannerAvailable` is false and

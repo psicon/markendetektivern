@@ -41,6 +41,27 @@ export function kameraBelegtHinweis(grund: string | null): { titel: string; text
 }
 
 /**
+ * Die Kamera lässt sich nicht nutzen (keine Kamera, oder ein Laufzeitfehler
+ * hat sie angehalten). Ein weiterer Tipp hilft nicht — darum nie „versuch es
+ * noch einmal“, sondern die Galerie; eine neu geöffnete Kamera richtet sich
+ * neu ein.
+ */
+export const KAMERA_NICHT_ERREICHBAR = {
+  titel: 'Die Kamera ist gerade nicht erreichbar',
+  text: 'Nimm dein Foto einfach aus deiner Galerie. Beim nächsten Öffnen der Kamera geht’s auch hier wieder direkt los.',
+} as const;
+
+/**
+ * Die Kamera hat ausgelöst, aber das Bild kam nicht innerhalb der großzügigen
+ * Zeitgrenze. Wer jetzt erneut tippt, läuft wahrscheinlich wieder hinein —
+ * darum die Galerie statt „tipp nochmal“.
+ */
+export const AUFNAHME_DAUERT = {
+  titel: 'Dein Foto braucht gerade länger',
+  text: 'Nimm es am einfachsten aus deiner Galerie. Beim nächsten Öffnen der Kamera geht’s auch hier wieder direkt los.',
+} as const;
+
+/**
  * Einheitliche Rückmeldung, wenn eine Aufnahme (Bon-Scanner, Produktfoto)
  * nicht klappt. Der Aufrufer setzt seinen Aufnahme-Zustand selbst zurück
  * (`finally`); hier geht es nur um die Meldung.
@@ -56,6 +77,12 @@ export function zeigeAufnahmeFehler(fehler: unknown): void {
       Alert.alert(titel, text);
       return;
     }
+    case 'kamera_fehlt':
+      Alert.alert(KAMERA_NICHT_ERREICHBAR.titel, KAMERA_NICHT_ERREICHBAR.text);
+      return;
+    case 'zu_langsam':
+      Alert.alert(AUFNAHME_DAUERT.titel, AUFNAHME_DAUERT.text);
+      return;
     case 'still':
       return;
     case 'fehlgeschlagen':

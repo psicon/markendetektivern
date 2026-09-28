@@ -8,6 +8,9 @@
  * Auslöser endlos drehen. Zweite Klasse (Prüfrunde 28.09.): eine feste
  * Grenze vom Tipp bis zum fertigen Bild verwarf auf langsamen Geräten gute
  * Bilder, und eine Unterbrechung der Kamera versprach „gleich bereit“.
+ * Dritte (Prüfrunde 2): nach der langen Bild-Grenze, bei fehlender Kamera
+ * und nach Laufzeitfehlern hilft ein erneuter Tipp nicht — die Codes müssen
+ * das unterscheidbar machen.
  */
 
 import {
@@ -97,13 +100,15 @@ describe('AufnahmeZuordnung', () => {
       expect(jest.getTimerCount()).toBe(0);
     });
 
-    it('beendet auch eine quittierte Aufnahme, wenn die Aufbereitung hängt', async () => {
+    it('beendet auch eine quittierte Aufnahme, wenn die Aufbereitung hängt — mit eigenem Code', async () => {
       const z = new AufnahmeZuordnung<Bild>();
       const { id, zusage } = z.starten();
       const code = fehlercode(zusage);
       z.gestartet(id);
       jest.advanceTimersByTime(AUFNAHME_BILD_LIMIT_MS);
-      expect(await code).toBe('timeout');
+      // Nicht `timeout`: nach der Start-Grenze hilft ein erneuter Tipp, nach
+      // der Bild-Grenze nicht verlässlich (Prüfrunde 2).
+      expect(await code).toBe('timeout_bild');
       expect(z.offeneId).toBeNull();
     });
 
@@ -118,7 +123,7 @@ describe('AufnahmeZuordnung', () => {
       // Eine zweite Quittung setzt die Grenze NICHT erneut.
       expect(z.gestartet(id)).toBe('verworfen');
       jest.advanceTimersByTime(1);
-      expect(await code).toBe('timeout');
+      expect(await code).toBe('timeout_bild');
     });
 
     it('ignoriert die Quittung einer abgelösten Aufnahme', async () => {
@@ -236,12 +241,13 @@ describe('signalIdAus', () => {
 describe('aufnahmeFehlerArt', () => {
   it.each([
     ['timeout', 'nochmal_tippen'],
+    ['timeout_bild', 'zu_langsam'],
     ['session_not_running', 'nochmal_tippen'],
     ['session_interrupted', 'kamera_belegt'],
     ['unmounted', 'still'],
     ['superseded', 'still'],
     ['capture_failed', 'fehlgeschlagen'],
-    ['camera_unavailable', 'fehlgeschlagen'],
+    ['camera_unavailable', 'kamera_fehlt'],
     ['ein_neuer_code', 'fehlgeschlagen'],
   ])('%s → %s', (code, art) => {
     expect(aufnahmeFehlerArt(new BonScannerFehler(code))).toBe(art);
@@ -263,6 +269,16 @@ describe('aufnahmeFehlerArt', () => {
     // dauerhaft an — „tipp einfach nochmal“ wäre eine Schleife.
     expect(aufnahmeFehlerArt(new BonScannerFehler('session_interrupted'))).not.toBe('nochmal_tippen');
   });
+
+  it.each(['timeout_bild', 'camera_unavailable'])(
+    'lädt bei %s nie zum erneuten Tippen ein (Tipp hilft dort nicht)',
+    (code) => {
+      const art = aufnahmeFehlerArt(new BonScannerFehler(code));
+      expect(art).not.toBe('nochmal_tippen');
+      // …und auch nicht „versuch es noch einmal“ (Fehlschlag-Dialog).
+      expect(art).not.toBe('fehlgeschlagen');
+    },
+  );
 
   it('wertet fremde Fehler als Fehlschlag', () => {
     expect(aufnahmeFehlerArt(new Error('timeout'))).toBe('fehlgeschlagen');

@@ -48,6 +48,24 @@ describe('zeigeAufnahmeFehler', () => {
     expect(alertMock.mock.calls[0][1]).toMatch(/Galerie/);
   });
 
+  it('nennt bei nicht erreichbarer Kamera die Galerie statt „noch einmal“', () => {
+    zeigeAufnahmeFehler(new BonScannerFehler('camera_unavailable'));
+    expect(toastMock).not.toHaveBeenCalled();
+    expect(alertMock).toHaveBeenCalledTimes(1);
+    const [titel, text] = alertMock.mock.calls[0];
+    expect(text).toMatch(/Galerie/);
+    expect(`${titel} ${text}`).not.toMatch(/noch einmal|nochmal|gleich bereit/);
+  });
+
+  it('verspricht nach der langen Bild-Grenze kein „gleich bereit“', () => {
+    zeigeAufnahmeFehler(new BonScannerFehler('timeout_bild'));
+    expect(toastMock).not.toHaveBeenCalled();
+    expect(alertMock).toHaveBeenCalledTimes(1);
+    const [titel, text] = alertMock.mock.calls[0];
+    expect(text).toMatch(/Galerie/);
+    expect(`${titel} ${text}`).not.toMatch(/noch einmal|nochmal|gleich bereit/);
+  });
+
   it('bleibt still, wenn die Ansicht abgebaut wurde', () => {
     zeigeAufnahmeFehler(new BonScannerFehler('unmounted'));
     expect(toastMock).not.toHaveBeenCalled();

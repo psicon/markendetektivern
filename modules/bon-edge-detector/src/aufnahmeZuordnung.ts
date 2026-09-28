@@ -23,6 +23,9 @@
  *    Tipp liefe wieder hinein. Nach der Quittung garantiert AVFoundation
  *    ohnehin einen letzten Rückruf (didFinishCaptureFor); die Grenze fängt
  *    nur eine hängende Aufbereitung.
+ * Beide Stufen melden eigene Codes (`timeout` / `timeout_bild`): nach Stufe 1
+ * hilft ein erneuter Tipp, nach Stufe 2 nicht verlässlich — dort nennt die
+ * Rückmeldung die Galerie statt „tipp nochmal“.
  * Ohne Quittung (native Stände vor diesem Stand) gilt Stufe 1 für alles.
  *
  * Bewusst rein (kein React, keine nativen Module) → mit jest testbar.
@@ -37,18 +40,26 @@ export const AUFNAHME_BILD_LIMIT_MS = 30000;
 
 /**
  * Fehlercodes einer Aufnahme.
- * - `timeout`             JS: keine Antwort innerhalb der Zeitgrenze
+ * - `timeout`             JS: Kamera hat nicht innerhalb der Start-Grenze
+ *                         quittiert — sie war kurz nicht bereit
+ * - `timeout_bild`        JS: Aufnahme quittiert, aber innerhalb der Bild-
+ *                         Grenze kam kein Bild (Aufbereitung hängt). Auch für
+ *                         expo-camera, wenn takePictureAsync innerhalb seiner
+ *                         großzügigen Grenze nichts liefert.
  * - `session_not_running` nativ: Kamerasitzung lief beim Auslösen (noch) nicht
  * - `session_interrupted` nativ: Sitzung vom System unterbrochen — kann
  *                         dauern (Nebeneinander-Modus, andere App nutzt die
  *                         Kamera). Grund steht in `BonScannerFehler.grund`.
  * - `capture_failed`      nativ: Aufnahme oder Bildaufbereitung gescheitert
- * - `camera_unavailable`  nativ: keine nutzbare Kamera
+ * - `camera_unavailable`  nativ: keine nutzbare Kamera, oder ein Laufzeitfehler
+ *                         hat die Sitzung dauerhaft angehalten — ein erneuter
+ *                         Tipp hilft nicht
  * - `superseded`          JS: eine neue Aufnahme hat diese abgelöst
  * - `unmounted`           JS: die Kameraansicht wurde abgebaut
  */
 export type BonScannerFehlerCode =
   | 'timeout'
+  | 'timeout_bild'
   | 'session_not_running'
   | 'session_interrupted'
   | 'capture_failed'
@@ -97,6 +108,11 @@ export type AufnahmeFehlerArt =
   /** Kamera ist vom System belegt — ein erneuter Tipp allein hilft nicht,
    *  der Nutzer braucht den Ausweg (Vollbild, andere App schließen, Galerie). */
   | 'kamera_belegt'
+  /** Kamera nicht nutzbar (fehlt, Laufzeitfehler) — nur Galerie hilft. */
+  | 'kamera_fehlt'
+  /** Aufnahme quittiert, aber das Bild kam nicht innerhalb der großzügigen
+   *  Grenze — ein erneuter Tipp liefe wahrscheinlich wieder hinein. */
+  | 'zu_langsam'
   /** Kein Hinweis nötig (Ansicht abgebaut / Aufnahme abgelöst). */
   | 'still'
   /** Echter Fehlschlag — bisherige Fehlermeldung zeigen. */
@@ -106,6 +122,8 @@ export function aufnahmeFehlerArt(fehler: unknown): AufnahmeFehlerArt {
   if (!(fehler instanceof BonScannerFehler)) return 'fehlgeschlagen';
   const { code, grund } = fehler;
   if (code === 'timeout' || code === 'session_not_running') return 'nochmal_tippen';
+  if (code === 'timeout_bild') return 'zu_langsam';
+  if (code === 'camera_unavailable') return 'kamera_fehlt';
   if (code === 'session_interrupted') {
     // Hintergrund-Unterbrechung endet, sobald die App vorn ist — dort
     // stimmt „gleich bereit“. Alles andere kann dauern.
@@ -172,7 +190,7 @@ export class AufnahmeZuordnung<T> {
         id,
         resolve,
         reject,
-        timer: this.zeitgrenze(id, this.limits.startMs),
+        timer: this.zeitgrenze(id, this.limits.startMs, 'timeout'),
         quittiert: false,
       };
     });
@@ -191,7 +209,7 @@ export class AufnahmeZuordnung<T> {
       return 'verworfen';
     }
     clearTimeout(offen.timer);
-    offen.timer = this.zeitgrenze(offen.id, this.limits.bildMs);
+    offen.timer = this.zeitgrenze(offen.id, this.limits.bildMs, 'timeout_bild');
     offen.quittiert = true;
     return 'angenommen';
   }
@@ -218,12 +236,16 @@ export class AufnahmeZuordnung<T> {
     this.beenden(new BonScannerFehler(code));
   }
 
-  private zeitgrenze(id: number, ms: number): ReturnType<typeof setTimeout> {
+  private zeitgrenze(
+    id: number,
+    ms: number,
+    code: 'timeout' | 'timeout_bild',
+  ): ReturnType<typeof setTimeout> {
     return setTimeout(() => {
       const offen = this.offen;
       if (!offen || offen.id !== id) return;
       this.offen = null;
-      offen.reject(new BonScannerFehler('timeout'));
+      offen.reject(new BonScannerFehler(code));
     }, ms);
   }
 
