@@ -45,6 +45,7 @@ import {
 } from '@/components/product-submit/LocationConfirmStep';
 import { MarketSelector } from '@/components/ui/MarketSelector';
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
+import { useBildschirmAktiv } from '@/hooks/useBildschirmAktiv';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
@@ -58,6 +59,7 @@ import {
   type ActiveProductCampaign,
   type ProductPhotoStep,
 } from '@/lib/services/productSubmit';
+import { BILDSCHIRM_WEG, aufnahmeMitGrenze } from '@/lib/services/kameraAufnahme';
 import { isOnline } from '@/lib/services/network';
 import { StandortPflichtHinweis } from '@/components/rewards/StandortPflichtHinweis';
 import { useStandortPflicht } from '@/hooks/useStandortPflicht';
@@ -68,6 +70,12 @@ import { showInfoToast } from '@/lib/services/ui/toast';
 
 const PURPLE = '#5b4f9c';
 const SCREEN_W = Dimensions.get('window').width;
+
+// Zeitgrenze für takePictureAsync (expo-camera: auf Android alle Schritte,
+// auf iOS der EAN-Schritt samt Auto-Auslöser). Projektregel: kein Spinner
+// ohne Grenze an einem nativen await. Großzügig, damit langsame Geräte mit
+// Nachbearbeitung kein gutes Foto verlieren.
+const EXPO_AUFNAHME_LIMIT_MS = 30_000;
 
 // Readability tuning for PRODUCT LABELS (not receipts). The shipped defaults
 // only accept tall, receipt-shaped documents (docMaxWHRatio 0.85) and demand
@@ -95,6 +103,9 @@ export default function ProductWizardScreen() {
   const { theme } = useTokens();
   const scheme = useColorScheme();
   const { user } = useAuth();
+  // Nach dem await einer Aufnahme: Screen noch da und vorn? Sonst weder State
+  // noch Hinweis über einer fremden Seite (Push-Ziel geöffnet, Wizard zu).
+  const bildschirm = useBildschirmAktiv();
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
   const docScannerRef = useRef<BonScannerHandle>(null);
@@ -335,10 +346,19 @@ export default function ProductWizardScreen() {
 
   // Jump to a specific step (from a thumbnail/pill tap) during the normal
   // capture flow. If it's already captured, an overwrite hint shows inline.
-  const goToStep = useCallback((i: number) => {
-    setStepIdx(i);
-    setPhase('capture');
-  }, []);
+  // Während einer Aufnahme gesperrt: das Bild geht an den Schritt, in dem
+  // ausgelöst wurde, entsteht aber erst, wenn die Kamera wirklich auslöst —
+  // nach einem Kamerawechsel (EAN → nativer Scanner) bis zu Sekunden später.
+  // Wer dazwischen die Pill wechselt und das neue Etikett hinhält, bekäme
+  // dessen Foto im alten Fach.
+  const goToStep = useCallback(
+    (i: number) => {
+      if (capturing) return;
+      setStepIdx(i);
+      setPhase('capture');
+    },
+    [capturing],
+  );
 
   // Store the captured uri for the current step. In edit-from-review mode we
   // go straight back to review; otherwise advance to the next missing step
@@ -377,15 +397,25 @@ export default function ProductWizardScreen() {
     setCapturing(true);
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.7, skipProcessing: false });
+      // Zeitgrenze → BonScannerFehler('timeout_bild'). Ein Foto, das danach
+      // noch kommt, fällt ins Leere; das Fach steht über onCaptured aus DIESEM
+      // Render fest (Schritt zum Tippzeitpunkt). Screen inzwischen weg →
+      // BILDSCHIRM_WEG: kein State, kein Hinweis.
+      const photo = await aufnahmeMitGrenze(
+        cameraRef.current.takePictureAsync({ quality: 0.7, skipProcessing: false }),
+        EXPO_AUFNAHME_LIMIT_MS,
+        bildschirm.aktiv,
+      );
+      if (photo === BILDSCHIRM_WEG) return;
       if (!photo?.uri) throw new Error('no-uri');
       onCaptured(photo.uri);
-    } catch {
-      Alert.alert('Aufnahme fehlgeschlagen', 'Bitte versuch es noch einmal.');
+    } catch (e) {
+      if (!bildschirm.aktiv()) return;
+      zeigeAufnahmeFehler(e);
     } finally {
-      setCapturing(false);
+      if (bildschirm.gemountet()) setCapturing(false);
     }
-  }, [onCaptured, cameraReady]);
+  }, [onCaptured, cameraReady, bildschirm]);
 
   // Shutter dispatches by capture mode: document → native doc scanner
   // (flat OCR-friendly crop), else the plain camera.
@@ -400,16 +430,19 @@ export default function ProductWizardScreen() {
         // nicht laufender oder unterbrochener Kamera); ein verspätetes Bild
         // wird dort verworfen und landet nie im nächsten Schritt.
         const res = await docScannerRef.current.capture();
+        // Screen inzwischen verlassen: Bild verwerfen.
+        if (!bildschirm.aktiv()) return;
         if (res?.uri) onCaptured(res.uri);
       } catch (e) {
+        if (!bildschirm.aktiv()) return;
         zeigeAufnahmeFehler(e);
       } finally {
-        setCapturing(false);
+        if (bildschirm.gemountet()) setCapturing(false);
       }
     } else {
       await shootCamera();
     }
-  }, [capturing, useNativeCam, onCaptured, shootCamera]);
+  }, [capturing, useNativeCam, onCaptured, shootCamera, bildschirm]);
 
   // EAN/barcode auto-capture: on the first valid scan of the EAN step,
   // store the code + grab the frame (the code rides into the filename).
@@ -986,6 +1019,7 @@ export default function ProductWizardScreen() {
                 <Pressable
                   key={s.key}
                   onPress={() => goToStep(i)}
+                  disabled={capturing}
                   onLayout={(e) => {
                     chipXRef.current[i] = e.nativeEvent.layout.x;
                   }}
@@ -1019,8 +1053,13 @@ export default function ProductWizardScreen() {
 
         {/* bottom bar */}
         <View style={[styles.camBottom, { paddingBottom: insets.bottom + 16 }]}>
-          <Pressable onPress={() => setPhase('review')} disabled={capturedCount === 0} style={styles.iconBtn} hitSlop={12}>
-            <MaterialCommunityIcons name="view-grid-outline" size={26} color={capturedCount === 0 ? 'rgba(255,255,255,0.4)' : '#fff'} />
+          {/* Übersicht während einer Aufnahme gesperrt (wie Pills und Galerie). */}
+          <Pressable onPress={() => setPhase('review')} disabled={capturedCount === 0 || capturing} style={styles.iconBtn} hitSlop={12}>
+            <MaterialCommunityIcons
+              name="view-grid-outline"
+              size={26}
+              color={capturedCount === 0 || capturing ? 'rgba(255,255,255,0.4)' : '#fff'}
+            />
           </Pressable>
           <Pressable
             onPress={onShutter}
