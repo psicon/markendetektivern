@@ -159,7 +159,8 @@ export default function ProductWizardScreen() {
   // zurück (Foto des vorherigen Produkts). Das war die Ursache der
   // vertauschten Produktfotos (crowd_uploads-Kontamination, 2026-07-03):
   // der Wizard löste bei rapiden Einreichungen aus, bevor die Kamera streamte.
-  // Der Cashback-Scanner gated genau so — nur der Wizard tat es bisher nicht.
+  // Referenz für dieses Muster; der expo-Ersatzweg des Bon-Scanners
+  // (app/cashback/capture.tsx) gated seit 28.09.2026 genauso.
   const [cameraReady, setCameraReady] = useState(false);
   const [flashOn, setFlashOn] = useState(false);
   const [campaign, setCampaign] = useState<ActiveProductCampaign | null>(null);

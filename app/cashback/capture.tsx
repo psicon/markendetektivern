@@ -44,6 +44,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   BonScanner,
+  BonScannerFehler,
   DEFAULT_SCANNER_TUNING,
   isBonScannerAvailable,
   type BonScannerHandle,
@@ -56,6 +57,7 @@ import { StandortPflichtHinweis } from '@/components/rewards/StandortPflichtHinw
 import { useStandortPflicht } from '@/hooks/useStandortPflicht';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { mitZeitlimit } from '@/lib/services/berechtigungsWaechter';
 import { getCashbackConfig, hasValidCashbackConsent } from '@/lib/services/cashbackService';
 import { zeigeAufnahmeFehler } from '@/lib/services/ui/aufnahmeFehler';
 import { buildCapturedBon } from '@/lib/utils/cashbackImage';
@@ -66,6 +68,12 @@ const FRAME_WIDTH = SCREEN_W * 0.82;
 const FRAME_HEIGHT = SCREEN_H * 0.55;
 const CORNER_LEN = 28;
 const CORNER_THICK = 3;
+
+// Zeitgrenze für takePictureAsync im expo-camera-Ersatzweg (Projektregel:
+// kein Spinner ohne Zeitgrenze an einem nativen await). Großzügiger als die
+// 8 s des BonScanners, weil expo-camera auf langsamen Android-Geräten mit
+// Nachbearbeitung spürbar länger braucht.
+const FALLBACK_AUFNAHME_LIMIT_MS = 15_000;
 
 // Debug gate (mirror app/profile.tsx): the in-scanner tuning panel is
 // only available in DEV builds or for a whitelisted owner email — so the
@@ -160,6 +168,13 @@ export default function CashbackCaptureScreen() {
   // erst beim Hochladen — wer ohne Freigabe fotografiert, hätte die Arbeit
   // umsonst gemacht.
   const pflicht = useStandortPflicht();
+  // Kamera-Montage erst nach den Einblend-Animationen (siehe Effekt unten).
+  // Das ist NICHT die Bereitschaft der Kamera selbst.
+  const [mountReady, setMountReady] = useState(false);
+  // expo-camera (Ersatzweg) MUSS onCameraReady gemeldet haben, bevor
+  // takePictureAsync läuft — sonst liefert CameraX den letzten Puffer der
+  // VORHERIGEN Kamera-Session (vertauschte Fotos, Vorfall 2026-07-03).
+  // Gleiches Muster wie app/product-submit/wizard.tsx.
   const [cameraReady, setCameraReady] = useState(false);
   const [flashOn, setFlashOn] = useState(false);
   const [capturing, setCapturing] = useState(false);
@@ -203,6 +218,19 @@ export default function CashbackCaptureScreen() {
   const cameraRef = useRef<CameraView>(null);
   const scannerRef = useRef<BonScannerHandle>(null);
 
+  // Bereitschaft zurücksetzen, sobald die expo-CameraView abgebaut wird
+  // (Standort-Sperre, Berechtigung entzogen, Moduswechsel). Eine neu
+  // gemountete Kamera muss onCameraReady erneut melden. An der tatsächlichen
+  // Mount-Bedingung des Ersatzwegs hängen (Render-Zweige unten).
+  const expoCamGemountet =
+    pflicht.stand === 'erfuellt' &&
+    scannerState === 'unavailable' &&
+    !!permission?.granted &&
+    mountReady;
+  useEffect(() => {
+    if (!expoCamGemountet) setCameraReady(false);
+  }, [expoCamGemountet]);
+
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
@@ -210,7 +238,7 @@ export default function CashbackCaptureScreen() {
   // Defer camera mount until interactions settle (avoids first-paint
   // jank that bites Android, same trick as barcode-scanner).
   useEffect(() => {
-    const t = InteractionManager.runAfterInteractions(() => setCameraReady(true));
+    const t = InteractionManager.runAfterInteractions(() => setMountReady(true));
     return () => t.cancel();
   }, []);
 
@@ -348,15 +376,21 @@ export default function CashbackCaptureScreen() {
   }, [scannerState, pflicht.stand, permission?.granted, ensurePermission]);
 
   const handleCaptureFallback = useCallback(async () => {
-    if (capturing || !cameraRef.current) return;
+    // HART: nie vor onCameraReady auslösen (Stale-Frame-Schutz, s. o.).
+    if (capturing || !cameraRef.current || !cameraReady) return;
     setCapturing(true);
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.9,
-        skipProcessing: false,
-        exif: false,
-      });
+      const photo = await mitZeitlimit(
+        cameraRef.current.takePictureAsync({
+          quality: 0.9,
+          skipProcessing: false,
+          exif: false,
+        }),
+        FALLBACK_AUFNAHME_LIMIT_MS,
+        null,
+      );
+      if (photo === null) throw new BonScannerFehler('timeout');
       if (!photo?.uri) throw new Error('takePictureAsync returned no URI');
 
       // Manual-capture path: there's no native auto-perspective-
@@ -376,11 +410,11 @@ export default function CashbackCaptureScreen() {
       await goReview(outUri, 'live_camera');
     } catch (error: any) {
       console.warn('⚠️ Bon capture failed:', error);
-      Alert.alert('Aufnahme fehlgeschlagen', 'Bitte versuch es noch einmal.');
+      zeigeAufnahmeFehler(error);
     } finally {
       setCapturing(false);
     }
-  }, [capturing, goReview]);
+  }, [capturing, cameraReady, goReview]);
 
   // Live-scanner shutter: the native view warps the frozen frame flat
   // (using the live-detected quad) and hands back a ready-to-OCR JPEG.
@@ -621,7 +655,7 @@ export default function CashbackCaptureScreen() {
     return (
       <View style={styles.root}>
         <StatusBar barStyle="light-content" />
-        {cameraReady ? (
+        {mountReady ? (
           <BonScanner
             ref={scannerRef}
             style={StyleSheet.absoluteFill}
@@ -747,12 +781,12 @@ export default function CashbackCaptureScreen() {
           </Pressable>
           <Pressable
             onPress={handleLiveCapture}
-            disabled={capturing || !cameraReady}
+            disabled={capturing || !mountReady}
             style={({ pressed }) => [
               styles.shutter,
               quality === 'ok' && { borderColor: '#5ee0a0' },
               (pressed || capturing) && { transform: [{ scale: 0.94 }] },
-              (capturing || !cameraReady) && { opacity: 0.7 },
+              (capturing || !mountReady) && { opacity: 0.7 },
             ]}
             accessibilityRole="button"
             accessibilityLabel="Bon fotografieren"
@@ -807,13 +841,15 @@ export default function CashbackCaptureScreen() {
   return (
     <View style={styles.root}>
       <StatusBar barStyle="light-content" />
-      {cameraReady ? (
+      {mountReady ? (
         <CameraView
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
           facing={'back' as CameraType}
           autofocus="on"
           enableTorch={flashOn}
+          // Erst wenn die Kamera wirklich streamt, darf ausgelöst werden.
+          onCameraReady={() => setCameraReady(true)}
         />
       ) : (
         <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
