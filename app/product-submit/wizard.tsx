@@ -396,8 +396,9 @@ export default function ProductWizardScreen() {
       setCapturing(true);
       try {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-        // Endet spätestens an der Zeitgrenze des Scanners; ein verspätetes
-        // Bild wird dort verworfen und landet nie im nächsten Schritt.
+        // Endet spätestens an der Zeitgrenze des Scanners (sofort bei
+        // nicht laufender oder unterbrochener Kamera); ein verspätetes Bild
+        // wird dort verworfen und landet nie im nächsten Schritt.
         const res = await docScannerRef.current.capture();
         if (res?.uri) onCaptured(res.uri);
       } catch (e) {

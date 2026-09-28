@@ -423,9 +423,11 @@ export default function CashbackCaptureScreen() {
     setCapturing(true);
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-      // capture() endet spätestens nach der Zeitgrenze des Scanners
-      // (`timeout`) oder sofort, wenn die Kamerasitzung nicht läuft
-      // (`session_not_running`) — der Auslöser dreht nie endlos.
+      // capture() endet spätestens an der Zeitgrenze des Scanners
+      // (`timeout`), sofort, wenn die Kamerasitzung nicht läuft
+      // (`session_not_running`) oder das System sie unterbrochen hat
+      // (`session_interrupted`, z. B. Nebeneinander-Modus) — der Auslöser
+      // dreht nie endlos. zeigeAufnahmeFehler nennt je Fall den Ausweg.
       const res = await scannerRef.current.capture();
       if (res?.uri) await goReview(res.uri, 'live_camera');
     } catch (error: any) {

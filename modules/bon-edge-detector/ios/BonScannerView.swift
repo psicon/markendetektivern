@@ -59,8 +59,10 @@ struct ScannerTuning: Record {
  *   - a manual shutter (JS sets `captureSignal` to a fresh, strictly
  *     increasing ID; we grab the next frame, warp it flat via
  *     CIPerspectiveCorrection, emit onCapture). Every answer to a capture
- *     — onCapture AND onError — carries that ID as `signalId`, so JS can
- *     match it to the tap and drop late answers (aufnahmeZuordnung.ts).
+ *     — onCaptureStarted (acknowledgement), onCapture AND onError — carries
+ *     that ID as `signalId`, so JS can match it to the tap, give slow image
+ *     processing its own deadline, and drop late answers
+ *     (aufnahmeZuordnung.ts).
  *
  * Portrait-locked (receipt scanning is portrait) so the Vision↔preview
  * coordinate mapping stays simple and robust: we deliver frames in
@@ -74,6 +76,9 @@ struct ScannerTuning: Record {
 public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate {
 
   // ── JS events ──────────────────────────────────────────────────────
+  // Quittung: die Kamera hat eine Aufnahme angenommen (willBeginCaptureFor).
+  // JS wechselt damit von der kurzen Start- auf die lange Aufbereitungsgrenze.
+  let onCaptureStarted = EventDispatcher()
   let onCapture = EventDispatcher()
   let onError = EventDispatcher()
   let onEdgesDetected = EventDispatcher()
@@ -95,8 +100,19 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
 
   private let sessionQueue = DispatchQueue(label: "bon.scanner.session")
   private let videoQueue = DispatchQueue(label: "bon.scanner.video", qos: .userInitiated)
+  // Bildaufbereitung (Rendern, Vision, Entzerren, JPEG) läuft hier und NICHT
+  // im Photo-Delegate: AVCapturePhotoOutput stellt alle Delegate-Rückrufe auf
+  // EINER gemeinsamen Queue zu (AVCapturePhotoOutput.h). Schwere Arbeit dort
+  // verzögert die Quittung (willBeginCaptureFor) jeder weiteren Aufnahme.
+  private let processingQueue = DispatchQueue(label: "bon.scanner.processing", qos: .userInitiated)
 
   private var configured = false
+  // Nur auf sessionQueue: Einrichtung fand keine nutzbare Kamera.
+  private var kameraFehlt = false
+  // Nur auf sessionQueue: Grund der laufenden Unterbrechung (JS-Code, siehe
+  // unterbrechungsCode), nil = keine Unterbrechung oder Grund unbekannt.
+  private var unterbrechungsGrund: String?
+  private var sitzungsBeobachter: [NSObjectProtocol] = []
   private var wantActive = false
   private var lastSignal = 0
 
@@ -136,9 +152,27 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
     overlayLayer.lineWidth = 3
     overlayLayer.lineJoin = .round
     layer.addSublayer(overlayLayer)
+
+    // Unterbrechungsgrund merken: isInterrupted sagt nur DASS, nicht WARUM —
+    // und nur mit dem Grund kann JS den richtigen Ausweg nennen (Vollbild vs.
+    // andere App schließen). Nach Ende der Unterbrechung startet die Sitzung
+    // von selbst wieder (AVCaptureSession.h).
+    let nc = NotificationCenter.default
+    sitzungsBeobachter.append(nc.addObserver(
+      forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil
+    ) { [weak self] note in
+      let grund = BonScannerView.unterbrechungsCode(note)
+      self?.sessionQueue.async { self?.unterbrechungsGrund = grund }
+    })
+    sitzungsBeobachter.append(nc.addObserver(
+      forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil
+    ) { [weak self] _ in
+      self?.sessionQueue.async { self?.unterbrechungsGrund = nil }
+    })
   }
 
   deinit {
+    sitzungsBeobachter.forEach { NotificationCenter.default.removeObserver($0) }
     let capturedSession = session
     sessionQueue.async {
       if capturedSession.isRunning { capturedSession.stopRunning() }
@@ -202,20 +236,29 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
       guard let self = self else { return }
       // Läuft die Sitzung nicht (Start/Stopp im Gange, Unterbrechung, keine
       // Kamera), kam bis 28.09.2026 gar keine Antwort — der Auslöser in JS
-      // drehte endlos. Jetzt sofort melden, mit der ID dieses Tipps. Die
-      // Verbindungsprüfung verhindert zudem die Ausnahme, die capturePhoto
-      // ohne aktive Videoverbindung wirft.
+      // drehte endlos. Jetzt sofort melden, mit der ID dieses Tipps.
+      if self.kameraFehlt {
+        self.melde("camera_unavailable", signalId: signal)
+        return
+      }
+      // Unterbrechung ZUERST prüfen: während einer Unterbrechung hält die
+      // Sitzung an (isRunning == false), sie fiele sonst unter „läuft noch
+      // nicht“ — und JS verspräche „gleich bereit“, obwohl die Kamera im
+      // Nebeneinander-Modus oder bei belegter Kamera gesperrt BLEIBT.
+      if self.session.isInterrupted {
+        self.melde("session_interrupted", signalId: signal, grund: self.unterbrechungsGrund)
+        return
+      }
+      // Die Verbindungsprüfung verhindert zudem die Ausnahme, die
+      // capturePhoto ohne aktive Videoverbindung wirft.
       guard
         self.configured,
         self.session.isRunning,
-        !self.session.isInterrupted,
         let conn = self.photoOutput.connection(with: .video),
         conn.isEnabled,
         conn.isActive
       else {
-        DispatchQueue.main.async {
-          self.onError(["message": "session_not_running", "signalId": signal])
-        }
+        self.melde("session_not_running", signalId: signal)
         return
       }
       let settings = AVCapturePhotoSettings()
@@ -238,6 +281,36 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
     return signalByPhotoID.removeValue(forKey: photoID)
   }
 
+  /// Liest die Signal-ID, ohne sie einzulösen (Quittung).
+  private func siehSignal(fuer photoID: Int64) -> Int? {
+    signalLock.lock()
+    defer { signalLock.unlock() }
+    return signalByPhotoID[photoID]
+  }
+
+  /// Meldet einen Aufnahmefehler an JS (auf dem Main-Thread).
+  private func melde(_ code: String, signalId: Int?, grund: String? = nil) {
+    var payload = mitSignal(["message": code], signalId)
+    if let grund = grund { payload["reason"] = grund }
+    DispatchQueue.main.async { [weak self] in self?.onError(payload) }
+  }
+
+  /// AVCaptureSession.InterruptionReason → Code für JS
+  /// (KameraUnterbrechungsGrund in aufnahmeZuordnung.ts).
+  private static func unterbrechungsCode(_ note: Notification) -> String? {
+    guard
+      let roh = (note.userInfo?[AVCaptureSessionInterruptionReasonKey] as? NSNumber)?.intValue,
+      let grund = AVCaptureSession.InterruptionReason(rawValue: roh)
+    else { return nil }
+    switch grund {
+    case .videoDeviceNotAvailableWithMultipleForegroundApps: return "multitasking"
+    case .videoDeviceInUseByAnotherClient, .audioDeviceInUseByAnotherClient: return "other_client"
+    case .videoDeviceNotAvailableDueToSystemPressure: return "system_pressure"
+    case .videoDeviceNotAvailableInBackground: return "background"
+    default: return nil
+    }
+  }
+
   /// Hängt die Signal-ID an ein Event (fehlt sie, bleibt das Event wie früher).
   private func mitSignal(_ payload: [String: Any], _ signalId: Int?) -> [String: Any] {
     guard let signalId = signalId else { return payload }
@@ -247,8 +320,7 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
   }
 
   private func meldeAufnahmeFehler(_ signalId: Int?) {
-    let payload = mitSignal(["message": "capture_failed"], signalId)
-    DispatchQueue.main.async { [weak self] in self?.onError(payload) }
+    melde("capture_failed", signalId: signalId)
   }
 
   // ── Session configuration ─────────────────────────────────────────
@@ -281,9 +353,13 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
         self.session.canAddInput(input)
       else {
         self.session.commitConfiguration()
+        // Auslöser-Tipps melden das ab jetzt als camera_unavailable statt
+        // „gleich bereit“ (setActive versucht die Einrichtung erneut).
+        self.kameraFehlt = true
         DispatchQueue.main.async { self.onError(["message": "camera_unavailable"]) }
         return
       }
+      self.kameraFehlt = false
       self.device = dev
       self.session.addInput(input)
 
@@ -388,6 +464,19 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
   }
 
   // ── Capture: full-res still → segment → warp flat ──────────────────
+
+  /// Erster Rückruf jeder Aufnahme („so bald wie möglich nach
+  /// capturePhoto“, AVCapturePhotoOutput.h). Ab hier ist ein letzter
+  /// Rückruf (didFinishCaptureFor) garantiert → JS darf der Aufbereitung
+  /// eine großzügige Zeitgrenze geben, statt ein langsames Bild zu verwerfen.
+  public func photoOutput(
+    _ output: AVCapturePhotoOutput,
+    willBeginCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings
+  ) {
+    guard let signalId = siehSignal(fuer: resolvedSettings.uniqueID) else { return }
+    DispatchQueue.main.async { [weak self] in self?.onCaptureStarted(["signalId": signalId]) }
+  }
+
   public func photoOutput(
     _ output: AVCapturePhotoOutput,
     didFinishProcessingPhoto photo: AVCapturePhoto,
@@ -400,6 +489,16 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
       meldeAufnahmeFehler(signalId)
       return
     }
+    // Einstellungen zum Zeitpunkt der Aufnahme festhalten, dann die schwere
+    // Arbeit von der gemeinsamen Delegate-Queue nehmen (siehe processingQueue).
+    let raw = rawCapture
+    let t = tuning
+    processingQueue.async { [weak self] in
+      self?.bereiteAuf(photo, signalId: signalId, raw: raw, tuning: t)
+    }
+  }
+
+  private func bereiteAuf(_ photo: AVCapturePhoto, signalId: Int?, raw: Bool, tuning t: ScannerTuning) {
     guard let cg = photo.cgImageRepresentation() else {
       meldeAufnahmeFehler(signalId)
       return
@@ -413,7 +512,7 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
     // Raw mode (product labels): no segmentation/warp — just the upright
     // full-frame photo. The live overlay + readability hint already guided
     // the user; we don't want a deskewed doc-scanner crop here.
-    if rawCapture {
+    if raw {
       guard let r = BonVision.renderJPEG(ciImage: oriented) else {
         meldeAufnahmeFehler(signalId)
         return
@@ -425,7 +524,6 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
 
     // Lenient — the user is pointing at a bon and tapped; accept whatever
     // document fills the still (rectangle detector as fallback).
-    let t = tuning
     let result: [String: Any]?
     let context = CIContext()
     if let uprightCG = context.createCGImage(oriented, from: oriented.extent) {

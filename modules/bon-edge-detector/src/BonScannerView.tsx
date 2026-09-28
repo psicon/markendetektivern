@@ -8,10 +8,12 @@
  * Capture is triggered via the `captureSignal` prop (rather than a native
  * view method) — robust across Expo Modules versions and React-friendly.
  * Each capture gets its own strictly increasing signal ID; the native side
- * echoes it in `onCapture` and `onError`, and only the matching pending
- * `capture()` is settled (see aufnahmeZuordnung.ts). No answer within
- * AUFNAHME_ZEITLIMIT_MS → rejected with code `timeout`; a late answer for
- * an expired ID is discarded and its file deleted.
+ * echoes it in `onCaptureStarted`, `onCapture` and `onError`, and only the
+ * matching pending `capture()` is settled (see aufnahmeZuordnung.ts).
+ * Two-stage deadline: AUFNAHME_START_LIMIT_MS until the camera acknowledges
+ * the capture, then AUFNAHME_BILD_LIMIT_MS for the (slow) image processing.
+ * No answer → rejected with code `timeout`; a late answer for an expired ID
+ * is discarded and its file deleted.
  *
  * On Android, or on an iOS binary that predates the native view, the
  * native view manager is absent → `isBonScannerAvailable` is false and
@@ -73,8 +75,12 @@ export const DEFAULT_SCANNER_TUNING: ScannerTuning = {
 interface NativeCaptureEvent {
   nativeEvent: BonScannerCaptureResult & { signalId?: number };
 }
+// `reason` nur bei `session_interrupted` (KameraUnterbrechungsGrund).
 interface NativeErrorEvent {
-  nativeEvent: { message: string; signalId?: number };
+  nativeEvent: { message: string; signalId?: number; reason?: string };
+}
+interface NativeCaptureStartedEvent {
+  nativeEvent: { signalId?: number };
 }
 interface NativeEdgesEvent {
   nativeEvent: { visible: boolean };
@@ -93,6 +99,7 @@ interface NativeProps {
   rawCapture?: boolean;
   captureSignal?: number;
   tuning?: ScannerTuning;
+  onCaptureStarted?: (e: NativeCaptureStartedEvent) => void;
   onCapture?: (e: NativeCaptureEvent) => void;
   onError?: (e: NativeErrorEvent) => void;
   onEdgesDetected?: (e: NativeEdgesEvent) => void;
@@ -183,6 +190,11 @@ export const BonScanner = React.forwardRef<BonScannerHandle, BonScannerProps>(
         rawCapture={rawCapture}
         tuning={tuning}
         captureSignal={signal}
+        // Kamera hat die Aufnahme angenommen → ab jetzt gilt die großzügige
+        // Grenze für die Aufbereitung (langsame Geräte verlieren kein Bild).
+        onCaptureStarted={(e) => {
+          zuordnung.gestartet(e.nativeEvent.signalId);
+        }}
         onCapture={(e) => {
           const { signalId, uri, width, height } = e.nativeEvent;
           if (zuordnung.ergebnis(signalId, { uri, width, height }) === 'verworfen') {
@@ -192,8 +204,8 @@ export const BonScanner = React.forwardRef<BonScannerHandle, BonScannerProps>(
           }
         }}
         onError={(e) => {
-          const { message, signalId } = e.nativeEvent;
-          const zustellung = zuordnung.fehler(signalId, message);
+          const { message, signalId, reason } = e.nativeEvent;
+          const zustellung = zuordnung.fehler(signalId, message, reason);
           // Späte Fehler einer abgelaufenen Aufnahme nicht mehr melden. Fehler
           // ohne ID (Kamera nicht verfügbar beim Start) weiterhin melden.
           if (zustellung === 'verworfen' && signalIdAus(signalId) !== null) return;

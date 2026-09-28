@@ -5,11 +5,14 @@
  * Vorfall-Klasse: `capture()` wartete ohne Zeitgrenze, und jede native
  * Antwort löste die gerade offene Zusage auf — ein verspätetes Bild konnte so
  * die NÄCHSTE Aufnahme beantworten, eine nie beantwortete Aufnahme ließ den
- * Auslöser endlos drehen.
+ * Auslöser endlos drehen. Zweite Klasse (Prüfrunde 28.09.): eine feste
+ * Grenze vom Tipp bis zum fertigen Bild verwarf auf langsamen Geräten gute
+ * Bilder, und eine Unterbrechung der Kamera versprach „gleich bereit“.
  */
 
 import {
-  AUFNAHME_ZEITLIMIT_MS,
+  AUFNAHME_BILD_LIMIT_MS,
+  AUFNAHME_START_LIMIT_MS,
   AufnahmeZuordnung,
   BonScannerFehler,
   aufnahmeFehlerArt,
@@ -68,22 +71,93 @@ describe('AufnahmeZuordnung', () => {
     expect(jest.getTimerCount()).toBe(0);
   });
 
-  it('beendet eine unbeantwortete Aufnahme nach der Zeitgrenze mit `timeout`', async () => {
+  it('beendet eine nie quittierte Aufnahme nach der Start-Grenze mit `timeout`', async () => {
     const z = new AufnahmeZuordnung<Bild>();
     const { zusage } = z.starten();
     const code = fehlercode(zusage);
-    jest.advanceTimersByTime(AUFNAHME_ZEITLIMIT_MS - 1);
+    jest.advanceTimersByTime(AUFNAHME_START_LIMIT_MS - 1);
     expect(z.offeneId).not.toBeNull();
     jest.advanceTimersByTime(1);
     expect(await code).toBe('timeout');
     expect(z.offeneId).toBeNull();
   });
 
+  describe('Quittung der Kamera (zweistufige Zeitgrenze)', () => {
+    it('gibt der Aufbereitung nach der Quittung die lange Grenze — ab der Quittung gerechnet', async () => {
+      const z = new AufnahmeZuordnung<Bild>();
+      const { id, zusage } = z.starten();
+      jest.advanceTimersByTime(AUFNAHME_START_LIMIT_MS - 100);
+      expect(z.gestartet(id)).toBe('angenommen');
+      // Die Start-Grenze wäre jetzt längst abgelaufen: das langsame Bild
+      // darf trotzdem noch kommen.
+      jest.advanceTimersByTime(AUFNAHME_BILD_LIMIT_MS - 1);
+      expect(z.offeneId).toBe(id);
+      expect(z.ergebnis(id, bild('file:///langsam.jpg'))).toBe('angenommen');
+      await expect(zusage).resolves.toEqual({ uri: 'file:///langsam.jpg' });
+      expect(jest.getTimerCount()).toBe(0);
+    });
+
+    it('beendet auch eine quittierte Aufnahme, wenn die Aufbereitung hängt', async () => {
+      const z = new AufnahmeZuordnung<Bild>();
+      const { id, zusage } = z.starten();
+      const code = fehlercode(zusage);
+      z.gestartet(id);
+      jest.advanceTimersByTime(AUFNAHME_BILD_LIMIT_MS);
+      expect(await code).toBe('timeout');
+      expect(z.offeneId).toBeNull();
+    });
+
+    it('verlängert nur mit passender ID und nur einmal', async () => {
+      const z = new AufnahmeZuordnung<Bild>();
+      const { id, zusage } = z.starten();
+      const code = fehlercode(zusage);
+      expect(z.gestartet(undefined)).toBe('verworfen');
+      expect(z.gestartet(id + 1)).toBe('verworfen');
+      expect(z.gestartet(id)).toBe('angenommen');
+      jest.advanceTimersByTime(AUFNAHME_BILD_LIMIT_MS - 1);
+      // Eine zweite Quittung setzt die Grenze NICHT erneut.
+      expect(z.gestartet(id)).toBe('verworfen');
+      jest.advanceTimersByTime(1);
+      expect(await code).toBe('timeout');
+    });
+
+    it('ignoriert die Quittung einer abgelösten Aufnahme', async () => {
+      const z = new AufnahmeZuordnung<Bild>();
+      const alt = z.starten();
+      alt.zusage.catch(() => {});
+      const neu = z.starten();
+      const code = fehlercode(neu.zusage);
+      expect(z.gestartet(alt.id)).toBe('verworfen');
+      // Die neue Aufnahme hat weiter nur die Start-Grenze.
+      jest.advanceTimersByTime(AUFNAHME_START_LIMIT_MS);
+      expect(await code).toBe('timeout');
+    });
+
+    it('verwirft eine Quittung, die nach dem Ergebnis kommt', async () => {
+      const z = new AufnahmeZuordnung<Bild>();
+      const { id, zusage } = z.starten();
+      z.ergebnis(id, bild('file:///a.jpg'));
+      await zusage;
+      expect(z.gestartet(id)).toBe('verworfen');
+      expect(jest.getTimerCount()).toBe(0);
+    });
+  });
+
+  it('gibt den Unterbrechungsgrund eines nativen Fehlers weiter', async () => {
+    const z = new AufnahmeZuordnung<Bild>();
+    const { id, zusage } = z.starten();
+    expect(z.fehler(id, 'session_interrupted', 'multitasking')).toBe('angenommen');
+    const fehler = await zusage.catch((e: unknown) => e);
+    expect(fehler).toBeInstanceOf(BonScannerFehler);
+    expect((fehler as BonScannerFehler).code).toBe('session_interrupted');
+    expect((fehler as BonScannerFehler).grund).toBe('multitasking');
+  });
+
   it('verwirft die späte Antwort einer abgelaufenen Aufnahme — auch wenn schon eine neue offen ist', async () => {
     const z = new AufnahmeZuordnung<Bild>();
     const alt = z.starten();
     const altCode = fehlercode(alt.zusage);
-    jest.advanceTimersByTime(AUFNAHME_ZEITLIMIT_MS);
+    jest.advanceTimersByTime(AUFNAHME_START_LIMIT_MS);
     expect(await altCode).toBe('timeout');
 
     const neu = z.starten();
@@ -163,6 +237,7 @@ describe('aufnahmeFehlerArt', () => {
   it.each([
     ['timeout', 'nochmal_tippen'],
     ['session_not_running', 'nochmal_tippen'],
+    ['session_interrupted', 'kamera_belegt'],
     ['unmounted', 'still'],
     ['superseded', 'still'],
     ['capture_failed', 'fehlgeschlagen'],
@@ -170,6 +245,23 @@ describe('aufnahmeFehlerArt', () => {
     ['ein_neuer_code', 'fehlgeschlagen'],
   ])('%s → %s', (code, art) => {
     expect(aufnahmeFehlerArt(new BonScannerFehler(code))).toBe(art);
+  });
+
+  it.each([
+    ['multitasking', 'kamera_belegt'],
+    ['other_client', 'kamera_belegt'],
+    ['system_pressure', 'kamera_belegt'],
+    ['ein_neuer_grund', 'kamera_belegt'],
+    // Endet von selbst, sobald die App vorn ist — dort stimmt „gleich bereit“.
+    ['background', 'nochmal_tippen'],
+  ])('session_interrupted mit Grund %s → %s', (grund, art) => {
+    expect(aufnahmeFehlerArt(new BonScannerFehler('session_interrupted', grund))).toBe(art);
+  });
+
+  it('verspricht bei einer Unterbrechung nie „gleich bereit“', () => {
+    // Vorfall-Klasse Prüfrunde 28.09.: Nebeneinander-Modus hält die Kamera
+    // dauerhaft an — „tipp einfach nochmal“ wäre eine Schleife.
+    expect(aufnahmeFehlerArt(new BonScannerFehler('session_interrupted'))).not.toBe('nochmal_tippen');
   });
 
   it('wertet fremde Fehler als Fehlschlag', () => {
