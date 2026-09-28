@@ -58,6 +58,7 @@ private final class SitzungsZustand {
   private var _gewuenscht = false
   private var _lief = false
   private var _laufzeitFehler = false
+  private var _neuestesSignal = 0
 
   private func mitLock<T>(_ arbeit: () -> T) -> T {
     lock.lock()
@@ -87,6 +88,13 @@ private final class SitzungsZustand {
   var laufzeitFehler: Bool {
     get { mitLock { _laufzeitFehler } }
     set { mitLock { _laufzeitFehler = newValue } }
+  }
+  /// Zuletzt von JS angeforderte Signal-ID. JS lässt nur EINE offene Aufnahme
+  /// zu: Jede ältere ID ist dort schon beendet (Zeitgrenze oder abgelöst),
+  /// ihr Bild würde nur noch verworfen.
+  var neuestesSignal: Int {
+    get { mitLock { _neuestesSignal } }
+    set { mitLock { _neuestesSignal = newValue } }
   }
 }
 
@@ -145,14 +153,12 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
   // im Photo-Delegate: AVCapturePhotoOutput stellt alle Delegate-Rückrufe auf
   // EINER gemeinsamen Queue zu (AVCapturePhotoOutput.h). Schwere Arbeit dort
   // verzögert die Quittung (willBeginCaptureFor) jeder weiteren Aufnahme.
-  // Parallel statt seriell: eine hängende Aufbereitung (dafür gibt es in JS
-  // die Bild-Grenze) hielte sonst jede weitere Aufnahme dieser Ansicht in der
-  // Warteschlange fest. Geteilt wird nichts (bereiteAuf ist statisch), und
-  // JS lässt nur eine offene Aufnahme zu — parallel laufen zwei also nur
-  // nach einer abgelaufenen Bild-Grenze.
-  private let processingQueue = DispatchQueue(
-    label: "bon.scanner.processing", qos: .userInitiated, attributes: .concurrent
-  )
+  // Seriell: eine 12-MP-Aufbereitung braucht grob 100–150 MB Spitze, zwei
+  // gleichzeitig wären auf alten Geräten unnötig riskant. Aufträge, deren
+  // Signal-ID JS schon aufgegeben hat (Zeitgrenze, abgelöst), überspringt der
+  // Block vor dem Rendern — so staut sich hinter einer abgelaufenen Aufnahme
+  // keine unnütze Arbeit, und es entsteht keine verwaiste Datei.
+  private let processingQueue = DispatchQueue(label: "bon.scanner.processing", qos: .userInitiated)
 
   private var configured = false
   // Nur auf sessionQueue: Einrichtung fand keine nutzbare Kamera.
@@ -318,6 +324,7 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
   func requestCapture(signal: Int) {
     guard signal > 0, signal != lastSignal else { return }
     lastSignal = signal
+    zustand.neuestesSignal = signal
     sessionQueue.async { [weak self] in
       guard let self = self else { return }
       // Läuft die Sitzung nicht (Start/Stopp im Gange, Unterbrechung, keine
@@ -593,7 +600,11 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
     // Hintergrund-Queue (UIView/CALayer-Freigabe außerhalb des Main-Threads),
     // und das fertige JPEG blieb ohne Empfänger in Caches liegen.
     weak var ziel = self
+    let zst = zustand
     processingQueue.async {
+      // Von JS schon aufgegeben (neuere Aufnahme angefordert): nicht rendern.
+      // JS hat für diese ID bereits geantwortet, hier kommt kein Event mehr.
+      if let s = signalId, s != zst.neuestesSignal { return }
       let ergebnis = BonScannerView.bereiteAuf(photo, raw: raw, tuning: t)
       DispatchQueue.main.async {
         guard let view = ziel else {

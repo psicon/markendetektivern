@@ -48,17 +48,19 @@ export function kameraBelegtHinweis(grund: string | null): { titel: string; text
  */
 export const KAMERA_NICHT_ERREICHBAR = {
   titel: 'Die Kamera ist gerade nicht erreichbar',
-  text: 'Nimm dein Foto einfach aus deiner Galerie. Beim nächsten Öffnen der Kamera geht’s auch hier wieder direkt los.',
+  text: 'Mach das Foto kurz mit deiner Kamera-App und wähl es hier über die Galerie aus. Beim nächsten Öffnen der Kamera geht’s auch hier wieder direkt los.',
 } as const;
 
 /**
  * Die Kamera hat ausgelöst, aber das Bild kam nicht innerhalb der großzügigen
  * Zeitgrenze. Wer jetzt erneut tippt, läuft wahrscheinlich wieder hinein —
- * darum die Galerie statt „tipp nochmal“.
+ * darum die Galerie statt „tipp nochmal“. Das verspätete Bild wird verworfen
+ * und liegt NICHT in der Fotos-App: darum den konkreten Weg nennen (Kamera-App,
+ * dann Galerie), nie „nimm es aus deiner Galerie“.
  */
 export const AUFNAHME_DAUERT = {
-  titel: 'Dein Foto braucht gerade länger',
-  text: 'Nimm es am einfachsten aus deiner Galerie. Beim nächsten Öffnen der Kamera geht’s auch hier wieder direkt los.',
+  titel: 'Über die Galerie geht’s gerade schneller',
+  text: 'Mach das Foto kurz mit deiner Kamera-App und wähl es hier über die Galerie aus – oder öffne die Kamera einfach neu.',
 } as const;
 
 /**
