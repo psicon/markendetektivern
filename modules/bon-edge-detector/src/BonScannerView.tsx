@@ -5,19 +5,25 @@
  * VNDetectRectangles overlay). Exposes an imperative `capture()` that
  * resolves with the perspective-corrected JPEG.
  *
- * Capture is triggered via an incrementing `captureSignal` prop (rather
- * than a native view method) — robust across Expo Modules versions and
- * React-friendly. The result comes back on the `onCapture` event, which
- * we bridge to the pending `capture()` promise.
+ * Capture is triggered via the `captureSignal` prop (rather than a native
+ * view method) — robust across Expo Modules versions and React-friendly.
+ * Each capture gets its own strictly increasing signal ID; the native side
+ * echoes it in `onCapture` and `onError`, and only the matching pending
+ * `capture()` is settled (see aufnahmeZuordnung.ts). No answer within
+ * AUFNAHME_ZEITLIMIT_MS → rejected with code `timeout`; a late answer for
+ * an expired ID is discarded and its file deleted.
  *
  * On Android, or on an iOS binary that predates the native view, the
  * native view manager is absent → `isBonScannerAvailable` is false and
  * the component renders null, so callers fall back to the basic camera.
  */
 
+import * as FileSystem from 'expo-file-system';
 import { requireNativeViewManager } from 'expo-modules-core';
 import * as React from 'react';
 import { Platform, type StyleProp, type ViewStyle } from 'react-native';
+
+import { AufnahmeZuordnung, BonScannerFehler, signalIdAus } from './aufnahmeZuordnung';
 
 export interface BonScannerCaptureResult {
   uri: string;
@@ -62,11 +68,13 @@ export const DEFAULT_SCANNER_TUNING: ScannerTuning = {
   maxObservations: 6,
 };
 
+// `signalId` fehlt bei nativen Ständen vor dem 28.09.2026 und bei Fehlern,
+// die zu keiner Aufnahme gehören (z. B. `camera_unavailable` beim Start).
 interface NativeCaptureEvent {
-  nativeEvent: BonScannerCaptureResult;
+  nativeEvent: BonScannerCaptureResult & { signalId?: number };
 }
 interface NativeErrorEvent {
-  nativeEvent: { message: string };
+  nativeEvent: { message: string; signalId?: number };
 }
 interface NativeEdgesEvent {
   nativeEvent: { visible: boolean };
@@ -105,7 +113,8 @@ const NativeView: React.ComponentType<NativeProps> | null = (() => {
 export const isBonScannerAvailable = NativeView != null;
 
 export interface BonScannerHandle {
-  /** Capture the current frame, warp it flat, resolve with the JPEG. */
+  /** Capture the current frame, warp it flat, resolve with the JPEG.
+   *  Rejects with a `BonScannerFehler` (see `aufnahmeFehlerArt`). */
   capture: () => Promise<BonScannerCaptureResult>;
 }
 
@@ -139,32 +148,30 @@ export const BonScanner = React.forwardRef<BonScannerHandle, BonScannerProps>(
     ref,
   ) {
     const [signal, setSignal] = React.useState(0);
-    const pending = React.useRef<{
-      resolve: (r: BonScannerCaptureResult) => void;
-      reject: (e: Error) => void;
-    } | null>(null);
+    const zuordnungRef = React.useRef<AufnahmeZuordnung<BonScannerCaptureResult> | null>(null);
+    if (!zuordnungRef.current) zuordnungRef.current = new AufnahmeZuordnung();
+    const zuordnung = zuordnungRef.current;
 
     React.useImperativeHandle(
       ref,
       () => ({
-        capture: () =>
-          new Promise<BonScannerCaptureResult>((resolve, reject) => {
-            // Reject any in-flight capture before starting a new one.
-            pending.current?.reject(new Error('superseded'));
-            pending.current = { resolve, reject };
-            setSignal((s) => s + 1);
-          }),
+        capture: () => {
+          // Ohne native Ansicht (Android, Binary ohne Scanner) antwortet nie
+          // eine Kamera — sofort ablehnen statt die Zeitgrenze abzuwarten.
+          if (!NativeView) return Promise.reject(new BonScannerFehler('camera_unavailable'));
+          // Löst eine noch offene Aufnahme mit `superseded` ab.
+          const { id, zusage } = zuordnung.starten();
+          setSignal(id);
+          return zusage;
+        },
       }),
-      [],
+      [zuordnung],
     );
 
     React.useEffect(() => {
       // If the view unmounts with a capture in flight, fail it.
-      return () => {
-        pending.current?.reject(new Error('unmounted'));
-        pending.current = null;
-      };
-    }, []);
+      return () => zuordnung.abbrechen('unmounted');
+    }, [zuordnung]);
 
     if (!NativeView) return null;
 
@@ -177,13 +184,20 @@ export const BonScanner = React.forwardRef<BonScannerHandle, BonScannerProps>(
         tuning={tuning}
         captureSignal={signal}
         onCapture={(e) => {
-          pending.current?.resolve(e.nativeEvent);
-          pending.current = null;
+          const { signalId, uri, width, height } = e.nativeEvent;
+          if (zuordnung.ergebnis(signalId, { uri, width, height }) === 'verworfen') {
+            // Antwort auf eine abgelaufene/abgelöste Aufnahme: das Bild gehört
+            // zu keinem offenen Tipp und wird nie verwendet.
+            verwaistesBildLoeschen(uri);
+          }
         }}
         onError={(e) => {
-          pending.current?.reject(new Error(e.nativeEvent.message));
-          pending.current = null;
-          onError?.(e.nativeEvent.message);
+          const { message, signalId } = e.nativeEvent;
+          const zustellung = zuordnung.fehler(signalId, message);
+          // Späte Fehler einer abgelaufenen Aufnahme nicht mehr melden. Fehler
+          // ohne ID (Kamera nicht verfügbar beim Start) weiterhin melden.
+          if (zustellung === 'verworfen' && signalIdAus(signalId) !== null) return;
+          onError?.(message);
         }}
         onEdgesDetected={(e) => onEdges?.(e.nativeEvent.visible)}
         onQuality={(e) => onQuality?.(e.nativeEvent.status)}
@@ -192,3 +206,10 @@ export const BonScanner = React.forwardRef<BonScannerHandle, BonScannerProps>(
     );
   },
 );
+
+/** Löscht das Cache-JPEG einer verworfenen Aufnahme. Best effort — der
+ *  Caches-Ordner wird vom System ohnehin geräumt. */
+function verwaistesBildLoeschen(uri: unknown): void {
+  if (typeof uri !== 'string' || !uri) return;
+  FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+}

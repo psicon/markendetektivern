@@ -68,6 +68,13 @@ export async function scanBarcodeFromImage(uri: string): Promise<string | null> 
 
 // Live scanner (manual shutter + per-frame edge overlay).
 export {
+  AUFNAHME_ZEITLIMIT_MS,
+  BonScannerFehler,
+  aufnahmeFehlerArt,
+  type AufnahmeFehlerArt,
+  type BonScannerFehlerCode,
+} from './aufnahmeZuordnung';
+export {
   BonScanner,
   isBonScannerAvailable,
   DEFAULT_SCANNER_TUNING,

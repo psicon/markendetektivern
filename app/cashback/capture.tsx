@@ -57,6 +57,7 @@ import { useStandortPflicht } from '@/hooks/useStandortPflicht';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { getCashbackConfig, hasValidCashbackConsent } from '@/lib/services/cashbackService';
+import { zeigeAufnahmeFehler } from '@/lib/services/ui/aufnahmeFehler';
 import { buildCapturedBon } from '@/lib/utils/cashbackImage';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
@@ -388,11 +389,14 @@ export default function CashbackCaptureScreen() {
     setCapturing(true);
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+      // capture() endet spätestens nach der Zeitgrenze des Scanners
+      // (`timeout`) oder sofort, wenn die Kamerasitzung nicht läuft
+      // (`session_not_running`) — der Auslöser dreht nie endlos.
       const res = await scannerRef.current.capture();
       if (res?.uri) await goReview(res.uri, 'live_camera');
     } catch (error: any) {
       console.warn('⚠️ Live capture failed:', error?.message);
-      Alert.alert('Aufnahme fehlgeschlagen', 'Bitte versuch es noch einmal.');
+      zeigeAufnahmeFehler(error);
     } finally {
       setCapturing(false);
     }

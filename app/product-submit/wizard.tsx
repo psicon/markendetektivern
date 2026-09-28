@@ -63,6 +63,7 @@ import { StandortPflichtHinweis } from '@/components/rewards/StandortPflichtHinw
 import { useStandortPflicht } from '@/hooks/useStandortPflicht';
 import { clientVersion, erfasseCaptureContext } from '@/lib/services/captureContext';
 import { enqueueProductUpload } from '@/lib/services/uploadQueue';
+import { zeigeAufnahmeFehler } from '@/lib/services/ui/aufnahmeFehler';
 import { showInfoToast } from '@/lib/services/ui/toast';
 
 const PURPLE = '#5b4f9c';
@@ -394,10 +395,12 @@ export default function ProductWizardScreen() {
       setCapturing(true);
       try {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+        // Endet spätestens an der Zeitgrenze des Scanners; ein verspätetes
+        // Bild wird dort verworfen und landet nie im nächsten Schritt.
         const res = await docScannerRef.current.capture();
         if (res?.uri) onCaptured(res.uri);
-      } catch {
-        Alert.alert('Aufnahme fehlgeschlagen', 'Bitte versuch es noch einmal.');
+      } catch (e) {
+        zeigeAufnahmeFehler(e);
       } finally {
         setCapturing(false);
       }

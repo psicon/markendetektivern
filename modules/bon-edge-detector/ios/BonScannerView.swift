@@ -56,8 +56,11 @@ struct ScannerTuning: Record {
  * an auto-shutter we can't disable. This view gives us BOTH:
  *   - a live edge-detection overlay (per-frame VNDetectRectangles,
  *     drawn as a CAShapeLayer over the camera preview), AND
- *   - a manual shutter (JS bumps `captureSignal`; we grab the next
- *     frame, warp it flat via CIPerspectiveCorrection, emit onCapture).
+ *   - a manual shutter (JS sets `captureSignal` to a fresh, strictly
+ *     increasing ID; we grab the next frame, warp it flat via
+ *     CIPerspectiveCorrection, emit onCapture). Every answer to a capture
+ *     — onCapture AND onError — carries that ID as `signalId`, so JS can
+ *     match it to the tap and drop late answers (aufnahmeZuordnung.ts).
  *
  * Portrait-locked (receipt scanning is portrait) so the Vision↔preview
  * coordinate mapping stays simple and robust: we deliver frames in
@@ -96,6 +99,12 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
   private var configured = false
   private var wantActive = false
   private var lastSignal = 0
+
+  // Signal-ID je laufender Aufnahme (AVCapturePhotoSettings.uniqueID → ID aus
+  // JS). Die Photo-Delegate-Rückrufe kommen auf einer Queue von AVFoundation,
+  // nicht auf sessionQueue — deshalb das Lock.
+  private let signalLock = NSLock()
+  private var signalByPhotoID: [Int64: Int] = [:]
 
   // When true, capture() returns the full upright frame WITHOUT perspective
   // warp/crop — the live overlay + readability hint still run, but the saved
@@ -184,17 +193,62 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
     rawCapture = v
   }
 
-  /// JS bumps an incrementing signal to request a capture. We take a
+  /// JS sets a fresh signal ID to request a capture. We take a
   /// full-resolution still via AVCapturePhotoOutput (delegate below).
   func requestCapture(signal: Int) {
     guard signal > 0, signal != lastSignal else { return }
     lastSignal = signal
     sessionQueue.async { [weak self] in
-      guard let self = self, self.configured, self.session.isRunning else { return }
+      guard let self = self else { return }
+      // Läuft die Sitzung nicht (Start/Stopp im Gange, Unterbrechung, keine
+      // Kamera), kam bis 28.09.2026 gar keine Antwort — der Auslöser in JS
+      // drehte endlos. Jetzt sofort melden, mit der ID dieses Tipps. Die
+      // Verbindungsprüfung verhindert zudem die Ausnahme, die capturePhoto
+      // ohne aktive Videoverbindung wirft.
+      guard
+        self.configured,
+        self.session.isRunning,
+        !self.session.isInterrupted,
+        let conn = self.photoOutput.connection(with: .video),
+        conn.isEnabled,
+        conn.isActive
+      else {
+        DispatchQueue.main.async {
+          self.onError(["message": "session_not_running", "signalId": signal])
+        }
+        return
+      }
       let settings = AVCapturePhotoSettings()
       settings.isHighResolutionPhotoEnabled = true
+      self.merkeSignal(signal, fuer: settings.uniqueID)
       self.photoOutput.capturePhoto(with: settings, delegate: self)
     }
+  }
+
+  private func merkeSignal(_ signal: Int, fuer photoID: Int64) {
+    signalLock.lock()
+    signalByPhotoID[photoID] = signal
+    signalLock.unlock()
+  }
+
+  /// Löst die Signal-ID einer Aufnahme genau einmal ein.
+  private func nimmSignal(fuer photoID: Int64) -> Int? {
+    signalLock.lock()
+    defer { signalLock.unlock() }
+    return signalByPhotoID.removeValue(forKey: photoID)
+  }
+
+  /// Hängt die Signal-ID an ein Event (fehlt sie, bleibt das Event wie früher).
+  private func mitSignal(_ payload: [String: Any], _ signalId: Int?) -> [String: Any] {
+    guard let signalId = signalId else { return payload }
+    var p = payload
+    p["signalId"] = signalId
+    return p
+  }
+
+  private func meldeAufnahmeFehler(_ signalId: Int?) {
+    let payload = mitSignal(["message": "capture_failed"], signalId)
+    DispatchQueue.main.async { [weak self] in self?.onError(payload) }
   }
 
   // ── Session configuration ─────────────────────────────────────────
@@ -339,12 +393,15 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
     didFinishProcessingPhoto photo: AVCapturePhoto,
     error: Error?
   ) {
+    // ID einlösen, bevor irgendetwas schiefgehen kann — didFinishCaptureFor
+    // meldet dann nur noch Aufnahmen, die hier nie angekommen sind.
+    let signalId = nimmSignal(fuer: photo.resolvedSettings.uniqueID)
     if error != nil {
-      DispatchQueue.main.async { [weak self] in self?.onError(["message": "capture_failed"]) }
+      meldeAufnahmeFehler(signalId)
       return
     }
     guard let cg = photo.cgImageRepresentation() else {
-      DispatchQueue.main.async { [weak self] in self?.onError(["message": "capture_failed"]) }
+      meldeAufnahmeFehler(signalId)
       return
     }
     // Apply the still's EXIF orientation so we work upright, matching the
@@ -357,11 +414,12 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
     // full-frame photo. The live overlay + readability hint already guided
     // the user; we don't want a deskewed doc-scanner crop here.
     if rawCapture {
-      let r = BonVision.renderJPEG(ciImage: oriented)
-      DispatchQueue.main.async { [weak self] in
-        guard let self = self else { return }
-        if let r = r { self.onCapture(r) } else { self.onError(["message": "capture_failed"]) }
+      guard let r = BonVision.renderJPEG(ciImage: oriented) else {
+        meldeAufnahmeFehler(signalId)
+        return
       }
+      let payload = mitSignal(r, signalId)
+      DispatchQueue.main.async { [weak self] in self?.onCapture(payload) }
       return
     }
 
@@ -381,14 +439,23 @@ public class BonScannerView: ExpoView, AVCaptureVideoDataOutputSampleBufferDeleg
       result = BonVision.renderJPEG(ciImage: oriented)
     }
 
-    DispatchQueue.main.async { [weak self] in
-      guard let self = self else { return }
-      if let r = result {
-        self.onCapture(r)
-      } else {
-        self.onError(["message": "capture_failed"])
-      }
+    guard let r = result else {
+      meldeAufnahmeFehler(signalId)
+      return
     }
+    let payload = mitSignal(r, signalId)
+    DispatchQueue.main.async { [weak self] in self?.onCapture(payload) }
+  }
+
+  /// Letzter Rückruf jeder Aufnahme. Kam für sie nie ein Bild an (Abbruch vor
+  /// der Verarbeitung), wartete JS sonst bis zur Zeitgrenze.
+  public func photoOutput(
+    _ output: AVCapturePhotoOutput,
+    didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings,
+    error: Error?
+  ) {
+    guard let signalId = nimmSignal(fuer: resolvedSettings.uniqueID) else { return }
+    meldeAufnahmeFehler(signalId)
   }
 
   // ── Live overlay ───────────────────────────────────────────────────
