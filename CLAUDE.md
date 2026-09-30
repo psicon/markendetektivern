@@ -444,6 +444,21 @@ werden sollten. Andere "Don't"-Regeln stehen verteilt im File
 `USE_FLYING_TABS`-Legacy etc.) — hier nur die Learnings aus
 Recent-Sessions.
 
+- **Test-, Köder- oder Teildatensätze in `produkte`/`markenProdukte` anlegen, die
+  alte App-Versionen als „neueste“ laden (Vorfall 01.–08.09.2026, per Crashlytics
+  am 30.09. belegt).** `scripts/canary/create_canaries.py` legte 12 Köder mit
+  `created_at = jetzt` und OHNE `preis` an. Die Startseite von 5.x lädt
+  `orderBy('created_at','desc').limit(10)` und formatiert den Preis ungeprüft →
+  5.0.6: Startseite eine Woche lang Fehlerseite (24 Nutzer), 5.0.0–5.0.4:
+  Absturzschleife beim Start (7 Nutzer, dort stürzt zusätzlich das Fehlermelden
+  selbst ab). Erst der Datenfix am 08.09. beendete es. Alte Versionen lassen sich
+  nicht zwangsaktualisieren (es gibt KEINE Mindestversions-Sperre), deshalb:
+  (1) Künstliche Datensätze immer mit `created_at` in der Vergangenheit und allen
+  Pflichtfeldern (`preis`, `name`, Referenzen) anlegen. (2) Vor jedem Schreiben
+  neuer Dokumentformen in öffentliche Katalog-Collections prüfen, welche Abfragen
+  alte Clients darauf machen. (3) Eine Mindestversions-Sperre gehört in die App,
+  sonst bleibt jede künftige Datenänderung ein Risiko für Altversionen.
+
 - **Auf Android eine Laufzeit-Berechtigung anfragen, deren Ausgang schon
   feststeht (Vorfall 25.09.2026, Pixel 8, Build 6.0.20-1246).** Erteilt oder
   dauerhaft verweigert → Android antwortet ohne Dialog, und React Native
