@@ -11,8 +11,10 @@
  * Strategy (cost scales with difficulty — easy bons stop after 2 reads):
  *   1. Up to `maxFlash` flash reads; stop as soon as 2 reconciling reads
  *      produce the IDENTICAL (name#price) sequence → confidence 'high'.
- *   2. If no flash agreement, escalate to a stronger model (pro) up to 2×;
- *      agreement that includes a pro read → 'medium'.
+ *   2. If no flash agreement, escalate up to 2× (Eskalationsstufe, intern
+ *      weiter „pro" genannt — seit 01.10.2026 gemini-3.5-flash mit Denkstufe
+ *      HIGH statt gemini-2.5-pro, s. u.); agreement that includes an
+ *      escalation read → 'medium'.
  *   3. No agreement but at least one read reconciles → that read, 'low'.
  *   4. Nothing reconciles → first read, 'none' (the recon gate rejects it).
  *
@@ -24,10 +26,22 @@
 
 'use strict';
 
-const { extractReceipt, reconcile, countEligibleItems, DEFAULT_MODEL } = require('./ocr');
-const { enhanceForOcr } = require('./imageEnhance');
+const { extractReceipt: extractReceiptDefault, reconcile, countEligibleItems, DEFAULT_MODEL } = require('./ocr');
+const { enhanceForOcr: enhanceForOcrDefault } = require('./imageEnhance');
+const { eskalationsOptionen } = require('./geminiModelle');
 
-const PRO_MODEL = process.env.CASHBACK_OCR_PRO_MODEL || 'gemini-2.5-pro';
+// ═══ Eskalationsstufe (01.10.2026): gemini-3.5-flash HIGH statt gemini-2.5-pro ═══
+// gemini-2.5-pro wird auf Vertex am 20.10.2026 abgeschaltet; eine GA-Pro-
+// Variante gibt es nicht (3.1-pro nur als Preview → bleibt der Zweitprüfung
+// vorbehalten, dort mit Rückfall). Die Wahl fiel auf das stärkste GA-Modell mit
+// langer Restlaufzeit auf der höchsten Denkstufe — die Flash-Lesungen davor
+// laufen auf der Standardstufe MEDIUM, die Eskalation denkt also weiter als
+// sie; nach einem Fehlversuch liest sie mit LOW (Denk-Ausreißer). Messung an
+// 38 echten Bons, Standort `eu` und Begründung: lib/geminiModelle.js.
+// Rückweg bis 20.10. ohne Codeänderung: CASHBACK_OCR_PRO_MODEL=gemini-2.5-pro
+// in der .env (dann exakt der alte Aufruf, Standort europe-west4).
+const ESKALATION = eskalationsOptionen();
+const PRO_MODEL = ESKALATION.model;
 const MAX_FLASH = Number(process.env.CASHBACK_OCR_MAX_FLASH || 3);
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -89,6 +103,7 @@ function readFingerprint(r) {
 function pack(chosen, confidence, method, reads, failedAttempts = 0) {
   const proAttempts = reads.filter((r) => r && r.__pro).length;
   const usedEnhanced = reads.some((r) => r && r.__enh);
+  const eskalation = reads.find((r) => r && r.__pro);
   const out = { ...chosen };
   delete out.__pro;
   delete out.__enh;
@@ -99,6 +114,10 @@ function pack(chosen, confidence, method, reads, failedAttempts = 0) {
     attempts: reads.length,
     failedAttempts, // geworfene (nicht gezählte) Lese-Versuche — Observability
     proAttempts,
+    // Welches Modell die Eskalationsstufe tatsächlich gelesen hat — seit dem
+    // Wechsel 01.10.2026 sagt `proAttempts` allein nicht mehr, ob 2.5-pro oder
+    // 3.5-flash lief (`reads[].model` bleibt 'pro' für die Vergleichbarkeit).
+    escalationModel: eskalation ? eskalation.model || null : null,
     enhanced: usedEnhanced,
     agreement: confidence === 'high' || confidence === 'medium',
     // Alle Lesungen als Fingerabdruck — Grundlage der feldweisen Prüfung im
@@ -111,7 +130,9 @@ function pack(chosen, confidence, method, reads, failedAttempts = 0) {
 /**
  * @param {Buffer} imageBytes
  * @param {string} mimeType
- * @param {object} [opts] {model, proModel, maxFlash, escalationGate}
+ * @param {object} [opts] {model, proModel, maxFlash, escalationGate, extract, enhance}
+ *   proModel: anderes Eskalationsmodell (Optionen dann wie per Env bestimmt).
+ *   extract / enhance: Testnähte; Standard extractReceipt / enhanceForOcr.
  *   escalationGate: optionale async Funktion (reads) => string|null.
  *   Eskalations-Deckel (Kosten, 86cb-Nachtrag 19.08.2026): Liefert sie einen
  *   Grund (z.B. 'bon_too_old'), wird die TEURE Leiter (Enhance-Lesungen +
@@ -124,7 +145,11 @@ function pack(chosen, confidence, method, reads, failedAttempts = 0) {
  */
 async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
   const model = opts.model || DEFAULT_MODEL;
-  const proModel = opts.proModel || PRO_MODEL;
+  const esk = opts.proModel && opts.proModel !== ESKALATION.model
+    ? eskalationsOptionen({ ...process.env, CASHBACK_OCR_PRO_MODEL: opts.proModel })
+    : ESKALATION;
+  const extractReceipt = opts.extract || extractReceiptDefault;
+  const enhanceForOcr = opts.enhance || enhanceForOcrDefault;
   const maxFlash = opts.maxFlash || MAX_FLASH;
   const reads = [];
   // Incident 19.08.2026: geworfene Versuche wurden hier still verschluckt.
@@ -214,22 +239,39 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
     }
   }
 
-  // Phase 2 — escalate to the stronger model on the (enhanced) image;
-  // agreement incl. a pro read.
+  // Phase 2 — escalate on the (enhanced) image; agreement incl. an
+  // escalation read. Scheitert ein Versuch (Denk-Ausreißer bis MAX_TOKENS,
+  // Zeitlimit, 429), liest der nächste mit der Ausweich-Denkstufe (LOW) —
+  // sonst bliebe ausgerechnet auf den schwersten Bons gar keine Lesung übrig.
+  let eskalationGescheitert = false;
+  let ausweichGenutzt = null; // Denkstufe, falls eine Ausweich-Lesung gelang
   for (let i = 0; i < 2; i++) {
     let r;
+    const ausweichen = eskalationGescheitert && !!esk.ausweichThinkingConfig;
+    const denken = ausweichen ? esk.ausweichThinkingConfig : esk.thinkingConfig;
     try {
-      r = await extractReceipt(escImg, enhanced ? 'image/jpeg' : mimeType, { model: proModel });
+      r = await extractReceipt(escImg, enhanced ? 'image/jpeg' : mimeType, {
+        model: esk.model,
+        // Ausdrücklich gesetzt → hat Vorrang vor CASHBACK_OCR_THINKING_BUDGET
+        // (ein `thinkingBudget` würde Gemini 3 mit 400 ablehnen).
+        ...(denken ? { thinkingConfig: denken } : {}),
+        ...(esk.standort ? { location: esk.standort } : {}),
+        ...(Number.isFinite(esk.temperature) ? { temperature: esk.temperature } : {}),
+        // Hartes Zeitlimit je Lesung (lib/geminiModelle.js) — 2.5-pro lief ohne.
+        ...(esk.timeoutMs > 0 ? { timeoutMs: esk.timeoutMs } : {}),
+      });
     } catch (e) {
       noteFailure(`pro-${i + 1}`, e);
+      eskalationGescheitert = true;
       continue;
     }
     r.__pro = true;
+    if (ausweichen) ausweichGenutzt = denken.thinkingLevel;
     reads.push(r);
     const agreed = findAgreement(reads);
     if (agreed) {
       const conf = agreed.__pro ? 'medium' : 'high';
-      return pack(agreed, conf, 'pro-agreement', reads, failed.length);
+      return mitAusweich(pack(agreed, conf, 'pro-agreement', reads, failed.length), ausweichGenutzt);
     }
   }
 
@@ -245,13 +287,22 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
 
   // Phase 3 — no agreement. Prefer any reconciling read (best-effort), low conf.
   const anyRec = reads.find(reconciles);
-  if (anyRec) return pack(anyRec, 'low', 'reconcile-no-agreement', reads, failed.length);
+  if (anyRec) return mitAusweich(pack(anyRec, 'low', 'reconcile-no-agreement', reads, failed.length), ausweichGenutzt);
 
   // Phase 4 — nothing reconciles; hand back the first read for the recon gate.
   // `reads` ist hier garantiert nicht leer (Infrastruktur-Gate oben) — der
   // Stub-Fallback bleibt nur als Form-Sicherheit erhalten.
   const first = reads[0] || { parsed: { isReceipt: false, items: [] }, model, promptVersion: null, latencyMs: 0 };
-  return pack(first, 'none', 'no-reconcile', reads, failed.length);
+  return mitAusweich(pack(first, 'none', 'no-reconcile', reads, failed.length), ausweichGenutzt);
 }
 
-module.exports = { extractReceiptRobust, sigOf, PRO_MODEL };
+/**
+ * Vermerkt am Ergebnis, ob eine Eskalationslesung mit der Ausweich-Denkstufe
+ * entstand (Beobachtung im Betrieb: wie oft scheitert HIGH?).
+ */
+function mitAusweich(out, stufe) {
+  if (stufe) out.robust.escalationFallbackThinking = stufe;
+  return out;
+}
+
+module.exports = { extractReceiptRobust, sigOf, PRO_MODEL, ESKALATION };

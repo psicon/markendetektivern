@@ -1,5 +1,5 @@
 'use strict';
-const { runReferee, REFEREE_MODEL, REFEREE_FALLBACK_MODEL } = require('../lib/ocr_referee');
+const { runReferee, REFEREE_MODEL, REFEREE_FALLBACK_MODEL, REFEREE_FALLBACK_LOCATION } = require('../lib/ocr_referee');
 
 /** Eine Lesung, wie extractReceipt sie liefert. */
 const lesung = (over = {}, parsedOver = {}) => ({
@@ -78,13 +78,25 @@ describe('runReferee', () => {
     expect(o.userPrompt).not.toMatch(/hochgeladen|Upload|Datum|Summe|Endbetrag/i);
   });
 
-  test('429 → Rückfall auf das Ersatzmodell (gedeckeltes Denken, Temperatur 0.1)', async () => {
+  test('Rückfallmodell ist das GA-Modell gemini-3.5-flash, nicht mehr 2.5-pro (Abschaltung 20.10.2026)', () => {
+    expect(REFEREE_FALLBACK_MODEL).toBe('gemini-3.5-flash');
+    expect(REFEREE_FALLBACK_MODEL).not.toBe(REFEREE_MODEL);
+  });
+
+  test('429 → Rückfall auf das Ersatzmodell (Denkstufe HIGH, Temperatur 1.0, kein thinkingBudget)', async () => {
     const quota = new Error('got status: 429 RESOURCE_EXHAUSTED');
     const extract = fakeExtract([quota, lesung(), lesung()]);
     const { result } = await runReferee(Buffer.from('x'), 'image/jpeg', ctx(extract));
     expect(extract.aufrufe.map((o) => o.model)).toEqual([REFEREE_MODEL, REFEREE_FALLBACK_MODEL, REFEREE_FALLBACK_MODEL]);
-    expect(extract.aufrufe[1].thinkingConfig).toEqual({ thinkingBudget: 4096 });
-    expect(extract.aufrufe[1].temperature).toBe(0.1);
+    expect(extract.aufrufe[0].thinkingConfig).toEqual({ thinkingLevel: 'LOW' });
+    expect(extract.aufrufe[1].thinkingConfig).toEqual({ thinkingLevel: 'HIGH' });
+    expect(extract.aufrufe[1].thinkingConfig.thinkingBudget).toBeUndefined();
+    expect(extract.aufrufe[1].temperature).toBe(1.0);
+    // Rückfall über die Multi-Region eu (zweiter Kapazitätspool), das Preview-Modell bleibt global.
+    expect(REFEREE_FALLBACK_LOCATION).toBe('eu');
+    expect(extract.aufrufe[0].location).toBeUndefined();
+    expect(extract.aufrufe[1].location).toBe('eu');
+    expect(extract.aufrufe[2].location).toBe('eu');
     expect(result).toMatchObject({ verdict: 'decided', fallbackModel: REFEREE_FALLBACK_MODEL, failedAttempts: 1 });
   });
 
