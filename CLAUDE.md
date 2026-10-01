@@ -4091,6 +4091,23 @@ Key-Pfad (Secret GEMINI_API_KEY bleibt gebunden).
 - Embeddings sind zwischen AI Studio und Vertex **byte-identisch** (Kosinus
   1.0000 gegen Bestandsvektoren verifiziert) → Vektor-Index kompatibel.
 
+**Stand 01.10.2026 — Liste oben ist teils überholt, neu gemessen (curl je
+Standort):** `gemini-3.5-flash` antwortet jetzt unter `global`, `eu` und
+`europe-west3` (nicht europe-west4/-west1), `gemini-2.5-pro` auch unter
+`global`, `gemini-3.1-pro-preview` nur `global`. **gemini-2.5-pro/-flash werden
+auf Vertex am 20.10.2026 abgeschaltet**; eine GA-Pro-Variante gibt es nicht,
+3.6/3.7/3.8-flash sind Kurzläufer (45 Tage Abschaltfrist) — nie als Standard.
+Die Bon-OCR eskaliert seitdem auf `gemini-3.5-flash` HIGH über `eu` (nach
+Fehlversuch LOW), der Rückfall der Zweitprüfung ebenso; Messung an 38 echten
+Bons und Begründung in `cloud-functions/cashback-pipeline/lib/geminiModelle.js`.
+Regeln: (1) Standortwahl NUR über `geminiModelle.js`, keine Modell-Regex mehr in
+einzelnen Clients. (2) Gemini 3 auf hoher Denkstufe denkt auf langen,
+zerknitterten Bons in ~12–16 % der Lesungen bis MAX_TOKENS (32.768 Token,
+~2 min, ~0,33 $, keine Antwort) — jede Gemini-3-Lesung mit Denkstufe braucht
+ein Zeitlimit und einen Ausweg (niedrigere Stufe), sonst bleibt auf genau den
+schwersten Bons gar keine Lesung. (3) Ein bei 512 KiB abgeschnittener Upload
+wird von Gemini 3 mit 400 abgelehnt; nur 2.5-pro las ihn (1 von 786 Bons).
+
 **Der eigentliche Bug (gefixt 19.08.):** ocr_robust.js verschluckte geworfene
 Lese-Versuche (`catch { continue; }` ohne Log). Bei Totalausfall lieferte
 Phase 4 den `isReceipt:false`-Stub → Nutzer sah fälschlich „kein Kassenbon".

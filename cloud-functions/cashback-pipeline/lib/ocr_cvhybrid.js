@@ -26,6 +26,7 @@
 
 const { ImageAnnotatorClient } = require('@google-cloud/vision');
 const { GoogleGenAI } = require('@google/genai');
+const { vertexStandort } = require('./geminiModelle');
 const {
   SYSTEM_PROMPT,
   buildUserPrompt,
@@ -59,12 +60,9 @@ function getGenAIClient(model) {
   // GEMINI_USE_VERTEX=false zurueck auf den AI-Studio-Key.
   const useVertex = String(process.env.GEMINI_USE_VERTEX ?? 'true') !== 'false';
   if (useVertex) {
-    // Standort ist MODELL-abhaengig (beides geprueft 19.08.2026):
-    // gemini-3.5-flash ist NUR unter 'global' publiziert, gemini-2.5-pro
-    // dagegen NUR regional → pro Modell aufloesen (gleiche Logik wie ocr.js).
-    const location = /2\.5-pro/i.test(String(model || ''))
-      ? process.env.GEMINI_VERTEX_LOCATION_PRO || 'europe-west4'
-      : process.env.GEMINI_VERTEX_LOCATION || 'global';
+    // Standort ist MODELL-abhaengig — dieselbe Aufloesung wie ocr.js
+    // (lib/geminiModelle.js, gemessen 01.10.2026).
+    const location = vertexStandort(model);
     if (_genaiClients.has(location)) return _genaiClients.get(location);
     const client = new GoogleGenAI({
       vertexai: true,

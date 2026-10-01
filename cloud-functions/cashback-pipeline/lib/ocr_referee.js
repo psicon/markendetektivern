@@ -20,15 +20,27 @@
  * Kosten mit `thinkingLevel: LOW` gemessen (Live-Test 14.09., 13 Bons):
  * ~3.600 Eingabe- und ~1.000–3.500 Ausgabe-Token pro Lesung, Denk-Token 0 →
  * grob 0,02–0,05 $ pro Lesung (Listenpreise geschätzt, nicht live geprüft).
- * Der Rückfall auf 2.5-pro denkt dagegen frei (11k Denk-Token, 115 s).
+ *
+ * ═══ Rückfall seit 01.10.2026: gemini-3.5-flash statt gemini-2.5-pro ═══
+ * gemini-2.5-pro wird auf Vertex am 20.10.2026 abgeschaltet. Eine GA-Pro-
+ * Variante gibt es nicht; der Rückfall ist deshalb das stärkste GA-Modell mit
+ * langer Restlaufzeit (3.5-flash, bis mindestens 19.05.2027) auf der höchsten
+ * Denkstufe — dieselbe Wahl wie die Eskalation der Robust-OCR (Messung und
+ * Standort `eu`: lib/geminiModelle.js). Der Rückfall griff in den 30 Tagen
+ * vor dem Umbau bei 7 von 110 Zweitprüfungen.
  */
 
 const { extractReceipt } = require('./ocr');
 const PROMPT = require('./prompt_referee');
 const { refereeFingerprint, decideReferee } = require('./refereePolicy');
+const { istGemini3, ausweichStandort, ESKALATION_MODELL_STANDARD } = require('./geminiModelle');
 
 const REFEREE_MODEL = process.env.CASHBACK_OCR_REFEREE_MODEL || 'gemini-3.1-pro-preview';
-const REFEREE_FALLBACK_MODEL = process.env.CASHBACK_OCR_REFEREE_FALLBACK_MODEL || 'gemini-2.5-pro';
+const REFEREE_FALLBACK_MODEL = process.env.CASHBACK_OCR_REFEREE_FALLBACK_MODEL || ESKALATION_MODELL_STANDARD;
+// Der Rückfall greift gerade dann, wenn `global` überlastet ist (429 beim
+// Preview-Modell) — deshalb wie die Eskalation über die Multi-Region eu
+// (zweiter Kapazitätspool, Begründung in lib/geminiModelle.js).
+const REFEREE_FALLBACK_LOCATION = ausweichStandort(REFEREE_FALLBACK_MODEL, process.env.CASHBACK_OCR_REFEREE_FALLBACK_LOCATION);
 // Ungültige Werte ('0', Tippfehler) dürfen das Zeitlimit nicht abschalten —
 // dann hinge ein Aufruf bis zum 540-s-Limit der Function.
 const READ_TIMEOUT_MS = (() => {
@@ -52,20 +64,32 @@ const kurz = (e) => String(e && e.message ? e.message : e).slice(0, 160);
 // Anbieter jede Prüfung als „failed".
 const brauchtRueckfall = (e) => /\b429\b|RESOURCE_EXHAUSTED|quota|\b404\b|NOT_FOUND/i.test(kurz(e));
 
-const istGen3 = (model) => /gemini-3/i.test(String(model));
+const istGen3 = istGemini3;
+const istGen3Pro = (model) => /gemini-3(\.\d+)?-pro/i.test(String(model));
 
 function thinkingFor(model) {
-  if (istGen3(model)) return { thinkingLevel: 'LOW' };
-  // Rückfall 2.5-pro: frei denkend ~115 s pro Lesung (11k Denk-Token, Live-Test
-  // 14.09.) — bei 120 s Zeitlimit und 330 s Frist passten kaum zwei Lesungen,
-  // ein Ausfall hätte die Entscheidung verhindert (Review Runde 3). Gedeckelt.
+  // Pro-Preview: HIGH/Standard liefen bis MAX_TOKENS (Messung 14.09., s. o.).
+  if (istGen3Pro(model)) return { thinkingLevel: 'LOW' };
+  // Rückfall 3.5-flash: höchste Denkstufe. Gemessen 01.10.2026 mit diesem
+  // Prompt an 28 echten Zweitprüfungen (Preview-Modell per simuliertem 429
+  // übersprungen): von 20 Fällen, die 3.1-pro-preview entschieden hatte,
+  // entschied der Rückfall 15 — 14 mit identischen Geldfeldern, 1 mit anderem
+  // Datum, und dort zeigt das Bild das Datum des Rückfalls (16.09., nicht
+  // 16.08.). 7 von 62 Lesungen liefen ins 120-s-Limit, 5 bekamen 429 (die
+  // Messung lief noch über `global`; der Rückfall nutzt jetzt `eu`). Zum
+  // Vergleich: der alte Rückfall 2.5-pro entschied in 30 Tagen 1 von 7 Fällen.
+  if (istGen3(model)) return { thinkingLevel: 'HIGH' };
+  // Nur noch über Env erreichbar (2.5-pro bis 20.10.2026): frei denkend
+  // ~115 s pro Lesung (11k Denk-Token, Live-Test 14.09.) — bei 120 s
+  // Zeitlimit und 330 s Frist passten kaum zwei Lesungen. Gedeckelt.
   return { thinkingBudget: 4096 };
 }
 
 // Google empfiehlt für Gemini 3 ausdrücklich die Standard-Temperatur 1.0
 // (niedrigere Werte können Schleifen/Qualitätsverlust verursachen). Nebeneffekt,
 // der hier erwünscht ist: zwei Lesungen sind weniger korreliert, ihre
-// Übereinstimmung sagt mehr. 2.5-pro bleibt beim Pipeline-Wert 0.1.
+// Übereinstimmung sagt mehr. Gilt auch für den Rückfall 3.5-flash; nur ein
+// per Env gesetztes 2.5-pro bliebe beim Pipeline-Wert 0.1.
 function temperatureFor(model) {
   return istGen3(model) ? 1.0 : 0.1;
 }
@@ -112,6 +136,7 @@ async function runReferee(imageBytes, mimeType, ctx) {
         promptVersion: PROMPT.VERSION,
         thinkingConfig: thinkingFor(model),
         temperature: temperatureFor(model),
+        ...(rueckfall && REFEREE_FALLBACK_LOCATION ? { location: REFEREE_FALLBACK_LOCATION } : {}),
         timeoutMs: Math.min(READ_TIMEOUT_MS, rest - 10_000),
       });
     } catch (e) {
@@ -161,4 +186,4 @@ async function runReferee(imageBytes, mimeType, ctx) {
   return { result, chosen };
 }
 
-module.exports = { runReferee, REFEREE_MODEL, REFEREE_FALLBACK_MODEL, MAX_READS, DEADLINE_MS };
+module.exports = { runReferee, REFEREE_MODEL, REFEREE_FALLBACK_MODEL, REFEREE_FALLBACK_LOCATION, MAX_READS, DEADLINE_MS };

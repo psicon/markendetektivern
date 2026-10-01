@@ -14,6 +14,7 @@
 'use strict';
 
 const { GoogleGenAI } = require('@google/genai');
+const { vertexStandort } = require('./geminiModelle');
 const {
   SYSTEM_PROMPT,
   USER_PROMPT,
@@ -39,16 +40,18 @@ const DEFAULT_MODEL = process.env.CASHBACK_OCR_MODEL || 'gemini-3.5-flash';
 // NUR nach bestandener Regressionsmessung an echten Juli-Bons setzen — die
 // Konsens-Mechanik (2 übereinstimmende Lesungen, sonst Eskalation) bleibt
 // unverändert die Qualitätssicherung dahinter. Gilt bewusst NICHT für die
-// Pro-Eskalation (opts.model gesetzt): das starke Modell behält sein Denken
-// als letzte Rettung schwerer Bons.
+// Eskalation und die Zweitprüfung: beide übergeben ihre Denkstufe ausdrücklich
+// (opts.thinkingConfig hat Vorrang). ACHTUNG: Gemini 3 kennt `thinkingBudget`
+// nicht mehr (Vertex lehnt es seit 22.09.2026 teilweise mit 400 ab) — für
+// gemini-3.5-flash diesen Schalter NICHT setzen, sondern thinkingLevel nutzen.
 const THINKING_BUDGET_RAW = process.env.CASHBACK_OCR_THINKING_BUDGET;
 const THINKING_BUDGET =
   THINKING_BUDGET_RAW != null && THINKING_BUDGET_RAW !== '' && Number.isFinite(Number(THINKING_BUDGET_RAW))
     ? Number(THINKING_BUDGET_RAW)
     : null;
 
-const _clients = new Map(); // Cache: Vertex-Location bzw. 'apikey' → GoogleGenAI
-function getClient(model) {
+const _clients = new Map(); // Cache: Vertex-Standort bzw. 'apikey' → GoogleGenAI
+function getClient(model, standort) {
   // Backend-Umschaltung (Incident 19.08.2026): AI-Studio-Keys haengen am
   // monatlichen Spending-Cap der Rechnungskontostufe. Ist der erreicht,
   // liefern ALLE Gemini-Calls 429 RESOURCE_EXHAUSTED — die OCR faellt dann
@@ -58,13 +61,11 @@ function getClient(model) {
   // GEMINI_USE_VERTEX=false zurueck auf den AI-Studio-Key.
   const useVertex = String(process.env.GEMINI_USE_VERTEX ?? 'true') !== 'false';
   if (useVertex) {
-    // Standort ist MODELL-abhaengig (beides geprueft 19.08.2026):
-    // gemini-3.5-flash ist NUR unter 'global' publiziert, gemini-2.5-pro
-    // (die Robust-Eskalation) dagegen NUR regional → pro Modell aufloesen,
-    // sonst 404t die Pro-Eskalation still im catch der Robust-Schleife.
-    const location = /2\.5-pro/i.test(String(model || ''))
-      ? process.env.GEMINI_VERTEX_LOCATION_PRO || 'europe-west4'
-      : process.env.GEMINI_VERTEX_LOCATION || 'global';
+    // Standort ist MODELL-abhaengig (gemessen 01.10.2026, s. geminiModelle.js):
+    // gemini-3.5-flash global/eu, gemini-3.1-pro-preview nur global,
+    // gemini-2.5-pro (Rueckweg bis 20.10.) europe-west4. Ein ausdruecklich
+    // uebergebener Standort (Eskalation: 'eu') hat Vorrang.
+    const location = vertexStandort(model, { standort });
     if (_clients.has(location)) return _clients.get(location);
     const client = new GoogleGenAI({
       vertexai: true,
@@ -91,6 +92,8 @@ function getClient(model) {
  * @param {string} mimeType e.g. "image/jpeg"
  * @param {object} [opts]
  * @param {string} [opts.model]
+ * @param {string} [opts.location]  Vertex-Standort; ohne Angabe je Modell
+ *                                  (lib/geminiModelle.js → vertexStandort).
  * @returns {Promise<{
  *   parsed: object,
  *   model: string,
@@ -103,7 +106,7 @@ function getClient(model) {
  */
 async function extractReceipt(imageBytes, mimeType, opts = {}) {
   const model = opts.model || DEFAULT_MODEL;
-  const client = getClient(model);
+  const client = getClient(model, opts.location);
   const started = Date.now();
 
   const base64 = Buffer.isBuffer(imageBytes)
@@ -139,10 +142,11 @@ async function extractReceipt(imageBytes, mimeType, opts = {}) {
       maxOutputTokens: 32768,
       // Denk-Budget nur für Flash-Lesungen (s. Kommentar oben). Entscheidend
       // ist die MODELLKLASSE, nicht ob opts.model gesetzt ist — ocr_robust
-      // übergibt das Modell auch für Flash-Reads immer explizit. Die
-      // Pro-Eskalation ('gemini-2.5-pro') bleibt unangetastet: sie
-      // unterstützt Budget 0 nicht und ist die letzte Rettung schwerer Bons.
-      // Eine ausdrücklich übergebene Denk-Konfiguration hat Vorrang.
+      // übergibt das Modell auch für Flash-Reads immer explizit. Eskalation
+      // und Zweitprüfung übergeben ihre Denkstufe ausdrücklich — eine
+      // übergebene Denk-Konfiguration hat Vorrang, die Eskalation bleibt so
+      // vom Budget-Schalter unberührt, obwohl sie seit 01.10.2026 auch ein
+      // Flash-Modell ist.
       ...(opts.thinkingConfig
         ? { thinkingConfig: opts.thinkingConfig }
         : THINKING_BUDGET != null && /flash/i.test(model)
