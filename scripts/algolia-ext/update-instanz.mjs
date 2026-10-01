@@ -7,7 +7,7 @@
 //    Parameter interaktiv ab; ausgerollt wird erst per `firebase deploy`.
 //  - `firebase deploy --only extensions:<id>` filtert bei Manifest-Instanzen NICHT nach der
 //    Instanz (firebase-tools 15.15: lib/deploy/extensions/prepare.js). Alle anderen
-//    Instanzen des Projekts (24 Stück: BigQuery-Exporte, Backup, Bildverarbeitung, die
+//    Instanzen des Projekts (25 von 26 Stück: BigQuery-Exporte, Backup, Bildverarbeitung, die
 //    uebrigen Algolia-Syncs) landen in der Loesch-Liste. Nur die Voreinstellung "nein" der
 //    Rueckfrage verhindert das Loeschen; ein `--force` loescht sie alle.
 //  - Dieses Skript ruft denselben API-Aufruf wie firebase-tools auf
@@ -38,10 +38,21 @@
 //   node scripts/algolia-ext/update-instanz.mjs <instanz> --ausfuehren --erwarte-version 1.2.0
 // Optionen:
 //   --version <v>           Zielversion, Standard 1.3.0. Erlaubt: 1.3.0, 1.2.10 (Rueckweg).
-//   --erwarte-version <v>   Pflicht bei --ausfuehren: die Version, die JETZT laufen muss.
+//   --erwarte-version <v>   Pflicht bei --pruefen/--ausfuehren: die Version, die JETZT in der
+//                           Konfiguration steht. Mit --aus-fehlerzustand auch als Liste
+//                           "1.2.0,1.3.0" erlaubt (siehe unten).
+//   --aus-fehlerzustand     Erlaubt Rueckweg/Wiederholung an einer Instanz im Zustand ERRORED
+//                           (nach einem gescheiterten Update). NUR fuer ERRORED: an einer
+//                           ACTIVE-Instanz bricht das Skript ab, DEPLOYING/UNINSTALLING/PAUSED
+//                           bleiben immer gesperrt. Weil nicht belegt ist, ob nach einem
+//                           Fehlschlag die alte oder die Zielversion in der Konfiguration steht,
+//                           darf --erwarte-version hier beide nennen ("1.2.0,1.3.0"); welche
+//                           tatsaechlich dastand, steht im Protokoll.
 //   --protokoll <ordner>    Vorher/Nachher-JSON, Standard <tmpdir>/algolia-ext-protokoll
 //
 // --plan liest nur (Instanz + Funktionen) und zeigt den geplanten Aufruf; sendet nichts.
+//   Es laeuft in JEDEM Zustand (auch ERRORED) und ist der erste Schritt jedes Rueckwegs:
+//   Zustand, Fehlermeldung und eingetragene Version ablesen, dann handeln.
 // --pruefen schickt den Aufruf mit validateOnly=true (der Server prueft, aendert nichts)
 // und kontrolliert anschliessend per etag, dass die Instanz unveraendert ist.
 
@@ -66,8 +77,11 @@ const PFLICHT_PARAMS = ['ALGOLIA_API_KEY', 'ALGOLIA_APP_ID', 'ALGOLIA_INDEX_NAME
 
 function fehler(msg) { console.error(`ABBRUCH: ${msg}`); process.exit(2); }
 
+// Versionen, die an diesen Instanzen ueberhaupt vorkommen koennen (Tippfehlerschutz).
+const BEKANNTE_VERSIONEN = new Set(['1.2.0', '1.2.10', '1.3.0']);
+
 function argumente(argv) {
-  const a = { instanz: argv[0], modus: null, version: '1.3.0', erwarte: null, protokoll: path.join(os.tmpdir(), 'algolia-ext-protokoll'), vollindex: false };
+  const a = { instanz: argv[0], modus: null, version: '1.3.0', erwarte: null, protokoll: path.join(os.tmpdir(), 'algolia-ext-protokoll'), vollindex: false, ausFehler: false };
   for (let i = 1; i < argv.length; i++) {
     const x = argv[i];
     if (x === '--plan' || x === '--pruefen' || x === '--ausfuehren') { if (a.modus) fehler('nur eines von --plan, --pruefen, --ausfuehren'); a.modus = x.slice(2); }
@@ -75,12 +89,20 @@ function argumente(argv) {
     else if (x === '--erwarte-version') a.erwarte = argv[++i];
     else if (x === '--protokoll') a.protokoll = argv[++i];
     else if (x === '--vollindex-beibehalten') a.vollindex = true;
+    else if (x === '--aus-fehlerzustand') a.ausFehler = true;
     else fehler(`unbekannte Option ${x}`);
   }
   if (!a.instanz || !INSTANZEN.has(a.instanz)) fehler(`Instanz fehlt oder unbekannt: ${a.instanz}. Erlaubt: ${[...INSTANZEN].join(', ')}`);
   if (!a.modus) fehler('--plan, --pruefen oder --ausfuehren angeben');
   if (!ERLAUBTE_ZIELE.has(a.version)) fehler(`Zielversion ${a.version} nicht erlaubt (1.2.0 ist deprecated und laeuft auf nodejs18, das nicht mehr ausrollbar ist)`);
-  if (a.modus === 'ausfuehren' && !a.erwarte) fehler('--ausfuehren verlangt --erwarte-version <laufende Version>');
+  if (a.modus !== 'plan' && !a.erwarte) fehler(`--${a.modus} verlangt --erwarte-version <Version, die jetzt in der Konfiguration steht>`);
+  if (a.ausFehler && a.modus === 'plan') fehler('--aus-fehlerzustand gilt nur fuer --pruefen/--ausfuehren; --plan laeuft ohnehin in jedem Zustand');
+  if (a.erwarte != null) {
+    a.erwarteListe = a.erwarte.split(',').map((s) => s.trim()).filter(Boolean);
+    if (!a.erwarteListe.length) fehler('--erwarte-version ist leer');
+    for (const v of a.erwarteListe) if (!BEKANNTE_VERSIONEN.has(v)) fehler(`--erwarte-version ${v} ist keine bekannte Version (${[...BEKANNTE_VERSIONEN].join(', ')})`);
+    if (a.erwarteListe.length > 1 && !a.ausFehler) fehler('mehrere Werte in --erwarte-version nur zusammen mit --aus-fehlerzustand');
+  }
   return a;
 }
 
@@ -107,16 +129,30 @@ async function ladeInstanz(id) {
   return r.json;
 }
 
+function zustandText(inst) {
+  const c = inst.config || {};
+  const e = inst.errorStatus ? ` | Fehler: ${JSON.stringify(inst.errorStatus).slice(0, 400)}` : '';
+  return `Zustand ${inst.state}, Version laut Konfiguration ${c.extensionVersion}, letzte Operation ${inst.lastOperationType || '-'} (${inst.lastOperationName || '-'})${e}`;
+}
+
+// Prueft die Instanz vor einem Aufruf. Im Modus "plan" werden Zustand und Version nur
+// angezeigt (kein Abbruch) — --plan ist der erste Schritt jedes Rueckwegs.
 function pruefeInstanz(inst, a) {
   const c = inst.config || {};
   if (c.extensionRef !== EXT_REF) fehler(`${a.instanz} ist keine ${EXT_REF}-Instanz (${c.extensionRef})`);
-  if (inst.state !== 'ACTIVE') fehler(`${a.instanz} ist nicht ACTIVE (${inst.state})`);
-  for (const p of PFLICHT_PARAMS) if (!c.params?.[p]) fehler(`Parameter ${p} fehlt an der laufenden Instanz`);
+  if (a.modus !== 'plan') {
+    if (a.ausFehler) {
+      if (inst.state !== 'ERRORED') fehler(`--aus-fehlerzustand gilt nur fuer ERRORED, ${a.instanz} ist ${inst.state}. Ohne die Option erneut aufrufen.`);
+    } else if (inst.state !== 'ACTIVE') {
+      fehler(`${a.instanz} ist nicht ACTIVE (${inst.state})${inst.state === 'ERRORED' ? ' — Rueckweg/Wiederholung nur mit --aus-fehlerzustand, vorher --plan lesen' : ''}`);
+    }
+  }
+  for (const p of PFLICHT_PARAMS) if (!c.params?.[p]) fehler(`Parameter ${p} fehlt an der Instanz`);
   if (!/^projects\/\d+\/secrets\/[^/]+\/versions\/\d+$/.test(c.params.ALGOLIA_API_KEY)) fehler('ALGOLIA_API_KEY ist keine Secret-Version-Referenz');
   if (c.params.ALT_OBJECT_ID) fehler('ALT_OBJECT_ID ist gesetzt — das aendert die objectID. Nicht mit diesem Skript.');
-  if (a.erwarte && c.extensionVersion !== a.erwarte) fehler(`laufende Version ist ${c.extensionVersion}, erwartet ${a.erwarte}`);
+  if (a.erwarteListe && !a.erwarteListe.includes(c.extensionVersion)) fehler(`in der Konfiguration steht ${c.extensionVersion}, erwartet ${a.erwarteListe.join(' oder ')}`);
   const laeuft = inst.lastOperationName && inst.runtimeData?.processingState?.state === 'PROCESSING';
-  if (laeuft) fehler(`an ${a.instanz} laeuft gerade eine Verarbeitung (${inst.runtimeData.processingState.detailMessage})`);
+  if (laeuft && a.modus !== 'plan') fehler(`an ${a.instanz} laeuft gerade eine Verarbeitung (${inst.runtimeData.processingState.detailMessage})`);
 }
 
 function baueAufruf(inst, a) {
@@ -162,10 +198,14 @@ async function main() {
   const a = argumente(process.argv.slice(2));
   const stempel = new Date().toISOString().replace(/[:.]/g, '-');
   const vorher = await ladeInstanz(a.instanz);
+  console.log(`Instanz ${a.instanz}: ${zustandText(vorher)}`);
   pruefeInstanz(vorher, a);
   const c = vorher.config;
-  console.log(`Instanz ${a.instanz}: ${c.extensionVersion} -> ${a.version}  (Index ${c.params.ALGOLIA_INDEX_NAME}, Collection ${c.params.COLLECTION_PATH})`);
-  if (c.extensionVersion === a.version && (a.vollindex || c.params.DO_FULL_INDEXING === 'false')) {
+  console.log(`Plan: ${c.extensionVersion} -> ${a.version}  (Index ${c.params.ALGOLIA_INDEX_NAME}, Collection ${c.params.COLLECTION_PATH})`);
+  if (vorher.state !== 'ACTIVE') console.log(`!! Instanz ist ${vorher.state}. Rueckweg/Wiederholung nur mit --aus-fehlerzustand und --erwarte-version ${c.extensionVersion} (siehe Deploy-Rezept, Rollback).`);
+  // Nur eine GESUNDE Instanz auf Zielstand gilt als erledigt. Eine ERRORED-Instanz kann die
+  // Zielversion schon in der Konfiguration tragen, obwohl das Update gescheitert ist.
+  if (vorher.state === 'ACTIVE' && c.extensionVersion === a.version && (a.vollindex || c.params.DO_FULL_INDEXING === 'false')) {
     console.log('Bereits auf Zielstand — nichts zu tun.');
     return;
   }
@@ -176,7 +216,10 @@ async function main() {
   console.log('Funktionen vorher:', JSON.stringify(fVorher));
   if (a.modus === 'plan') { console.log('PLAN: nichts gesendet.'); return; }
   fs.mkdirSync(a.protokoll, { recursive: true });
-  fs.writeFileSync(path.join(a.protokoll, `${stempel}-${a.instanz}-vorher.json`), JSON.stringify({ instanz: vorher, funktionen: fVorher, aufruf: { body, updateMask } }, null, 2));
+  fs.writeFileSync(path.join(a.protokoll, `${stempel}-${a.instanz}-vorher.json`), JSON.stringify({
+    modus: a.modus, ausFehlerzustand: a.ausFehler, zustand: vorher.state, versionInKonfiguration: c.extensionVersion,
+    erwartet: a.erwarteListe, ziel: a.version, instanz: vorher, funktionen: fVorher, aufruf: { body, updateMask },
+  }, null, 2));
 
   const url = `${instanzUrl(a.instanz)}?updateMask=${encodeURIComponent(updateMask)}&validateOnly=${a.modus === 'pruefen'}`;
   const r = await api('PATCH', url, body);
@@ -193,8 +236,13 @@ async function main() {
   const op = await warteAufOperation(r.json.name);
   console.log('');
   if (op.error) {
-    fs.writeFileSync(path.join(a.protokoll, `${stempel}-${a.instanz}-fehler.json`), JSON.stringify(op, null, 2));
-    fehler(`Operation fehlgeschlagen: ${JSON.stringify(op.error).slice(0, 800)} — Rueckweg siehe Deploy-Rezept`);
+    // Zustand nach dem Fehlschlag festhalten: davon haengt der Rueckweg ab (ERRORED? welche
+    // Version steht jetzt in der Konfiguration?). Ein Lesefehler hier darf die Meldung nicht verdecken.
+    let danach = null;
+    try { const r2 = await api('GET', instanzUrl(a.instanz)); danach = r2.status === 200 ? r2.json : { http: r2.status }; } catch (e) { danach = { lesefehler: e.message }; }
+    fs.writeFileSync(path.join(a.protokoll, `${stempel}-${a.instanz}-fehler.json`), JSON.stringify({ operation: op, instanzDanach: danach }, null, 2));
+    if (danach?.state) console.error(`Instanz nach dem Fehlschlag: ${zustandText(danach)}`);
+    fehler(`Operation fehlgeschlagen: ${JSON.stringify(op.error).slice(0, 800)} — NICHT blind wiederholen; Rueckweg siehe Deploy-Rezept (zuerst --plan)`);
   }
   // Lifecycle-Aufgabe (onUpdate) braucht nach dem Update ein paar Sekunden
   await new Promise((res) => setTimeout(res, 20_000));
