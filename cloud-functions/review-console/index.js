@@ -1086,3 +1086,21 @@ exports.reviewStatistik = onCall({ region: REGION, memory: '1GiB', timeoutSecond
   statistikCache = { at: jetzt, tage, daten };
   return { ...daten, ausCache: false, stand: jetzt };
 });
+
+/**
+ * Guthaben & Auszahlungen fürs Dashboard (Laden: src/auszahlungLaden.js,
+ * Rechnen: src/auszahlung.js). Nur lesend. Rund 2.000–5.000 Lesevorgänge pro
+ * frischer Berechnung, deshalb 10 Minuten im Speicher; `frisch: true` umgeht das.
+ */
+const { ladeAuszahlung } = require('./src/auszahlungLaden');
+let auszahlungCache = { at: 0, daten: null };
+exports.reviewAuszahlungen = onCall({ region: REGION, memory: '512MiB', timeoutSeconds: 120, maxInstances: 2 }, async (req) => {
+  assertAdmin(req);
+  if (auszahlungCache.daten && !req.data?.frisch && Date.now() - auszahlungCache.at < 10 * 60 * 1000) {
+    return { ...auszahlungCache.daten, ausCache: true, stand: auszahlungCache.at };
+  }
+  const jetzt = Date.now();
+  const daten = await ladeAuszahlung({ db, auth: admin.auth(), jetzt, logger });
+  auszahlungCache = { at: jetzt, daten };
+  return { ...daten, ausCache: false, stand: jetzt };
+});
