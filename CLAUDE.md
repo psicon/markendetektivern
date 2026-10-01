@@ -444,6 +444,24 @@ werden sollten. Andere "Don't"-Regeln stehen verteilt im File
 `USE_FLYING_TABS`-Legacy etc.) — hier nur die Learnings aus
 Recent-Sessions.
 
+- **Den Patch `patches/react-native+0.79.7.patch` beim RN-Upgrade still
+  verlieren (Vorfall 01.10.2026, iOS 6.0.20).** Onboarding zeigte statt des
+  Einkaufswagen-Fotos das riesige Splash-Logo — nur iOS, zufällig. Ursache ist
+  RN #58667: iOS (Fabric) gibt eine `<Image>`-Ansicht beim Bildschirmwechsel an
+  ein neues Bild weiter; ein noch wartender Rückruf der alten Anfrage
+  überschreibt danach das neue Bild (hier: Boot-Logo aus `app/index.tsx` über
+  dem vorgeladenen `background.jpg`). Trifft JEDES `<Image>` der App, auch
+  Produktbilder. Gefixt upstream am 25.09.2026 (#58669); der Patch ist eine
+  0.79-taugliche Fassung davon (Beobachter-Ring statt `shared_ptr`, weil der
+  Koordinator in 0.79 rohe Zeiger hält). Nachweis im Simulator mit 50 Runden à
+  64 Bildern: ohne Patch 59 falsche Bilder in 33 Runden, mit Patch 0 in
+  dreimal 50 Runden, alle Bilder geladen. Regeln: (1) Beim RN-Upgrade prüfen,
+  ob #58669 enthalten ist — erst dann den Patch löschen, sonst nachziehen.
+  (2) iOS-Änderungen am Startablauf auf einem echten Gerät mit Release-Build
+  prüfen; Debug/Metro verschiebt das Zeitfenster, der Simulator zeigte das
+  Onboarding fehlerfrei. (3) Der Patch wirkt nur mit einem neuen nativen
+  Build (iOS) — ein JS-Update allein behebt nichts.
+
 - **Test-, Köder- oder Teildatensätze in `produkte`/`markenProdukte` anlegen, die
   alte App-Versionen als „neueste“ laden (Vorfall 01.–08.09.2026, per Crashlytics
   am 30.09. belegt).** `scripts/canary/create_canaries.py` legte 12 Köder mit
