@@ -1,0 +1,17 @@
+{
+  "name": "bewertungen",
+  "version": "1.0.0",
+  "description": "aggregateRatingsByPath: hält die Bewertungsschnitte (ratingCount*/ratingSum*/averageRating*, ratingCount) auf produkte/markenProdukte aktuell, sobald sich ein Dokument in productRatings ändert. Aus der Console-Version 15 (11.09.2025) unverändert übernommen, nur Laufzeit und SDK angehoben.",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "firebase-admin": "^13.10.0",
+    "firebase-functions": "^6.6.0"
+  },
+  "private": true
+}
