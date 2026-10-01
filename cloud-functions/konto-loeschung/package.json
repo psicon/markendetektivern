@@ -1,0 +1,13 @@
+{
+  "name": "konto-loeschung",
+  "description": "onUserDeleted (1st gen, us-central1): löscht users/{uid}, wenn ein Firebase-Auth-Konto gelöscht wird. Übernahme der FlutterFlow-Funktion, Verhalten 1:1.",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^6.0.0"
+  },
+  "private": true
+}
