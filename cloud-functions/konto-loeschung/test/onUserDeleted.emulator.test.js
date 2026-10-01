@@ -33,6 +33,14 @@
  * Abgenommen am 01.10.2026: 3/3 grün; identisch grün gegen den Original-
  * Quelltext (FlutterFlow, Version 8); mit leerem Handler (Negativkontrolle)
  * scheitern die beiden Auslöser-Tests wie erwartet.
+ *
+ * Zusätzlich am 01.10.2026 (einmalig, nicht Teil dieses Tests): Aufruf wie
+ * auf GCF 1st gen über das Google Functions Framework 3.5.1 und 5.0.5
+ * (`--signature-type=event`, Legacy-Ereignis user.delete in beiden
+ * Formaten {context,data} und flach), Quelle frisch per `npm ci` aus dem
+ * Lockfile, Firestore-Emulator: HTTP 204, Dokument weg, Nachbar und
+ * Unterordner unberührt, fehlendes Dokument → 204. Leerer und werfender
+ * Handler wurden als Negativkontrollen erkannt.
  */
 
 const { test, before } = require('node:test');

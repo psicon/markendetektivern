@@ -28,6 +28,11 @@
  * (Identity Platform kennt nur blockierende beforeCreate/beforeSignIn). Und
  * die Firebase CLI erlaubt kein Upgrade 1st → 2nd gen in place. Deshalb
  * v1-API über `firebase-functions/v1` (in v6 nicht mehr der Default-Export).
+ * Der Laufzeitpfad ist dabei derselbe wie in firebase-functions 5.1.1, mit
+ * dem `aggregateLeaderboard` seit August 2026 auf 1st gen + nodejs22 läuft:
+ * `lib/v1/cloud-functions.js`, `function-builder.js`, `onInit.js` sind
+ * byte-gleich; `v1/providers/auth.js` unterscheidet sich nur bei den
+ * blockierenden Funktionen (beforeCreate/beforeSignIn/…), nicht bei onDelete.
  *
  * Name, Region und Auslöser sind identisch zur Live-Funktion, damit der
  * Deploy sie AN ORT UND STELLE aktualisiert statt eine zweite anzulegen
@@ -37,6 +42,17 @@
  *
  * Deploy: `firebase deploy --only functions:konto-loeschung` (Node 22, vorher
  * `npm ci` in diesem Ordner). Emulator-Test: siehe test/.
+ *
+ * ACHTUNG beim Deploy: Das Artifact-Registry-Repo `gcf-artifacts` in
+ * us-central1 hat (Stand 01.10.2026) keine Aufräumregel. Die CLI aktualisiert
+ * die Funktion und bricht DANACH mit Exit 1 ab („Functions successfully
+ * deployed but could not set up cleanup policy … Pass the --force option").
+ * NICHT mit --force wiederholen: Das setzt auf dem Repo, das die Images ALLER
+ * us-central1-Funktionen hält (Algolia-/Bild-Extensions, FlutterFlow-
+ * Funktionen auf nicht mehr baubaren Runtimes), die Regel „Images älter als
+ * 1 Tag löschen" und bestätigt jede weitere Rückfrage ungefragt. Erfolg an
+ * der Zeile „Successful update operation." und an `gcloud functions
+ * describe` erkennen, nicht am Exit-Code (solange die Regel fehlt, immer 1).
  */
 
 const functions = require('firebase-functions/v1');
