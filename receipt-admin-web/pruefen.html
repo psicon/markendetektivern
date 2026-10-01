@@ -431,12 +431,36 @@
       }
 
       // ── Fälle laden (mit Vorladen der nächsten) ─────────────
+      /**
+       * Wie lange ein geladener Fall im Speicher als gültig gilt.
+       *
+       * Die Kachel-URLs aus reviewCases sind signiert und laufen ab, frühestens
+       * 6 Stunden nach dem Ausstellen (review-console/src/kachel.js,
+       * GUELTIG_MIN_S). Ein Fall, der länger hier lag, käme mit abgelaufenen
+       * URLs auf den Schirm — kaputte Kacheln, sobald der Browser die Bilder
+       * nicht schon im Cache hat (Tab über Nacht offen, Vorladen gescheitert).
+       * 5 Stunden lassen eine Stunde Luft. Nebenbei sind Vorprüfung und
+       * „Freigabe bucht …" damit nie älter als 5 Stunden.
+       * Wanduhr statt performance.now(): die läuft auch im Ruhezustand weiter,
+       * genau wie der Ablauf der URL.
+       */
+      const FALL_GUELTIG_MS = 5 * 3600 * 1000;
+      const geladenUm = new WeakMap(); // Fall-Objekt → Ladezeitpunkt
+      const frisch = (id) => {
+        const fall = S.cache.get(id);
+        return !!fall && Date.now() - (geladenUm.get(fall) || 0) < FALL_GUELTIG_MS;
+      };
+
       async function fetchCases(ids) {
-        const fehlen = ids.filter((id) => id && !S.cache.has(id));
+        const fehlen = ids.filter((id) => id && !frisch(id));
         if (!fehlen.length) return;
+        // Veraltete Einträge vorher entfernen: liefert der Server einen Fall
+        // nicht (mehr), darf nicht der alte Stand angezeigt werden.
+        fehlen.forEach((id) => S.cache.delete(id));
         const r = await call('reviewCases')({ type: S.type, ids: fehlen });
         (r.data.cases || []).forEach((c) => {
           S.cache.set(c.id, c);
+          geladenUm.set(c, Date.now());
           // Bilder in den Browser-Cache holen, damit der nächste Fall sofort steht.
           const urls = c.kind === 'photo' ? (c.bilder || []).map((b) => b.url) : [c.imageUrl];
           urls.filter(Boolean).forEach((u) => { const im = new Image(); im.src = u; });
@@ -456,7 +480,7 @@
         const c = cur();
         leisteAus();
         if (!c) { $('stage').innerHTML = '<div class="empty">Nichts offen 🎉</div>'; return; }
-        if (!S.cache.has(c.id)) {
+        if (!frisch(c.id)) {
           $('stage').innerHTML = '<div class="empty">Lade Fall …</div>';
           try {
             await fetchCases([c.id]);
