@@ -65,6 +65,11 @@
       .legende{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--fg2);margin-top:6px}
       .legende i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
 
+      .stufe{display:grid;grid-template-columns:76px 1fr auto;gap:10px;align-items:center;padding:5px 0;font-size:13px}
+      .stufe .spur{height:12px;background:var(--panel2);border-radius:6px;overflow:hidden}
+      .stufe .spur i{display:block;height:100%;border-radius:6px;background:var(--geld)}
+      .stufe .w{font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--fg2)}
+      tr.reif td{background:rgba(47,179,137,.08)}
       table{width:100%;border-collapse:collapse;font-size:13px}
       th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
       th{color:var(--fg3);font-weight:700;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px}
@@ -96,6 +101,7 @@
       </header>
       <main>
         <div id="inhalt"><p class="leer">Lade Berichte …</p></div>
+        <div id="auszahlung" style="margin-top:22px"><p class="leer">Lade Guthaben &amp; Auszahlungen …</p></div>
         <div id="statistik" style="margin-top:22px"><p class="leer">Lade Statistik …</p></div>
         <div id="details" style="margin-top:22px"></div>
       </main>
@@ -382,8 +388,8 @@
           if (d === '01' || i === 0 || i === jeTag.length - 1 || d === '15') svg += `<text x="${x + B / 2}" y="${oben + hoehe + 15}" fill="var(--fg3)" font-size="10" text-anchor="middle">${d}.${m}.</text>`;
         });
         svg += `<polyline points="${pkt.join(' ')}" fill="none" stroke="var(--geld)" stroke-width="1.8"/>`;
-        jeTag.forEach((t, i) => { svg += `<circle cx="${15 + i * (B + L) + B / 2}" cy="${oben + hoehe - ((t[geldFeld] || 0) / maxGeld) * hoehe}" r="5" fill="transparent"><title>${esc(t.tag)}: ${euro(t[geldFeld] || 0)} ausgezahlt</title></circle>`; });
-        return `<div class="diagramm">${svg}</svg></div><div class="legende">${serien.map((s) => `<span><i style="background:${s.farbe}"></i>${esc(s.name)}</span>`).join('')}<span><i style="background:var(--geld)"></i>ausgezahlt (€, eigene Skala)</span></div>`;
+        jeTag.forEach((t, i) => { svg += `<circle cx="${15 + i * (B + L) + B / 2}" cy="${oben + hoehe - ((t[geldFeld] || 0) / maxGeld) * hoehe}" r="5" fill="transparent"><title>${esc(t.tag)}: ${euro(t[geldFeld] || 0)} gutgeschrieben</title></circle>`; });
+        return `<div class="diagramm">${svg}</svg></div><div class="legende">${serien.map((s) => `<span><i style="background:${s.farbe}"></i>${esc(s.name)}</span>`).join('')}<span><i style="background:var(--geld)"></i>gutgeschrieben (€, eigene Skala)</span></div>`;
       }
       const kachel = (z, l, farbe = '') => `<div class="kachel"><div class="z"${farbe ? ` style="color:${farbe}"` : ''}>${z}</div><div class="l">${l}</div></div>`;
       const top = (obj, n = 10) => zeilen(Object.fromEntries(Object.entries(obj || {}).sort((a, b) => b[1] - a[1]).slice(0, n)), 'keine');
@@ -397,7 +403,7 @@
             <div class="kacheln" style="margin:6px 0 14px">
               ${kachel(f.letzte7.freigegeben, `freigegeben · 7 Tage (${f.summe.freigegeben} in ${st.tage.length})`, 'var(--ok)')}
               ${kachel(f.letzte7.abgelehnt, `abgelehnt · 7 Tage (${f.summe.abgelehnt})`, 'var(--nein)')}
-              ${kachel(euro(f.letzte7.cents), `ausgezahlt · 7 Tage (${euro(f.summe.cents)})`, 'var(--geld)')}
+              ${kachel(euro(f.letzte7.cents), `gutgeschrieben · 7 Tage (${euro(f.summe.cents)})`, 'var(--geld)')}
               ${kachel(f.letzte7.eingereicht, `eingereicht · 7 Tage (${f.summe.eingereicht})`)}
               ${kachel(f.offen, 'offen jetzt', 'var(--offen)')}
             </div>
@@ -410,13 +416,87 @@
               ${kachel(b.letzte7.approved, `mit Prämie · 7 Tage (${b.summe.approved})`, 'var(--ok)')}
               ${kachel(b.letzte7.no_reward, `ohne Prämie · 7 Tage (${b.summe.no_reward})`)}
               ${kachel(b.letzte7.rejected, `abgelehnt · 7 Tage (${b.summe.rejected})`, 'var(--nein)')}
-              ${kachel(euro(b.letzte7.cents), `ausgezahlt · 7 Tage (${euro(b.summe.cents)})`, 'var(--geld)')}
+              ${kachel(euro(b.letzte7.cents), `gutgeschrieben · 7 Tage (${euro(b.summe.cents)})`, 'var(--geld)')}
               ${kachel(b.inPruefung, 'in Prüfung jetzt', 'var(--offen)')}
             </div>
             ${balken(b.jeTag, [{ feld: 'approved', name: 'mit Prämie', farbe: 'var(--ok)' }, { feld: 'no_reward', name: 'ohne Prämie', farbe: 'var(--fg3)' }, { feld: 'rejected', name: 'abgelehnt', farbe: 'var(--nein)' }], 'cents')}
             <h3 style="margin-top:14px">Gründe ohne Prämie / abgelehnt (${st.tage.length} Tage)</h3>${top(b.gruende)}
           </section>
           <p class="leer" style="margin-top:8px">Fotos zählen am Tag der Entscheidung, Bons am Tag des Einreichens. Foto-Beträge kommen aus dem Ledger, Bon-Beträge aus dem Bon.</p>`;
+      }
+
+      /* ─── Guthaben & Auszahlungen (reviewAuszahlungen, src/auszahlung.js) ─── */
+      const KONTO = {
+        konto: ['Konto mit E-Mail', 'kann auszahlen'],
+        ohne_email: ['Konto ohne E-Mail', 'muss erst eine E-Mail hinterlegen'],
+        gast: ['Gast ohne Konto', 'muss erst ein Konto anlegen'],
+        unbekannt: ['unbekannt', 'Konto nicht gefunden oder gesperrt'],
+      };
+      const datum = (t) => (t ? new Date(t).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', timeZone: 'Europe/Berlin' }) : '—');
+      const eur0 = (c) => euro(c).replace(',00 €', ' €');
+      const zahl = (n) => Number(n || 0).toLocaleString('de-DE');
+
+      function zeigeAuszahlung(a) {
+        const s = a.schwelleCents;
+        const az = a.auszahlungen;
+        const nichtAuszahlbar = (a.reifNachKonto.gast?.personen || 0) + (a.reifNachKonto.ohne_email?.personen || 0) + (a.reifNachKonto.unbekannt?.personen || 0);
+        const maxStufe = Math.max(1, ...a.stufen.map((x) => x.cents));
+        const stufeName = (x) => (x.bisCents == null ? `ab ${eur0(x.vonCents)}` : `${eur0(x.vonCents).replace(' €', '')}–${eur0(x.bisCents)}`);
+        const tage = (z) => (z.tageBisSchwelle === 0 ? '<span style="color:var(--ok)">erreicht</span>'
+          : z.tageBisSchwelle == null ? '<span class="leer">sammelt gerade nicht</span>' : z.tageBisSchwelle > 90 ? 'über 90 Tage' : `in ~${z.tageBisSchwelle} Tagen`);
+        const kontoZelle = (z) => (z.test ? '<span class="pill trocken">Testkonto</span>'
+          : z.konto === 'konto' ? '' : `<span style="color:var(--offen)">${esc(KONTO[z.konto]?.[0] || z.konto)} – ${esc(KONTO[z.konto]?.[1] || '')}</span>`);
+        $('auszahlung').innerHTML = `
+          <div class="lauf"><h2>Guthaben &amp; Auszahlungen</h2>
+            <span class="meta">Auszahlung ab ${euro(s)} · Stand ${esc(fmtDateTime(a.stand))}${a.ausCache ? ' (zwischengespeichert)' : ''}</span>
+            <button id="auszahlungNeu" style="padding:4px 10px;font-size:12px">neu laden</button></div>
+          ${a.kontoFehler ? `<div class="warn gelb"><b>Im Blick</b><span>Bei ${zahl(a.kontoFehler)} Personen konnte nicht geprüft werden, ob sie ein Konto haben — sie stehen unter „unbekannt".</span></div>` : ''}
+          ${az.haengt.anzahl ? `<div class="warn rot"><b>Handeln</b><span>${zahl(az.haengt.anzahl)} Auszahlung(en) über ${euro(az.haengt.cents)} sind seit über 15 Minuten angefordert, aber noch nicht an Tremendous übergeben.</span></div>` : ''}
+          <div class="kacheln" style="margin-top:6px">
+            ${kachel(zahl(a.reif.personen), `haben ${eur0(s)} erreicht, noch nicht ausgezahlt · ${euro(a.reif.cents)}${nichtAuszahlbar ? ` · ${nichtAuszahlbar} davon können noch nicht auszahlen` : ''}`, 'var(--ok)')}
+            ${kachel(zahl(a.nah.personen), `nah dran (${eur0(a.nahAbCents)}–${eur0(s)}) · ${euro(a.nah.cents)}`, 'var(--offen)')}
+            ${kachel(`~${zahl(a.vorschau30.personen)}`, `erreichen ${eur0(s)} voraussichtlich in den nächsten 30 Tagen · je mind. ${eur0(s)} (grobe Schätzung)`)}
+            ${kachel(euro(a.gesamt.cents), `offenes Guthaben aller Kunden · ${zahl(a.gesamt.personen)} Personen`, 'var(--geld)')}
+            ${kachel(euro(az.versandt.cents), `an Kunden ausgezahlt seit Start · ${zahl(az.versandt.anzahl)}× an ${zahl(az.empfaenger)} Personen · 30 Tage: ${euro(az.letzte30.cents)}`)}
+          </div>
+          ${(() => {
+            const teile = [];
+            if (a.test.personen) teile.push(`${zahl(a.test.personen)} Testkonto mit ${euro(a.test.cents)} Guthaben (Testgutschrift vom Go-Live — kann trotzdem echt ausgezahlt werden)`);
+            if (az.anTestkonto.anzahl) teile.push(`${zahl(az.anTestkonto.anzahl)} echte Auszahlungen an das Testkonto über ${euro(az.anTestkonto.cents)}`);
+            if (az.testumgebung.anzahl) teile.push(`${zahl(az.testumgebung.anzahl)} Auszahlungen aus der Testumgebung über ${euro(az.testumgebung.cents)} (kein Geld geflossen)`);
+            return teile.length ? `<div class="leer" style="margin:-10px 0 18px">Nicht mitgezählt: ${teile.join(' · ')}.</div>` : '';
+          })()}
+          <div class="raster">
+            <section class="box"><h3>Wie verteilt sich das Guthaben?</h3>
+              ${a.stufen.map((x) => `<div class="stufe"><span>${esc(stufeName(x))}</span>
+                <span class="spur"><i style="width:${x.cents ? Math.max(2, Math.round((100 * x.cents) / maxStufe)) : 0}%;${x.bisCents == null ? 'background:var(--ok)' : x.vonCents >= a.nahAbCents ? 'background:var(--offen)' : ''}"></i></span>
+                <span class="w">${zahl(x.personen)} Pers. · ${euro(x.cents)}</span></div>`).join('')}
+              <div class="leer" style="margin-top:6px">Balkenlänge = Betrag. ${Math.round(100 * a.anteilUnterVierzigProzent)} % des Guthabens liegen bei Personen unter ${eur0(a.vierzigProzentCents)} — das wird so bald nicht fällig.</div>
+            </section>
+            <section class="box"><h3>Wer kann überhaupt auszahlen?</h3>
+              ${['konto', 'ohne_email', 'gast', 'unbekannt'].filter((k) => a.nachKonto[k]?.personen).map((k) => `<div class="zeile"><span>${esc(KONTO[k][0])} <span class="leer">· ${esc(KONTO[k][1])}</span></span><span>${zahl(a.nachKonto[k].personen)} · ${euro(a.nachKonto[k].cents)}</span></div>`).join('') || '<div class="leer">niemand mit Guthaben</div>'}
+              <div class="leer" style="margin-top:8px">Ausgezahlt wird nur, wenn die Person es in der App anfordert. „Ausgezahlt" heißt: Gutschein-Link von Tremendous verschickt — ob er eingelöst wurde, meldet Tremendous nicht zurück.${az.gescheitert30.anzahl ? ` In den letzten 30 Tagen ${zahl(az.gescheitert30.anzahl)}× gescheitert (${euro(az.gescheitert30.cents)}).` : ''}</div>
+            </section>
+          </div>
+          <section class="box" style="margin-top:14px"><h3>Wer ist als Nächstes dran? (alle ab ${eur0(a.listeAbCents)} und alle, die schon einmal ausgezahlt haben · ${zahl(a.liste.length)}${a.listeGekuerzt ? ', Ausschnitt' : ''})</h3>
+            ${a.liste.length ? `<div class="tabwrap"><table>
+              <tr><th>Nutzer (gekürzt)</th><th class="n">Guthaben</th><th class="n">verdient in 30 Tagen</th><th class="n">${eur0(s)} erreicht</th><th>wartet seit</th><th>letzte Auszahlung</th><th></th></tr>
+              ${a.liste.map((z) => `<tr class="${z.cents >= s && !z.test ? 'reif' : ''}"><td><code>${esc(z.kuerzel)}…</code></td><td class="n"><b>${euro(z.cents)}</b></td>
+                <td class="n">${z.verdient30 ? euro(z.verdient30) : '—'}</td><td class="n">${tage(z)}</td>
+                <td>${esc(datum(z.wartetSeit))}</td><td>${esc(datum(z.letzteAuszahlung))}</td><td>${kontoZelle(z)}</td></tr>`).join('')}
+            </table></div>` : '<div class="leer">Noch niemand über der Hälfte der Schwelle.</div>'}
+            <div class="leer" style="margin-top:8px">Die Prognose rechnet das Tempo der letzten 30 Tage weiter — eine grobe Schätzung: Wer neu anfängt und schnell sammelt, ist noch nicht dabei, und nicht jeder hält sein Tempo.</div>
+          </section>`;
+        $('auszahlungNeu').onclick = () => ladeAuszahlung(true);
+      }
+
+      async function ladeAuszahlung(frisch = false) {
+        try {
+          const r = await call('reviewAuszahlungen')({ frisch });
+          zeigeAuszahlung(r.data);
+        } catch (e) {
+          $('auszahlung').innerHTML = `<p class="leer">Guthaben &amp; Auszahlungen konnten nicht geladen werden: ${esc(e.message)}</p>`;
+        }
       }
 
       async function ladeStatistik() {
@@ -440,7 +520,7 @@
       }
 
       $('trockenBtn').onclick = () => { mitTrocken = !mitTrocken; $('trockenBtn').classList.toggle('on', mitTrocken); zeige(); };
-      initAdmin(() => { lade(); ladeStatistik(); });
+      initAdmin(() => { lade(); ladeAuszahlung(); ladeStatistik(); });
     </script>
   </body>
 </html>

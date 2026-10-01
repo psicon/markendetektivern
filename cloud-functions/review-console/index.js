@@ -25,7 +25,7 @@
 
 const admin = require('firebase-admin');
 const { FieldValue } = require('firebase-admin/firestore');
-const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
 const logger = require('firebase-functions/logger');
 const { REASON, dupZumSpeichern, ms } = require('./src/duplicatePolicy');
 const {
@@ -34,6 +34,7 @@ const {
 } = require('./src/einreichung');
 const { ortVonEinreichung, ortVonBon, ortsverzeichnisAusBons } = require('./src/ort');
 const { pruefeOrtsanforderung } = require('./src/locationGate');
+const { kachelUrl, pruefeKachelAnfrage, MIN_SCHLUESSEL } = require('./src/kachel');
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -530,25 +531,49 @@ async function imageUrl(path) {
   }
 }
 
-/** Warteschlange: alles, was zu entscheiden ist — schlank, für die Seitenleiste. */
 /**
- * Verkleinerte Ansicht über die installierte Bild-Extension (invertase/
- * image-processing-api). Die Originale sind ~5 MB — sieben davon je Fall
- * wären 34 MB und genau der Grund, warum die alte Konsole unbenutzbar war.
- * Die Extension liefert ~90 KB und setzt ein Jahr Cache-Control, der zweite
- * Abruf kommt aus dem Browser-Cache. Das Original bleibt für die Lupe.
+ * Verkleinerte Ansicht über den eigenen Endpunkt `reviewKachel` (unten).
+ * Die Originale sind ~5 MB — sieben davon je Fall wären 34 MB und genau der
+ * Grund, warum die alte Konsole unbenutzbar war. Eine Kachel hat ~50–90 KB
+ * und ein Jahr Cache-Control. Das Original bleibt für die Lupe (`imageUrl`).
+ *
+ * Bis 01.10.2026 lief das über die Extension image-processing-api (Node 14,
+ * abgekündigt), die jeden Bucket-Pfad ohne Anmeldung auslieferte. Jetzt
+ * stellt NUR diese Funktion — nach der Admin-Prüfung in reviewCases — eine
+ * signierte, ablaufende URL aus; der Endpunkt lehnt alles andere mit 403 ab.
  */
-const IMG_API = 'https://us-central1-markendetektive-895f7.cloudfunctions.net/ext-image-processing-api-handler/process';
-function thumbUrl(path, width) {
-  if (!path) return null;
-  const ops = [
-    { operation: 'input', type: 'gcs', source: path },
-    { operation: 'resize', width },
-    { operation: 'output', format: 'jpeg', quality: 72 },
-  ];
-  return `${IMG_API}?operations=${encodeURIComponent(JSON.stringify(ops))}`;
+const KACHEL_SCHLUESSEL = defineSecret('REVIEW_KACHEL_SIGNING_KEY');
+const KACHEL_BASIS = 'https://europe-west1-markendetektive-895f7.cloudfunctions.net/reviewKachel';
+/**
+ * `private` statt `public` wie bei der Extension: gleiche Wirkung im Browser,
+ * aber kein geteilter Cache (Proxy) darf Bons und Produktfotos ablegen.
+ */
+const KACHEL_CACHE = 'private, max-age=31536000, immutable';
+
+let kachelSchluesselGemeldet = false;
+function kachelSchluessel() {
+  let wert = null;
+  try { wert = KACHEL_SCHLUESSEL.value(); } catch (e) { wert = null; }
+  if ((!wert || wert.length < MIN_SCHLUESSEL) && !kachelSchluesselGemeldet) {
+    kachelSchluesselGemeldet = true;
+    logger.error('Kachel-Schlüssel fehlt oder ist zu kurz — Kacheln fallen auf die Originale zurück', { secret: 'REVIEW_KACHEL_SIGNING_KEY' });
+  }
+  return wert;
 }
 
+/**
+ * Signierte Kachel-URL, oder null (Pfad außerhalb der erlaubten Bereiche,
+ * Schlüssel fehlt). Aufrufer fallen dann auf das Original zurück: lieber
+ * langsam als ein Fall ohne Bild, über den jemand entscheiden soll.
+ */
+function thumbUrl(path, width) {
+  if (!path) return null;
+  const url = kachelUrl(KACHEL_BASIS, path, width, kachelSchluessel());
+  if (!url) logger.warn('Keine Kachel-URL ausgestellt', { praefix: String(path).split('/')[0], width });
+  return url;
+}
+
+/** Warteschlange: alles, was zu entscheiden ist — schlank, für die Seitenleiste. */
 exports.reviewQueue = onCall({ region: REGION, memory: '512MiB', timeoutSeconds: 60 }, async (req) => {
   assertAdmin(req);
   const p = req.data || {};
@@ -598,7 +623,7 @@ function eanIndexAusCache() {
 }
 
 /** Bis 6 Fälle vollständig — mit fertigen Bild-URLs, für Anzeige + Vorladen. */
-exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds: 60 }, async (req) => {
+exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds: 60, secrets: [KACHEL_SCHLUESSEL] }, async (req) => {
   assertAdmin(req);
   const p = req.data || {};
   const type = p.type === 'receipts' ? 'receipts' : 'photos';
@@ -654,7 +679,7 @@ exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
           buchtCent: Number(x.cashbackCents) || 0,
           grund: (Number(x.cashbackCents) || 0) > 0 ? null : (x.zeroReason || x.rejectReason || 'kein_betrag'),
         },
-        imageUrl: thumbUrl(row.storagePath, 1100), fullUrl: full,
+        imageUrl: thumbUrl(row.storagePath, 1100) || full, fullUrl: full,
         items: Array.isArray(x.items) ? x.items : [],
         ocr: { parsed: x.ocr?.parsed ?? null, robust: x.ocr?.robust ?? null, reconciliation: x.ocr?.reconciliation ?? null },
         duplicateOf: row.duplicateOf, ledger,
@@ -714,10 +739,11 @@ exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
     const defekt = new Set(row.bildDefekt.map((b) => b.slot));
     const bilder = await Promise.all(REQUIRED_STEPS_ORDER.map(async (step) => {
       const path = row.images && row.images[step];
+      const full = await imageUrl(path); // Lupe
       return {
         step, label: STEP_LABEL_DE[step] || step,
-        url: thumbUrl(path, 520),          // Kachel
-        full: await imageUrl(path),        // Lupe
+        url: thumbUrl(path, 520) || full,  // Kachel
+        full,
         fehlt: !path,
         // Vom Namer als abgeschnitten erkannt (unser Upload-Fehler, nicht der des Nutzers).
         defekt: defekt.has(step),
@@ -753,6 +779,78 @@ exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
   }));
   return { cases };
 });
+
+/**
+ * Kachel-Endpunkt (01.10.2026) — liefert eine verkleinerte JPEG-Ansicht eines
+ * Uploads, aber NUR mit einer von reviewCases ausgestellten, gültigen Signatur
+ * (src/kachel.js). Ohne / mit falscher / abgelaufener Signatur: 403.
+ *
+ * Öffentlich aufrufbar (invoker public), weil ein <img>-Tag keinen
+ * Anmelde-Header mitschicken kann — die Berechtigung steckt in der URL.
+ * Lesen per Admin-SDK: hängt NICHT an öffentlichen Bucket-Rechten.
+ *
+ * sharp wird erst hier geladen: die übrigen Funktionen dieser Codebase
+ * (Morgen-/Bon-Runde, Entscheidungen) brauchen libvips nicht, und ein
+ * Ladefehler der nativen Bibliothek soll nur die Kacheln treffen, nicht die
+ * ganze Konsole.
+ *
+ * concurrency 8: die Konsole lädt 7 Kacheln je Fall und die nächsten drei
+ * Fälle vor; eine Instanz je Anfrage (wie die Extension) hieße viele
+ * Kaltstarts. 1 GiB reicht für 8 gleichzeitige Bilder (≤ 20 MB Eingabe,
+ * JPEG wird beim Laden bereits verkleinert).
+ */
+let _kachelBild = null;
+const kachelBild = () => (_kachelBild ||= require('./src/kachelBild'));
+
+function kachelAntwort(res, status, text) {
+  res.set('Cache-Control', 'no-store');
+  res.set('Content-Type', 'text/plain; charset=utf-8');
+  res.status(status).send(text);
+}
+
+exports.reviewKachel = onRequest(
+  {
+    region: REGION, memory: '1GiB', cpu: 1, concurrency: 8, maxInstances: 10, timeoutSeconds: 60,
+    invoker: 'public', secrets: [KACHEL_SCHLUESSEL],
+  },
+  async (req, res) => {
+    res.set('X-Content-Type-Options', 'nosniff');
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      res.set('Allow', 'GET, HEAD');
+      kachelAntwort(res, 405, 'Methode nicht erlaubt');
+      return;
+    }
+    const urteil = pruefeKachelAnfrage(req.query, kachelSchluessel(), Date.now());
+    if (!urteil.ok) {
+      if (urteil.grund === 'schluessel_fehlt') {
+        logger.error('reviewKachel ohne Schlüssel — Secret REVIEW_KACHEL_SIGNING_KEY prüfen');
+        kachelAntwort(res, 500, 'Serverfehler');
+      } else {
+        // Kein Pfad im Log: wer hier landet, hat keine gültige Signatur.
+        logger.warn('reviewKachel abgelehnt', { grund: urteil.grund });
+        kachelAntwort(res, 403, 'Verboten');
+      }
+      return;
+    }
+    const { ladeBegrenzt, rendereKachel } = kachelBild();
+    try {
+      const roh = await ladeBegrenzt(storageBucket().file(urteil.pfad));
+      const jpeg = await rendereKachel(roh, urteil.breite);
+      res.set({
+        'Content-Type': 'image/jpeg',
+        'Content-Length': String(jpeg.length),
+        'Content-Disposition': 'inline; filename="kachel.jpg"',
+        'Cache-Control': KACHEL_CACHE,
+      });
+      res.status(200).end(jpeg);
+    } catch (e) {
+      const status = Number(e && e.status) || 500;
+      const log = status >= 500 ? logger.error : logger.warn;
+      log('reviewKachel fehlgeschlagen', { code: e && e.code, status, praefix: urteil.pfad.split('/')[0], fehler: String((e && e.message) || e).slice(0, 300) });
+      kachelAntwort(res, status, status === 404 ? 'Nicht gefunden' : 'Kachel nicht verfügbar');
+    }
+  },
+);
 
 
 /**
@@ -864,7 +962,6 @@ exports.reviewMapPoints = onCall({ region: REGION, memory: '1GiB', timeoutSecond
  * (gleiche Bauart wie der Schalter `ocrReferee`).
  */
 const { onSchedule } = require('firebase-functions/v2/scheduler');
-const { onRequest } = require('firebase-functions/v2/https');
 const { taeglicheRunde } = require('./src/taeglicheRunde');
 const PROJEKT = process.env.GCLOUD_PROJECT || 'markendetektive-895f7';
 
@@ -987,5 +1084,23 @@ exports.reviewStatistik = onCall({ region: REGION, memory: '1GiB', timeoutSecond
   });
   const daten = baueStatistik({ jetzt, tage, fotos, fotoBuchungen, bons });
   statistikCache = { at: jetzt, tage, daten };
+  return { ...daten, ausCache: false, stand: jetzt };
+});
+
+/**
+ * Guthaben & Auszahlungen fürs Dashboard (Laden: src/auszahlungLaden.js,
+ * Rechnen: src/auszahlung.js). Nur lesend. Rund 2.000–5.000 Lesevorgänge pro
+ * frischer Berechnung, deshalb 10 Minuten im Speicher; `frisch: true` umgeht das.
+ */
+const { ladeAuszahlung } = require('./src/auszahlungLaden');
+let auszahlungCache = { at: 0, daten: null };
+exports.reviewAuszahlungen = onCall({ region: REGION, memory: '512MiB', timeoutSeconds: 120, maxInstances: 2 }, async (req) => {
+  assertAdmin(req);
+  if (auszahlungCache.daten && !req.data?.frisch && Date.now() - auszahlungCache.at < 10 * 60 * 1000) {
+    return { ...auszahlungCache.daten, ausCache: true, stand: auszahlungCache.at };
+  }
+  const jetzt = Date.now();
+  const daten = await ladeAuszahlung({ db, auth: admin.auth(), jetzt, logger });
+  auszahlungCache = { at: jetzt, daten };
   return { ...daten, ausCache: false, stand: jetzt };
 });
