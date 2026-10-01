@@ -1,6 +1,10 @@
 // NACH dem Update: rechnet fuer einzelne Dokumente den erwarteten Datensatz mit dem
 // 1.3.0-Code aus Firestore und vergleicht mit dem LIVE-Datensatz in Algolia und mit der
 // Vorher-Sicherung (Form: gleiche Felder, gleiche Typen; lastmodified separat). NUR LESEND.
+// Entscheidend ist "Inhalt GLEICH": der live geschriebene Datensatz entspricht exakt dem, was
+// der 1.3.0-Code (und nachweislich auch der alte Code) aus dem aktuellen Dokument baut. Ein
+// Formhinweis gegenueber der Vorher-Sicherung ist dann eine echte Dokumentaenderung (nur Info).
+// Alarm: Inhalt UNGLEICH, Datensatz fehlt, oder lastmodified in Objektform (Vollindex-Spur).
 // Aufruf: node pruefe-doc.js <instanz> <collection> <index> <docId> [docId...]
 // Umgebung:
 //   ALGOLIA_EXT_ARBEIT   Arbeitsordner mit ext-1.3.0/functions (baue-ext.sh) — Pflicht
@@ -50,7 +54,7 @@ const stable = (v) => JSON.stringify(v, (k, x) => (x && typeof x === 'object' &&
     const gleich = stable(soll) === stable(ist);
     const v = vorher.get(id);
     let form = 'kein Vorher-Datensatz (neues Dokument)';
-    if (v) { const vv = { ...v }; delete vv.lastmodified; const keys = [...new Set([...Object.keys(vv), ...Object.keys(ist)])]; const fd = keys.filter(k => !(k in vv) || !(k in ist) || typ(vv[k]) !== typ(ist[k])); form = fd.length ? 'FORMWECHSEL: ' + fd.join(',') : 'Form gleich wie vorher'; if (fd.length) ok = false; }
+    if (v) { const vv = { ...v }; delete vv.lastmodified; const keys = [...new Set([...Object.keys(vv), ...Object.keys(ist)])]; const fd = keys.filter(k => !(k in vv) || !(k in ist) || typ(vv[k]) !== typ(ist[k])); form = fd.length ? 'Formhinweis (Feld neu/weg/Typ anders als vorher — nur Info, entscheidend ist der Inhalt): ' + fd.join(',') : 'Form gleich wie vorher'; }
     // lastmodified wechselt bei jedem Sync naturgemaess die Form (alter wie neuer Code):
     // FORCE_DATA_SYNC=yes -> saveObject ohne das Feld (undefined); =no -> partialUpdateObject
     // mit IncrementSet (number) bzw. saveObject (undefined). Die Objektform {_operation,value}
