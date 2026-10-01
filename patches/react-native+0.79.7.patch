@@ -1,0 +1,96 @@
+diff --git a/node_modules/react-native/React/Fabric/Mounting/ComponentViews/Image/RCTImageComponentView.mm b/node_modules/react-native/React/Fabric/Mounting/ComponentViews/Image/RCTImageComponentView.mm
+index 6e7a9ba..9fc4551 100644
+--- a/node_modules/react-native/React/Fabric/Mounting/ComponentViews/Image/RCTImageComponentView.mm
++++ b/node_modules/react-native/React/Fabric/Mounting/ComponentViews/Image/RCTImageComponentView.mm
+@@ -17,11 +17,19 @@
+ #import <react/renderer/imagemanager/ImageRequest.h>
+ #import <react/renderer/imagemanager/RCTImagePrimitivesConversions.h>
+ 
++#include <array>
++
+ using namespace facebook::react;
+ 
+ @implementation RCTImageComponentView {
+   ImageShadowNode::ConcreteState::Shared _state;
+-  RCTImageResponseObserverProxy _imageResponseObserverProxy;
++  // MarkenDetektive-Patch (RN #58667, Fix-Idee aus #58669): ein Beobachter je Abonnement statt
++  // einem für die ganze Lebensdauer. Rückrufe einer früheren Anfrage können noch auf der
++  // Hauptwarteschlange liegen, wenn diese Ansicht schon wiederverwendet wurde; sie werden am
++  // Absender erkannt und verworfen. In 0.79 speichert der Koordinator rohe Zeiger, deshalb
++  // leben die Beobachter als Ring so lange wie die Ansicht (kein Freigeben → kein Use-after-free).
++  std::array<RCTImageResponseObserverProxy, 8> _imageResponseObserverProxies;
++  size_t _imageResponseObserverProxyIndex;
+ }
+ 
+ - (instancetype)initWithFrame:(CGRect)frame
+@@ -36,7 +44,10 @@ using namespace facebook::react;
+     _imageView.layer.minificationFilter = kCAFilterTrilinear;
+     _imageView.layer.magnificationFilter = kCAFilterTrilinear;
+ 
+-    _imageResponseObserverProxy = RCTImageResponseObserverProxy(self);
++    for (auto &proxy : _imageResponseObserverProxies) {
++      proxy = RCTImageResponseObserverProxy(self);
++    }
++    _imageResponseObserverProxyIndex = 0;
+ 
+     self.contentView = _imageView;
+   }
+@@ -99,17 +110,24 @@ using namespace facebook::react;
+   if (_state) {
+     const auto &imageRequest = _state->getData().getImageRequest();
+     auto &observerCoordinator = imageRequest.getObserverCoordinator();
+-    observerCoordinator.removeObserver(_imageResponseObserverProxy);
++    observerCoordinator.removeObserver(_imageResponseObserverProxies[_imageResponseObserverProxyIndex]);
+   }
+ 
+   _state = state;
+ 
+   if (_state) {
++    // Neuer Beobachter für dieses Abonnement (siehe Kommentar an _imageResponseObserverProxies).
++    _imageResponseObserverProxyIndex = (_imageResponseObserverProxyIndex + 1) % _imageResponseObserverProxies.size();
+     auto &observerCoordinator = _state->getData().getImageRequest().getObserverCoordinator();
+-    observerCoordinator.addObserver(_imageResponseObserverProxy);
++    observerCoordinator.addObserver(_imageResponseObserverProxies[_imageResponseObserverProxyIndex]);
+   }
+ }
+ 
++- (BOOL)_isCurrentImageResponseObserver:(const void *)observer
++{
++  return observer == &_imageResponseObserverProxies[_imageResponseObserverProxyIndex];
++}
++
+ - (void)prepareForRecycle
+ {
+   [super prepareForRecycle];
+@@ -121,8 +139,9 @@ using namespace facebook::react;
+ 
+ - (void)didReceiveImage:(UIImage *)image metadata:(id)metadata fromObserver:(const void *)observer
+ {
+-  if (!_eventEmitter || !_state) {
+-    // Notifications are delivered asynchronously and might arrive after the view is already recycled.
++  if (!_eventEmitter || !_state || ![self _isCurrentImageResponseObserver:observer]) {
++    // Notifications are delivered asynchronously and might arrive after the view is already recycled,
++    // or after it has been reused for another image (MarkenDetektive-Patch, RN #58667).
+     // In the future, we should incorporate an `EventEmitter` into a separate object owned by `ImageRequest` or `State`.
+     // See for more info: T46311063.
+     return;
+@@ -168,7 +187,7 @@ using namespace facebook::react;
+                      total:(int64_t)total
+               fromObserver:(const void *)observer
+ {
+-  if (!_eventEmitter) {
++  if (!_eventEmitter || ![self _isCurrentImageResponseObserver:observer]) {
+     return;
+   }
+ 
+@@ -177,6 +196,10 @@ using namespace facebook::react;
+ 
+ - (void)didReceiveFailure:(NSError *)error fromObserver:(const void *)observer
+ {
++  if (![self _isCurrentImageResponseObserver:observer]) {
++    return;
++  }
++
+   _imageView.image = nil;
+ 
+   if (!_eventEmitter) {
