@@ -206,7 +206,11 @@ async function aggregateMostViewed() {
       .collectionGroup('journeys')
       .where('lastUpdated', '>=', cutoffTs)
       .orderBy('lastUpdated', 'asc')
-      .select('viewedProducts')
+      // lastUpdated MUSS mitgelesen werden: startAfter(docSnap) baut den
+      // Cursor aus dem orderBy-Feld des Snapshots. Fehlt es in der
+      // Feldauswahl, scheitert jede zweite Seite („Field lastUpdated is
+      // missing“) — so stand die Liste vom 13.07. bis 01.10.2026 still.
+      .select('viewedProducts', 'lastUpdated')
       .limit(PAGE);
     if (lastDoc) q = q.startAfter(lastDoc);
     const snap = await q.get();
