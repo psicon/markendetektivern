@@ -180,7 +180,10 @@
         ['kein_produktname', 'Kein Name erkennbar'],
         ['bilder_wiederverwendet', 'Bilder wiederverwendet'],
         ['bild_defekt', 'Foto unlesbar'],
-        ['sperre_30_tage_gleicher_nutzer', 'Doppelt (selber Nutzer)'],
+        // 02.10.2026 (Entscheidung Patrick): Wochen-Sperre statt 24 h. Der
+        // Server schreibt dafür den App-Code `doppelt_eingereicht` ans Dokument
+        // (duplicatePolicy.APP_GRUND), der gewählte Grund bleibt in review.reason.
+        ['sperre_woche_gleicher_nutzer', 'Doppelt (selbe Person, binnen 7 Tagen)'],
         // 26.09.2026: Preis ist Pflicht (Entscheidung Patrick). Taste 8 — die
         // übrigen Tasten bleiben, wo sie waren; auf 8 lag bis dahin die Sperre
         // wegen fremder Einreichungen, die es seit 20.09. nicht mehr gibt.
@@ -225,7 +228,44 @@
         ['already_booked', 'war bereits gebucht'],
         // Gründe, die nur die Morgenrunde vergibt (keine Taste, nur Anzeige).
         ['gleiche_ansicht_mehrfach', 'Fast alle Fotos zeigen dieselbe Ansicht'],
+        // Altbestand bis 02.10.2026 (24-h-Sperre).
+        ['sperre_30_tage_gleicher_nutzer', 'Doppelt (selber Nutzer, alte 24-h-Regel)'],
+        // Entscheidungen Patrick 02.10.2026.
+        // Gesperrte Konten: die Runde lässt sie STUMM liegen (keine Ablehnung),
+        // die Konsole verweigert die Freigabe; sie stehen am Ende der Liste.
+        ['konto_gesperrt', 'Konto gesperrt — Freigabe nicht möglich'],
+        ['kontosperre_unbekannt', 'Kontosperre nicht lesbar — nicht freigeben'],
+        ['ean_abweichend', 'Barcode-Foto zeigt andere Nummer als gespeichert'],
+        ['ean_unsicher', 'Barcode-Foto: zwei Lesungen uneinig — Nummer selbst prüfen'],
+        ['foto_nummer_doppelt', 'Unter der Foto-Nummer: eigene Freigabe binnen 7 Tagen'],
+        ['foto_fremdes_konto', 'Gleiches Foto bei einem anderen Konto'],
+        ['foto_aeltere_offen', 'Gleiches Foto in älterer, offener Einreichung'],
+        ['foto_abgleich_gescheitert', 'Foto-Abgleich gescheitert (Technik)'],
+        // Schlussprüfung 03.10.2026: zurückgeholte Ablehnung als Doppel bzw.
+        // mit wiederverwendeten Fotos — Freigabe nur mit Begründung.
+        ['zurueckgeholt_doppel', 'Zurückgeholt — war als Doppel bzw. mit wiederverwendeten Fotos abgelehnt'],
+        // Weitere Gründe, mit denen die Morgenrunde einen Fall liegen lässt
+        // (review.rundeOffen, Prüfrunde 2, 02.10.2026) — nur Anzeige.
+        ['sperre_woche_gleicher_nutzer', 'Doppelt (selbe Person, binnen 7 Tagen)'],
+        ['konto_gesperrt_im_lauf', 'Konto während der Runde gesperrt'],
+        ['beleg_nicht_geschrieben', 'Doppel-Beleg in der Runde nicht gespeichert'],
+        ['notbremse_wochensperre', 'Notbremse (Wochen-Sperre)'],
+        ['notbremse_bildpruefung', 'Notbremse Bildprüfung'],
+        ['notbremse_quote', 'Notbremse Ablehnungsquote'],
+        ['notbremse_preis', 'Notbremse (Preis)'],
+        ['bild_nicht_lesbar_infrastruktur', 'Datei nicht abrufbar (Technik)'],
+        ['nachlesen_gescheitert', 'Nachlesen gescheitert (Technik)'],
+        ['bild_audit_gescheitert', 'Bildprüfung gescheitert (Technik)'],
+        ['kein_bild_audit', 'Nicht geprüft (Zeit)'],
+        ['schreib_fehler', 'Speichern gescheitert (Technik)'],
+        ['lesung_unsicher', 'Name/Barcode unsicher gelesen'],
+        ['preis_unbeurteilt', 'Preis nicht beurteilt (Bildprüfung)'],
+        ['preis_unsicher', 'Preis unsicher — auf dem Preisfoto nachsehen'],
+        ['ort_auffaellig', 'Aufnahmeort passt nicht zum Markt'],
+        ['namer_laeuft_noch', 'Wird noch nachgelesen'],
       ]]);
+      /** Was die Barcode-Lesung der Morgenrunde ergab (row.eanFoto, src/einreichung.js eanFotoZeile). */
+      const EANFOTO_DE = { abweichend: 'zeigt andere Nummer', unsicher: 'Lesungen uneinig', gleich: 'bestätigt', kein_urteil: 'nicht lesbar' };
 
       /**
        * Wer entschieden hat — aus `review.decidedBy`. Vorher hieß alles außer
@@ -279,6 +319,7 @@
 
       const FOLGE_DE = {
         keine_aktion: 'zu dieser Einreichung gehört keine Aktion',
+        konto_gesperrt: 'das Konto ist gesperrt (Entscheidung 02.10.2026) — Freigabe nicht möglich',
         ort_fehlt: 'ohne Ortsangabe zahlt die Aktion nicht',
         no_location: 'ohne Ortsangabe zahlt die Aktion nicht',
         kein_ort_angegeben: 'ohne Ortsangabe zahlt die Aktion nicht',
@@ -422,9 +463,11 @@
           ? `<div class="empty">Keine Treffer für „${esc(S.gesucht)}"<br><span style="font-size:12.5px">Suchfeld leeren zeigt wieder alle offenen Fälle.</span></div>`
           : '<div class="empty">Nichts offen 🎉</div>');
         // Wie viele davon sind auffällig? Bisher wurde das gerechnet und nie gezeigt.
-        const auff = (S.counts.locked || 0) + (S.counts.hold || 0) + (S.counts.incomplete || 0);
+        // Gesperrte Konten stehen am Ende und zählen getrennt — sie warten auf niemanden.
+        const gesperrt = S.counts.gesperrt || 0;
+        const auff = (S.counts.locked || 0) + (S.counts.hold || 0) + (S.counts.incomplete || 0) - gesperrt;
         $('prog').textContent = S.queue.length
-          ? `${Math.min(S.idx + 1, S.queue.length)} von ${S.queue.length}${auff ? ` · ${auff} auffällig` : ''}`
+          ? `${Math.min(S.idx + 1, S.queue.length)} von ${S.queue.length}${auff ? ` · ${auff} auffällig` : ''}${gesperrt ? ` · ${gesperrt} gesperrte Konten (am Ende)` : ''}`
           : '';
         const on = l.querySelector('.qi.on');
         if (on) on.scrollIntoView({ block: 'nearest' });
@@ -531,7 +574,9 @@
         // Der tatsächliche Ablehngrund: Bild-Gründe (gleiche Ansicht, wieder-
         // verwendet) stehen nicht in der Vorprüfung — ohne diese Zeile stand
         // über einem abgelehnten Fall nur „Alle Prüfungen bestanden".
-        const ablehnGrund = r.status === 'rejected' ? (r.rejectReason || (r.review && r.review.reason)) : null;
+        // Interner Grund zuerst: am Dokument steht seit 02.10.2026 teils der
+        // App-Code (Wochen-Sperre → doppelt_eingereicht), review.reason sagt genauer, was war.
+        const ablehnGrund = r.status === 'rejected' ? ((r.review && r.review.reason) || r.rejectReason) : null;
         const entschieden = ablehnGrund
           ? `<div class="folge zahlt-nicht">Abgelehnt wegen: <b>${esc(REASON_DE[ablehnGrund] || ablehnGrund)}</b></div>`
           : '';
@@ -551,6 +596,8 @@
               ${(p.reasons || []).length ? `<small>${esc((p.reasons || []).map((x) => REASON_DE[x] || x).join(' · '))}</small>` : `<small>Vollständig, kein Doppel${ohnePreis ? ' · ohne Preis im Foto: ablehnen mit A, dann 8' : ''}</small>`}
               ${urteilHerkunft}</div>
             ${entschieden}
+            ${rundeZeile(r)}
+            ${zurueckZeile(r)}
             <div class="folge ${c.folge && c.folge.buchtCent > 0 ? 'zahlt' : 'zahlt-nicht'}">
               ${c.folge && c.folge.buchtCent > 0
                 ? `Freigabe bucht <b>${euro(c.folge.buchtCent)}</b>`
@@ -558,7 +605,7 @@
             </div>
             ${nutzerZeile(c.nutzer)}
             <div class="kv">
-              <div class="k">Barcode</div><div class="v">${esc(ean || '—')}${h.eanNachgelesen ? nl() : ''}</div>
+              <div class="k">Barcode</div><div class="v">${esc(ean || '—')}${h.eanNachgelesen ? nl() : ''}${eanFotoZeile(r.eanFoto)}</div>
               <div class="k">Markt</div><div class="v">${esc(r.marketName || r.marketId || '—')}</div>
               <div class="k">Preis</div><div class="v">${euro(r.priceCents)} <span style="color:var(--fg3)">${esc(PREISBILD_DE[preisBild] || 'Herkunft unklar')}</span>${h.preisNachgelesen ? nl() : ''}</div>
               <div class="k">Hersteller</div><div class="v">${esc(r.manufacturer || '—')}${h.herstellerNachgelesen ? nl('nachgelesen · zählt nicht für die Doppel-Prüfung') : ''}</div>
@@ -574,6 +621,46 @@
             ${dup}
           </div>
         </div>`;
+      }
+
+      /**
+       * Warum die Morgenrunde den Fall liegen ließ (review.rundeOffen, Prüfrunde 2,
+       * 02.10.2026). Vorher stand ein Fall, den die Runde wegen eines Fotos eines
+       * anderen Kontos anhielt, hier als „Vorprüfung ok" — ohne jeden Hinweis.
+       * Sperrende Befunde stehen zusätzlich in der Vorprüfung (Freigabe nur mit
+       * Begründung); hier der Zusammenhang: Grund, Hinweis, Lauf.
+       */
+      function rundeZeile(r) {
+        const ro = r.status === 'pending' ? r.rundeOffen : null;
+        if (!ro || !ro.grund) return '';
+        const was = ro.geplant === 'ablehnen' ? 'würde ablehnen' : ro.geplant === 'freigeben' ? 'würde freigeben' : 'ließ liegen';
+        const wer = ro.trocken ? 'Morgenrunde (Trockenlauf)' : 'Morgenrunde';
+        const wann = ro.at ? ` · ${esc(fmtDateTime(ro.at))}` : '';
+        const zurueck = ro.zurueckgehalten ? ` · zurückgehalten: ${esc(REASON_DE[ro.zurueckgehalten] || ro.zurueckgehalten)}` : '';
+        return `<div class="folge zahlt-nicht">${wer} ${was}: <b>${esc(REASON_DE[ro.grund] || ro.grund)}</b>${zurueck}${wann}
+          ${ro.hinweis ? `<br><small>${esc(ro.hinweis)}</small>` : ''}</div>`;
+      }
+
+      /**
+       * Woraus der Fall zurückgeholt wurde (review.wiedereroeffnet, Schlussprüfung
+       * 03.10.2026). Das Zurückholen löscht den Ablehngrund am Dokument — ohne
+       * diese Zeile sähe man nicht mehr, dass die Runde z. B. wiederverwendete
+       * Fotos gefunden hatte.
+       */
+      function zurueckZeile(r) {
+        const w = r.status === 'pending' ? r.wiedereroeffnet : null;
+        const grund = w && (w.vorherIntern || w.vorherGrund);
+        if (!grund) return '';
+        const wer = w.vorherVon === 'worker-fotorunde' ? 'von der Morgenrunde' : 'in der Konsole';
+        return `<div class="folge zahlt-nicht">Zurückgeholt — vorher ${wer} abgelehnt: <b>${esc(REASON_DE[grund] || grund)}</b></div>`;
+      }
+
+      /** Nummer vom Barcode-Foto, wo sie etwas zu sagen hat. */
+      function eanFotoZeile(ef) {
+        if (!ef || ef.art === 'kein_urteil' || ef.art === 'gleich') return '';
+        const nummer = ef.gelesen || ef.roh;
+        const text = `Foto: ${nummer ? esc(nummer) + ' — ' : ''}${esc(EANFOTO_DE[ef.art] || ef.art)}${ef.zweit ? ` (zweite Lesung ${esc(ef.zweit)})` : ''}`;
+        return `<br><small style="color:var(--no)">${text}</small>`;
       }
 
       function renderReceipt(c) {

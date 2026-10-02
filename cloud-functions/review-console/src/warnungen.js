@@ -23,7 +23,7 @@ const TAG_MS = 24 * 60 * 60 * 1000;
  * @param {Array<{id:string, kind:string, active:boolean, startAt:number, endAt:number, budgetRemainingCents?:number, budgetTotalCents?:number}>} k.aktionen
  * @param {{eingeschaltet:boolean, laeufeLetzte48h:number}} k.zweitpruefung
  * @param {{inPruefung:number, aeltesteTage:number|null, letzte24h:{gesamt:number, ohneAktion:number}}} k.bons
- * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number, aeltesteOffenTage?:number|null}} k.runde
+ * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number, aeltesteOffenTage?:number|null, fotoAbgleichGescheitert?:boolean, kontoSperrenUnlesbar?:boolean, eanHaltenNeu?:number, haltBefundNichtGespeichert?:number, eanFotoNichtGespeichert?:number}} k.runde
  * @param {{bild:boolean, gesamt:boolean, text:string[]}} k.notbremse
  * @param {{alt:string|null, neu:string}} k.regelVersion
  * @param {{scharf:boolean, bericht:object|null, abgebrochen?:boolean, laeuftNoch?:boolean, unbekannt?:boolean}} [k.bonRunde]
@@ -77,6 +77,13 @@ function warnungen(k) {
   // ── Die Runde selbst ─────────────────────────────────────────────────
   const r = k.runde;
   if (r) {
+    // Ohne diese Abgleiche gibt die Runde nichts frei (Entscheidungen Patrick
+    // 02.10.2026, fail-closed) — still wäre das ein Tag ohne jede Freigabe.
+    if (r.kontoSperrenUnlesbar) rot('kontosperren_unlesbar', 'Die Liste gesperrter Konten (cashback_sperren) war nicht lesbar — heute wurde nichts freigegeben. Die Fälle sind morgen wieder dran.');
+    // Foto-Befunde früherer Läufe gelten weiter (fotoRundeRegeln.bildMitVorbefund);
+    // wer heute zum ersten Mal geprüft wurde, hat aber keinen — die Konsole
+    // rechnet den Foto-Abgleich nicht selbst (Schlussprüfung 03.10.2026).
+    if (r.fotoAbgleichGescheitert) rot('foto_abgleich_gescheitert', 'Der Abgleich der Fotos mit früheren Einreichungen ist gescheitert (Storage-Liste) — heute wurde nichts freigegeben. Foto-Befunde früherer Läufe gelten weiter; Einreichungen, die heute zum ersten Mal geprüft wurden, zeigt die Prüfkonsole ohne Foto-Befund — dort vor einer Freigabe die Fotos selbst ansehen. Die Fälle sind morgen wieder dran.');
     if (r.schreibFehler > 0) rot('schreibfehler', `${r.schreibFehler} Entscheidungen konnten nicht gespeichert werden — die Fälle sind offen geblieben und morgen wieder dran.`);
     if (r.nichtGeschafft > 0) gelb('runde_unvollstaendig', `${r.nichtGeschafft} Einreichungen hat die Runde in der Zeit nicht mehr geschafft — sie sind morgen dran.`);
     // Seit der Preis-Pflicht (26.09.) bleibt bei Zweifel mehr liegen als vorher.
@@ -86,6 +93,22 @@ function warnungen(k) {
     }
     if (r.auditVersucht >= 8 && r.auditFehler / r.auditVersucht > 0.25) {
       rot('bildpruefung_gestoert', `Die Bildprüfung ist bei ${r.auditFehler} von ${r.auditVersucht} Einreichungen gescheitert (meist Google-Limit). Diese Fälle bleiben offen.`);
+    }
+    // Barcode-Nummer (Prüfrunde 2, 02.10.2026): normal ~3 % der geprüften
+    // Fälle. Ändert sich das Modell (wie beim thinkingBudget am 22.09.),
+    // blieben sonst massenhaft Fälle still liegen — aufgefallen wäre es erst
+    // nach drei Tagen über „Produktfotos warten".
+    const eanNeu = Number(r.eanHaltenNeu) || 0;
+    if (r.auditVersucht > 0 && eanNeu >= 8 && eanNeu / r.auditVersucht > 0.1) {
+      (eanNeu / r.auditVersucht > 0.25 ? rot : gelb)('barcode_haelt_viele', `${eanNeu} von ${r.auditVersucht} geprüften Einreichungen hält die Runde wegen der Barcode-Nummer an (normal etwa 3 %) — Lesung des Modells prüfen.`);
+    }
+    // Ohne diese Einträge sieht die Prüfkonsole nicht, warum die Runde einen
+    // Fall liegen ließ, und gibt ihn ohne Warnung frei (Prüfrunde 2).
+    if (r.haltBefundNichtGespeichert > 0) {
+      rot('befund_nicht_gespeichert', `Bei ${r.haltBefundNichtGespeichert} offenen Fällen konnte der Halte-Grund (gleiches Foto, Barcode-Nummer) nicht gespeichert werden — die Prüfkonsole zeigt sie als unauffällig. Vor einer Freigabe die Fälle im Bericht ansehen.`);
+    }
+    if (r.eanFotoNichtGespeichert > 0) {
+      gelb('barcode_befund_nicht_gespeichert', `Bei ${r.eanFotoNichtGespeichert} Fällen konnte der Barcode-Befund (eanFotoOcr) nicht gespeichert werden; er steht ersatzweise am Halte-Grund der Runde.`);
     }
   }
   for (const t of (k.notbremse?.text || [])) rot('notbremse', `Notbremse: ${t}`);

@@ -168,7 +168,13 @@ service cloud.firestore {
         'priceRescueOcr', 'manufacturerRescueOcr', 'rescueAt', 'rescueQuelle',
         'productNameRescueAt', 'productNameRescueQuelle',
         'eanRescueAt', 'eanRescueQuelle',
-        // Prüfung (Morgenrunde + Prüfkonsole)
+        // Nummer vom Barcode-Foto (Morgenrunde, 02.10.2026) — die Prüfkonsole
+        // hält bei Abweichung an; ein mitgeschickter Wert gäbe „stimmt" vor.
+        'eanFotoOcr',
+        // Prüfung (Morgenrunde + Prüfkonsole). `review` umfasst auch
+        // `review.rundeOffen` (Halte-Grund der Morgenrunde, 02.10.2026) — die
+        // Prüfkonsole hält damit an; ein mitgeschickter leerer Eintrag gäbe vor,
+        // es gebe nichts zu beanstanden.
         'review', 'reviewedBy', 'reviewedAt', 'reviewNote', 'holdReasons',
         'rejectReason', 'loseWare', 'frischwareOhneAngaben',
         // Vergütung (crowd-upload-reward)

@@ -11,6 +11,9 @@ hat, steht hier als Regel. Wer die Runde ändert, ändert zuerst diese Datei.
 | Ablauf | `src/taeglicheRunde.js` (Cloud Function `fotoRundeTaeglich`, 08:00 Europe/Berlin) |
 | Entscheidungsregeln, Notbremse, Bündeln | `src/fotoRundeRegeln.js` (+ Tests) |
 | Doppel-Regel | `src/duplicatePolicy.js` — DIESELBE Datei wie die Prüfkonsole |
+| Gesperrte Konten | `src/kontoSperre.js` — liest `cashback_sperren/{uid}` (server-only), Runde UND Konsole |
+| Nummer vom Barcode-Foto | `src/werte.js` (`eanFotoBefund`, `eanFotoMitVorbefund`), gelesen in der Bildprüfung, abgelegt in `eanFotoOcr` |
+| Halte-Grund für die Prüfkonsole | `review.rundeOffen` (`fotoRundeRegeln.rundeOffenEintrag`), gelesen in `einreichung.precheckOf`; Foto-Befunde früherer Läufe: `fotoRundeRegeln.bildMitVorbefund` |
 | Warnungen | `src/warnungen.js` (+ Tests) |
 | Buchung + Push | `crowd-upload-reward` (Trigger bei `approved` bucht; der Sammler `crowd_push_sammler` verschickt EINE Nachricht pro Person) |
 | Bericht | Firestore `ops_tagesberichte/{lauf}` und `ops_tagesberichte/aktuell` |
@@ -32,15 +35,28 @@ Notbremse zurückhält — das steht im Bericht unter `wartetAufDich`.
 
 ## Reihenfolge des Laufs
 
-1. **Offene Einreichungen laden**, älteste zuerst.
+1. **Offene Einreichungen laden**, älteste zuerst (Server-Zeitpunkt
+   `createTime`, siehe unten), dazu die Liste gesperrter Konten.
+   Einreichungen gesperrter Konten werden weder nachgelesen noch angesehen —
+   sie bleiben stumm liegen.
 2. **Nachlesen** fehlender Angaben (Name, EAN, Preis, Hersteller) — siehe unten.
 3. **Dateien prüfen**: leer (0 Byte) = Mangel; nicht abrufbar = unsere Technik;
-   Identitätsfoto schon in einer älteren Einreichung = Wiederverwendung.
-4. **Bildprüfung** aller Fälle, denen kein Foto fehlt.
+   Identitätsfoto schon in einer älteren Einreichung — gegen ALLE
+   Einreichungen, über eine Storage-Liste von `crowduploads/` (6 Seiten, ~3 s
+   für 28.741 Dateien, 02.10.2026).
+4. **Bildprüfung** aller Fälle, denen kein Foto fehlt. Sie liest im selben
+   Aufruf die Nummer unter dem Strichcode des Barcode-Fotos mit (`eanFoto`);
+   wo nötig folgt eine zweite Lesung nur dieses Fotos (innerhalb der
+   Arbeitszeit). Ein Halte-Befund eines früheren Laufs gilt weiter, bis ein
+   Mensch in der Konsole entscheidet. Die Runde
+   legt das Ergebnis in `eanFotoOcr` ab (als Ganzes ersetzt), auch im Trockenlauf.
 5. **Chronologisch entscheiden** (`entscheideFall`) — eine im selben Lauf
    entschiedene Einreichung ist für die nächste derselben EAN Referenz bzw.
-   kein offener Vorgänger mehr.
-6. **Notbremse** prüfen, dann schreiben.
+   kein offener Vorgänger mehr. „Dieselbe EAN" heißt dieselbe GTIN in jeder
+   Schreibweise (`werte.eanSchluessel`).
+6. **Notbremse** prüfen, dann schreiben. Danach bekommt jeder Fall, der offen
+   bleibt, seinen Grund und die sperrenden Befunde in `review.rundeOffen`
+   (auch im Trockenlauf) — siehe „Was die Prüfkonsole von der Runde erfährt".
 7. **Auf die Buchungen warten** (höchstens 5 Minuten) — nur für die Zahlen im
    Bericht. Die Nachricht an die Nutzer schickt der Sammler in crowd-upload-reward.
 8. **Bericht** mit Bon-Lage, Aktionen und Warnungen schreiben.
@@ -49,6 +65,169 @@ Zeitbudget: nach 18 Minuten beginnt die Runde nichts Neues mehr; der Rest ist
 am nächsten Morgen dran (Warnung „nicht geschafft").
 
 ## Regeln, die nicht verhandelbar sind
+
+- **Dieselbe Person, dasselbe Produkt: einmal pro Woche (Entscheidung Patrick
+  02.10.2026: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche").**
+  Rollierend 168 h gegen die eigenen FREIGEGEBENEN Einreichungen derselben
+  wirksamen EAN (`eanOf`), symmetrisch um den Einreichzeitpunkt. „Dieselbe EAN"
+  = dieselbe GTIN in jeder Schreibweise (`werte.eanSchluessel`, links mit
+  Nullen auf 14 Stellen): die App nimmt beim Eintippen 8–14 Ziffern ohne
+  Normalisierung an, „0" + EAN-13 lag sonst in einer eigenen Gruppe (Prüfrunde
+  02.10.2026; im Bestand noch nicht ausgenutzt, 0 Gruppen). Die Konsole fragt
+  dafür alle Schreibweisen ab (`werte.eanVarianten`, `in`-Abfrage).
+  Einreichzeitpunkt = `createTime` des Dokuments (Server), nicht das vom Client
+  geschriebene `createdAt` — das prüfen die Regeln beim Anlegen nicht, ein
+  veränderter Client könnte es um mehr als 7 Tage verschieben (gemessen: 0 von
+  4.102 Dokumenten weichen > 10 min ab, die Umstellung ändert am Bestand nichts). KEINE
+  Ausnahme mehr für anderen Preis, Hersteller oder Markt — der Markt wird vom
+  Nutzer frei gewählt (Buschbohnen 02.10.: REWE und Netto binnen 10 Minuten,
+  beide bezahlt), Preis und Hersteller liest die Texterkennung. Fremde
+  Einreichungen sperren weiterhin nie (20.09.). Eine ältere eigene OFFENE
+  Einreichung hält an (`doppelt_eingereicht`, offen), damit immer eine Kopie
+  zahlbar bleibt. Abgelehnte sind nie Referenz.
+  **Am Dokument steht `doppelt_eingereicht`**, intern (`review.reason`, Bericht)
+  `sperre_woche_gleicher_nutzer`: Der alte Code `sperre_30_tage_gleicher_nutzer`
+  verspricht in allen ausgelieferten App-Versionen „ab dem nächsten Tag … und
+  sofort mit anderem Preis, Hersteller oder Markt" — falsch. Der präzise Text
+  liegt in `REASON_COPY` für die nächste Version; umstellen in
+  `duplicatePolicy.APP_GRUND`, wenn sie verbreitet ist. Gemessen vor dem
+  Ausrollen: 20 von 614 Freigaben der letzten 7 Tage (3,3 %) wären gesperrt
+  gewesen, seit Beginn 35 (3,28 €). Zurückgefordert wird nichts.
+- **Gesperrte Konten (Entscheidung Patrick 02.10.2026, „Ja, dann sperr die
+  Konten").** `cashback_sperren/{uid}` = `{ gesperrt: true, seit, grund,
+  quelle }`, server-only (deny-all in firestore.rules, Test vorhanden).
+  Gesperrt → **die Runde lässt die Einreichung STUMM liegen** (`offen
+  konto_gesperrt`, vor allem anderen, ohne Nachlesen und Bildprüfung, nichts
+  ans Dokument geschrieben); die Konsole gibt NIE frei, auch nicht mit force
+  (Ausgang `refused`). Patricks Vorgabe heißt „nicht freigegeben", nicht
+  „abgelehnt": eine Ablehnung wäre endgültig und für den Nutzer sichtbar, und
+  eine Sperre, die der Betroffene sieht, lädt zum Ausweichen auf ein neues
+  Konto ein (so auch die Gutschrift-Seite, `cashback-pipeline/lib/kontoSperre.js`).
+  Bis zur Prüfrunde 02.10.2026 lehnte die Runde ab — eine eigene Verschärfung,
+  die nie vorgelegt wurde. Ob es sichtbar abgelehnt werden soll, entscheidet
+  Patrick; dann braucht es vorher einen App-Text (`konto_gesperrt` hat bewusst
+  KEINEN REASON_COPY-Eintrag, der Server vergibt den Code nie). Der Bericht
+  zählt diese Fälle getrennt (`kontoSperren.offenEinreichungen`) — sie stehen
+  NICHT in „wartet auf dich" und lösen keine „wartet seit"-Warnung aus; in der
+  Konsole stehen sie am Ende der Liste (`gesperrt: true`, `counts.gesperrt`).
+  Wird die Sperre aufgehoben, prüft die nächste Runde sie ganz normal.
+  `gesperrt: false` oder kein Dokument = nicht gesperrt. Jedes andere
+  vorhandene Dokument sperrt — auch ohne Feld oder mit `gesperrt: 'ja'`
+  (Prüfrunde 2, 02.10.2026: dieselbe Regel wie auf der Gutschrift-Seite,
+  `cashback-pipeline/lib/kontoSperre.js istGesperrt`; vorher hieß ein unklarer
+  Eintrag hier `unbekannt`, dort „gesperrt"). Lesefehler
+  = `unbekannt` → NIE freigeben, aber auch nicht wegen der Sperre ablehnen
+  (`kontosperre_unbekannt`, rote Warnung). In der Schreib-Transaktion wird die
+  Sperre vor JEDER Entscheidung noch einmal gelesen, auch vor einer Ablehnung
+  (Schlussprüfung 03.10.2026): gesperrt → `konto_gesperrt_im_lauf`, der Fall
+  bleibt unverändert und stumm liegen (auch kein `review.rundeOffen`); ein
+  Lesefehler → `schreib_fehler`, weder Freigabe noch Ablehnung. Vorher galt das
+  nur vor einer Freigabe — war die Sperrliste beim Laden nicht lesbar, wurde
+  ein gesperrtes Konto voll bearbeitet und sichtbar abgelehnt. Bereits Gebuchtes
+  wird nicht zurückgebucht; Gutschrift und Auszahlung sperrt die
+  Gutschrift-Seite (eigener Zweig).
+- **Nummer vom Barcode-Foto (Entscheidung Patrick 02.10.2026).** Weicht die
+  gelesene Nummer von der gespeicherten (`ean`, gescannt/getippt) ab → offen
+  `ean_abweichend`, ein Mensch entscheidet; nie ablehnen, nie freigeben. Das
+  gilt VOR der Wochen-Sperre: die rechnet mit der gespeicherten EAN, und ist
+  die falsch, träfe sie womöglich ein anderes Produkt. Nur eine gültige GTIN
+  zählt als gelesen (Prüfziffer, Vergleich auf 14 Stellen, UPC-A = EAN-13 mit
+  führender 0). Nicht lesbar, Waagen-/Händler-Code mit eingerechnetem Gewicht
+  oder Preis (GTIN-13 mit 02, 04, 20–29; UPC-A mit 2 oder 4 — lose Ware wird
+  angenommen, 20.09.) oder keine gespeicherte EAN → kein Urteil. **EAN-8 wird
+  IMMER verglichen** (Prüfrunde 02.10.2026): EAN-8 mit 0 oder 2 vorne sind bei
+  Lidl, Penny und Norma fest gedruckte Eigenmarken-Barcodes (294 von 3.910
+  Einreichungen mit EAN) — bis dahin fiel für sie der Abgleich ganz weg. Die Doppel-Regel läuft zusätzlich unter der
+  Foto-Nummer; eine eigene Freigabe dort steht im Hinweis. Die gespeicherte EAN
+  steht NICHT mehr im Auftrag der Bildprüfung — sonst schreibt das Modell sie
+  ab. **Eine Abweichung wird mit einer zweiten Lesung nur des Barcode-Fotos
+  nachgeprüft** (`eanFotoBestaetigen`): dieselbe Nummer → bestätigt (offen
+  `ean_abweichend`); die GESPEICHERTE Nummer → `gleich`, die erste Lesung war
+  falsch, normal weiter; alles andere (leer, unsicher, dritte Nummer) →
+  `unsicher`, offen `ean_unsicher` (Prüfrunde 02.10.2026 — bis dahin wurde so
+  ein Fall freigegeben, obwohl die gespeicherte Nummer nie bestätigt war);
+  scheitert die Lesung technisch oder reicht die Arbeitszeit nicht mehr, bleibt
+  der Fall ebenfalls liegen. **Der Befund hält, bis ein Mensch in der Konsole
+  entscheidet (Prüfrunde 2, 02.10.2026; Schlussprüfung 03.10.2026):** ein
+  gespeichertes `abweichend`/`unsicher` gilt weiter, egal was spätere Läufe
+  lesen — ein „kein Urteil", eine ausgefallene Bildprüfung und auch ZWEI
+  Lesungen der gespeicherten Nummer heben ihn NICHT auf. Freigabe nur in der
+  Konsole mit force + Notiz (Entscheidung Patrick 2a: „Weicht sie ab, bleibt
+  die Einreichung liegen" — ein Mensch entscheidet). Vorher bewertete die Runde
+  jeden Morgen nur die Lesung des Tages (Kfs5jFA6qqOF8gD9iTEk wäre am zweiten
+  Tag mit einer unlesbaren Nummer freigegeben worden), und bis zur
+  Schlussprüfung hob sie einen Halt mit zwei Lesungen der gespeicherten
+  Nummer selbst auf — eine eigene Abschwächung, die Patrick nie vorgelegt war
+  (nachgestellt: Tag 1 angehalten, Tag 2 ohne Menschen freigegeben). Ein heutiges
+  „gleich" bekommt deshalb auch keine zweite Lesung mehr. Eine heute
+  bestätigte Abweichung ersetzt einen alten Befund (hält weiter); alles andere
+  lässt ihn stehen. Scheiterte das Speichern von `eanFotoOcr`, steht der Befund
+  auch in `review.rundeOffen.eanFoto` (`werte.eanFotoVorbefund`); hält EINE der
+  beiden Quellen an, gilt der Halt (vorher: der jüngere Lauf). Auch am ersten
+  Tag gibt die Maschine eine Abweichung nicht selbst frei: liest die
+  Bildprüfung eine ANDERE gültige Nummer und die zweite Lesung die
+  gespeicherte, wird das `unsicher` (`erste_lesung_abweichend`) und bleibt
+  liegen — siehe „Offen für Patrick" (d).
+  **Falsche Prüfziffer, weit weg (Prüfrunde 2):** liest das Modell eine
+  Nummer mit falscher Prüfziffer, die sich an mehr als 2 von 14 Stellen von
+  der gespeicherten unterscheidet (`zweifelhaft`), wird sie wie eine
+  Abweichung nachgelesen: die gespeicherte Nummer → `gleich`, sonst
+  `unsicher` (halten). Bis 2 Stellen bleibt es ein Lesefehler derselben
+  Nummer, kein Urteil. Gemessen in den Trockenläufen 02.10.: echte
+  Lesefehler 1–2 Stellen, die übrigen 4–12 (5 Fälle je Lauf). **Waagen-Code
+  nur dann ohne Urteil, wenn auch die gespeicherte Nummer einer ist**
+  (Prüfrunde 2): ein Waagen-Code auf dem Foto gegen einen gespeicherten
+  Hersteller-Barcode ist eine echte Abweichung (im Bestand 0 Fälle in beiden
+  Trockenläufen). Grund (Trockenlauf 02.10.,
+  273 offene Fälle): 198 gleich, 65 ohne Urteil, 9 Abweichungen — 6 davon am
+  Foto eindeutig echt (gespeicherte EAN falsch), 1 Foto mit zwei Strichcodes,
+  2 falsch gelesen: bei einem unscharfen Foto erfand jede Lesung eine andere,
+  GÜLTIGE Nummer, bei einem dunklen Foto war eine Ziffer falsch. Die
+  Prüfziffer allein schützt also nicht. Kosten: ~15 Ausgabe-Token je Fall im
+  ohnehin laufenden Aufruf (Eingabe ~8.200 Token für 7 Fotos), dazu eine
+  Lesung eines einzelnen Fotos je Abweichung (~3 % der Fälle).
+- **Foto-Abgleich gegen ALLE früheren Einreichungen (Entscheidung Patrick
+  02.10.2026).** Gruppen gleicher Identitätsfotos (Pfad oder md5, leere
+  Dateien ausgenommen). Die älteste Einreichung einer Gruppe trägt nie einen
+  Befund. Ältere eines FREMDEN Kontos → offen `foto_fremdes_konto`; sonst
+  ältere eigene freigegeben → `bilder_wiederverwendet`; ältere eigene offen →
+  offen `foto_aeltere_offen`; ältere eigene als DOPPEL abgelehnt
+  (`DOPPEL_GRUENDE`: Wochen-Sperre, `doppelt_eingereicht`, alte 24-h-Sperre,
+  `bilder_wiederverwendet`, `produkt_bereits_verguetet`) →
+  `bilder_wiederverwendet` — sonst ließen sich die Fotos einer als Doppel
+  abgelehnten Einreichung eine Woche später einfach noch einmal einreichen
+  (Prüfrunde 02.10.2026, im Bestand 12 solche jüngeren Einreichungen, 1 davon
+  freigegeben — eine legitime Korrektur nach `unvollstaendig`). Das gilt NUR,
+  wenn dieselbe Person für dieselbe EAN wirklich eine Freigabe hat
+  (`freigabeVon`, Prüfrunde 2): `doppelt_eingereicht` wurde auch schon ohne
+  bezahlte Referenz vergeben (10.09.: alle Kopien abgelehnt) — dann bliebe
+  keine Kopie bezahlt (im Bestand 02.10.: 0 von 21 Befunden betroffen); ältere nur
+  wegen eines behebbaren Mangels abgelehnt → normal prüfen (erlaubte
+  Korrektur). Der Status ist im Lauf nachgezogen. Vorher nur gegen die im Lauf
+  offenen; gemessen seit Beginn: 35 Einreichungen mit identischem Foto einer
+  älteren, davon 1 eigene und 2 fremde dennoch freigegeben. Scheitert die
+  Storage-Liste → keine Freigaben (`foto_abgleich_gescheitert`, rote Warnung).
+  **Foto-Befunde früherer Läufe (Schlussprüfung 03.10.2026,
+  `fotoRundeRegeln.bildMitVorbefund`):** lässt sich der Abgleich für einen
+  Fall heute nicht VOLLSTÄNDIG rechnen (Storage-Liste gescheitert, ein
+  Identitätsfoto nicht abrufbar oder ohne md5), gelten die Foto-Codes aus
+  `review.rundeOffen.sperrend` des Vortags weiter. Bis dahin verschwand ein
+  Halt dann aus `rundeOffen`, die Konsole zeigte „ok", und F gab ohne Notiz
+  frei — ein Technikausfall hob den Halt auf. `foto_fremdes_konto` gilt
+  IMMER weiter, bis ein Mensch in der Konsole entscheidet, auch wenn sich die
+  md5-Grundlage ändert: storage.rules erlaubt dem Eigentümer, eigene Dateien
+  in `crowduploads/` zu überschreiben — wer zwei Konten hat, überschriebe das
+  Original im anderen, und der Halt wäre am nächsten Morgen weg. Ein
+  übernommener Befund hält nur an, er wird nie zur Ablehnung (auch
+  `bilder_wiederverwendet` nicht); er trägt keine IDs (die stehen im
+  Tagesbericht des Laufs `fotoSeit`). Ein heute gefundener stärkerer Befund
+  geht vor; einer, der heute zusätzlich gefunden wurde, steht mit in
+  `sperrend`. Ist der Abgleich heute vollständig, wird `foto_aeltere_offen`/
+  `bilder_wiederverwendet` NICHT übernommen — die ältere Einreichung kann
+  inzwischen entschieden sein. Bericht: `fotoVorbefund.haelt`,
+  `fotoAbgleich.unvollstaendig`. Langfristig offen: Updates auf
+  `crowduploads/` nach dem ersten Hochladen sperren (Wiederholungen der
+  Upload-Queue beachten).
 
 - **Der Preis ist Pflicht (Entscheidung Patrick 26.09.2026).** Die Bildprüfung
   beantwortet `preisSichtbar` getrennt von `echt`. Freigabe nur, wenn der Preis
@@ -87,7 +266,16 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
 - **Eine Doppel-Gruppe muss eine zahlbare Kopie übrig lassen.** Die älteste
   Einreichung einer Gruppe ist die Referenz und wird nie gesperrt. Sonst geht
   auch die korrekte Erst-Einreichung leer aus (passiert am 10.09., 3 Gruppen).
-- **Bild-Wiederverwendung trifft nur die jüngere Einreichung**, nie beide.
+- **Bild-Wiederverwendung trifft nur die jüngere Einreichung**, nie beide
+  (seit 02.10. über `fotoRundeRegeln.bildBefund`, siehe oben).
+- **Eine Sperr-Ablehnung braucht einen Beleg, der feststeht (Prüfrunde
+  02.10.2026).** Wochen-Sperre und `bilder_wiederverwendet` stützen sich auf
+  eine andere Einreichung (`fotoRundeRegeln.belegeVon`). Geschrieben wird so
+  eine Ablehnung nur, wenn mindestens ein Beleg schon vor dem Lauf entschieden
+  war oder im selben Lauf TATSÄCHLICH geschrieben wurde. Sonst (Referenz-
+  Freigabe übersprungen, gescheitert, von der Notbremse oder einer frischen
+  Kontosperre zurückgehalten) bleibt der Fall offen
+  (`beleg_nicht_geschrieben`) — am Ende wäre sonst keine Kopie bezahlt.
 - **Bild-Dedup zählt nur die Identitäts-Fotos** (front, rueckseite, hersteller,
   ean, naehrwerte, zutaten) — NICHT `preis`. Zwei echte Sorten teilen sich oft
   ein gemeinsames Regal-/Aktionsschild.
@@ -110,18 +298,61 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
 - **Jeder Ablehngrund braucht einen App-Text** in `lib/utils/productSubmissionCopy.ts`.
   Ohne Eintrag liest der Nutzer einen Standardtext, der nicht zu seinem Fall
   passt (bis 20.09. bei 31 % der Abgelehnten so).
-- **Fehlende Vergleichswerte gelten als gleich** (fail-closed) — deshalb muss
-  bei fehlendem Preis BEIDE Seiten nachgelesen sein, Kandidat und Referenz.
-  Die Runde erfüllt das von selbst: die Referenz der Doppel-Regel ist eine
-  eigene Freigabe binnen 24 h und lief als offene Einreichung schon durch das
-  Nachlesen. Scheiterte das Nachlesen beim Kandidaten technisch und hängt die
-  Sperre nur am fehlenden Preis, bleibt der Fall offen statt abgelehnt.
-- **Ein geretteter Preis darf eine Sperre lösen, eine geretteter Herstellername
-  nicht.** Markeninhaber und Produzent stehen beide auf der Packung; das ist
-  kein Beleg für „andere Daten".
+- **Preis und Hersteller lösen keine Sperre mehr** (seit der Wochen-Regel
+  02.10.2026). Bis dahin galten fehlende Vergleichswerte als gleich, und ein
+  geretteter Preis — nie ein geretteter Hersteller — konnte die 24-h-Sperre
+  lösen. Die Werte stehen nur noch zur Information („Anders" in der Konsole).
 - **Lose Ware wird angenommen** (Entscheidung Patrick, 20.09.): Waagen-Codes
   sind kein Ablehngrund. Nur kennzeichnen und die Doppelprüfung zusätzlich nach
   Markt trennen.
+
+## Was die Prüfkonsole von der Runde erfährt (Prüfrunde 2, 02.10.2026)
+
+Die Konsole rechnet Doppel-Regel, Kontosperre und Barcode-Abgleich selbst —
+den Foto-Abgleich (md5 gegen alle früheren Einreichungen) und die zweite
+Barcode-Lesung kann sie nicht. Bis zur Prüfrunde 2 stand ein Fall, den die
+Runde wegen eines Fotos eines ANDEREN Kontos liegen ließ (das Muster hinter den
+gesperrten Konten), dort als „Vorprüfung ok" mit Freigabe-Taste.
+
+- Jeder Fall, der nach dem Lauf offen ist, trägt `review.rundeOffen` =
+  `{grund, hinweis, zurueckgehalten, sperrend[], eanFoto, lauf, trocken, at}`
+  (`fotoRundeRegeln.rundeOffenEintrag`). Im Trockenlauf bleibt jeder Fall
+  offen; `geplant` sagt, was die Runde getan hätte (eine geplante Freigabe
+  ohne Befund hinterlässt nichts).
+- `sperrend` kommt aus den TATSACHEN, nicht aus dem gewählten Grund
+  (`rundeBefunde`): gleiches Foto bei einem anderen Konto
+  (`foto_fremdes_konto`), in einer älteren offenen (`foto_aeltere_offen`)
+  oder bezahlten eigenen Einreichung (`bilder_wiederverwendet`, z. B. von der
+  Notbremse zurückgehalten), abweichende/unsichere Barcode-Nummer
+  (`ean_abweichend`/`ean_unsicher`). Die Konsole macht daraus `hold` —
+  Freigabe nur mit force + Notiz. Alle anderen Gründe (Bildprüfung
+  gescheitert, Ort auffällig, Preis unsicher …) stehen nur zur Information da.
+- **Nicht in `holdReasons`**: die zeigt die App bei offenen Fällen als
+  „Zurückgestellt". `review` liest die App nicht und steht in der Sperrliste
+  von firestore.rules (Rules-Test vorhanden).
+- Aktualisiert bzw. entfernt wird der Eintrag beim nächsten Lauf (in einer
+  Transaktion: hat inzwischen jemand entschieden, bleibt das Dokument
+  unberührt) — seine Foto-Befunde übernimmt der Lauf, wo er sie nicht
+  vollständig nachrechnen kann, `foto_fremdes_konto` immer (siehe
+  Foto-Abgleich); `fotoSeit` merkt sich den ersten Lauf. Jede Entscheidung
+  (Runde oder Konsole) ersetzt `review` und nimmt ihn mit; „Zurückstellen" in
+  der Konsole lässt ihn stehen. Gesperrte Konten bekommen keinen (sie liegen
+  stumm), auch nicht bei einer erst beim Schreiben bemerkten Sperre.
+- **Zurückholen** (reopen) einer Ablehnung ersetzt `review` und löscht
+  `rejectReason`, behält den Grund aber in `review.wiedereroeffnet`
+  (`vorherGrund` = Code am Dokument, `vorherIntern` = `review.reason`,
+  `vorherVon`). War es ein Doppel-Grund (`DOPPEL_GRUENDE`, z. B.
+  `bilder_wiederverwendet`, `doppelt_eingereicht`/Wochen-Sperre), liefert die
+  Konsole `hold` (`zurueckgeholt_doppel`) — Freigabe nur mit force + Notiz
+  (Schlussprüfung 03.10.2026; vorher stand eine Runden-Ablehnung wegen
+  wiederverwendeter Fotos nach dem Zurückholen als „ok" da). Die Morgenrunde
+  prüft einen zurückgeholten Fall am nächsten Morgen trotzdem neu.
+- `review.precheck.dup.priorId` steht nur bei einer EIGENEN Referenz am
+  Dokument (`sameUser === true`): die Doc-IDs beginnen mit der uid, eine fremde
+  Referenz-ID verriet die uid eines anderen Kontos (03.10.: 237 Dokumente im
+  Bestand, nicht bereinigt).
+- Scheitert das Speichern bei einem Fall mit sperrendem Befund → rote Warnung
+  `befund_nicht_gespeichert`.
 
 ## Rettungsläufe vor dem Urteil
 
@@ -152,6 +383,52 @@ Freigaben laufen IMMER — sie sind die harmlose Richtung. Zurückgehalten
   mehr geschrieben (Gegenprüfung 26.09.).
 - **Preis fehlt auffällig oft:** mindestens 8 und mehr als 30 % der geprüften
   Fälle → nur diese Ablehnungen (normal gut 10 %).
+- **Wochen-Sperre auffällig oft:** mindestens 10 und mehr als 15 % aller Fälle
+  des Laufs → nur diese Ablehnungen (gemessen 3,3 %). Eher ein Fehler beim
+  Gruppieren als echte Doppel.
+- Wochen-Sperre und alte 24-h-Sperre zählen wie „Preis fehlt" NICHT in die
+  Gesamtquote — weder heute noch im 30-Tage-Schnitt (`AUSSER_GESAMTQUOTE`,
+  geprüft an `rejectReason` UND `review.reason`). Gesperrte Konten brauchen
+  keine Bremse: sie werden nicht abgelehnt.
+
+## Bekannte Lücken (bewusst offen, Prüfrunde 02.10.2026)
+
+- **Lose Ware und Waagen-Codes fallen nie unter die Wochen-Sperre.** Ohne EAN
+  gibt es keine Gruppe (19 Freigaben im Bestand); ein Waagen-Code mit
+  eingerechnetem Preis oder Gewicht ändert sich je Packung (rund 38 GTIN-13
+  mit 02/2x/04). Gleiche Person, gleicher Name binnen 7 Tagen: 1 Paar (16 ct).
+- **Händlercodes zweier Ketten können kollidieren.** Seit der Markt keine
+  Ausnahme mehr ist, sperrt ein Händlercode von dm den gleichen Code von Netto
+  derselben Person (im Bestand 1 Paar, dort dasselbe Produkt). Gehört zu
+  ClickUp 12487v2akqg (Händlercodes kennzeichnen, Doppel-Prüfung nach Markt).
+- **„Dieselbe Person" heißt „dieselbe uid".** Gast-Konto und Zielkonto eines
+  Kontowechsels, oder mehrere Konten einer Person (wie bei den beiden
+  gesperrten), zählen als verschiedene Personen — für Wochen-Sperre UND
+  Kontosperre. Heute ohne Geldwirkung (Gäste zahlen nicht aus, Übernahme
+  Stufe 2 ist aus). **Pflichtpunkt für Gast-Übernahme Stufe 2:** beide Regeln
+  müssen Gast und Zielkonto als eine Person behandeln.
+- **Welche fremde Einreichung dasselbe Foto hat, sieht die Konsole nicht
+  direkt** (Prüfrunde 2): die IDs stehen nur im Tagesbericht, weil der
+  Einreicher sein eigenes Dokument lesen darf. Die Codes selbst
+  (`foto_fremdes_konto` in `review.rundeOffen`) kann ein technisch versierter
+  Nutzer in seinem Rohdokument lesen — die App zeigt sie nicht (wie
+  `konto_gesperrt`).
+- **Offen für Patrick (Prüfrunde 2):** (a) zählt die Wochen-Sperre auch
+  Freigaben, die nie bezahlt wurden (Pro-Kopf-Deckel, Aktionslücke, kein
+  Ort)? Heute ja (fail-closed; gemessen 1 betroffene Einreichung, 12 ct).
+  (b) Übergang: wer in den letzten 7 Tagen nach der 24-h-Regel abgelehnt wurde
+  (13 Dokumente, 10 Personen), las in der App „ab dem nächsten Tag zählt es
+  wieder". (c) Gespeicherte EAN mit falscher Prüfziffer und unlesbares
+  Barcode-Foto → heute kein Urteil (6 von 3.894 gespeicherten EANs).
+  (d) **Barcode, erster Tag (Patrick vorgelegt am 03.10.2026):** liest die
+  Bildprüfung eine ANDERE gültige Nummer und die zweite Lesung die
+  gespeicherte, war die erste vermutlich eine Fehllesung. Bis zu Patricks
+  Antwort gilt sein Wortlaut („weicht sie ab, bleibt die Einreichung
+  liegen"): der Fall bleibt liegen (`unsicher`, `erste_lesung_abweichend`), ein
+  Mensch entscheidet. Wirkung laut Trockenlauf ~1 Fall/Tag. **Frage: darf die
+  Maschine in diesem Fall selbst weitergeben?** (`werte.eanFotoBestaetigen`)
+  Ebenso: die alten Handrunden-Skripte (`.crowd-review-0909/1309.js`, nicht
+  versioniert) schreiben `dup.reason` unverändert — nicht mehr benutzen.
 
 ## Warnungen im Bericht
 
@@ -160,10 +437,17 @@ Aktion läuft aus ohne Nachfolger (01.09.), keine laufende Aktion, Budget leer
 oder knapp, **Zweitprüfung eingeschaltet aber 48 h nicht gelaufen** (23.09.:
 ein Ausrollen von einem Zweig ohne diesen Code nahm sie still raus), Bons
 hängen ≥ 3 Tage in der Prüfung, > 5 % Bons ohne Aktion, Bildprüfung
-scheitert reihenweise, Runde nicht fertig geworden, Notbremse, Regeln
+scheitert reihenweise, Runde nicht fertig geworden, Notbremse, Sperrliste
+nicht lesbar bzw. Foto-Abgleich gescheitert (dann gab es keine Freigaben;
+Foto-Befunde früherer Läufe gelten weiter, heute erstmals geprüfte Fälle stehen
+in der Konsole ohne Foto-Befund), Regeln
 oder Anweisungen an das Modell seit dem letzten Lauf geändert, Produktfotos
 warten ≥ 3 Tage auf eine Entscheidung (seit der Preis-Pflicht bleibt bei
-Zweifel mehr liegen). Dass die Runde gar nicht lief, erkennen
+Zweifel mehr liegen), mehr als 10 % (mind. 8) der geprüften Fälle heute NEU
+wegen der Barcode-Nummer angehalten (gelb, über 25 % rot; normal ~3 % — ein
+Sprung deutet auf das Modell, Prüfrunde 2), Halte-Grund für die Konsole nicht
+gespeichert (rot) bzw. nur der Barcode-Befund nicht (gelb, steht ersatzweise
+am Halte-Grund). Dass die Runde gar nicht lief, erkennen
 Dashboard und Morgen-Chat selbst (Bericht älter als 26 h bzw. nicht von heute).
 
 ## Nachricht an die Nutzer

@@ -469,6 +469,8 @@ describe('Ratings, Feedback, Telemetrie, Push-Tokens', () => {
       rewardPushSentAt: new Date(),
       probableLocation: { source: 'gps' },
       exifGps: { lat: 1, lon: 2 },
+      // 02.10.2026: wer „Foto-Nummer stimmt" vorgibt, umginge die Prüfung der Konsole.
+      eanFotoOcr: { ean: '4061458000001', befund: 'gleich' },
     };
     for (const [feld, wert] of Object.entries(faelle)) {
       await assertFails(setDoc(doc(alice(), `crowd_uploads/angriff_${feld}`), { ...appAnlage(), [feld]: wert }));
@@ -491,6 +493,7 @@ describe('Ratings, Feedback, Telemetrie, Push-Tokens', () => {
     'priceRescueOcr', 'manufacturerRescueOcr', 'rescueAt', 'rescueQuelle',
     'productNameRescueAt', 'productNameRescueQuelle',
     'eanRescueAt', 'eanRescueQuelle',
+    'eanFotoOcr',
     'review', 'reviewedBy', 'reviewedAt', 'reviewNote', 'holdReasons',
     'rejectReason', 'loseWare', 'frischwareOhneAngaben',
     'rewardResult', 'rewardCents', 'rewardNotCreditedReason',
@@ -500,12 +503,23 @@ describe('Ratings, Feedback, Telemetrie, Push-Tokens', () => {
     'journeyLocationMatch', 'userLocationBackfilled',
   ];
 
-  test('ANGRIFF: JEDES Feld der Sperrliste beim Anlegen scheitert (47 Felder)', async () => {
-    expect(SERVER_FELDER).toHaveLength(47);
+  test('ANGRIFF: JEDES Feld der Sperrliste beim Anlegen scheitert (48 Felder)', async () => {
+    expect(SERVER_FELDER).toHaveLength(48);
     expect(new Set(SERVER_FELDER).size).toBe(SERVER_FELDER.length);
     for (const feld of SERVER_FELDER) {
       await assertFails(setDoc(doc(alice(), `crowd_uploads/liste_${feld}`), { ...appAnlage(), [feld]: 'x' }));
     }
+  });
+
+  test('ANGRIFF: Halte-Grund der Morgenrunde (review.rundeOffen) beim Anlegen vorbelegen scheitert — auch ohne andere review-Felder', async () => {
+    // Prüfrunde 2 (02.10.2026): die Prüfkonsole hält Fälle mit sperrenden
+    // Befunden in review.rundeOffen an; wer ihn leer vorbelegt, gäbe vor, es
+    // gebe nichts zu beanstanden. Ändern kann der Client das Dokument nie.
+    await assertFails(setDoc(doc(alice(), 'crowd_uploads/angriff_rundeOffen'), {
+      ...appAnlage(), review: { rundeOffen: { grund: null, sperrend: [], lauf: '2099-01-01_000000' } },
+    }));
+    await assertSucceeds(setDoc(doc(alice(), 'crowd_uploads/ohne_rundeOffen'), appAnlage()));
+    await assertFails(updateDoc(doc(alice(), 'crowd_uploads/ohne_rundeOffen'), { 'review.rundeOffen': { sperrend: [] } }));
   });
 
   test('Gegenprobe: die App-Anlage trägt keines der gesperrten Felder', () => {

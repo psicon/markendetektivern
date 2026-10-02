@@ -1,7 +1,8 @@
 'use strict';
-const { evaluateDuplicate, dataDiffers, manufacturerEqual, completenessCheck, dupZumSpeichern, LOCK_MS, SAME_USER_LOCK_MS, REASON } = require('../src/duplicatePolicy');
+const { evaluateDuplicate, dataDiffers, manufacturerEqual, completenessCheck, dupZumSpeichern, SAME_USER_LOCK_MS, REASON, appGrund } = require('../src/duplicatePolicy');
 
 const DAY = 24 * 60 * 60 * 1000;
+const HOUR = 60 * 60 * 1000;
 const T0 = Date.parse('2026-09-01T10:00:00Z');
 // Vergleichswerte kommen NUR aus den server-geschriebenen OCR-Feldern
 // (crowd-upload-namer) — Top-Level wäre client-schreibbar.
@@ -15,7 +16,11 @@ const base = (over = {}) => {
   };
 };
 
-describe('evaluateDuplicate', () => {
+describe('evaluateDuplicate — einmal pro Woche (Entscheidung Patrick 02.10.2026)', () => {
+  test('Fenster ist genau 7 Tage (168 h)', () => {
+    expect(SAME_USER_LOCK_MS).toBe(7 * DAY);
+  });
+
   test('ohne Referenz → ok', () => {
     expect(evaluateDuplicate(base(), [])).toMatchObject({ verdict: 'ok', priorId: null });
   });
@@ -30,48 +35,55 @@ describe('evaluateDuplicate', () => {
     expect(evaluateDuplicate(base(), [prior]).verdict).toBe('ok');
   });
 
-  test('gleicher Nutzer, versehentliches Doppel binnen Minuten, gleiche Daten → Sperre', () => {
+  test('gleicher Nutzer, Doppel binnen Minuten → Wochen-Sperre mit Frist', () => {
     const prior = base({ id: 'p', status: 'approved', createdAt: T0 - 10 * 1000 });
     const r = evaluateDuplicate(base(), [prior]);
-    expect(r).toMatchObject({ verdict: 'locked', reason: REASON.SAME_USER, priorId: 'p', sameUser: true });
-    expect(r.lockUntil).toBe(prior.createdAt + SAME_USER_LOCK_MS);
+    expect(r).toMatchObject({ verdict: 'locked', reason: REASON.SAME_USER_WEEK, priorId: 'p', sameUser: true });
+    expect(r.lockUntil).toBe(prior.createdAt + 7 * DAY);
   });
 
-  test('gleicher Nutzer, aber erst Tage später → neue Arbeit, also ok', () => {
-    const prior = base({ id: 'p', status: 'approved', createdAt: T0 - 5 * DAY });
-    expect(evaluateDuplicate(base(), [prior]).verdict).toBe('ok');
+  test('gleicher Nutzer, 25 Stunden später → JETZT gesperrt (vorher frei, Fenster war 24 h)', () => {
+    const prior = base({ id: 'p', status: 'approved', createdAt: T0 - 25 * HOUR });
+    expect(evaluateDuplicate(base(), [prior])).toMatchObject({ verdict: 'locked', reason: REASON.SAME_USER_WEEK });
   });
 
-  test('gleicher Nutzer, 25 Stunden später → ok (Fenster ist 24 h)', () => {
-    const prior = base({ id: 'p', status: 'approved', createdAt: T0 - 25 * 60 * 60 * 1000 });
-    expect(evaluateDuplicate(base(), [prior]).verdict).toBe('ok');
+  test('gleicher Nutzer, 6 Tage 23 Stunden später → gesperrt', () => {
+    const prior = base({ id: 'p', status: 'approved', createdAt: T0 - (7 * DAY - HOUR) });
+    expect(evaluateDuplicate(base(), [prior]).verdict).toBe('locked');
   });
 
-  test('anderer Preis hebt auch das Selbst-Doppel auf', () => {
-    const prior = base({ id: 'p', status: 'approved', createdAt: T0 - 10 * 1000, priceCents: 179 });
-    expect(evaluateDuplicate(base(), [prior])).toMatchObject({ verdict: 'ok', updatedFields: ['price'], diff: { price: [179, 199] } });
+  test('gleicher Nutzer, genau 168 h später → ok (Grenze exklusiv); 8 Tage später → ok', () => {
+    expect(evaluateDuplicate(base(), [base({ id: 'p', status: 'approved', createdAt: T0 - 7 * DAY })]).verdict).toBe('ok');
+    const r = evaluateDuplicate(base(), [base({ id: 'p', status: 'approved', createdAt: T0 - 8 * DAY })]);
+    expect(r).toMatchObject({ verdict: 'ok', priorId: 'p', sameUser: true });
   });
 
-  test('anderer Hersteller / anderer Markt zählen als andere Daten', () => {
-    const prior = base({ id: 'p', status: 'approved', createdAt: T0 - 60 * 1000, manufacturer: 'Bauer AG' });
-    expect(evaluateDuplicate(base(), [prior]).updatedFields).toEqual(['manufacturer']);
-    const prior2 = base({ id: 'p', status: 'approved', createdAt: T0 - 60 * 1000, marketId: 'm2' });
-    expect(evaluateDuplicate(base(), [prior2]).updatedFields).toEqual(['market']);
+  test('KEINE Ausnahme mehr: anderer Preis, anderer Hersteller, anderer Markt — alles gesperrt', () => {
+    const preis = base({ id: 'p', status: 'approved', createdAt: T0 - HOUR, priceCents: 179 });
+    const r = evaluateDuplicate(base(), [preis]);
+    expect(r).toMatchObject({ verdict: 'locked', reason: REASON.SAME_USER_WEEK, updatedFields: ['price'] });
+    expect(r.diff.price).toEqual([179, 199]);
+    expect(evaluateDuplicate(base(), [base({ id: 'p', status: 'approved', createdAt: T0 - HOUR, manufacturer: 'Bauer AG' })]).verdict).toBe('locked');
+    expect(evaluateDuplicate(base(), [base({ id: 'p', status: 'approved', createdAt: T0 - HOUR, marketId: 'm2' })]).verdict).toBe('locked');
   });
 
-  test('fehlende OCR-Werte gelten als gleich — sperrt aber nur im 24-h-Fenster', () => {
-    const kurz = base({ id: 'p', status: 'approved', createdAt: T0 - 60 * 1000, priceCents: null, manufacturer: null });
-    expect(evaluateDuplicate(base({ priceCents: null }), [kurz]).verdict).toBe('locked');
-    const spaeter = base({ id: 'p', status: 'approved', createdAt: T0 - 2 * DAY, priceCents: null, manufacturer: null });
-    expect(evaluateDuplicate(base({ priceCents: null }), [spaeter]).verdict).toBe('ok');
+  test('Buschbohnen 02.10.: REWE und Netto binnen 10 Minuten → die zweite ist gesperrt', () => {
+    const rewe = base({ id: 'rewe', status: 'approved', createdAt: T0 - 10 * 60 * 1000, marketId: 'rewe', priceCents: 129 });
+    const netto = base({ id: 'netto', marketId: 'netto', priceCents: 99 });
+    expect(evaluateDuplicate(netto, [rewe])).toMatchObject({ verdict: 'locked', priorId: 'rewe', updatedFields: ['price', 'market'] });
   });
 
-  test('eigene ältere offene Einreichung → hold (erst die entscheiden)', () => {
+  test('fehlende OCR-Werte spielen keine Rolle mehr', () => {
+    const p = base({ id: 'p', status: 'approved', createdAt: T0 - 2 * DAY, priceCents: null, manufacturer: null });
+    expect(evaluateDuplicate(base({ priceCents: null }), [p]).verdict).toBe('locked');
+  });
+
+  test('eigene ältere offene Einreichung → hold (erst die entscheiden — so bleibt eine Kopie zahlbar)', () => {
     const older = base({ id: 'o', status: 'pending', createdAt: T0 - DAY });
     expect(evaluateDuplicate(base(), [older])).toMatchObject({ verdict: 'hold', reason: REASON.PENDING_OLDER, priorId: 'o' });
   });
 
-  test('FREMDE offene Einreichung hält nichts mehr auf', () => {
+  test('FREMDE offene Einreichung hält nichts auf', () => {
     const older = base({ id: 'o', userId: 'u2', status: 'pending', createdAt: T0 - DAY });
     expect(evaluateDuplicate(base(), [older]).verdict).toBe('ok');
   });
@@ -81,27 +93,30 @@ describe('evaluateDuplicate', () => {
     expect(evaluateDuplicate(base(), [newer]).verdict).toBe('ok');
   });
 
-  test('eine JÜNGERE eigene Freigabe im 24-h-Fenster sperrt ebenfalls (Backlog-Reihenfolge)', () => {
-    const younger = base({ id: 'y', status: 'approved', createdAt: T0 + 4 * 60 * 60 * 1000 });
+  test('eine JÜNGERE eigene Freigabe im Fenster sperrt ebenfalls (Backlog-Reihenfolge)', () => {
+    const younger = base({ id: 'y', status: 'approved', createdAt: T0 + 3 * DAY, priceCents: 149 });
     const r = evaluateDuplicate(base(), [younger]);
-    expect(r).toMatchObject({ verdict: 'locked', reason: REASON.SAME_USER, priorId: 'y' });
+    expect(r).toMatchObject({ verdict: 'locked', reason: REASON.SAME_USER_WEEK, priorId: 'y' });
     expect(r.lockUntil).toBe(younger.createdAt + SAME_USER_LOCK_MS);
   });
 
-  test('jüngere Freigabe mit anderen Daten sperrt nicht', () => {
-    const younger = base({ id: 'y', status: 'approved', createdAt: T0 + 4 * 60 * 60 * 1000, priceCents: 149 });
-    expect(evaluateDuplicate(base(), [younger])).toMatchObject({ verdict: 'ok', priorId: 'y', updatedFields: ['price'] });
+  test('mehrere eigene Freigaben: Frist richtet sich nach der jüngsten', () => {
+    const a = base({ id: 'a', status: 'approved', createdAt: T0 - 6 * DAY });
+    const b = base({ id: 'b', status: 'approved', createdAt: T0 - 2 * DAY });
+    expect(evaluateDuplicate(base(), [a, b])).toMatchObject({ priorId: 'b', lockUntil: b.createdAt + 7 * DAY });
   });
 
-  test('Freigabe außerhalb des Fensters bleibt Information, sperrt nicht', () => {
-    const old = base({ id: 'o', status: 'approved', createdAt: T0 - 40 * DAY });
-    expect(evaluateDuplicate(base(), [old])).toMatchObject({ verdict: 'ok', priorId: 'o' });
-  });
-
-  test('abgelehnte Einreichungen sind keine Referenz; Kandidat selbst wird ignoriert', () => {
+  test('abgelehnte Einreichungen sind keine Referenz und verlängern nichts; Kandidat selbst wird ignoriert', () => {
     const rej = base({ id: 'r', status: 'rejected', createdAt: T0 - 60 * 1000 });
     const self = base({ id: 'x', status: 'pending' });
     expect(evaluateDuplicate(base(), [rej, self]).verdict).toBe('ok');
+  });
+
+  test('täglich dasselbe Produkt: Tag 0 frei, Tage 1–6 gesperrt, Tag 7 wieder frei', () => {
+    const tag0 = base({ id: 't0', status: 'approved', createdAt: T0 });
+    const gesperrt = [1, 2, 3, 4, 5, 6].map((t) => base({ id: `t${t}`, status: 'rejected', createdAt: T0 + t * DAY }));
+    expect(evaluateDuplicate(base({ id: 'k3', createdAt: T0 + 3 * DAY }), [tag0, ...gesperrt]).verdict).toBe('locked');
+    expect(evaluateDuplicate(base({ id: 'k7', createdAt: T0 + 7 * DAY }), [tag0, ...gesperrt]).verdict).toBe('ok');
   });
 
   test('Firestore-Timestamps und ISO-Strings werden gelesen', () => {
@@ -112,6 +127,16 @@ describe('evaluateDuplicate', () => {
   test('Der reale Fall Blumhofer: eigene Erfassung 22 Tage vorher zählt wieder', () => {
     const august = base({ id: 'aug', status: 'approved', createdAt: T0 - 22 * DAY, priceCents: null, manufacturer: null });
     expect(evaluateDuplicate(base({ priceCents: null }), [august]).verdict).toBe('ok');
+  });
+});
+
+describe('appGrund — Code am Dokument für die App (Entscheidung Patrick 02.10.2026)', () => {
+  test('Wochen-Sperre und alter 24-h-Code erscheinen als doppelt_eingereicht', () => {
+    expect(appGrund(REASON.SAME_USER_WEEK)).toBe('doppelt_eingereicht');
+    expect(appGrund(REASON.SAME_USER)).toBe('doppelt_eingereicht');
+  });
+  test('alle anderen Codes bleiben', () => {
+    for (const c of ['unvollstaendig', 'preis_fehlt', 'konto_gesperrt', 'bilder_wiederverwendet', 'doppelt_eingereicht']) expect(appGrund(c)).toBe(c);
   });
 });
 
@@ -151,9 +176,19 @@ describe('dupZumSpeichern', () => {
     const d = evaluateDuplicate(kand, [prior]);
     expect(d.priorUserId).toBe('andere');
     const s = dupZumSpeichern(d);
-    expect(s).toEqual({ verdict: 'ok', reason: null, priorId: 'p', sameUser: false, lockUntil: d.lockUntil, updatedFields: ['price', 'market'] });
+    // priorId einer FREMDEN Referenz nicht (die Doc-ID beginnt mit deren uid, Schlussprüfung 03.10.2026)
+    expect(d.priorId).toBe('p');
+    expect(s).toEqual({ verdict: 'ok', reason: null, priorId: null, sameUser: false, lockUntil: d.lockUntil, updatedFields: ['price', 'market'] });
     expect(JSON.stringify(s)).not.toContain('andere');
     expect(JSON.stringify(s)).not.toContain('199');
+    expect(JSON.stringify(s)).not.toContain('"p"');
+  });
+  it('eigene Referenz → priorId bleibt (Wochen-Sperre, ältere offene, eigene Freigabe außerhalb des Fensters)', () => {
+    const eigen = { id: 'ich_alt', userId: 'ich', ean: '4061464833821', status: 'approved', createdAt: T - 3 * 86400000 };
+    const kand = { id: 'ich_neu', userId: 'ich', ean: '4061464833821', status: 'pending', createdAt: T };
+    expect(dupZumSpeichern(evaluateDuplicate(kand, [eigen]))).toMatchObject({ verdict: 'locked', priorId: 'ich_alt', sameUser: true });
+    expect(dupZumSpeichern(evaluateDuplicate(kand, [{ ...eigen, status: 'pending' }]))).toMatchObject({ verdict: 'hold', priorId: 'ich_alt', sameUser: true });
+    expect(dupZumSpeichern(evaluateDuplicate(kand, [{ ...eigen, createdAt: T - 40 * 86400000 }]))).toMatchObject({ verdict: 'ok', priorId: 'ich_alt', sameUser: true });
   });
   it('Kurzform der Runde ohne EAN ({verdict, reason, lockUntil}) und null', () => {
     expect(dupZumSpeichern({ verdict: 'ok', reason: null, lockUntil: null })).toEqual({ verdict: 'ok', reason: null, priorId: null, sameUser: null, lockUntil: null, updatedFields: [] });

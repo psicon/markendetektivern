@@ -9,29 +9,49 @@
  *  - Admin-only (Custom-Claim `admin:true`), Admin-SDK → keine Rules-Lockerung.
  *  - Das Tool setzt NUR den Status. Geld bucht ausschließlich der Trigger
  *    crowd-upload-reward auf der Flanke pending→approved (Idempotenz dort).
- *  - Die Doppel-Regel (30-Tage-Sperre, außer andere Daten) wird bei JEDER
- *    Freigabe frisch aus den Tatsachen berechnet — nicht aus einem Cache.
- *    `force:true` + Notiz übersteuert bewusst und wird am Doc vermerkt.
+ *  - Die Doppel-Regel (Wochen-Sperre gegen sich selbst, Entscheidung Patrick
+ *    02.10.2026) wird bei JEDER Freigabe frisch aus den Tatsachen berechnet —
+ *    nicht aus einem Cache. `force:true` + Notiz übersteuert bewusst und wird
+ *    am Doc vermerkt.
+ *  - Gesperrte Konten (`cashback_sperren/{uid}`, Entscheidung Patrick
+ *    02.10.2026) gibt die Konsole NIE frei, auch nicht mit force. Die Sperre
+ *    wird in der Freigabe-Transaktion gelesen; scheitert das Lesen, wird nicht
+ *    freigegeben. Die Morgenrunde lässt diese Fälle stumm liegen; in der
+ *    Warteschlange stehen sie am Ende.
+ *  - Was die Morgenrunde bei einem offenen Fall gefunden hat und die Konsole
+ *    selbst nicht prüfen kann (gleiches Foto bei einem anderen Konto oder in
+ *    einer älteren Einreichung, abweichende/unsichere Barcode-Nummer), steht
+ *    in `review.rundeOffen` (Prüfrunde 2, 02.10.2026). precheckOf macht daraus
+ *    `hold` — Freigabe nur mit force + Notiz. Jede Entscheidung hier ersetzt
+ *    `review` und nimmt den Eintrag mit; sonst aktualisiert ihn der nächste Lauf.
  *  - Batch = pro ID eigene Transaktion + Ergebnis pro ID. Kein „alles oder nichts".
  *  - reviewNote immer positiv formuliert (Copy-Ton-Regel, CLAUDE.md).
  *
- * Ausroll-Reihenfolge seit 26.09.2026 (effektive Werte aus src/werte.js):
- *  1. firestore.rules — sperrt die Namer-/Nachlese-Felder beim Anlegen. Vorher
- *     vertraute die Konsole fälschbaren *RescueOcr-Werten.
+ * Ausroll-Reihenfolge seit 26.09.2026 (effektive Werte aus src/werte.js),
+ * ergänzt 02.10.2026 (Wochen-Sperre, Barcode-Foto, Kontosperre):
+ *  1. firestore.rules — sperrt die Namer-/Nachlese-Felder und `eanFotoOcr`
+ *     beim Anlegen. Vorher vertraute die Konsole fälschbaren Werten; ginge
+ *     diese Codebase zuerst live, könnte ein Client `eanFotoOcr` mit der
+ *     gespeicherten Nummer vorbelegen.
  *  2. diese Codebase SOLO (Multi-Codebase-Deploys flaken, CLAUDE.md).
  *  3. hosting:md-receipt-admin — pruefen.html fällt zwar auf die Rohfelder
  *     zurück, zeigt nachgelesene Werte aber erst mit dieser Codebase.
+ *  4. Gutschrift-Seite der Kontosperre (cashback-pipeline, crowd-upload-reward,
+ *     survey-reward; Zweig claude/reward-sperre).
+ *  5. ERST DANN `cashback_sperren/{uid}` anlegen.
  */
 
 const admin = require('firebase-admin');
 const { FieldValue } = require('firebase-admin/firestore');
 const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
 const logger = require('firebase-functions/logger');
-const { REASON, dupZumSpeichern, ms } = require('./src/duplicatePolicy');
+const { REASON, dupZumSpeichern, ms, appGrund } = require('./src/duplicatePolicy');
+const { SPERREN, ladeSperren, kontoSperreVon, sperreAusDaten } = require('./src/kontoSperre');
 const {
   INDEX_FELDER, safeStatus, rowOf, stripPolicy, precheckOf, precheckFuerFall,
-  nachbarnAus, gruppiereNachEan, eanIndex, baueFotoListe,
+  nachbarnAus, nachbarnVon, gruppiereNachEan, eanIndex, baueFotoListe,
 } = require('./src/einreichung');
+const { eanVarianten } = require('./src/werte');
 const { ortVonEinreichung, ortVonBon, ortsverzeichnisAusBons } = require('./src/ort');
 const { pruefeOrtsanforderung } = require('./src/locationGate');
 const { kachelUrl, pruefeKachelAnfrage, MIN_SCHLUESSEL } = require('./src/kachel');
@@ -58,8 +78,11 @@ const fmtDate = (msValue) => (msValue ? new Date(msValue).toLocaleDateString('de
 function noteFor(reason, ctx = {}) {
   const until = fmtDate(ctx.lockUntil);
   switch (reason) {
+    // Wochen-Sperre (Entscheidung Patrick 02.10.2026); der Altcode aus einer
+    // noch nicht neu ausgerollten Konsole bekommt denselben Text.
+    case REASON.SAME_USER_WEEK:
     case REASON.SAME_USER:
-      return `Dieses Produkt hast du vor Kurzem schon erfasst — danke! Eine neue Einreichung zählt wieder ab ${until || 'in 30 Tagen'}, oder sofort, wenn sich Preis oder Hersteller geändert haben.`;
+      return `Dieses Produkt hast du diese Woche schon erfasst — danke! Derselbe Artikel zählt wieder ab ${until || 'nächster Woche'}.`;
     case REASON.OTHER_USER:
       return `Dieses Produkt ist bei uns schon frisch erfasst — danke fürs Mitmachen! Ab ${until || 'in 30 Tagen'} zählt es wieder, oder sofort mit neuem Preis oder anderem Hersteller.`;
     case REASON.PENDING_OLDER:
@@ -86,11 +109,13 @@ function noteFor(reason, ctx = {}) {
 /**
  * Alle Einreichungen zu einer EAN-Menge (Chunks à 30 für `in`-Queries), über
  * BEIDE EAN-Felder: eine nur nachgelesene EAN (`eanRescueOcr`) ist genauso
- * Nachbar wie eine gescannte — die Runde gruppiert über eanOf. Ergebnis je
- * effektiver EAN (`row.anzeigeEan`).
+ * Nachbar wie eine gescannte — die Runde gruppiert über eanOf. Abgefragt wird
+ * jede Schreibweise derselben GTIN (werte.eanVarianten: „0" + EAN-13 ist
+ * derselbe Artikel, Prüfrunde 02.10.2026). Ergebnis je GTIN — nachschlagen
+ * mit nachbarnVon(byEan, ean).
  */
 async function loadByEans(eans) {
-  const list = [...new Set(eans.filter(Boolean))];
+  const list = [...new Set(eans.filter(Boolean).flatMap(eanVarianten))];
   const docs = [];
   for (let i = 0; i < list.length; i += 30) {
     const chunk = list.slice(i, i + 30);
@@ -110,9 +135,26 @@ async function loadByEans(eans) {
  * Transaktions-Reads bringen bei zwei Abfragen nichts.
  */
 async function nachbarnInTx(tx, ean, ohneId) {
-  const gescannt = await tx.get(db.collection(COL).where('ean', '==', ean));
-  const nachgelesen = await tx.get(db.collection(COL).where('eanRescueOcr', '==', ean));
+  const varianten = eanVarianten(ean); // höchstens 8 — `in` erlaubt 30
+  const gescannt = await tx.get(db.collection(COL).where('ean', 'in', varianten));
+  const nachgelesen = await tx.get(db.collection(COL).where('eanRescueOcr', 'in', varianten));
   return nachbarnAus([...gescannt.docs, ...nachgelesen.docs], ean, ohneId);
+}
+
+/**
+ * Zusatz-Eingaben der Vorprüfung für EINEN Fall außerhalb einer Transaktion:
+ * Kontosperre (Lesefehler → 'unbekannt') und die Einreichungen unter der
+ * Nummer vom Barcode-Foto, wenn sie von der gespeicherten abweicht.
+ */
+async function fallOptionen(row) {
+  const fotoEan = row.eanFoto && row.eanFoto.art === 'abweichend' ? row.eanFoto.gelesen : null;
+  const [sperre, fotoEanRows] = await Promise.all([
+    row.userId
+      ? db.collection(SPERREN).doc(row.userId).get().then((d) => sperreAusDaten(d.data())).catch(() => 'unbekannt')
+      : null,
+    fotoEan ? loadByEans([fotoEan]).then((m) => nachbarnVon(m, fotoEan)) : null,
+  ]);
+  return { kontoSperre: sperre, fotoEanRows };
 }
 
 /**
@@ -177,12 +219,18 @@ exports.reviewListUploads = onCall({ region: REGION, memory: '512MiB', timeoutSe
     ? rows.filter((r) => r.status === 'pending')
     : (await db.collection(COL).where('status', '==', 'pending').get()).docs.map(rowOf);
   // Effektive EAN (auch nur nachgelesen) — wie reviewCases und die Runde.
-  const byEan = allPending.length ? await loadByEans(allPending.map((r) => r.anzeigeEan)) : new Map();
-  const preById = new Map(allPending.map((r) => [r.id, precheckOf(r, byEan.get(r.anzeigeEan) || [])]));
+  // Auch die Nummern vom Barcode-Foto, wo sie abweichen (Doppel-Regel dort, 02.10.2026).
+  const fotoEan = (r) => (r.eanFoto && r.eanFoto.art === 'abweichend' ? r.eanFoto.gelesen : null);
+  const [byEan, sperren] = await Promise.all([
+    allPending.length ? loadByEans([...allPending.map((r) => r.anzeigeEan), ...allPending.map(fotoEan)]) : new Map(),
+    ladeSperren(db),
+  ]);
+  const opts = (r) => ({ kontoSperre: kontoSperreVon(sperren, r.userId), fotoEanRows: fotoEan(r) ? nachbarnVon(byEan, fotoEan(r)) : null });
+  const preById = new Map(allPending.map((r) => [r.id, precheckOf(r, nachbarnVon(byEan, r.anzeigeEan), opts(r))]));
   let lockedPendingCount = 0;
   for (const pre of preById.values()) if (pre.verdict === 'locked') lockedPendingCount++;
   for (const r of rows) {
-    r.precheck = r.status === 'pending' ? preById.get(r.id) ?? precheckOf(r, byEan.get(r.anzeigeEan) || []) : r.review?.precheck ?? null;
+    r.precheck = r.status === 'pending' ? preById.get(r.id) ?? precheckOf(r, nachbarnVon(byEan, r.anzeigeEan), opts(r)) : r.review?.precheck ?? null;
   }
   if (p.precheck && p.precheck !== 'all') rows = rows.filter((r) => r.precheck && r.precheck.verdict === p.precheck);
 
@@ -215,16 +263,17 @@ exports.reviewGetUpload = onCall({ region: REGION }, async (req) => {
   const d = await db.collection(COL).doc(id).get();
   if (!d.exists) throw new HttpsError('not-found', 'Einreichung nicht gefunden.');
   const row = rowOf(d);
-  // Nachbarn über BEIDE EAN-Felder, gezählt nach effektiver EAN — dasselbe
-  // Urteil wie reviewCases und die Runde.
+  // Nachbarn über BEIDE EAN-Felder und jede Schreibweise, gezählt nach
+  // effektiver EAN — dasselbe Urteil wie reviewCases und die Runde.
+  const varianten = eanVarianten(row.anzeigeEan);
   const [gescannt, nachgelesen, sameUserSnap] = await Promise.all([
-    row.anzeigeEan ? db.collection(COL).where('ean', '==', row.anzeigeEan).get() : null,
-    row.anzeigeEan ? db.collection(COL).where('eanRescueOcr', '==', row.anzeigeEan).get() : null,
+    row.anzeigeEan ? db.collection(COL).where('ean', 'in', varianten).get() : null,
+    row.anzeigeEan ? db.collection(COL).where('eanRescueOcr', 'in', varianten).get() : null,
     row.userId ? db.collection(COL).where('userId', '==', row.userId).get() : null,
   ]);
   const sameEan = row.anzeigeEan ? nachbarnAus([...gescannt.docs, ...nachgelesen.docs], row.anzeigeEan, id) : [];
   const sameUser = sameUserSnap ? sameUserSnap.docs.map(rowOf).filter((r) => r.id !== id).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)).slice(0, 30) : [];
-  const precheck = precheckFuerFall(row, sameEan);
+  const precheck = precheckFuerFall(row, sameEan, await fallOptionen(row));
   const prior = precheck.dup && precheck.dup.priorId ? sameEan.find((r) => r.id === precheck.dup.priorId) : null;
   return { row: stripPolicy(row), precheck, prior: prior ? stripPolicy(prior) : null, sameEan: sameEan.map(stripPolicy), sameUser: sameUser.map(stripPolicy) };
 });
@@ -233,7 +282,8 @@ exports.reviewGetUpload = onCall({ region: REGION }, async (req) => {
 
 // 'reopen' holt eine ABGELEHNTE Einreichung zurück in die Warteschlange —
 // die Rücknahme im Prüf-Werkzeug. Bewusst nur aus 'rejected': eine Freigabe
-// hat bereits gebucht, die nimmt man nicht per Klick zurück.
+// hat bereits gebucht, die nimmt man nicht per Klick zurück. Der bisherige
+// Grund bleibt in `review.wiedereroeffnet` (Doppel-Gründe → `hold`, precheckOf).
 const DECISIONS = new Set(['approve', 'reject', 'hold', 'unhold', 'reopen']);
 
 exports.reviewDecideUploads = onCall({ region: REGION, timeoutSeconds: 120 }, async (req) => {
@@ -276,10 +326,23 @@ exports.reviewDecideUploads = onCall({ region: REGION, timeoutSeconds: 120 }, as
 
         if (decision === 'approve') {
           if (row.status !== 'pending') return { id, outcome: 'skipped', reason: `status_${row.status}` };
+          // Gesperrtes Konto (Entscheidung Patrick 02.10.2026): nie freigeben,
+          // auch nicht mit force. In der Transaktion gelesen; ein Lesefehler
+          // bricht die Transaktion ab → 'error', also ebenfalls keine Freigabe.
+          // Eigener Ausgang 'refused' (nicht 'blocked'): die Oberfläche bietet
+          // bei 'blocked' „Trotzdem freigeben" an, das hier nichts nützt.
+          const sperre = row.userId ? sperreAusDaten((await tx.get(db.collection(SPERREN).doc(row.userId))).data()) : null;
+          if (sperre) {
+            return { id, outcome: 'refused', reason: sperre === 'gesperrt' ? 'konto_gesperrt' : 'kontosperre_unbekannt' };
+          }
           // Tatsachen JETZT: alle Einreichungen derselben effektiven EAN (Reads
-          // in der Transaktion, damit ein paralleler Approve derselben EAN kollidiert).
+          // in der Transaktion, damit ein paralleler Approve derselben EAN kollidiert)
+          // — und unter der Nummer vom Barcode-Foto, wenn sie abweicht.
           const others = row.anzeigeEan ? await nachbarnInTx(tx, row.anzeigeEan, id) : [];
-          const precheck = precheckOf(row, others);
+          const fotoEan = row.eanFoto && row.eanFoto.art === 'abweichend' ? row.eanFoto.gelesen : null;
+          const fotoEanRows = fotoEan ? await nachbarnInTx(tx, fotoEan, id) : null;
+          // `row` aus der Transaktion trägt `rundeOffen` (Befunde der Morgenrunde) — precheckOf hält damit an.
+          const precheck = precheckOf(row, others, { fotoEanRows });
           if (precheck.verdict !== 'ok' && !force) {
             return { id, outcome: 'blocked', reason: precheck.reasons[0] || precheck.verdict, precheck };
           }
@@ -292,12 +355,17 @@ exports.reviewDecideUploads = onCall({ region: REGION, timeoutSeconds: 120 }, as
           if (row.status !== 'pending') return { id, outcome: 'skipped', reason: `status_${row.status}` };
           // Für Sperr-Gründe die Frist aus den Tatsachen holen (Notiz nennt das Datum).
           let ctx = { note };
-          if (reason === REASON.SAME_USER || reason === REASON.OTHER_USER) {
+          if (reason === REASON.SAME_USER_WEEK || reason === REASON.SAME_USER || reason === REASON.OTHER_USER) {
             const pre = precheckOf(row, row.anzeigeEan ? await nachbarnInTx(tx, row.anzeigeEan, id) : []);
             ctx = { note, lockUntil: pre.dup && pre.dup.lockUntil };
           }
+          // Am Dokument der Code, nach dem die App ihren Text wählt (appGrund:
+          // die Wochen-Sperre — auch aus einer noch alten Oberfläche mit dem
+          // 30-Tage-Code — erscheint als `doppelt_eingereicht`, Entscheidung
+          // Patrick 02.10.2026). Der gewählte Grund bleibt in review.reason.
+          const code = appGrund(reason);
           tx.update(ref, {
-            status: 'rejected', rejectReason: reason, holdReasons: [...new Set([...(row.holdReasons || []), reason])],
+            status: 'rejected', rejectReason: code, holdReasons: [...new Set([...(row.holdReasons || []), code])],
             reviewNote: note || noteFor(reason, ctx), reviewedAt: ts, reviewedBy: adminUid, updatedAt: ts,
             review: { decidedBy: adminUid, reason, lockUntil: ctx.lockUntil || null },
           });
@@ -312,6 +380,13 @@ exports.reviewDecideUploads = onCall({ region: REGION, timeoutSeconds: 120 }, as
 
         if (decision === 'reopen') {
           if (row.status !== 'rejected') return { id, outcome: 'skipped', reason: `status_${row.status}` };
+          // Den bisherigen Grund behalten (Schlussprüfung 03.10.2026): sonst
+          // stand eine Runden-Ablehnung wegen wiederverwendeter Fotos nach dem
+          // Zurückholen als „ok" da — den md5-Abgleich kann die Konsole nicht
+          // selbst — und F gab ohne Notiz frei. precheckOf hält damit an.
+          const alt = snap.data() || {};
+          const altReview = alt.review && typeof alt.review === 'object' ? alt.review : {};
+          const kurz = (v) => (typeof v === 'string' && v ? v.slice(0, 60) : null);
           tx.update(ref, {
             status: 'pending',
             rejectReason: FieldValue.delete(),
@@ -320,7 +395,10 @@ exports.reviewDecideUploads = onCall({ region: REGION, timeoutSeconds: 120 }, as
             reviewedAt: FieldValue.delete(),
             updatedAt: ts,
             reviewedBy: adminUid,
-            review: { reopenedBy: adminUid, at: ts },
+            review: {
+              reopenedBy: adminUid, at: ts,
+              wiedereroeffnet: { vorherGrund: kurz(alt.rejectReason), vorherIntern: kurz(altReview.reason), vorherVon: kurz(altReview.decidedBy) || kurz(alt.reviewedBy) },
+            },
           });
           return { id, outcome: 'reopened' };
         }
@@ -603,16 +681,18 @@ exports.reviewQueue = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
   // eigene Serverposten des Projekts; der Bestand ändert sich zwischen zwei
   // Klicks so gut wie nie. Zwei Minuten Aufbewahrung fangen die Wiederholungen
   // ab, ohne dass jemand mit veralteten Nachbarn arbeitet.
-  const openSnap = await db.collection(COL).where('status', '==', 'pending').get();
+  const [openSnap, sperren] = await Promise.all([db.collection(COL).where('status', '==', 'pending').get(), ladeSperren(db)]);
+  // Sperren NICHT aus dem Zwischenspeicher: eine frisch gesetzte Sperre soll sofort sichtbar sein.
+  const sperreVon = (uid) => kontoSperreVon(sperren, uid);
   const byEan = eanIndexAusCache();
-  if (byEan) return baueFotoListe(openSnap.docs, byEan, p, q);
+  if (byEan) return baueFotoListe(openSnap.docs, byEan, p, q, sperreVon);
 
   // Beide EAN-Felder und beide Preis-Felder: Gruppe und Doppel-Regel wie in
   // der Runde (src/werte.js policyOf). Form wie `rowOf`, siehe eanIndex.
   const allSnap = await db.collection(COL).select(...INDEX_FELDER).get();
   const frisch = eanIndex(allSnap.docs);
   eanCache = { index: frisch, stand: Date.now() };
-  return baueFotoListe(openSnap.docs, frisch, p, q);
+  return baueFotoListe(openSnap.docs, frisch, p, q, sperreVon);
 });
 
 /** Zwischenspeicher des EAN-Nachbarschafts-Index (siehe reviewQueue). */
@@ -730,12 +810,14 @@ exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
   }));
   // EAN-Nachbarn für die Doppel-Regel: nur die betroffenen (effektiven) EANs.
   const rows = present.map(rowOf);
-  const eans = [...new Set(rows.map((r) => r.anzeigeEan).filter(Boolean))];
-  const byEan = eans.length ? await loadByEans(eans) : new Map();
+  // Auch unter der Nummer vom Barcode-Foto, wo sie abweicht (02.10.2026).
+  const fotoEan = (r) => (r.eanFoto && r.eanFoto.art === 'abweichend' ? r.eanFoto.gelesen : null);
+  const eans = [...new Set([...rows.map((r) => r.anzeigeEan), ...rows.map(fotoEan)].filter(Boolean))];
+  const [byEan, sperren] = await Promise.all([eans.length ? loadByEans(eans) : new Map(), ladeSperren(db)]);
   const cases = await Promise.all(present.map(async (s, i) => {
     const row = rows[i];
-    const nachbarn = row.anzeigeEan ? byEan.get(row.anzeigeEan) || [] : [];
-    const pre = precheckFuerFall(row, nachbarn);
+    const nachbarn = nachbarnVon(byEan, row.anzeigeEan);
+    const pre = precheckFuerFall(row, nachbarn, { kontoSperre: kontoSperreVon(sperren, row.userId), fotoEanRows: fotoEan(row) ? nachbarnVon(byEan, fotoEan(row)) : null });
     const defekt = new Set(row.bildDefekt.map((b) => b.slot));
     const bilder = await Promise.all(REQUIRED_STEPS_ORDER.map(async (step) => {
       const path = row.images && row.images[step];
@@ -759,7 +841,11 @@ exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
     // in src/locationGate.js, nicht nacherzählt. Eine zweite, halbe Fassung
     // dieser Regel sagte bei einer von elf Einreichungen das Falsche.
     const ort = pruefeOrtsanforderung(s.data());
-    if (!ort.ok) {
+    // Gesperrtes Konto (02.10.2026): eine Freigabe ist gar nicht möglich, und
+    // gebucht würde ohnehin nichts.
+    if (pre.kontoSperre === 'gesperrt') {
+      folge = { buchtCent: 0, grund: 'konto_gesperrt' };
+    } else if (!ort.ok) {
       folge = { buchtCent: 0, grund: ort.grund || 'ort_fehlt' };
     } else if (aktion) {
       const bisher = (nutzer?.proAktion || {})[row.campaignId] || 0;

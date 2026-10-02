@@ -39,7 +39,7 @@ describe('productSubmissionCopy (86cbam5ep)', () => {
   });
 
   it('Copy-Ton: nie „abgelehnt"/„falsch"/„Fehler" in Nutzer-Texten', () => {
-    const codes = ['ean_fehlt', 'kein_produktname', 'produkt_bereits_verguetet', 'doppelt_eingereicht', 'bilder_wiederverwendet', 'fotos_unpassend', 'preis_fehlt', 'unbekannt'];
+    const codes = ['ean_fehlt', 'kein_produktname', 'produkt_bereits_verguetet', 'doppelt_eingereicht', 'bilder_wiederverwendet', 'fotos_unpassend', 'preis_fehlt', 'sperre_woche_gleicher_nutzer', 'unbekannt'];
     for (const code of codes) {
       const c = describeSubmission({ status: 'rejected', rejectReason: code });
       expect(`${c.label} ${c.headline} ${c.body}`).not.toMatch(/abgelehnt|falsch|Fehler/i);
@@ -50,6 +50,19 @@ describe('productSubmissionCopy (86cbam5ep)', () => {
     const c = describeSubmission({ status: 'rejected', rejectReason: 'preis_fehlt' });
     expect(c.headline).toMatch(/kein Preis/);
     expect(c.body).toMatch(/Preisschild|Kassenbon/);
+  });
+
+  // 02.10.2026 (Entscheidung Patrick): Wochen-Sperre. Der Server schreibt
+  // vorerst `doppelt_eingereicht` (alle Versionen kennen ihn), der präzise
+  // Text liegt für die nächste Version bereit. Keiner der Texte darf noch
+  // versprechen, dass anderer Preis/Hersteller/Markt sofort zählt.
+  it('Wochen-Sperre: kein Text verspricht „sofort mit anderem Preis/Hersteller/Markt"', () => {
+    for (const code of ['doppelt_eingereicht', 'sperre_woche_gleicher_nutzer', 'sperre_30_tage_gleicher_nutzer']) {
+      const c = describeSubmission({ status: 'rejected', rejectReason: code });
+      expect(c.headline).not.toBe('Diese Einreichung konnte nicht gezählt werden');
+      expect(`${c.headline} ${c.body}`).not.toMatch(/Preis|Hersteller|Markt|nächsten Tag/);
+    }
+    expect(describeSubmission({ status: 'rejected', rejectReason: 'sperre_woche_gleicher_nutzer' }).body).toMatch(/nächster Woche/);
   });
 
   it('primaryReasonCode bevorzugt holdReasons und strippt den Suffix', () => {

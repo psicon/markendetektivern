@@ -80,6 +80,19 @@ describe('Schreibfehler', () => {
   });
 });
 
+describe('Abgleiche, ohne die nichts freigegeben wird (Entscheidungen Patrick 02.10.2026)', () => {
+  const runde = (over) => ({ ...basis().runde, ...over });
+  it('Sperrliste nicht lesbar → rot', () => {
+    expect(codes(warnungen(basis({ runde: runde({ kontoSperrenUnlesbar: true }) })))).toContain('rot:kontosperren_unlesbar');
+  });
+  it('Foto-Abgleich gescheitert → rot', () => {
+    expect(codes(warnungen(basis({ runde: runde({ fotoAbgleichGescheitert: true }) })))).toContain('rot:foto_abgleich_gescheitert');
+  });
+  it('beides in Ordnung → nichts', () => {
+    expect(warnungen(basis({ runde: runde({ kontoSperrenUnlesbar: false, fotoAbgleichGescheitert: false }) }))).toEqual([]);
+  });
+});
+
 describe('Bon-Runde', () => {
   it('scharf, aber kein Bericht von heute → rot', () => {
     expect(codes(warnungen(basis({ bonRunde: { scharf: true, bericht: null } })))).toContain('rot:bonrunde_fehlt');
@@ -109,5 +122,19 @@ describe('Bon-Runde', () => {
   });
   it('sauberer Lauf → nichts', () => {
     expect(warnungen(basis({ bonRunde: { scharf: true, bericht: { offen: 2, technikFehler: 0, budgetEnde: 0, tagesKollisionen: 0, offenGruende: { datum_widerspricht: 2 } } } }))).toEqual([]);
+  });
+});
+
+describe('Barcode-Nummer und Halte-Gründe (Prüfrunde 2, 02.10.2026)', () => {
+  const runde = (over) => ({ ...basis().runde, ...over });
+  it('normal (~3 %) → nichts; über 10 % (mind. 8) → gelb; über 25 % → rot', () => {
+    expect(warnungen(basis({ runde: runde({ auditVersucht: 270, eanHaltenNeu: 8 }) }))).toEqual([]);
+    expect(codes(warnungen(basis({ runde: runde({ auditVersucht: 60, eanHaltenNeu: 8 }) })))).toEqual(['gelb:barcode_haelt_viele']);
+    expect(codes(warnungen(basis({ runde: runde({ auditVersucht: 30, eanHaltenNeu: 8 }) })))).toEqual(['rot:barcode_haelt_viele']);
+    expect(warnungen(basis({ runde: runde({ auditVersucht: 20, eanHaltenNeu: 7 }) }))).toEqual([]); // kleiner Tag
+  });
+  it('Halte-Grund für die Konsole nicht gespeichert → rot; nur der Barcode-Befund → gelb (steht ersatzweise am Halte-Grund)', () => {
+    expect(codes(warnungen(basis({ runde: runde({ haltBefundNichtGespeichert: 1 }) })))).toEqual(['rot:befund_nicht_gespeichert']);
+    expect(codes(warnungen(basis({ runde: runde({ eanFotoNichtGespeichert: 2 }) })))).toEqual(['gelb:barcode_befund_nicht_gespeichert']);
   });
 });

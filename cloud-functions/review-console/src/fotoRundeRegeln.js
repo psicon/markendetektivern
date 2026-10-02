@@ -13,27 +13,67 @@
  * Einreichung, weder in die eine noch in die andere Richtung.
  */
 
-const SAME_USER = 'sperre_30_tage_gleicher_nutzer';
-const PENDING_OLDER = 'doppelt_eingereicht';
+const { REASON } = require('./duplicatePolicy');
+
+const PENDING_OLDER = REASON.PENDING_OLDER;
+const KONTO_GESPERRT = 'konto_gesperrt';
+
+/**
+ * Ablehngründe, die besagen: dieses Produkt war für diese Person schon
+ * bezahlt (Doppel, Wochen-Sperre, wiederverwendete Fotos). Fotos aus so einer
+ * abgelehnten Einreichung zählen bei einer späteren Einreichung als
+ * wiederverwendet (bildBefund) — sonst ließen sie sich eine Woche später
+ * einfach noch einmal einreichen (Prüfrunde 02.10.2026). `doppelt_eingereicht`
+ * steht seit 02.10.2026 auch für die Wochen-Sperre am Dokument (APP_GRUND).
+ * Gründe, die man korrigieren kann (fehlende Ansicht, Barcode, Name, Preis),
+ * gehören NICHT hierher: wer danach mit denselben Fotos nachreicht, wird normal
+ * geprüft.
+ */
+const DOPPEL_GRUENDE = new Set([
+  REASON.SAME_USER_WEEK, REASON.SAME_USER, REASON.PENDING_OLDER, 'bilder_wiederverwendet', 'produkt_bereits_verguetet',
+]);
 
 /** Ablehnungen, die allein auf dem Urteil der Bildprüfung beruhen. */
 const BILD_GRUENDE = new Set(['fotos_unpassend', 'gleiche_ansicht_mehrfach']);
-/** Zählen nicht in die Gesamt-Quote der Notbremse (eigene Bremse, siehe notbremse). */
-const PREIS_GRUENDE = new Set(['preis_fehlt']);
+
+/**
+ * Ablehngründe mit EIGENER Bremse (siehe notbremse). Sie zählen nicht in die
+ * Gesamt-Quote — weder heute noch im 30-Tage-Schnitt (schnittQuote in
+ * taeglicheRunde.js prüft `rejectReason` UND `review.reason`). Ein Grund, den
+ * es vorher nicht oder seltener gab, verschöbe die Quote dauerhaft, und die
+ * Gesamt-Bremse hielte dann jeden Tag alle Ablehnungen zurück (Gegenprüfung
+ * 26.09.2026 am Preis). Die alte 24-h-Sperre steht mit drin, damit der
+ * Schnitt dieselbe Gruppe weglässt wie der heutige Lauf.
+ */
+const EIGENE_BREMSEN = Object.freeze([
+  // Preis ist Pflicht (Entscheidung Patrick 26.09.2026). Beruht auf der
+  // Bildprüfung — normal gut 10 % der geprüften Fälle.
+  { schalter: 'preis', gruende: ['preis_fehlt'], halten: 'notbremse_preis', basis: 'geprueft', min: 8, anteil: 0.3,
+    text: (n, g, pz) => `Bei ${n} von ${g} Einreichungen fehlte angeblich der Preis (${pz} %) — diese Ablehnungen zurückgehalten.` },
+  // Wochen-Sperre (Entscheidung Patrick 02.10.2026). Vorher gemessen: 3,3 %
+  // der Freigaben der letzten 7 Tage. Deutlich mehr deutet eher auf einen
+  // Fehler beim Gruppieren (EAN, Nutzer) als auf echte Doppel.
+  { schalter: 'woche', gruende: [REASON.SAME_USER_WEEK], halten: 'notbremse_wochensperre', basis: 'alle', min: 10, anteil: 0.15,
+    text: (n, g, pz) => `${n} von ${g} Einreichungen wären wegen der Wochen-Sperre abgelehnt worden (${pz} %) — diese Ablehnungen zurückgehalten.` },
+]);
+const AUSSER_GESAMTQUOTE = new Set([...EIGENE_BREMSEN.flatMap((b) => b.gruende), REASON.SAME_USER]);
 
 /**
  * Ein Fall → Entscheidung.
  *
  * @param {object} f
+ * @param {'gesperrt'|'unbekannt'|null} [f.kontoSperre]  src/kontoSperre.js
  * @param {{ok:boolean, problems:string[], missing:string[]}} f.comp   completenessCheck
  * @param {{verdict:string, reason:string|null, lockUntil:number|null}} f.dup  evaluateDuplicate
  * @param {string[]} f.leer         Slots mit 0-Byte-Datei (echter Mangel)
  * @param {string[]} f.unlesbar     Slots, deren Metadaten Storage nicht lieferte (unsere Technik)
- * @param {boolean} f.wiederverwendet  Identitätsfoto stammt aus einer älteren Einreichung
+ * @param {{art:'wiederverwendet'|'aeltere_offen'|'fremdes_konto', mit:string[], seit?:string|null, vorbefund?:object, heute?:string|null}|null} [f.bild]  bildBefund / bildMitVorbefund
+ * @param {boolean} [f.fotoAbgleichFehlt]  Abgleich gegen frühere Einreichungen nicht möglich (Storage-Liste gescheitert)
+ * @param {{art:string, gelesen:string|null, gespeichert:string|null, zweit?:string|null}|null} [f.eanFoto]  werte.eanFotoBefund / eanFotoBestaetigen
+ * @param {string|null} [f.eanFotoHinweis]  Text für den Menschen (z. B. eigene Freigabe unter der Foto-Nummer)
  * @param {{echt:boolean, loseWare:boolean, traegtAngaben?:boolean, gleicheAnsicht:boolean, grund:string}|null} f.audit
  * @param {string|null} f.auditFehler   Fehlermeldung, wenn die Bildprüfung scheiterte
  * @param {{name?:string, ean?:string, preis?:string, alles?:string}} f.rettungFehler  Nachlesen ist an unserer Technik gescheitert
- * @param {boolean} [f.preisFehlt]  Kandidat oder Referenz der Doppel-Regel hat keinen Preis
  * @param {boolean} [f.preisVorhanden]  Preis gelesen (Namer oder nachgelesen, werte.preisOf)
  * @param {string|null} [f.preisHinweis]  Anzeichen, dass doch ein Preis im Bild ist (Lesedienst sah Preisschild/Kassenbon)
  * @param {boolean} [f.preisBildDefekt]  Preisfoto kam beim Hochladen beschädigt an (unser Fehler, nicht der Einreichung)
@@ -46,6 +86,16 @@ function entscheideFall(f) {
   const dup = f.dup || { verdict: 'ok', reason: null, lockUntil: null };
   const rf = f.rettungFehler || {};
 
+  // Gesperrtes Konto (Entscheidung Patrick 02.10.2026: offene Produktfotos
+  // werden „nicht freigegeben") — hängt an nichts anderem, deshalb zuerst.
+  // STUMM LIEGEN LASSEN, nicht ablehnen (Prüfrunde 02.10.2026): eine Ablehnung
+  // ist endgültig und für den Nutzer sichtbar, und eine Sperre, die der
+  // Betroffene sieht, lädt zum Ausweichen auf ein neues Konto ein (so hält es
+  // auch die Gutschrift-Seite, cashback-pipeline/lib/kontoSperre.js). Ob er
+  // sie doch sichtbar ablehnen will, entscheidet Patrick. Der Bericht zählt
+  // diese Fälle getrennt, damit sie „wartet auf dich" nicht füllen.
+  if (f.kontoSperre === 'gesperrt') return offen(KONTO_GESPERRT);
+
   // Unsere Technik zuerst: ohne lesbare Dateien gibt es kein Urteil.
   if ((f.unlesbar || []).length) return offen('bild_nicht_lesbar_infrastruktur');
   // Der Lesedienst versucht es nach einer Störung noch einmal — erst danach
@@ -56,17 +106,39 @@ function entscheideFall(f) {
   if (comp.problems.includes('unvollstaendig')) return ablehnen('unvollstaendig', { missing: comp.missing });
   if ((f.leer || []).length) return ablehnen('unvollstaendig', { missing: f.leer });
 
-  // Doppel-Regel (Konsolen-Regel, gleiche Datei wie dort).
-  if (dup.verdict === 'locked') {
-    // Fehlende Preise gelten als gleich (fail-closed). Scheiterte das Nachlesen
-    // des Preises an unserer Technik, wäre die Sperre ein Urteil aus einem
-    // Werkzeugfehler — dann offen lassen (Gegenprüfung 24.09.).
-    if (f.preisFehlt && rf.preis === 'lesungen_uneinig') return offen('preis_unsicher', { hinweis: 'Preis unsicher gelesen' });
-    if (f.preisFehlt && (rf.preis || rf.alles)) return offen('nachlesen_gescheitert', { hinweis: rf.preis || rf.alles });
-    return ablehnen(dup.reason || SAME_USER, { lockUntil: dup.lockUntil });
+  // Barcode-Foto zeigt eine andere Nummer als gespeichert, oder die zweite
+  // Lesung bestätigt weder die eine noch die andere → ein Mensch entscheidet
+  // (Entscheidung Patrick 02.10.2026). Weder freigeben noch ablehnen: welche
+  // Nummer stimmt, weiß hier niemand. VOR der Doppel-Regel (Prüfrunde
+  // 02.10.2026): die rechnet mit der gespeicherten EAN — ist die falsch und
+  // gehört zufällig zu einem eigenen Produkt dieser Woche, lehnte die
+  // Wochen-Sperre ein womöglich anderes Produkt ab.
+  if (f.eanFoto && f.eanFoto.art === 'abweichend') {
+    return offen('ean_abweichend', { hinweis: f.eanFotoHinweis || `Barcode-Foto zeigt ${f.eanFoto.gelesen}, gespeichert ist ${f.eanFoto.gespeichert}` });
   }
+  // `zweifelhaft` (falsche Prüfziffer, weit weg) kommt nach der zweiten Lesung
+  // nicht mehr vor — falls doch, hält es wie `unsicher` (fail-closed).
+  if (f.eanFoto && (f.eanFoto.art === 'unsicher' || f.eanFoto.art === 'zweifelhaft')) {
+    return offen('ean_unsicher', { hinweis: f.eanFotoHinweis || `Barcode-Foto: erste Lesung ${f.eanFoto.gelesen || f.eanFoto.roh || 'ungültig'}, zweite ${f.eanFoto.zweit || 'nicht lesbar'}, gespeichert ist ${f.eanFoto.gespeichert}` });
+  }
+
+  // Doppel-Regel (Konsolen-Regel, gleiche Datei wie dort). Seit der
+  // Wochen-Regel (02.10.2026) hängt die Sperre an nichts als Person, EAN und
+  // Zeit — kein Preis, kein Hersteller, kein Markt. Ein gescheitertes
+  // Nachlesen des Preises ändert an ihr deshalb nichts mehr.
+  if (dup.verdict === 'locked') return ablehnen(dup.reason || REASON.SAME_USER_WEEK, { lockUntil: dup.lockUntil });
   if (dup.verdict === 'hold') return offen(PENDING_OLDER);
-  if (f.wiederverwendet) return ablehnen('bilder_wiederverwendet');
+
+  // Identisches Identitätsfoto in einer FRÜHEREN Einreichung (Abgleich gegen
+  // alle, Entscheidung Patrick 02.10.2026). Die älteste Einreichung einer
+  // Gruppe trägt nie einen Befund (bildBefund). Ein aus einem früheren Lauf
+  // übernommener Befund (bildMitVorbefund, `vorbefund`) hält nur an — er wird
+  // nie zur Ablehnung, denn heute ließ er sich nicht nachprüfen.
+  const bild = f.bild || null;
+  if (bild && bild.vorbefund && BILD_CODE[bild.art]) return offen(BILD_CODE[bild.art], { hinweis: vorbefundHinweis(bild) });
+  if (bild && bild.art === 'fremdes_konto') return offen('foto_fremdes_konto', { hinweis: `Gleiches Foto bei anderem Konto: ${(bild.mit || []).slice(0, 3).join(', ')}` });
+  if (bild && bild.art === 'wiederverwendet') return ablehnen('bilder_wiederverwendet');
+  if (bild && bild.art === 'aeltere_offen') return offen('foto_aeltere_offen', { hinweis: `Gleiches Foto in älterer, noch offener Einreichung: ${(bild.mit || []).slice(0, 3).join(', ')}` });
 
   // Ab hier braucht es die Bildprüfung.
   const audit = f.audit || null;
@@ -105,6 +177,140 @@ function entscheideFall(f) {
 }
 
 /**
+ * Bild-Befund einer Einreichung gegen ALLE früheren (Entscheidung Patrick
+ * 02.10.2026). Bis dahin verglich die Runde byteidentische Fotos nur unter den
+ * im selben Lauf offenen Einreichungen; eine Wiederverwendung aus einer schon
+ * entschiedenen fiel nur auf, wenn derselbe Speicherpfad benutzt wurde.
+ *
+ * Regeln — „eine Kopie muss übrig bleiben" (10.09.2026):
+ *  - Die ÄLTESTE Einreichung einer Gruppe bekommt nie einen Befund; „älter"
+ *    heißt früher eingereicht (createdAt, bei Gleichstand die ID).
+ *  - Ein früheres Foto eines ANDEREN Kontos → halten (`fremdes_konto`), der
+ *    Mensch entscheidet; das kann Weitergabe sein oder Zufall.
+ *  - Sonst (nur eigene ältere): eine davon freigegeben ODER als Doppel
+ *    abgelehnt (DOPPEL_GRUENDE — das Produkt war für diese Person schon
+ *    bezahlt) → `wiederverwendet` (ablehnen); eine davon noch offen →
+ *    `aeltere_offen` (halten, bis sie entschieden ist); nur aus anderen
+ *    Gründen abgelehnt → kein Befund. Wer nach einer Ablehnung wegen eines
+ *    behebbaren Mangels dieselben Fotos erneut einreicht, korrigiert womöglich
+ *    nur (z. B. EAN nachgetragen) und wird normal geprüft. Fotos einer als
+ *    Doppel abgelehnten Einreichung eine Woche später noch einmal einzureichen
+ *    ist dagegen kein neuer Einkauf (Prüfrunde 02.10.2026).
+ *  - Eine als Doppel abgelehnte ältere zählt nur, wenn das Produkt für diese
+ *    Person WIRKLICH bezahlt ist: `freigabeVon(uid, ean)` meldet eine
+ *    freigegebene Einreichung derselben Person und EAN (Prüfrunde 2,
+ *    02.10.2026). `doppelt_eingereicht` wurde auch schon vergeben, ohne dass
+ *    je eine Kopie freigegeben war (Vorfall 10.09.: alle Kopien abgelehnt) —
+ *    dann lehnte der Befund auch die nächste Einreichung mit diesen Fotos ab,
+ *    und keine bliebe bezahlt. Ohne `freigabeVon` zählt keine (im Bestand
+ *    02.10.: 0 von 21 Befunden stützten sich allein darauf).
+ *
+ * Der Status kommt vom Aufrufer und ist im Lauf nachgezogen (statusJetzt) —
+ * eine im selben Lauf abgelehnte ältere Einreichung zählt also als abgelehnt
+ * (Lehre vom 13.09.: sonst bleibt das jüngere Geschwister grundlos hängen).
+ *
+ * @param {string} id
+ * @param {Iterable<string>} partner  IDs mit mindestens einem identischen Identitätsfoto (ohne id selbst)
+ * @param {(id:string)=>{userId:string|null, createdAt:number|null, status:string, grund?:string|null, ean?:string|null}|null} info
+ *   `grund`: Ablehngrund einer abgelehnten Einreichung (intern, sonst der Code am Dokument)
+ * @param {(uid:string|null, ean:string|null)=>boolean} [freigabeVon]  gibt es eine freigegebene Einreichung dieser Person mit dieser EAN?
+ * @returns {{art:'wiederverwendet'|'aeltere_offen'|'fremdes_konto', mit:string[]}|null}
+ */
+function bildBefund(id, partner, info, freigabeVon = null) {
+  const ich = info(id);
+  if (!ich) return null;
+  const frueher = (a, b) => ((a.createdAt ?? 0) - (b.createdAt ?? 0)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  const selbst = { id, createdAt: ich.createdAt };
+  const aeltere = [];
+  for (const p of partner || []) {
+    if (p === id) continue;
+    const x = info(p);
+    if (x && frueher({ id: p, createdAt: x.createdAt }, selbst) < 0) aeltere.push({ id: p, ...x });
+  }
+  if (!aeltere.length) return null;
+  const fremd = aeltere.filter((a) => a.userId !== ich.userId);
+  if (fremd.length) return { art: 'fremdes_konto', mit: fremd.map((a) => a.id) };
+  const bezahlt = (a) => !!(freigabeVon && a.ean && freigabeVon(a.userId, a.ean));
+  const frei = aeltere.filter((a) => a.status === 'approved' || (a.status === 'rejected' && DOPPEL_GRUENDE.has(a.grund) && bezahlt(a)));
+  if (frei.length) return { art: 'wiederverwendet', mit: frei.map((a) => a.id) };
+  const offenAelter = aeltere.filter((a) => a.status === 'pending');
+  if (offenAelter.length) return { art: 'aeltere_offen', mit: offenAelter.map((a) => a.id) };
+  return null;
+}
+
+/** Rangfolge der Foto-Befunde — wie in bildBefund: fremdes Konto vor eigener bezahlter vor eigener offener. */
+const BILD_RANG = Object.freeze(['fremdes_konto', 'wiederverwendet', 'aeltere_offen']);
+const bildRang = (art) => { const i = BILD_RANG.indexOf(art); return i < 0 ? BILD_RANG.length : i; };
+
+/**
+ * Foto-Befund eines FRÜHEREN Laufs aus `review.rundeOffen.sperrend`
+ * (Schlussprüfung 03.10.2026) — der stärkste nach BILD_RANG. `seit`: Lauf, in
+ * dem der Befund zuerst stand (`fotoSeit`, sonst der Lauf des Eintrags).
+ * @returns {{art:string, seit:string|null}|null}
+ */
+function fotoVorbefund(x) {
+  const ro = x && x.review && typeof x.review === 'object' && x.review.rundeOffen && typeof x.review.rundeOffen === 'object' ? x.review.rundeOffen : null;
+  if (!ro || !Array.isArray(ro.sperrend)) return null;
+  const art = BILD_RANG.find((a) => ro.sperrend.includes(BILD_CODE[a]));
+  if (!art) return null;
+  const lauf = (v) => (typeof v === 'string' && v ? v.slice(0, 40) : null);
+  return { art, seit: lauf(ro.fotoSeit) || lauf(ro.lauf) };
+}
+
+/**
+ * Heutiger Foto-Befund (bildBefund) mit dem eines früheren Laufs
+ * (fotoVorbefund) verbinden — Schlussprüfung 03.10.2026, analog
+ * werte.eanFotoMitVorbefund.
+ *
+ *  - Heute KEIN vollständiger Abgleich möglich (Storage-Liste gescheitert, ein
+ *    Identitätsfoto nicht abrufbar oder ohne md5): der frühere Befund gilt
+ *    weiter. Bis dahin verschwand ein Halt dann aus `review.rundeOffen`, die
+ *    Konsole zeigte den Fall als „ok", und F gab ihn ohne Notiz frei — ein
+ *    Technikausfall hob den Halt auf.
+ *  - `fremdes_konto` gilt IMMER weiter, bis ein Mensch in der Konsole
+ *    entscheidet (jede Entscheidung dort ersetzt `review` und nimmt den
+ *    Eintrag mit). Die md5-Grundlage kann sich ändern: der Eigentümer darf
+ *    seine Dateien in `crowduploads/` überschreiben (storage.rules) — wer zwei
+ *    Konten hat, überschriebe das Original im anderen Konto, und der Halt wäre
+ *    am nächsten Morgen weg.
+ *  - Sonst (vollständig berechnet) gilt der heutige Befund: `aeltere_offen`
+ *    löst sich auf, sobald die ältere Einreichung entschieden ist.
+ * Ist der heutige Befund mindestens so stark (BILD_RANG), gilt er — mit `seit`
+ * des früheren, wenn es derselbe ist. Übernommen → `vorbefund`; `heute` nennt,
+ * was heute (ggf. unvollständig) gefunden wurde. `mit` bleibt leer: die IDs
+ * stehen nur im Tagesbericht des Laufs `seit` (Datenschutz, siehe rundeOffenEintrag).
+ *
+ * @param {object|null} heute  bildBefund
+ * @param {{art:string, seit:string|null}|null} vorher  fotoVorbefund
+ * @param {{vollstaendig:boolean}} opts
+ */
+function bildMitVorbefund(heute, vorher, { vollstaendig } = {}) {
+  if (!vorher) return heute;
+  const uebernehmen = vorher.art === 'fremdes_konto' || !vollstaendig;
+  if (heute && (!uebernehmen || bildRang(heute.art) <= bildRang(vorher.art))) {
+    return heute.art === vorher.art ? { ...heute, seit: vorher.seit } : heute;
+  }
+  if (!uebernehmen) return heute;
+  return {
+    art: vorher.art, mit: [], seit: vorher.seit,
+    vorbefund: { grund: vorher.art === 'fremdes_konto' ? 'bis_zur_entscheidung' : 'heute_nicht_pruefbar' },
+    heute: heute ? heute.art : null,
+  };
+}
+
+const BILD_TEXT = {
+  fremdes_konto: 'Gleiches Foto bei einem anderen Konto (welche Einreichung, steht im Tagesbericht dieses Laufs)',
+  wiederverwendet: 'Gleiches Foto in einer bezahlten eigenen Einreichung',
+  aeltere_offen: 'Gleiches Foto in einer älteren, noch offenen eigenen Einreichung',
+};
+/** Hinweis zu einem übernommenen Foto-Befund — OHNE IDs (er landet auch am Dokument, rundeOffenEintrag). */
+function vorbefundHinweis(bild) {
+  const warum = bild.vorbefund.grund === 'bis_zur_entscheidung' ? 'gilt bis zur Entscheidung in der Konsole' : 'heute nicht nachprüfbar (Foto-Abgleich unvollständig)';
+  const heute = bild.heute && bild.heute !== bild.art ? `; heute: ${BILD_CODE[bild.heute]}` : '';
+  return `${BILD_TEXT[bild.art]} — Befund vom ${bild.seit || 'früheren Lauf'}, ${warum}${heute}`;
+}
+
+/**
  * Letzte Hürden vor jeder Freigabe.
  *  - Preis ist Pflicht (Entscheidung Patrick 26.09.2026). Bis dahin ließ die
  *    Bildprüfung ein Preisfoto ohne Preis ausdrücklich durch — eine Regel, die
@@ -134,6 +340,12 @@ function freigabe(f, audit, extra = {}) {
     if (f.preisBildDefekt) return offen('bild_defekt', { hinweis: 'Preisfoto beim Hochladen beschädigt' });
     return ablehnen('preis_fehlt');
   }
+  // Keine Freigabe ohne die beiden Abgleiche, die sie verhindern könnten
+  // (fail-closed für die Freigabe, Entscheidung Patrick 02.10.2026): ob das
+  // Konto gesperrt ist, und ob ein Foto schon in einer früheren Einreichung
+  // steckt. Scheiterte das Lesen, ist das kein Urteil — der Fall bleibt liegen.
+  if (f.kontoSperre === 'unbekannt') return offen('kontosperre_unbekannt');
+  if (f.fotoAbgleichFehlt) return offen('foto_abgleich_gescheitert');
   if (f.ortAuffaellig) return offen('ort_auffaellig', { hinweis: f.ortAuffaellig });
   return { entscheidung: 'freigeben', grund: null, ctx: {}, ...extra };
 }
@@ -178,12 +390,118 @@ const normName = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9äöüß]
 
 /**
  * Nachlese-Fehler eines Falls, den die Runde in ihrer Arbeitszeit nicht mehr
- * erreicht hat. Gilt für ALLE Angaben, auch den Preis: fehlte `preis`, wurde
- * eine Sperre, die nur am fehlenden Preis hängt, abgelehnt statt offen gelassen
- * — ein Werkzeugfehler als Urteil (gefunden 26.09.2026, greift ab etwa doppeltem
+ * erreicht hat. Gilt für ALLE Angaben: nicht nachgelesen ist kein „fehlt"
+ * (Name, Barcode) und kein „kein Preis" (Preis-Pflicht) — ein Werkzeugfehler
+ * ist nie ein Urteil (gefunden 26.09.2026, greift ab etwa doppeltem
  * Tagesvolumen).
  */
 const rettungNichtGeschafft = () => ({ name: 'zeit_abgelaufen', ean: 'zeit_abgelaufen', preis: 'zeit_abgelaufen' });
+
+/**
+ * Worauf sich eine Ablehnung stützt, die eine ANDERE Einreichung als Beleg
+ * nimmt: die Wochen-Sperre (eigene Freigaben im Fenster) und „Fotos
+ * wiederverwendet" (ältere Einreichungen mit demselben Foto). Die Morgenrunde
+ * schreibt so eine Ablehnung nur, wenn mindestens einer dieser Belege
+ * feststeht — vorher entschieden oder im selben Lauf tatsächlich geschrieben
+ * (Prüfrunde 02.10.2026). Sonst: Referenz-Freigabe im Lauf übersprungen,
+ * gescheitert oder von der Notbremse zurückgehalten → am Ende wäre keine der
+ * Kopien bezahlt.
+ * @returns {string[]|null}  IDs der Belege, oder null, wenn die Entscheidung an keinem hängt
+ */
+function belegeVon(fall) {
+  if (!fall || fall.entscheidung !== 'ablehnen') return null;
+  if (fall.grund === REASON.SAME_USER_WEEK && fall.dup) return fall.dup.priorIds || (fall.dup.priorId ? [fall.dup.priorId] : []);
+  if (fall.grund === 'bilder_wiederverwendet') return (fall.eingabe && fall.eingabe.bild && fall.eingabe.bild.mit) || [];
+  return null;
+}
+
+/**
+ * Befunde der Runde, die die Prüfkonsole ohne Übersteuerung (force + Notiz)
+ * NICHT freigeben lässt (Prüfrunde 2, 02.10.2026). Die Konsole selbst kennt
+ * weder den Foto-Abgleich (md5 gegen alle früheren Einreichungen) noch die
+ * zweite Barcode-Lesung — ohne diesen Weg stand ein Fall, den die Runde wegen
+ * eines Fotos eines ANDEREN Kontos liegen ließ, in der Konsole als „ok" mit
+ * Freigabe-Taste da.
+ */
+const RUNDE_SPERREND = Object.freeze(['foto_fremdes_konto', 'foto_aeltere_offen', 'bilder_wiederverwendet', 'ean_abweichend', 'ean_unsicher']);
+const BILD_CODE = { fremdes_konto: 'foto_fremdes_konto', aeltere_offen: 'foto_aeltere_offen', wiederverwendet: 'bilder_wiederverwendet' };
+
+/**
+ * Sperrende Befunde aus den Eingaben eines Falls — aus den TATSACHEN, nicht
+ * aus dem gewählten Grund: entscheideFall nennt nur den ersten Grund (eine
+ * Barcode-Abweichung geht dem Foto-Befund vor, eine ältere offene Einreichung
+ * derselben EAN beiden), die Konsole soll aber jeden sehen.
+ */
+function rundeBefunde(eingabe) {
+  const e = eingabe || {};
+  const out = [];
+  if (e.bild && BILD_CODE[e.bild.art]) out.push(BILD_CODE[e.bild.art]);
+  // Übernommener Befund (bildMitVorbefund): auch, was heute gefunden wurde.
+  if (e.bild && e.bild.heute && BILD_CODE[e.bild.heute] && !out.includes(BILD_CODE[e.bild.heute])) out.push(BILD_CODE[e.bild.heute]);
+  const ef = e.eanFoto;
+  if (ef && ef.art === 'abweichend') out.push('ean_abweichend');
+  else if (ef && (ef.art === 'unsicher' || ef.art === 'zweifelhaft')) out.push('ean_unsicher');
+  return out;
+}
+
+/**
+ * Was die Runde an einer Einreichung hinterlässt, die NACH dem Lauf offen ist
+ * (`review.rundeOffen`, nur vom Server geschrieben — `review` steht in der
+ * Sperrliste von firestore.rules; die App liest das Feld nicht). Bewusst NICHT
+ * `holdReasons`: die zeigt die App bei offenen Fällen als „Zurückgestellt".
+ *
+ *  - `grund`/`hinweis`/`zurueckgehalten`: warum die Runde nicht entschieden
+ *    hat — Anzeige in der Konsole.
+ *  - `sperrend`: Befunde aus RUNDE_SPERREND — daraus leitet die Konsole das
+ *    Urteil `hold` ab (Freigabe nur mit force + Notiz). Die Foto-Befunde
+ *    darunter übernimmt der nächste Lauf, wo er sie nicht vollständig
+ *    nachrechnen kann, `foto_fremdes_konto` immer (fotoVorbefund/bildMitVorbefund).
+ *  - `fotoSeit`: Lauf, seit dem der Foto-Befund steht (nur mit Foto-Befund).
+ *  - `eanFoto`: Halte-Befund der Barcode-Nummer als Rückfall für die nächste
+ *    Runde, falls `eanFotoOcr` nicht gespeichert werden konnte (eanFotoVorbefund).
+ *  - Im Trockenlauf (`trocken`) bleibt auch ein geplanter Entscheid offen —
+ *    `geplant` sagt, was die Runde getan hätte. Eine geplante Freigabe ohne
+ *    sperrenden Befund hinterlässt nichts.
+ * Gesperrte Konten bekommen nichts (sie liegen stumm, die Konsole liest die
+ * Sperre selbst). null = nichts zu hinterlassen (ein alter Eintrag wird entfernt).
+ *
+ * DATENSCHUTZ: das Dokument darf der Einreicher selbst lesen (firestore.rules,
+ * `crowd_uploads` read für den Eigentümer). Die IDs der Einreichungen eines
+ * ANDEREN Kontos (sie beginnen mit dessen uid) stehen deshalb NICHT hier,
+ * sondern nur im Tagesbericht (`wartetAufDich`, nur für Admins) — sonst
+ * erführe jemand die Kennung eines fremden Kontos und zugleich, dass wir
+ * Fotos kontenübergreifend vergleichen (vgl. kontoSperre: eine Sperre, die der
+ * Betroffene sieht, lädt zum Ausweichen ein).
+ */
+function rundeOffenEintrag(p, { lauf, trocken = false } = {}) {
+  if (!p || p.grund === KONTO_GESPERRT) return null;
+  const sperrend = rundeBefunde(p.eingabe);
+  if (p.entscheidung === 'freigeben' && !sperrend.length) return null;
+  const ef = p.eingabe && p.eingabe.eanFoto;
+  const eanHalt = ef && (ef.art === 'abweichend' || ef.art === 'unsicher' || ef.art === 'zweifelhaft');
+  const bild = p.eingabe && p.eingabe.bild;
+  const fremd = p.grund === 'foto_fremdes_konto' ? ((bild && bild.mit) || []).length : 0;
+  // Ein übernommener Befund trägt keine IDs; sein Hinweis darf ans Dokument.
+  const hinweis = p.grund === 'foto_fremdes_konto' && !(bild && bild.vorbefund)
+    ? `Gleiches Foto bei ${fremd || 'einer'} Einreichung${fremd === 1 || !fremd ? '' : 'en'} eines anderen Kontos — welche, steht im Tagesbericht`
+    : (p.ctx && p.ctx.hinweis) ? String(p.ctx.hinweis).slice(0, 300) : null;
+  return {
+    grund: p.grund || null,
+    ...(p.entscheidung !== 'offen' ? { geplant: p.entscheidung } : {}),
+    hinweis,
+    zurueckgehalten: p.zurueckgehaltenGrund || null,
+    sperrend,
+    // Seit welchem Lauf der Foto-Befund steht — der nächste Lauf übernimmt ihn
+    // damit (fotoVorbefund), auch wenn der Eintrag täglich neu geschrieben wird.
+    ...(bild && BILD_CODE[bild.art] ? { fotoSeit: bild.seit || lauf || null } : {}),
+    eanFoto: eanHalt ? {
+      befund: ef.art === 'abweichend' ? 'abweichend' : 'unsicher', ean: ef.gelesen || ef.roh || null,
+      ...(ef.art === 'abweichend' ? { bestaetigt: ef.bestaetigt === true } : { zweit: ef.zweit || null }),
+    } : null,
+    lauf: lauf || null,
+    trocken: !!trocken,
+  };
+}
 
 function ablehnen(grund, ctx = {}) { return { entscheidung: 'ablehnen', grund, ctx }; }
 function offen(grund, ctx = {}) { return { entscheidung: 'offen', grund, ctx }; }
@@ -194,50 +512,58 @@ function offen(grund, ctx = {}) { return { entscheidung: 'offen', grund, ctx }; 
  * bleiben offen — und der Bericht warnt rot. Freigaben laufen immer weiter:
  * sie sind die harmlose Richtung.
  *
- *  A) Bildprüfung: mehr als `bildMaxAnteil` der geprüften Fälle als unecht
+ *  A) Eigene Bremsen (EIGENE_BREMSEN): Preis fehlt, Wochen-Sperre — jede mit
+ *     eigener Schwelle, bezogen auf die geprüften Fälle (Preis, beruht auf der
+ *     Bildprüfung) bzw. auf alle Fälle des Laufs. Gesperrte Konten brauchen
+ *     keine: sie werden nicht abgelehnt, sondern liegen gelassen.
+ *  B) Bildprüfung: mehr als `bildMaxAnteil` der geprüften Fälle als unecht
  *     bzw. „dieselbe Ansicht" — dann liegt es eher am Modell als an den
  *     Einreichungen (Handrunden 09.–24.09.: 0–2 %).
- *  B) Gesamt: Ablehnungsquote über dem Doppelten des 30-Tage-Schnitts
+ *  C) Gesamt: Ablehnungsquote über dem Doppelten des 30-Tage-Schnitts
  *     (mindestens `gesamtMin` Ablehnungen, damit ein kleiner Tag nicht auslöst).
- *     OHNE „Preis fehlt": diese Ablehnungen gibt es erst seit 26.09., sie hätten
- *     die Quote gegenüber dem alten Schnitt dauerhaft verdoppelt und die Bremse
- *     jeden Tag ausgelöst (Gegenprüfung 26.09.). Dafür hat der Preis seine eigene
- *     Bremse C, und schnittQuote lässt diese Ablehnungen ebenfalls weg.
- *  C) Preis: mehr als `preisMaxAnteil` der geprüften Fälle „Preis fehlt".
+ *     OHNE die Gründe mit eigener Bremse (AUSSER_GESAMTQUOTE): neue oder
+ *     verschärfte Gründe hätten die Quote gegenüber dem alten Schnitt dauerhaft
+ *     verschoben und die Bremse jeden Tag ausgelöst (Gegenprüfung 26.09.).
+ *     schnittQuote lässt dieselben Gründe weg. Kippt die Gesamtquote, werden
+ *     ALLE Ablehnungen des Laufs gehalten, auch die mit eigener Bremse.
  *
  * @param {Array<{entscheidung:string, grund:string|null, audit?:object|null}>} plan (wird verändert)
- * @param {{schnittQuote:number|null, bildMaxAnteil?:number, bildMin?:number, gesamtMin?:number, preisMaxAnteil?:number, preisMin?:number}} opts
- * @returns {{bild:boolean, gesamt:boolean, preis:boolean, text:string[]}}
+ * @param {{schnittQuote:number|null, bildMaxAnteil?:number, bildMin?:number, gesamtMin?:number}} opts
+ * @returns {{bild:boolean, gesamt:boolean, preis:boolean, woche:boolean, text:string[]}}
  */
-function notbremse(plan, { schnittQuote = null, bildMaxAnteil = 0.1, bildMin = 5, gesamtMin = 10, preisMaxAnteil = 0.3, preisMin = 8 } = {}) {
-  const ergebnis = { bild: false, gesamt: false, preis: false, text: [] };
+function notbremse(plan, { schnittQuote = null, bildMaxAnteil = 0.1, bildMin = 5, gesamtMin = 10 } = {}) {
+  const ergebnis = { bild: false, gesamt: false, preis: false, woche: false, text: [] };
   const geprueft = plan.filter((p) => p.audit).length;
-  // „Preis fehlt" beruht auf dem Urteil der Bildprüfung. Normal sind gut 10 %
-  // der geprüften Fälle (gemessen 26.09.); fehlt bei deutlich mehr der Preis,
-  // ist eher die Bildprüfung gestört als die Einreichungen.
-  const preisAbgelehnt = plan.filter((p) => p.entscheidung === 'ablehnen' && p.grund === 'preis_fehlt');
-  if (preisAbgelehnt.length >= preisMin && geprueft && preisAbgelehnt.length / geprueft > preisMaxAnteil) {
-    ergebnis.preis = true;
-    ergebnis.text.push(`Bei ${preisAbgelehnt.length} von ${geprueft} Einreichungen fehlte angeblich der Preis (${Math.round((100 * preisAbgelehnt.length) / geprueft)} %) — diese Ablehnungen zurückgehalten.`);
-    preisAbgelehnt.forEach((p) => { p.zurueckgehaltenGrund = p.grund; p.entscheidung = 'offen'; p.grund = 'notbremse_preis'; });
+  const halten = (liste, grund) => liste.forEach((p) => { p.zurueckgehaltenGrund = p.grund; p.entscheidung = 'offen'; p.grund = grund; });
+  const pz = (n, g) => Math.round((100 * n) / g);
+  for (const b of EIGENE_BREMSEN) {
+    const betroffen = plan.filter((p) => p.entscheidung === 'ablehnen' && b.gruende.includes(p.grund));
+    const basis = b.basis === 'geprueft' ? geprueft : plan.length;
+    if (betroffen.length >= b.min && basis && betroffen.length / basis > b.anteil) {
+      ergebnis[b.schalter] = true;
+      ergebnis.text.push(b.text(betroffen.length, basis, pz(betroffen.length, basis)));
+      halten(betroffen, b.halten);
+    }
   }
   const bildAbgelehnt = plan.filter((p) => p.entscheidung === 'ablehnen' && BILD_GRUENDE.has(p.grund));
   if (bildAbgelehnt.length >= bildMin && geprueft && bildAbgelehnt.length / geprueft > bildMaxAnteil) {
     ergebnis.bild = true;
-    ergebnis.text.push(`Bildprüfung hielt ${bildAbgelehnt.length} von ${geprueft} Einreichungen für unpassend (${Math.round((100 * bildAbgelehnt.length) / geprueft)} %) — Ablehnungen aus der Bildprüfung zurückgehalten.`);
-    bildAbgelehnt.forEach((p) => { p.zurueckgehaltenGrund = p.grund; p.entscheidung = 'offen'; p.grund = 'notbremse_bildpruefung'; });
+    ergebnis.text.push(`Bildprüfung hielt ${bildAbgelehnt.length} von ${geprueft} Einreichungen für unpassend (${pz(bildAbgelehnt.length, geprueft)} %) — Ablehnungen aus der Bildprüfung zurückgehalten.`);
+    halten(bildAbgelehnt, 'notbremse_bildpruefung');
   }
-  const entschieden = plan.filter((p) => (p.entscheidung === 'freigeben' || p.entscheidung === 'ablehnen') && !PREIS_GRUENDE.has(p.grund));
+  const entschieden = plan.filter((p) => (p.entscheidung === 'freigeben' || p.entscheidung === 'ablehnen') && !AUSSER_GESAMTQUOTE.has(p.grund));
   const abgelehnt = entschieden.filter((p) => p.entscheidung === 'ablehnen');
   const quote = entschieden.length ? abgelehnt.length / entschieden.length : 0;
   if (schnittQuote != null && abgelehnt.length >= gesamtMin && quote > 2 * Math.max(schnittQuote, 0.02)) {
     ergebnis.gesamt = true;
     ergebnis.text.push(`Ablehnungsquote ${Math.round(quote * 100)} % statt üblich ${Math.round(schnittQuote * 100)} % — alle Ablehnungen dieses Laufs zurückgehalten.`);
-    // Wenn insgesamt etwas kippt, auch die Preis-Ablehnungen halten.
-    plan.filter((p) => p.entscheidung === 'ablehnen')
-      .forEach((p) => { p.zurueckgehaltenGrund = p.grund; p.entscheidung = 'offen'; p.grund = 'notbremse_quote'; });
+    halten(plan.filter((p) => p.entscheidung === 'ablehnen'), 'notbremse_quote');
   }
   return ergebnis;
 }
 
-module.exports = { entscheideFall, notbremse, nameAusLesungen, eanAusLesungen, rettungNichtGeschafft, BILD_GRUENDE, PREIS_GRUENDE };
+module.exports = {
+  entscheideFall, bildBefund, fotoVorbefund, bildMitVorbefund, belegeVon, notbremse, nameAusLesungen, eanAusLesungen, rettungNichtGeschafft,
+  rundeBefunde, rundeOffenEintrag,
+  BILD_GRUENDE, EIGENE_BREMSEN, AUSSER_GESAMTQUOTE, KONTO_GESPERRT, DOPPEL_GRUENDE, RUNDE_SPERREND,
+};
