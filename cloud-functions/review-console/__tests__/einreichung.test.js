@@ -81,15 +81,52 @@ describe('precheckOf: dieselbe Semantik wie die Morgenrunde', () => {
   it('nur nachgelesene EAN wird gegen Doppel geprüft (vorher nie)', () => {
     const ref = rowOf(doc('ref', basis({ ean: GUELTIG, productNameOcr: 'Skyr', status: 'approved' })));
     const k = rowOf(doc('k', basis({ productNameOcr: 'Skyr', eanRescueOcr: GUELTIG, createdAt: T0 + STUNDE })));
-    expect(precheckOf(k, [ref])).toMatchObject({ verdict: 'locked', reasons: ['sperre_30_tage_gleicher_nutzer'] });
+    expect(precheckOf(k, [ref])).toMatchObject({ verdict: 'locked', reasons: ['sperre_woche_gleicher_nutzer'] });
   });
 
-  it('geretteter Preis löst die Sperre, geretteter Hersteller nicht', () => {
+  it('Wochen-Regel (02.10.2026): weder geretteter Preis noch Hersteller lösen die Sperre', () => {
     const ref = rowOf(doc('ref', basis({ ean: GUELTIG, productNameOcr: 'Gouda', status: 'approved', priceOcr: { priceCents: 199 }, manufacturerOcr: { name: 'Kaufland Stiftung & Co. KG' } })));
     const preis = rowOf(doc('k1', basis({ ean: GUELTIG, productNameOcr: 'Gouda', createdAt: T0 + STUNDE, priceRescueOcr: { priceCents: 229, priceImageKind: 'preisschild' } })));
     const hersteller = rowOf(doc('k2', basis({ ean: GUELTIG, productNameOcr: 'Gouda', createdAt: T0 + STUNDE, manufacturerRescueOcr: { name: 'DMK' } })));
-    expect(precheckOf(preis, [ref]).verdict).toBe('ok');
+    expect(precheckOf(preis, [ref]).verdict).toBe('locked');
     expect(precheckOf(hersteller, [ref]).verdict).toBe('locked');
+    // 3 Tage später: auch gesperrt; 8 Tage später: frei.
+    expect(precheckOf(rowOf(doc('k3', basis({ ean: GUELTIG, productNameOcr: 'Gouda', createdAt: T0 + 72 * STUNDE }))), [ref]).verdict).toBe('locked');
+    expect(precheckOf(rowOf(doc('k4', basis({ ean: GUELTIG, productNameOcr: 'Gouda', createdAt: T0 + 192 * STUNDE }))), [ref]).verdict).toBe('ok');
+  });
+});
+
+describe('precheckOf: gesperrte Konten und Barcode-Foto (Entscheidungen Patrick 02.10.2026)', () => {
+  const sauber = (extra = {}) => rowOf(doc('k', basis({ ean: GUELTIG, productNameOcr: 'Skyr', priceOcr: { priceCents: 129 }, ...extra })));
+
+  it('gesperrtes Konto → locked mit konto_gesperrt vorne, auch bei sonst sauberem Fall', () => {
+    expect(precheckOf(sauber(), [], { kontoSperre: 'gesperrt' })).toMatchObject({ verdict: 'locked', reasons: ['konto_gesperrt'], kontoSperre: 'gesperrt' });
+  });
+  it('Sperrliste nicht lesbar → hold, nie ok', () => {
+    expect(precheckOf(sauber(), [], { kontoSperre: 'unbekannt' })).toMatchObject({ verdict: 'hold', reasons: ['kontosperre_unbekannt'] });
+  });
+  it('kein Eintrag → wie bisher', () => {
+    expect(precheckOf(sauber(), [], { kontoSperre: null })).toMatchObject({ verdict: 'ok', reasons: [] });
+  });
+  it('Barcode-Foto mit anderer Nummer → hold ean_abweichend; Rohwert bleibt sichtbar', () => {
+    const r = sauber({ eanFotoOcr: { ean: ANDERE } });
+    expect(r.eanFoto).toMatchObject({ art: 'abweichend', gelesen: ANDERE, gespeichert: GUELTIG });
+    expect(precheckOf(r, [])).toMatchObject({ verdict: 'hold', reasons: ['ean_abweichend'] });
+  });
+  it('… und die Doppel-Regel unter der Foto-Nummer: eigene Freigabe binnen 7 Tagen wird gemeldet', () => {
+    const r = sauber({ eanFotoOcr: { ean: ANDERE }, createdAt: T0 + 2 * STUNDE });
+    const unterFoto = [rowOf(doc('alt', basis({ ean: ANDERE, productNameOcr: 'Skyr', status: 'approved', createdAt: T0 })))];
+    const pre = precheckOf(r, [], { fotoEanRows: unterFoto });
+    expect(pre.reasons).toEqual(['ean_abweichend', 'foto_nummer_doppelt']);
+    expect(pre.dupFoto).toMatchObject({ verdict: 'locked', priorId: 'alt' });
+  });
+  it('gleiche Nummer oder nicht lesbar → kein Einfluss', () => {
+    expect(precheckOf(sauber({ eanFotoOcr: { ean: GUELTIG } }), []).verdict).toBe('ok');
+    expect(precheckOf(sauber({ eanFotoOcr: { ean: null } }), []).verdict).toBe('ok');
+  });
+  it('Warteschlange reicht die Kontosperre je Person durch', () => {
+    const l = baueFotoListe([doc('k', basis({ ean: GUELTIG, productNameOcr: 'Skyr' }))], new Map(), {}, '', (uid) => (uid === 'u1' ? 'gesperrt' : null));
+    expect(l.rows[0]).toMatchObject({ verdict: 'locked', reasons: ['konto_gesperrt'] });
   });
 });
 

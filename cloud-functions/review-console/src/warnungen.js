@@ -23,7 +23,7 @@ const TAG_MS = 24 * 60 * 60 * 1000;
  * @param {Array<{id:string, kind:string, active:boolean, startAt:number, endAt:number, budgetRemainingCents?:number, budgetTotalCents?:number}>} k.aktionen
  * @param {{eingeschaltet:boolean, laeufeLetzte48h:number}} k.zweitpruefung
  * @param {{inPruefung:number, aeltesteTage:number|null, letzte24h:{gesamt:number, ohneAktion:number}}} k.bons
- * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number, aeltesteOffenTage?:number|null}} k.runde
+ * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number, aeltesteOffenTage?:number|null, fotoAbgleichGescheitert?:boolean, kontoSperrenUnlesbar?:boolean}} k.runde
  * @param {{bild:boolean, gesamt:boolean, text:string[]}} k.notbremse
  * @param {{alt:string|null, neu:string}} k.regelVersion
  * @param {{scharf:boolean, bericht:object|null, abgebrochen?:boolean, laeuftNoch?:boolean, unbekannt?:boolean}} [k.bonRunde]
@@ -77,6 +77,10 @@ function warnungen(k) {
   // ── Die Runde selbst ─────────────────────────────────────────────────
   const r = k.runde;
   if (r) {
+    // Ohne diese Abgleiche gibt die Runde nichts frei (Entscheidungen Patrick
+    // 02.10.2026, fail-closed) — still wäre das ein Tag ohne jede Freigabe.
+    if (r.kontoSperrenUnlesbar) rot('kontosperren_unlesbar', 'Die Liste gesperrter Konten (cashback_sperren) war nicht lesbar — heute wurde nichts freigegeben. Die Fälle sind morgen wieder dran.');
+    if (r.fotoAbgleichGescheitert) rot('foto_abgleich_gescheitert', 'Der Abgleich der Fotos mit früheren Einreichungen ist gescheitert (Storage-Liste) — heute wurde nichts freigegeben. Die Fälle sind morgen wieder dran.');
     if (r.schreibFehler > 0) rot('schreibfehler', `${r.schreibFehler} Entscheidungen konnten nicht gespeichert werden — die Fälle sind offen geblieben und morgen wieder dran.`);
     if (r.nichtGeschafft > 0) gelb('runde_unvollstaendig', `${r.nichtGeschafft} Einreichungen hat die Runde in der Zeit nicht mehr geschafft — sie sind morgen dran.`);
     // Seit der Preis-Pflicht (26.09.) bleibt bei Zweifel mehr liegen als vorher.

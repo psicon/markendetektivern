@@ -65,9 +65,27 @@ const REASON_COPY: Record<string, { headline: string; body: string }> = {
     headline: 'Ein paar Ansichten fehlten',
     body: 'Mit allen sieben Schritten — Vorderseite, Rückseite, Zutaten, Nährwerte, Hersteller, Barcode und Preis — zählt der Datensatz sofort.',
   },
+  // Altbestand bis 02.10.2026 (24-h-Sperre). Seit der Wochen-Regel stimmte der
+  // alte Text („ab dem nächsten Tag … sofort, wenn sich Preis, Hersteller oder
+  // Markt geändert haben") nicht mehr; der Server vergibt den Code nicht mehr.
   sperre_30_tage_gleicher_nutzer: {
     headline: 'Dieses Produkt liegt uns von dir schon vor',
-    body: 'Die erste Einreichung zählt. Ab dem nächsten Tag zählt derselbe Artikel wieder — und sofort, wenn sich Preis, Hersteller oder Markt geändert haben.',
+    body: 'Die erste Einreichung zählt. Derselbe Artikel zählt eine Woche später wieder — ein anderes Produkt bringt sofort etwas.',
+  },
+  // 02.10.2026 (Entscheidung Patrick): dasselbe Produkt zählt je Person einmal
+  // pro Woche, ohne Ausnahme für anderen Preis, Hersteller oder Markt. Der
+  // Server schreibt vorerst `doppelt_eingereicht` ans Dokument, weil ältere
+  // App-Versionen diesen Code nicht kennen (review-console/src/duplicatePolicy.js,
+  // APP_GRUND) — er stellt um, sobald diese Version verbreitet ist.
+  sperre_woche_gleicher_nutzer: {
+    headline: 'Dieses Produkt hast du diese Woche schon eingereicht',
+    body: 'Die erste Einreichung zählt. Ab nächster Woche zählt derselbe Artikel wieder — ein anderes Produkt bringt sofort etwas.',
+  },
+  // 02.10.2026 (Entscheidung Patrick): Einreichungen gesperrter Konten. Sachlich,
+  // ohne Vorwurf — der Grund steht nicht im Text.
+  konto_gesperrt: {
+    headline: 'Dein Konto nimmt gerade nicht an den Aktionen teil',
+    body: 'Deine Einreichungen werden derzeit nicht gezählt. Wenn du Fragen dazu hast, schreib uns einfach.',
   },
   // Altbestand: bis zum 20.09.2026 sperrte auch die Einreichung eines ANDEREN
   // Nutzers. Das gilt nicht mehr; der Text sagt das, statt eine Frist zu nennen,

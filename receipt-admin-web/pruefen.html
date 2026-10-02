@@ -180,7 +180,10 @@
         ['kein_produktname', 'Kein Name erkennbar'],
         ['bilder_wiederverwendet', 'Bilder wiederverwendet'],
         ['bild_defekt', 'Foto unlesbar'],
-        ['sperre_30_tage_gleicher_nutzer', 'Doppelt (selber Nutzer)'],
+        // 02.10.2026 (Entscheidung Patrick): Wochen-Sperre statt 24 h. Der
+        // Server schreibt dafür den App-Code `doppelt_eingereicht` ans Dokument
+        // (duplicatePolicy.APP_GRUND), der gewählte Grund bleibt in review.reason.
+        ['sperre_woche_gleicher_nutzer', 'Doppelt (selbe Person, binnen 7 Tagen)'],
         // 26.09.2026: Preis ist Pflicht (Entscheidung Patrick). Taste 8 — die
         // übrigen Tasten bleiben, wo sie waren; auf 8 lag bis dahin die Sperre
         // wegen fremder Einreichungen, die es seit 20.09. nicht mehr gibt.
@@ -225,6 +228,16 @@
         ['already_booked', 'war bereits gebucht'],
         // Gründe, die nur die Morgenrunde vergibt (keine Taste, nur Anzeige).
         ['gleiche_ansicht_mehrfach', 'Fast alle Fotos zeigen dieselbe Ansicht'],
+        // Altbestand bis 02.10.2026 (24-h-Sperre).
+        ['sperre_30_tage_gleicher_nutzer', 'Doppelt (selber Nutzer, alte 24-h-Regel)'],
+        // Entscheidungen Patrick 02.10.2026.
+        ['konto_gesperrt', 'Konto gesperrt — Freigabe nicht möglich'],
+        ['kontosperre_unbekannt', 'Kontosperre nicht lesbar — nicht freigeben'],
+        ['ean_abweichend', 'Barcode-Foto zeigt andere Nummer als gespeichert'],
+        ['foto_nummer_doppelt', 'Unter der Foto-Nummer: eigene Freigabe binnen 7 Tagen'],
+        ['foto_fremdes_konto', 'Gleiches Foto bei einem anderen Konto'],
+        ['foto_aeltere_offen', 'Gleiches Foto in älterer, offener Einreichung'],
+        ['foto_abgleich_gescheitert', 'Foto-Abgleich gescheitert (Technik)'],
       ]]);
 
       /**
@@ -279,6 +292,7 @@
 
       const FOLGE_DE = {
         keine_aktion: 'zu dieser Einreichung gehört keine Aktion',
+        konto_gesperrt: 'das Konto ist gesperrt (Entscheidung 02.10.2026) — Freigabe nicht möglich',
         ort_fehlt: 'ohne Ortsangabe zahlt die Aktion nicht',
         no_location: 'ohne Ortsangabe zahlt die Aktion nicht',
         kein_ort_angegeben: 'ohne Ortsangabe zahlt die Aktion nicht',
@@ -531,7 +545,9 @@
         // Der tatsächliche Ablehngrund: Bild-Gründe (gleiche Ansicht, wieder-
         // verwendet) stehen nicht in der Vorprüfung — ohne diese Zeile stand
         // über einem abgelehnten Fall nur „Alle Prüfungen bestanden".
-        const ablehnGrund = r.status === 'rejected' ? (r.rejectReason || (r.review && r.review.reason)) : null;
+        // Interner Grund zuerst: am Dokument steht seit 02.10.2026 teils der
+        // App-Code (Wochen-Sperre → doppelt_eingereicht), review.reason sagt genauer, was war.
+        const ablehnGrund = r.status === 'rejected' ? ((r.review && r.review.reason) || r.rejectReason) : null;
         const entschieden = ablehnGrund
           ? `<div class="folge zahlt-nicht">Abgelehnt wegen: <b>${esc(REASON_DE[ablehnGrund] || ablehnGrund)}</b></div>`
           : '';

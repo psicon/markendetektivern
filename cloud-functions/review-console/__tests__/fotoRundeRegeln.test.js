@@ -3,7 +3,8 @@
  * Regeln der Morgenrunde. Jeder Fall hier ist einer, der in den Handrunden
  * 09.–24.09.2026 vorkam und dort von Hand entschieden werden musste.
  */
-const { entscheideFall, notbremse } = require('../src/fotoRundeRegeln');
+const { entscheideFall, notbremse, bildBefund, AUSSER_GESAMTQUOTE } = require('../src/fotoRundeRegeln');
+const WOCHE = 'sperre_woche_gleicher_nutzer';
 
 const ok = { ok: true, problems: [], missing: [] };
 const echt = { echt: true, loseWare: false, gleicheAnsicht: false, grund: '' };
@@ -58,9 +59,11 @@ describe('Preis ist Pflicht (Entscheidung Patrick 26.09.2026)', () => {
   it('Gegenzeichen ohne Belang, wenn der Preis sichtbar ist → freigeben', () => {
     expect(entscheideFall(ohnePreis({ ...echt, preisSichtbar: true }, { preisHinweis: 'x', rettungFehler: { preis: 'lesungen_uneinig' } })).entscheidung).toBe('freigeben');
   });
-  it('Doppel-Sperre ohne Preis und uneinige Preis-Nachlesung → offen, keine Sperre aus einer Lesung', () => {
-    const e = entscheideFall(fall({ preisFehlt: true, rettungFehler: { preis: 'lesungen_uneinig' }, dup: { verdict: 'locked', reason: 'sperre_30_tage_gleicher_nutzer', lockUntil: 1 } }));
-    expect(e).toMatchObject({ entscheidung: 'offen', grund: 'preis_unsicher' });
+  // Seit der Wochen-Regel (02.10.2026) hängt die Sperre nicht mehr am Preis —
+  // ein unsicher gelesener Preis kann sie also weder lösen noch begründen.
+  it('Wochen-Sperre ohne Preis und mit uneiniger Preis-Nachlesung → trotzdem ablehnen', () => {
+    const e = entscheideFall(fall({ preisVorhanden: false, rettungFehler: { preis: 'lesungen_uneinig' }, dup: { verdict: 'locked', reason: WOCHE, lockUntil: 1 } }));
+    expect(e).toMatchObject({ entscheidung: 'ablehnen', grund: WOCHE });
   });
 });
 
@@ -95,17 +98,17 @@ describe('entscheideFall', () => {
     expect(entscheideFall(fall({ leer: ['zutaten'] }))).toMatchObject({ entscheidung: 'ablehnen', grund: 'unvollstaendig' });
   });
 
-  it('eigenes Doppel binnen 24 h → ablehnen mit Sperrfrist', () => {
-    const e = entscheideFall(fall({ dup: { verdict: 'locked', reason: 'sperre_30_tage_gleicher_nutzer', lockUntil: 123 } }));
-    expect(e).toMatchObject({ entscheidung: 'ablehnen', grund: 'sperre_30_tage_gleicher_nutzer', ctx: { lockUntil: 123 } });
+  it('eigenes Doppel binnen einer Woche → ablehnen mit Sperrfrist', () => {
+    const e = entscheideFall(fall({ dup: { verdict: 'locked', reason: WOCHE, lockUntil: 123 } }));
+    expect(e).toMatchObject({ entscheidung: 'ablehnen', grund: WOCHE, ctx: { lockUntil: 123 } });
   });
 
   it('ältere eigene Einreichung noch offen → offen', () => {
     expect(entscheideFall(fall({ dup: { verdict: 'hold', reason: 'doppelt_eingereicht' } })).entscheidung).toBe('offen');
   });
 
-  it('Bild aus früherer Einreichung → ablehnen', () => {
-    expect(entscheideFall(fall({ wiederverwendet: true })).grund).toBe('bilder_wiederverwendet');
+  it('Bild aus früherer eigener Freigabe → ablehnen', () => {
+    expect(entscheideFall(fall({ bild: { art: 'wiederverwendet', mit: ['a'] } })).grund).toBe('bilder_wiederverwendet');
   });
 
   it('kein Name nach Nachlesen → ablehnen; Nachlesen am Limit gescheitert → offen', () => {
@@ -237,24 +240,20 @@ describe('Nachlese-Fehler sind kein Urteil (Gegenprüfung 24.09.)', () => {
     const comp = { ok: false, problems: ['ean_fehlt'], missing: [] };
     expect(entscheideFall(fall({ comp, rettungFehler: { alles: 'DEADLINE_EXCEEDED' } })).entscheidung).toBe('offen');
   });
-  it('Sperre hängt am fehlenden Preis und das Preis-Nachlesen scheiterte → offen', () => {
-    const dup = { verdict: 'locked', reason: 'sperre_30_tage_gleicher_nutzer', lockUntil: 1 };
-    expect(entscheideFall(fall({ dup, preisFehlt: true, rettungFehler: { preis: '429' } })).entscheidung).toBe('offen');
-    expect(entscheideFall(fall({ dup, preisFehlt: true })).entscheidung).toBe('ablehnen');
-    expect(entscheideFall(fall({ dup, preisFehlt: false, rettungFehler: { preis: '429' } })).entscheidung).toBe('ablehnen');
+  it('Wochen-Sperre ist ein Urteil über Person, EAN und Zeit — gescheitertes Preis-Nachlesen ändert nichts', () => {
+    const dup = { verdict: 'locked', reason: WOCHE, lockUntil: 1 };
+    expect(entscheideFall(fall({ dup, preisVorhanden: false, rettungFehler: { preis: '429' } })).entscheidung).toBe('ablehnen');
+    expect(entscheideFall(fall({ dup, preisVorhanden: false })).entscheidung).toBe('ablehnen');
   });
-  it('Arbeitszeit abgelaufen: Sperre, die am fehlenden Preis hängt → offen, nicht abgelehnt (26.09.)', () => {
+  it('Arbeitszeit abgelaufen: Name und Barcode nicht nachgelesen ist kein „fehlt" (26.09.)', () => {
     const { rettungNichtGeschafft } = require('../src/fotoRundeRegeln');
     const rf = rettungNichtGeschafft();
     expect(rf.preis).toBe('zeit_abgelaufen');
-    const dup = { verdict: 'locked', reason: 'sperre_30_tage_gleicher_nutzer', lockUntil: 1 };
-    expect(entscheideFall(fall({ dup, preisFehlt: true, rettungFehler: rf })))
+    expect(entscheideFall(fall({ comp: { ok: false, problems: ['kein_produktname'], missing: [] }, rettungFehler: rf })).entscheidung).toBe('offen');
+    expect(entscheideFall(fall({ comp: { ok: false, problems: ['ean_fehlt'], missing: [] }, rettungFehler: rf })).entscheidung).toBe('offen');
+    // … und kein Preis gelesen ist dann kein „Preis fehlt".
+    expect(entscheideFall(fall({ preisVorhanden: false, audit: { ...echt, preisSichtbar: false }, rettungFehler: rf })))
       .toMatchObject({ entscheidung: 'offen', grund: 'nachlesen_gescheitert', ctx: { hinweis: 'zeit_abgelaufen' } });
-    // Name und Barcode wie bisher: nicht nachgelesen ist kein „fehlt".
-    expect(entscheideFall(fall({ comp: { ok: false, problems: ['kein_produktname'], missing: [] }, rettungFehler: rettungNichtGeschafft() })).entscheidung).toBe('offen');
-    expect(entscheideFall(fall({ comp: { ok: false, problems: ['ean_fehlt'], missing: [] }, rettungFehler: rettungNichtGeschafft() })).entscheidung).toBe('offen');
-    // Liegt ein Preis vor, bleibt die Sperre ein Urteil über die Einreichung.
-    expect(entscheideFall(fall({ dup, preisFehlt: false, rettungFehler: rettungNichtGeschafft() })).entscheidung).toBe('ablehnen');
   });
 });
 
@@ -285,5 +284,124 @@ describe('Nachlesen: lesbar heißt nicht wortgleich (Hinweis APP_ORIGINAL 24.09.
       .toMatchObject({ entscheidung: 'offen', grund: 'lesung_unsicher' });
     expect(entscheideFall(fall({ comp: { ok: false, problems: ['ean_fehlt'], missing: [] }, rettungFehler: { ean: 'lesungen_uneinig' } })))
       .toMatchObject({ entscheidung: 'offen', grund: 'lesung_unsicher' });
+  });
+});
+
+describe('Gesperrte Konten (Entscheidung Patrick 02.10.2026)', () => {
+  it('gesperrt → ablehnen konto_gesperrt, vor allem anderen', () => {
+    expect(entscheideFall(fall({ kontoSperre: 'gesperrt' }))).toMatchObject({ entscheidung: 'ablehnen', grund: 'konto_gesperrt' });
+    // auch wenn sonst nur Technik im Weg stünde oder gar nichts geprüft ist
+    expect(entscheideFall({ kontoSperre: 'gesperrt' }).grund).toBe('konto_gesperrt');
+    expect(entscheideFall(fall({ kontoSperre: 'gesperrt', unlesbar: ['front'] })).grund).toBe('konto_gesperrt');
+  });
+  it('Sperrliste nicht lesbar → NIE freigeben, aber auch nicht ablehnen', () => {
+    expect(entscheideFall(fall({ kontoSperre: 'unbekannt' }))).toMatchObject({ entscheidung: 'offen', grund: 'kontosperre_unbekannt' });
+  });
+  it('… echte Mängel werden trotzdem abgelehnt (eine Ablehnung nützt einem gesperrten Konto nichts)', () => {
+    expect(entscheideFall(fall({ kontoSperre: 'unbekannt', comp: { ok: false, problems: ['unvollstaendig'], missing: ['preis'] } })).grund).toBe('unvollstaendig');
+    expect(entscheideFall(fall({ kontoSperre: 'unbekannt', preisVorhanden: false, audit: { ...echt, preisSichtbar: false } })).grund).toBe('preis_fehlt');
+  });
+  it('nicht gesperrt (null) → normal', () => {
+    expect(entscheideFall(fall({ kontoSperre: null })).entscheidung).toBe('freigeben');
+  });
+});
+
+describe('Nummer vom Barcode-Foto (Entscheidung Patrick 02.10.2026)', () => {
+  const ab = { art: 'abweichend', gelesen: '4000417025005', gespeichert: '4061464833821' };
+  it('abweichend → offen ean_abweichend mit Hinweis, nie Freigabe', () => {
+    const e = entscheideFall(fall({ eanFoto: ab }));
+    expect(e).toMatchObject({ entscheidung: 'offen', grund: 'ean_abweichend' });
+    expect(e.ctx.hinweis).toMatch(/4000417025005/);
+    expect(entscheideFall(fall({ eanFoto: ab, eanFotoHinweis: 'eigene Freigabe vom 01.10.' })).ctx.hinweis).toMatch(/01\.10\./);
+  });
+  it('gleich oder kein Urteil → normal weiter', () => {
+    expect(entscheideFall(fall({ eanFoto: { art: 'gleich' } })).entscheidung).toBe('freigeben');
+    expect(entscheideFall(fall({ eanFoto: { art: 'kein_urteil' } })).entscheidung).toBe('freigeben');
+  });
+  it('eine Wochen-Sperre unter der gespeicherten EAN geht vor (Tatsache, kein Zweifel)', () => {
+    expect(entscheideFall(fall({ eanFoto: ab, dup: { verdict: 'locked', reason: WOCHE, lockUntil: 1 } })).grund).toBe(WOCHE);
+  });
+  it('fehlende Fotos gehen vor', () => {
+    expect(entscheideFall(fall({ eanFoto: ab, comp: { ok: false, problems: ['unvollstaendig'], missing: ['ean'] } })).grund).toBe('unvollstaendig');
+  });
+});
+
+describe('Foto-Abgleich gegen alle früheren Einreichungen (Entscheidung Patrick 02.10.2026)', () => {
+  const T = 1_000_000;
+  const welt = (eintraege) => (id) => (eintraege[id] ? { ...eintraege[id] } : null);
+
+  it('die älteste Einreichung einer Gruppe bekommt nie einen Befund', () => {
+    const info = welt({ a: { userId: 'u1', createdAt: T, status: 'approved' }, b: { userId: 'u1', createdAt: T + 1, status: 'pending' } });
+    expect(bildBefund('a', ['b'], info)).toBeNull();
+  });
+  it('ältere eigene Freigabe → wiederverwendet', () => {
+    const info = welt({ a: { userId: 'u1', createdAt: T, status: 'approved' }, b: { userId: 'u1', createdAt: T + 1, status: 'pending' } });
+    expect(bildBefund('b', ['a'], info)).toEqual({ art: 'wiederverwendet', mit: ['a'] });
+  });
+  it('ältere eigene noch offen → halten, bis sie entschieden ist', () => {
+    const info = welt({ a: { userId: 'u1', createdAt: T, status: 'pending' }, b: { userId: 'u1', createdAt: T + 1, status: 'pending' } });
+    expect(bildBefund('b', ['a'], info)).toEqual({ art: 'aeltere_offen', mit: ['a'] });
+  });
+  it('ältere eigene ABGELEHNT → kein Befund (erlaubte Korrektur, normal prüfen)', () => {
+    const info = welt({ a: { userId: 'u1', createdAt: T, status: 'rejected' }, b: { userId: 'u1', createdAt: T + 1, status: 'pending' } });
+    expect(bildBefund('b', ['a'], info)).toBeNull();
+  });
+  it('fremdes Konto mit identischem Foto → halten für den Menschen, egal welcher Status', () => {
+    for (const status of ['approved', 'rejected', 'pending']) {
+      const info = welt({ a: { userId: 'u2', createdAt: T, status }, b: { userId: 'u1', createdAt: T + 1, status: 'pending' } });
+      expect(bildBefund('b', ['a'], info)).toEqual({ art: 'fremdes_konto', mit: ['a'] });
+    }
+  });
+  it('Gleichstand der Zeit: die kleinere ID gilt als älter — genau eine Kopie bleibt ohne Befund', () => {
+    const info = welt({ a: { userId: 'u1', createdAt: T, status: 'approved' }, b: { userId: 'u1', createdAt: T, status: 'approved' } });
+    expect(bildBefund('a', ['b'], info)).toBeNull();
+    expect(bildBefund('b', ['a'], info)).toMatchObject({ art: 'wiederverwendet' });
+  });
+  it('Befund im Entscheid: wiederverwendet → ablehnen, aeltere_offen / fremdes_konto → offen', () => {
+    expect(entscheideFall(fall({ bild: { art: 'wiederverwendet', mit: ['a'] } })).grund).toBe('bilder_wiederverwendet');
+    expect(entscheideFall(fall({ bild: { art: 'aeltere_offen', mit: ['a'] } }))).toMatchObject({ entscheidung: 'offen', grund: 'foto_aeltere_offen' });
+    expect(entscheideFall(fall({ bild: { art: 'fremdes_konto', mit: ['a'] } }))).toMatchObject({ entscheidung: 'offen', grund: 'foto_fremdes_konto' });
+  });
+  it('Doppel derselben Person mit denselben Dateien heißt doppelt, nicht „wiederverwendet" (Text vom 10.09.)', () => {
+    const e = entscheideFall(fall({ dup: { verdict: 'locked', reason: WOCHE, lockUntil: 1 }, bild: { art: 'wiederverwendet', mit: ['a'] } }));
+    expect(e.grund).toBe(WOCHE);
+  });
+  it('Abgleich nicht möglich (Storage-Liste gescheitert) → keine Freigabe, aber Ablehnungen bleiben möglich', () => {
+    expect(entscheideFall(fall({ fotoAbgleichFehlt: true }))).toMatchObject({ entscheidung: 'offen', grund: 'foto_abgleich_gescheitert' });
+    expect(entscheideFall(fall({ fotoAbgleichFehlt: true, comp: { ok: false, problems: ['unvollstaendig'], missing: ['preis'] } })).entscheidung).toBe('ablehnen');
+  });
+});
+
+describe('Notbremse: neue Gründe mit eigener Bremse (02.10.2026)', () => {
+  const frei = (n) => Array.from({ length: n }, () => ({ entscheidung: 'freigeben', grund: null, audit: echt }));
+  const ab = (n, grund) => Array.from({ length: n }, () => ({ entscheidung: 'ablehnen', grund, audit: grund === 'konto_gesperrt' ? null : echt }));
+
+  it('Wochen-Sperre und Kontosperre zählen nicht in die Gesamtquote', () => {
+    expect(AUSSER_GESAMTQUOTE.has(WOCHE)).toBe(true);
+    expect(AUSSER_GESAMTQUOTE.has('konto_gesperrt')).toBe(true);
+    expect(AUSSER_GESAMTQUOTE.has('sperre_30_tage_gleicher_nutzer')).toBe(true);
+    expect(AUSSER_GESAMTQUOTE.has('preis_fehlt')).toBe(true);
+    // gemessen: 3,3 % Wochen-Sperren — an einem Tag mit 10 weiteren Ablehnungen
+    // bei Schnitt 8 % darf die Gesamt-Bremse nicht anspringen
+    const p = [...frei(110), ...ab(5, WOCHE), ...ab(9, 'unvollstaendig'), ...ab(4, 'konto_gesperrt')];
+    expect(notbremse(p, { schnittQuote: 0.08 })).toMatchObject({ gesamt: false, woche: false, konto: false });
+    expect(p.filter((x) => x.entscheidung === 'ablehnen')).toHaveLength(18);
+  });
+  it('Wochen-Sperre trifft ungewöhnlich viele (≥ 10 und > 15 %) → zurückgehalten', () => {
+    const p = [...frei(40), ...ab(12, WOCHE)];
+    const b = notbremse(p, { schnittQuote: null });
+    expect(b.woche).toBe(true);
+    expect(p.filter((x) => x.grund === 'notbremse_wochensperre')).toHaveLength(12);
+    expect(p.filter((x) => x.entscheidung === 'freigeben')).toHaveLength(40);
+  });
+  it('Kontosperre trifft einen großen Teil des Laufs → zurückgehalten (Sperrliste prüfen)', () => {
+    const p = [...frei(10), ...ab(15, 'konto_gesperrt')];
+    expect(notbremse(p, { schnittQuote: null }).konto).toBe(true);
+    expect(p.filter((x) => x.grund === 'notbremse_kontosperre')).toHaveLength(15);
+  });
+  it('kippt die Gesamtquote, werden auch Wochen- und Kontosperren gehalten', () => {
+    const p = [...frei(40), ...ab(20, 'unvollstaendig'), ...ab(2, WOCHE), ...ab(1, 'konto_gesperrt')];
+    expect(notbremse(p, { schnittQuote: 0.1 }).gesamt).toBe(true);
+    expect(p.filter((x) => x.entscheidung === 'ablehnen')).toHaveLength(0);
   });
 });

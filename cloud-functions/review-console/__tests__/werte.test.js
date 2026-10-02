@@ -84,8 +84,8 @@ describe('Vollständigkeit sieht nachgelesene Werte', () => {
   });
 });
 
-describe('Doppel-Regel: welche Nachlesung eine Sperre löst', () => {
-  // Referenz: eigene, freigegebene Einreichung binnen 24 h, gleicher Markt.
+describe('Doppel-Regel: Nachlesungen lösen KEINE Sperre mehr (Wochen-Regel 02.10.2026)', () => {
+  // Referenz: eigene, freigegebene Einreichung binnen einer Woche, gleicher Markt.
   const referenz = {
     userId: 'u1', ean: GUELTIG, marketId: 'm1', status: 'approved', createdAt: T0,
     priceOcr: { priceCents: 199, source: 'preisschild' }, manufacturerOcr: { name: 'Kaufland Stiftung & Co. KG', source: 'hersteller' },
@@ -93,32 +93,73 @@ describe('Doppel-Regel: welche Nachlesung eine Sperre löst', () => {
   const kandidat = (extra) => ({ userId: 'u1', ean: GUELTIG, marketId: 'm1', status: 'pending', createdAt: T0 + 2 * STUNDE, ...extra });
   const urteil = (k) => evaluateDuplicate(policyOf('k', k), [policyOf('ref', referenz)]);
 
-  it('ohne andere Daten → gesperrt (fehlende Werte gelten als gleich)', () => {
+  it('ohne andere Daten → gesperrt', () => {
     expect(urteil(kandidat({})).verdict).toBe('locked');
   });
 
-  it('geretteter Preis 229 gegen Referenz 199 hebt die Sperre auf', () => {
+  it('geretteter anderer Preis → trotzdem gesperrt, der Unterschied steht nur noch als Information da', () => {
     const r = urteil(kandidat({ priceOcr: null, priceRescueOcr: { priceCents: 229, currency: 'EUR', priceImageKind: 'preisschild' } }));
-    expect(r.verdict).toBe('ok');
+    expect(r.verdict).toBe('locked');
     expect(r.updatedFields).toEqual(['price']);
   });
 
-  it('geretteter gleicher Preis hebt die Sperre NICHT auf', () => {
-    expect(urteil(kandidat({ priceRescueOcr: { priceCents: 199, currency: 'EUR', priceImageKind: 'preisschild' } })).verdict).toBe('locked');
-  });
-
-  it('geretteter Hersteller hebt KEINE Sperre auf (Markeninhaber vs. Produzent, 20.09.)', () => {
-    const k = kandidat({ manufacturerOcr: null, manufacturerRescueOcr: { name: 'DMK Deutsches Milchkontor GmbH' } });
-    expect(policyOf('k', k).manufacturerOcr).toBeNull();
-    expect(urteil(k).verdict).toBe('locked');
-    // Gegenprobe: derselbe Name als Namer-Lesung IST „andere Daten".
-    expect(urteil(kandidat({ manufacturerOcr: { name: 'DMK Deutsches Milchkontor GmbH', source: 'hersteller' } })).verdict).toBe('ok');
+  it('anderer Hersteller (Namer oder nachgelesen) → trotzdem gesperrt', () => {
+    expect(urteil(kandidat({ manufacturerOcr: null, manufacturerRescueOcr: { name: 'DMK Deutsches Milchkontor GmbH' } })).verdict).toBe('locked');
+    expect(urteil(kandidat({ manufacturerOcr: { name: 'DMK Deutsches Milchkontor GmbH', source: 'hersteller' } })).verdict).toBe('locked');
+    // Für die Anzeige bleibt der nachgelesene Hersteller außen vor (20.09.).
+    expect(policyOf('k', kandidat({ manufacturerOcr: null, manufacturerRescueOcr: { name: 'DMK' } })).manufacturerOcr).toBeNull();
   });
 
   it('nachgelesene EAN macht die Einreichung zum Nachbarn der Referenz', () => {
     const k = kandidat({ ean: null, eanRescueOcr: GUELTIG });
     expect(policyOf('k', k).ean).toBe(GUELTIG);
     expect(urteil(k).verdict).toBe('locked');
+  });
+});
+
+describe('Nummer vom Barcode-Foto (Entscheidung Patrick 02.10.2026)', () => {
+  const { eanFotoBefund, eanFotoOf, istHandelsCode, gtin14 } = require('../src/werte');
+  const ANDERE = '4000417025005';
+
+  it('gleiche Nummer → gleich; UPC-A (12) und EAN-13 mit führender 0 sind dieselbe', () => {
+    expect(eanFotoBefund(GUELTIG, GUELTIG)).toMatchObject({ art: 'gleich' });
+    expect(gtin14('012345678905')).toBe(gtin14('0012345678905'));
+    expect(eanFotoBefund('0012345678905', '012345678905')).toMatchObject({ art: 'gleich' });
+  });
+  it('andere gültige Nummer → abweichend', () => {
+    expect(eanFotoBefund(GUELTIG, ANDERE)).toEqual({ art: 'abweichend', gelesen: ANDERE, gespeichert: GUELTIG });
+  });
+  it('gespeicherte Nummer mit falscher Prüfziffer (vertippt), Foto gültig → abweichend', () => {
+    expect(eanFotoBefund(FALSCHE_PRUEFZIFFER, GUELTIG).art).toBe('abweichend');
+  });
+  it('nur eine gültige GTIN zählt als gelesen; nicht lesbar → kein Urteil', () => {
+    expect(eanFotoBefund(GUELTIG, FALSCHE_PRUEFZIFFER)).toMatchObject({ art: 'kein_urteil', grund: 'pruefziffer' });
+    expect(eanFotoBefund(GUELTIG, '')).toMatchObject({ art: 'kein_urteil', grund: 'nicht_lesbar' });
+    expect(eanFotoBefund(GUELTIG, null)).toMatchObject({ art: 'kein_urteil' });
+    expect(eanFotoBefund(GUELTIG, '40614648')).toMatchObject({ art: 'kein_urteil' }); // 8 Ziffern, Prüfziffer falsch
+  });
+  it('Händler-/Waagen-Code gelesen (lose Ware, 20.09.) → kein Urteil', () => {
+    // 2112345000008: Präfix 21, gültige Prüfziffer
+    const waage = '2112345000008';
+    expect(pruefzifferOk(waage)).toBe(true);
+    expect(istHandelsCode(waage)).toBe(true);
+    expect(eanFotoBefund(GUELTIG, waage)).toMatchObject({ art: 'kein_urteil', grund: 'handelscode' });
+    expect(istHandelsCode('0212345678909')).toBe(true);
+    expect(istHandelsCode('20123451')).toBe(true);
+    expect(istHandelsCode(GUELTIG)).toBe(false);
+    expect(istHandelsCode(ANDERE)).toBe(false);
+  });
+  it('gespeichert ist ein Waagen-Code, das Foto zeigt eine echte EAN → abweichend (ein Mensch sieht hin)', () => {
+    expect(eanFotoBefund('2112345000008', GUELTIG).art).toBe('abweichend');
+  });
+  it('nichts gespeichert → kein Urteil', () => {
+    expect(eanFotoBefund(null, GUELTIG)).toMatchObject({ art: 'kein_urteil', grund: 'nichts_gespeichert' });
+  });
+  it('eanFotoOf liest nur gültige Nummern aus eanFotoOcr', () => {
+    expect(eanFotoOf({ eanFotoOcr: { ean: GUELTIG } })).toBe(GUELTIG);
+    expect(eanFotoOf({ eanFotoOcr: { ean: FALSCHE_PRUEFZIFFER } })).toBeNull();
+    expect(eanFotoOf({ eanFotoOcr: { ean: null } })).toBeNull();
+    expect(eanFotoOf({})).toBeNull();
   });
 });
 

@@ -3,44 +3,82 @@
 /**
  * Doppel-Regel für Produkt-Einreichungen (Produktentscheidung 05.09.2026).
  *
- * Ein Produkt = EAN. Referenz („prior") ist die jüngste FREIGEGEBENE Einreichung
+ * Ein Produkt = EAN. Referenz („prior") ist eine FREIGEGEBENE Einreichung
  * desselben Produkts.
  *
- * GRÜNDERENTSCHEIDUNG 20.09.2026 — die Sperre gilt NUR NOCH GEGEN SICH SELBST:
- * Was ein ANDERER Nutzer eingereicht hat, sperrt niemanden mehr. Wer im Laden
+ * GRÜNDERENTSCHEIDUNG 20.09.2026 — die Sperre gilt NUR GEGEN SICH SELBST:
+ * Was ein ANDERER Nutzer eingereicht hat, sperrt niemanden. Wer im Laden
  * steht und fotografiert, kann nicht wissen, ob jemand anderes dasselbe Produkt
  * schon erfasst hat — die Ablehnung traf also immer die Falschen und hat aktive
  * Nutzer gekostet. Ziel ist mehr Scannen und mehr Fotografieren.
  *
- * Gegen den SELBEN Nutzer greift die Sperre weiterhin, aber nur für
- * versehentliche Doppel kurz hintereinander (SAME_USER_LOCK_MS, 24 h) — und
- * auch dann nur, wenn die Einreichung KEINE anderen Daten liefert (Preis,
- * Hersteller oder Markt). Eine echte neue Erfassung Wochen später zählt wieder.
+ * ENTSCHEIDUNG PATRICK 02.10.2026 — „weder 24 Stunden noch 30 Tage, sondern
+ * einmal pro Woche": Dieselbe Person bekommt dasselbe Produkt höchstens einmal
+ * je rollierende 7 Tage (168 h, SAME_USER_LOCK_MS) vergütet, gemessen gegen
+ * ihre FREIGEGEBENEN Einreichungen derselben EAN. Innerhalb des Fensters gibt
+ * es KEINE Ausnahme mehr — weder ein anderer gelesener Preis noch ein anderer
+ * Hersteller noch ein anderer Markt. Der Markt wird vom Nutzer frei gewählt
+ * (Buschbohnen 02.10.: REWE und Netto binnen 10 Minuten, beide bezahlt), und
+ * Preis/Hersteller liest die Texterkennung — keines davon belegt eine neue
+ * Erfassung. Bis dahin: 24 h, und andere Daten hoben die Sperre auf.
+ * Gemessen vor der Umstellung: in den letzten 7 Tagen hätte die neue Regel 20
+ * von 614 Freigaben (3,3 %) gesperrt, seit Beginn 35 von 3.273 (3,28 €).
+ * Bereits Bezahltes wird nicht zurückgefordert (Entscheidung Patrick 02.10.).
  *
  * Liegt eine ÄLTERE eigene Einreichung noch in `pending`, wird gehalten, bis
- * sie entschieden ist (sonst zahlt ein Doppel zweimal). Fremde Pendings halten
- * nichts mehr auf.
+ * sie entschieden ist (sonst zahlt ein Doppel zweimal; und so bleibt immer
+ * eine Kopie freigabefähig). Fremde Pendings halten nichts auf.
  *
  * Reine Funktionen, keine Firestore-Abhängigkeit — der Aufrufer liefert die
  * Kandidaten. Die Bewertung nutzt den EINREICH-Zeitpunkt (createdAt), nicht
  * „jetzt": ein Doppel, das 5 Tage nach der Referenz eingereicht wurde, wird
  * nicht dadurch freigabefähig, dass die Prüfung erst Wochen später stattfindet.
- *
- * Fehlt ein Vergleichswert auf einer Seite, gilt er als GLEICH (fail-closed:
- * fehlende OCR-Daten sind kein Beleg für „andere Daten").
  */
 
-const LOCK_DAYS = 30;
-const LOCK_MS = LOCK_DAYS * 24 * 60 * 60 * 1000;
-// Fenster für versehentliche Doppel desselben Nutzers (z. B. zweimal auf
-// „Senden" getippt). Alles darüber ist neue Arbeit und wird vergütet.
-const SAME_USER_LOCK_MS = 24 * 60 * 60 * 1000;
+// Rollierendes Fenster für dieselbe Person (Entscheidung Patrick 02.10.2026).
+// Grenze exklusiv: genau 168 h später zählt derselbe Artikel wieder.
+const SAME_USER_LOCK_MS = 7 * 24 * 60 * 60 * 1000;
 
 const REASON = Object.freeze({
+  // Interner Grund der Wochen-Sperre (Bericht, `review.reason`, Prüfkonsole).
+  // Am Dokument steht für die App bis auf Weiteres APP_GRUND[…], siehe dort.
+  SAME_USER_WEEK: 'sperre_woche_gleicher_nutzer',
+  // Altbestand: bis 02.10.2026 die 24-h-Sperre (vorher 30 Tage). Bleibt für
+  // die Anzeige alter Entscheidungen und für Ablehnungen aus einer noch nicht
+  // neu ausgerollten Prüfkonsole erhalten.
   SAME_USER: 'sperre_30_tage_gleicher_nutzer',
+  // Altbestand bis 20.09.2026 (fremde Einreichungen sperrten).
   OTHER_USER: 'sperre_30_tage_anderer_nutzer',
   PENDING_OLDER: 'doppelt_eingereicht',
 });
+
+/**
+ * Welcher Grund-Code am Dokument landet (`rejectReason`, `holdReasons`) — das
+ * ist der Code, nach dem die APP ihren Text wählt (lib/utils/productSubmission-
+ * Copy.ts, REASON_COPY). Die Texte sind im Binary fest.
+ *
+ * Wochen-Sperre → `doppelt_eingereicht` (Entscheidung Patrick 02.10.2026):
+ *  - `sperre_30_tage_gleicher_nutzer` verspricht in allen ausgelieferten
+ *    Versionen „Ab dem nächsten Tag zählt derselbe Artikel wieder — und sofort,
+ *    wenn sich Preis, Hersteller oder Markt geändert haben". Beides ist mit der
+ *    Wochen-Regel falsch.
+ *  - `doppelt_eingereicht` („Dieses Produkt hattest du schon eingereicht — Wir
+ *    zählen jedes Produkt einmal. Ein anderes Produkt bringt beim nächsten Mal
+ *    wieder etwas.") steht seit dem ersten Stand der Anzeige (c89cfb0,
+ *    05.09.2026) in jeder Version und verspricht nichts Falsches.
+ *  - Der präzise Text („ab nächster Woche zählt derselbe Artikel wieder") liegt
+ *    für die nächste App-Version unter `sperre_woche_gleicher_nutzer` bereit.
+ *    Umstellen (Eintrag hier entfernen), sobald diese Version bei praktisch
+ *    allen Nutzern läuft — alte Versionen zeigten sonst den Standardtext.
+ *
+ * Der interne Grund bleibt in `review.reason` am Dokument, damit Bericht,
+ * Notbremse und Auswertungen die Wochen-Sperre von anderen Doppeln trennen.
+ */
+const APP_GRUND = Object.freeze({
+  [REASON.SAME_USER_WEEK]: REASON.PENDING_OLDER,
+  [REASON.SAME_USER]: REASON.PENDING_OLDER,
+});
+const appGrund = (code) => APP_GRUND[code] || code;
 
 function ms(v) {
   if (v == null) return null;
@@ -89,12 +127,11 @@ function manufacturerEqual(a, b) {
   return levenshtein(x, y) <= 2;
 }
 
-// NUR server-geschriebene Felder als Vergleichswerte — der Aufrufer liefert sie
-// über src/werte.js policyOf: Preis vom Namer (`priceOcr`) oder nachgelesen
-// (`priceRescueOcr`), Hersteller NUR vom Namer. Beide sind per firestore.rules
-// beim Anlegen gesperrt (seit 26.09.2026). Top-Level `priceCents`/
-// `manufacturer` wären vom Client frei wählbar — ein Nutzer könnte sich sonst
-// durch einen erfundenen Preis aus der Sperre schreiben.
+// Vergleichswerte NUR zur Anzeige („Anders" in der Prüfkonsole) — seit der
+// Wochen-Regel (02.10.2026) hebt keiner davon eine Sperre auf. Weiterhin NUR
+// server-geschriebene Felder (src/werte.js policyOf: Preis vom Namer oder
+// nachgelesen, Hersteller nur vom Namer); Top-Level `priceCents`/`manufacturer`
+// wären vom Client frei wählbar.
 function priceOf(u) {
   const p = u && u.priceOcr && u.priceOcr.priceCents;
   return Number.isFinite(p) && p > 0 ? Math.round(p) : null;
@@ -106,7 +143,8 @@ function manufacturerOf(u) {
 }
 
 /**
- * Welche Daten unterscheiden sich zwischen Kandidat und Referenz?
+ * Welche Daten unterscheiden sich zwischen Kandidat und Referenz? Nur noch
+ * Information für den Menschen, keine Ausnahme von der Sperre.
  * @returns {{price:boolean, manufacturer:boolean, market:boolean, any:boolean, details:object}}
  */
 function dataDiffers(candidate, prior) {
@@ -121,21 +159,23 @@ function dataDiffers(candidate, prior) {
   };
 }
 
+const ANDERS = ['price', 'manufacturer', 'market'];
+
 /**
  * @param {object} candidate  die zu prüfende Einreichung (mit id, userId, ean, marketId, createdAt, status)
  * @param {object[]} others   alle anderen Einreichungen mit derselben EAN (beliebiger Status)
  * @returns {{verdict:'ok'|'locked'|'hold', reason:string|null, priorId:string|null, priorUserId:string|null,
  *            sameUser:boolean|null, lockUntil:number|null, updatedFields:string[], diff:object|null}}
  *
- * Das Fenster ist SYMMETRISCH (|Kandidat − Referenz| < 30 Tage) und prüft
- * JEDE Freigabe darin, nicht nur die jüngste:
- *  - Backlog-Reihenfolge: wird ein älterer Bon erst nach einem jüngeren
- *    entschieden, ist der jüngere trotzdem eine Referenz — sonst rutscht ein
- *    identisches Doppel durch, nur weil es zuerst eingereicht wurde.
- *  - Mehrere Freigaben: es genügt EINE, zu der es keine anderen Daten gibt →
- *    Sperre. Sonst schriebe sich ein Nutzer über eine zwischenzeitlich
- *    freigegebene Preisänderung an seiner eigenen identischen Wiederholung
- *    vorbei.
+ * Das Fenster ist SYMMETRISCH (|Kandidat − Referenz| < 7 Tage): wird ein
+ * älterer Fall erst nach einem jüngeren entschieden (Backlog), ist der jüngere
+ * trotzdem Referenz — sonst rutschte ein Doppel durch, nur weil es zuerst
+ * eingereicht wurde. Abgelehnte Einreichungen sind nie Referenz: eine
+ * Ablehnung verlängert keine Sperre, und wer nach einer Ablehnung neu
+ * einreicht, wird normal geprüft.
+ *
+ * `updatedFields`/`diff` beschreiben weiter, worin sich Kandidat und Referenz
+ * unterscheiden — nur zur Anzeige.
  */
 function evaluateDuplicate(candidate, others) {
   const cid = candidate?.id ?? null;
@@ -151,8 +191,7 @@ function evaluateDuplicate(candidate, others) {
     return { verdict: 'hold', reason: REASON.PENDING_OLDER, priorId: p.id, priorUserId: p.userId ?? null, sameUser: p.userId === candidate.userId, lockUntil: null, updatedFields: [], diff: null };
   }
 
-  // Alle Freigaben im 30-Tage-Fenster um den Kandidaten herum, jüngste zuerst.
-  // NUR EIGENE Freigaben sperren, und nur binnen 24 h (versehentliche Doppel).
+  // Eigene Freigaben derselben EAN binnen 7 Tagen um den Kandidaten, jüngste zuerst.
   const inWindow = list
     .filter(
       (o) =>
@@ -162,34 +201,31 @@ function evaluateDuplicate(candidate, others) {
     )
     .sort((a, b) => (ms(b.createdAt) ?? 0) - (ms(a.createdAt) ?? 0));
   if (!inWindow.length) {
-    // Referenz außerhalb des Fensters nur zur Information (priorId), nie sperrend.
+    // Referenz außerhalb des Fensters (oder fremd) nur zur Information, nie sperrend.
     const older = list
       .filter((o) => o.status === 'approved')
       .sort((a, b) => (ms(b.createdAt) ?? 0) - (ms(a.createdAt) ?? 0))[0];
+    const eigen = older ? older.userId === candidate.userId : null;
     return {
       verdict: 'ok', reason: null,
       priorId: older ? older.id : null, priorUserId: older ? older.userId ?? null : null,
-      sameUser: older ? older.userId === candidate.userId : null,
-      lockUntil: older ? (ms(older.createdAt) ?? 0) + LOCK_MS : null,
-      updatedFields: older ? ['price', 'manufacturer', 'market'].filter((k) => dataDiffers(candidate, older)[k]) : [],
+      sameUser: eigen,
+      lockUntil: eigen ? (ms(older.createdAt) ?? 0) + SAME_USER_LOCK_MS : null,
+      updatedFields: older ? ANDERS.filter((k) => dataDiffers(candidate, older)[k]) : [],
       diff: older ? dataDiffers(candidate, older).details : null,
     };
   }
 
-  // Sperrend ist die JÜNGSTE Referenz ohne andere Daten (deren Frist gilt).
-  const blocking = inWindow.find((p) => !dataDiffers(candidate, p).any);
-  const ref = blocking || inWindow[0];
-  const pAt = ms(ref.createdAt) ?? 0;
-  const lockUntil = pAt + SAME_USER_LOCK_MS;
-  const sameUser = ref.userId === candidate.userId;
+  // Jede eigene Freigabe im Fenster sperrt — ohne Ausnahme (Entscheidung
+  // Patrick 02.10.2026). Frist: die jüngste Freigabe + 7 Tage.
+  const ref = inWindow[0];
   const diff = dataDiffers(candidate, ref);
-  const updatedFields = ['price', 'manufacturer', 'market'].filter((k) => diff[k]);
-  const base = { priorId: ref.id, priorUserId: ref.userId ?? null, sameUser, lockUntil, diff: diff.details };
-
-  if (!blocking) return { verdict: 'ok', reason: null, updatedFields, ...base };
-  // `sameUser` ist hier immer true (das Fenster filtert fremde Einreichungen
-  // heraus). REASON.OTHER_USER bleibt nur für Altbestand im Export erhalten.
-  return { verdict: 'locked', reason: REASON.SAME_USER, updatedFields: [], ...base };
+  return {
+    verdict: 'locked', reason: REASON.SAME_USER_WEEK,
+    priorId: ref.id, priorUserId: ref.userId ?? null, sameUser: true,
+    lockUntil: (ms(ref.createdAt) ?? 0) + SAME_USER_LOCK_MS,
+    updatedFields: ANDERS.filter((k) => diff[k]), diff: diff.details,
+  };
 }
 
 /**
@@ -222,4 +258,4 @@ function completenessCheck(u, requiredSteps) {
   return { ok: problems.length === 0, problems, missing };
 }
 
-module.exports = { LOCK_DAYS, LOCK_MS, SAME_USER_LOCK_MS, REASON, evaluateDuplicate, dataDiffers, manufacturerEqual, completenessCheck, dupZumSpeichern, normText, ms };
+module.exports = { SAME_USER_LOCK_MS, REASON, APP_GRUND, appGrund, evaluateDuplicate, dataDiffers, manufacturerEqual, completenessCheck, dupZumSpeichern, normText, ms };

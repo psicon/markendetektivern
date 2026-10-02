@@ -80,6 +80,19 @@ describe('Schreibfehler', () => {
   });
 });
 
+describe('Abgleiche, ohne die nichts freigegeben wird (Entscheidungen Patrick 02.10.2026)', () => {
+  const runde = (over) => ({ ...basis().runde, ...over });
+  it('Sperrliste nicht lesbar → rot', () => {
+    expect(codes(warnungen(basis({ runde: runde({ kontoSperrenUnlesbar: true }) })))).toContain('rot:kontosperren_unlesbar');
+  });
+  it('Foto-Abgleich gescheitert → rot', () => {
+    expect(codes(warnungen(basis({ runde: runde({ fotoAbgleichGescheitert: true }) })))).toContain('rot:foto_abgleich_gescheitert');
+  });
+  it('beides in Ordnung → nichts', () => {
+    expect(warnungen(basis({ runde: runde({ kontoSperrenUnlesbar: false, fotoAbgleichGescheitert: false }) }))).toEqual([]);
+  });
+});
+
 describe('Bon-Runde', () => {
   it('scharf, aber kein Bericht von heute → rot', () => {
     expect(codes(warnungen(basis({ bonRunde: { scharf: true, bericht: null } })))).toContain('rot:bonrunde_fehlt');

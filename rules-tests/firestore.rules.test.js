@@ -449,6 +449,8 @@ describe('Ratings, Feedback, Telemetrie, Push-Tokens', () => {
       rewardPushSentAt: new Date(),
       probableLocation: { source: 'gps' },
       exifGps: { lat: 1, lon: 2 },
+      // 02.10.2026: wer „Foto-Nummer stimmt" vorgibt, umginge die Prüfung der Konsole.
+      eanFotoOcr: { ean: '4061458000001', befund: 'gleich' },
     };
     for (const [feld, wert] of Object.entries(faelle)) {
       await assertFails(setDoc(doc(alice(), `crowd_uploads/angriff_${feld}`), { ...appAnlage(), [feld]: wert }));
@@ -471,6 +473,7 @@ describe('Ratings, Feedback, Telemetrie, Push-Tokens', () => {
     'priceRescueOcr', 'manufacturerRescueOcr', 'rescueAt', 'rescueQuelle',
     'productNameRescueAt', 'productNameRescueQuelle',
     'eanRescueAt', 'eanRescueQuelle',
+    'eanFotoOcr',
     'review', 'reviewedBy', 'reviewedAt', 'reviewNote', 'holdReasons',
     'rejectReason', 'loseWare', 'frischwareOhneAngaben',
     'rewardResult', 'rewardCents', 'rewardNotCreditedReason',
@@ -480,8 +483,8 @@ describe('Ratings, Feedback, Telemetrie, Push-Tokens', () => {
     'journeyLocationMatch', 'userLocationBackfilled',
   ];
 
-  test('ANGRIFF: JEDES Feld der Sperrliste beim Anlegen scheitert (47 Felder)', async () => {
-    expect(SERVER_FELDER).toHaveLength(47);
+  test('ANGRIFF: JEDES Feld der Sperrliste beim Anlegen scheitert (48 Felder)', async () => {
+    expect(SERVER_FELDER).toHaveLength(48);
     expect(new Set(SERVER_FELDER).size).toBe(SERVER_FELDER.length);
     for (const feld of SERVER_FELDER) {
       await assertFails(setDoc(doc(alice(), `crowd_uploads/liste_${feld}`), { ...appAnlage(), [feld]: 'x' }));
@@ -491,6 +494,16 @@ describe('Ratings, Feedback, Telemetrie, Push-Tokens', () => {
   test('Gegenprobe: die App-Anlage trägt keines der gesperrten Felder', () => {
     const app = Object.keys(appAnlage());
     expect(app.filter((k) => SERVER_FELDER.includes(k))).toEqual([]);
+  });
+
+  // 02.10.2026 (Entscheidung Patrick): gesperrte Konten. Server-only — die
+  // abschließende deny-all-Regel deckt es ab, kein eigener Block. Weder lesen
+  // (wer gesperrt ist, soll es nicht abfragen können) noch sich selbst entsperren.
+  test('cashback_sperren: weder lesen noch schreiben, auch nicht das eigene', async () => {
+    await assertFails(getDoc(doc(alice(), `cashback_sperren/${ALICE}`)));
+    await assertFails(setDoc(doc(alice(), `cashback_sperren/${ALICE}`), { gesperrt: false }));
+    await assertFails(deleteDoc(doc(alice(), `cashback_sperren/${ALICE}`)));
+    await assertFails(getDocs(collection(alice(), 'cashback_sperren')));
   });
 
   test('ANGRIFF: Anlage mit einem anderen status als pending scheitert', async () => {

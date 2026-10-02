@@ -11,7 +11,7 @@
  * gegen Doppel geprüft.
  */
 const { evaluateDuplicate, completenessCheck, ms } = require('./duplicatePolicy');
-const { eanOf, nameOf, preisOf, policyOf, herstellerAnzeige, vollstaendigkeitOf, herkunftOf } = require('./werte');
+const { eanOf, nameOf, preisOf, policyOf, herstellerAnzeige, vollstaendigkeitOf, herkunftOf, eanFotoBefund } = require('./werte');
 
 const REQUIRED_STEPS = ['front', 'rueckseite', 'hersteller', 'ean', 'naehrwerte', 'zutaten', 'preis'];
 const SLOTS = new Set(REQUIRED_STEPS);
@@ -64,6 +64,10 @@ function rowOf(d) {
     // … angezeigt und geprüft wird der effektive Wert.
     anzeigeName: nameOf(x),
     anzeigeEan: eanOf(x),
+    // Nummer vom Barcode-Foto (Morgenrunde, `eanFotoOcr`) gegen die gespeicherte —
+    // dieselbe Rechnung wie in der Runde (werte.eanFotoBefund), nicht deren
+    // gespeichertes Ergebnis.
+    eanFoto: x.eanFotoOcr && typeof x.eanFotoOcr === 'object' ? { ...eanFotoBefund(x.ean, x.eanFotoOcr.ean), at: ms(x.eanFotoOcr.at) } : null,
     herkunft,
     images: x.images ?? {},
     bildDefekt: bildDefektOf(x),
@@ -123,16 +127,39 @@ const OHNE_DOPPEL = { verdict: 'ok', reason: null, priorId: null, priorUserId: n
  * Einreichung ohne Preis „Vorprüfung ok · Vollständig, kein Doppel" — ob der
  * Preis im Foto steht, sieht aber nur, wer hinschaut. Deshalb Hinweis statt
  * Sperre: ein sichtbarer, nur nicht gelesener Preis ist freigabefähig.
+ *
+ * Seit 02.10.2026 (Entscheidungen Patrick):
+ *  - `kontoSperre` 'gesperrt' → Urteil `locked` (`konto_gesperrt`); die
+ *    Freigabe verweigert der Server dann auch mit force. 'unbekannt' (Sperrliste
+ *    nicht lesbar oder Eintrag unklar) → `hold`.
+ *  - Zeigt das Barcode-Foto eine andere Nummer (`ean_abweichend`) → `hold`;
+ *    mit `fotoEanRows` (Einreichungen unter der Foto-Nummer) wird die
+ *    Doppel-Regel auch dort gerechnet (`dupFoto`) — eine falsch getippte EAN
+ *    soll die Wochen-Sperre nicht umgehen.
  */
-function precheckOf(row, sameEanRows) {
+function precheckOf(row, sameEanRows, { kontoSperre = null, fotoEanRows = null } = {}) {
   const completeness = completenessCheck(row._komplett, REQUIRED_STEPS);
   const others = (sameEanRows || []).filter((r) => r.id !== row.id).map((r) => r._policy);
   const dup = row._policy.ean ? evaluateDuplicate(row._policy, others) : OHNE_DOPPEL;
   const reasons = [...completeness.problems];
   if (dup.verdict === 'locked' || dup.verdict === 'hold') reasons.push(dup.reason);
-  const verdict = !completeness.ok ? 'incomplete' : dup.verdict === 'ok' ? 'ok' : dup.verdict;
+  let verdict = !completeness.ok ? 'incomplete' : dup.verdict === 'ok' ? 'ok' : dup.verdict;
+
+  const ef = row.eanFoto && row.eanFoto.art === 'abweichend' ? row.eanFoto : null;
+  let dupFoto = null;
+  if (ef) {
+    reasons.push('ean_abweichend');
+    if (fotoEanRows) {
+      dupFoto = evaluateDuplicate({ ...row._policy, ean: ef.gelesen }, fotoEanRows.filter((r) => r.id !== row.id).map((r) => r._policy));
+      if (dupFoto.verdict === 'locked') reasons.push('foto_nummer_doppelt');
+    }
+    if (verdict === 'ok') verdict = 'hold';
+  }
+  if (kontoSperre === 'gesperrt') { reasons.unshift('konto_gesperrt'); verdict = 'locked'; }
+  else if (kontoSperre === 'unbekannt') { reasons.unshift('kontosperre_unbekannt'); if (verdict === 'ok') verdict = 'hold'; }
+
   const hinweise = row.priceCents ? [] : ['preis_nicht_gelesen'];
-  return { verdict, reasons, missing: completeness.missing, dup, hinweise };
+  return { verdict, reasons, missing: completeness.missing, dup, hinweise, ...(dupFoto ? { dupFoto } : {}), ...(kontoSperre ? { kontoSperre } : {}) };
 }
 
 /**
@@ -147,13 +174,13 @@ function precheckOf(row, sameEanRows) {
  * fehlt genau bei den Sperr-Ablehnungen, die man zurückholen will, die Referenz.
  * Urteil und Gründe bleiben die gespeicherten.
  */
-function precheckFuerFall(row, sameEanRows) {
+function precheckFuerFall(row, sameEanRows, opts = {}) {
   const gespeichert = row.review && row.review.precheck;
   if (row.status !== 'pending' && gespeichert && typeof gespeichert === 'object') {
     if (gespeichert.dup) return { ...gespeichert, dupQuelle: 'gespeichert', quelle: 'gespeichert' };
-    return { ...gespeichert, dup: precheckOf(row, sameEanRows).dup, dupQuelle: 'heute', quelle: 'gespeichert' };
+    return { ...gespeichert, dup: precheckOf(row, sameEanRows, opts).dup, dupQuelle: 'heute', quelle: 'gespeichert' };
   }
-  return { ...precheckOf(row, sameEanRows), quelle: row.status === 'pending' ? 'frisch' : 'nachtraeglich' };
+  return { ...precheckOf(row, sameEanRows, opts), quelle: row.status === 'pending' ? 'frisch' : 'nachtraeglich' };
 }
 
 /** Dokumente → Zeilen, doppelte (über beide EAN-Felder gefunden) nur einmal. */
@@ -205,11 +232,17 @@ function eanIndex(docs) {
   return index;
 }
 
-/** Die Warteschlange der Produktfotos aus den offenen Dokumenten und dem Index. */
-function baueFotoListe(openDocs, byEan, p, q) {
+/**
+ * Die Warteschlange der Produktfotos aus den offenen Dokumenten und dem Index.
+ * `kontoSperre(uid)` liefert 'gesperrt' | 'unbekannt' | null (src/kontoSperre.js).
+ */
+function baueFotoListe(openDocs, byEan, p, q, kontoSperre = () => null) {
   let rows = openDocs.map((d) => {
     const r = rowOf(d);
-    const pre = precheckOf(r, byEan.get(r.anzeigeEan) || []);
+    const pre = precheckOf(r, byEan.get(r.anzeigeEan) || [], {
+      kontoSperre: kontoSperre(r.userId),
+      fotoEanRows: r.eanFoto && r.eanFoto.art === 'abweichend' ? byEan.get(r.eanFoto.gelesen) || [] : null,
+    });
     return {
       id: r.id, userId: r.userId, productName: r.anzeigeName, ean: r.anzeigeEan,
       nameNachgelesen: r.herkunft.nameQuelle === 'nachgelesen', eanNachgelesen: r.herkunft.eanNachgelesen,

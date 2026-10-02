@@ -37,10 +37,14 @@ const admin = require('firebase-admin');
 const { FieldValue } = require('firebase-admin/firestore');
 const logger = require('firebase-functions/logger');
 const { GoogleGenAI } = require('@google/genai');
-const { evaluateDuplicate, completenessCheck, dupZumSpeichern } = require('./duplicatePolicy');
-const { entscheideFall, notbremse, nameAusLesungen, eanAusLesungen, rettungNichtGeschafft, BILD_GRUENDE, PREIS_GRUENDE } = require('./fotoRundeRegeln');
+const { evaluateDuplicate, completenessCheck, dupZumSpeichern, appGrund, REASON } = require('./duplicatePolicy');
+const {
+  entscheideFall, bildBefund, notbremse, nameAusLesungen, eanAusLesungen, rettungNichtGeschafft,
+  BILD_GRUENDE, AUSSER_GESAMTQUOTE, KONTO_GESPERRT,
+} = require('./fotoRundeRegeln');
 // Werte-Helfer gemeinsam mit der Prüfkonsole (index.js/einreichung.js) — eine Quelle.
-const { eanOf, nameOf, preisOf, policyOf, pruefzifferOk, vollstaendigkeitOf, preisHinweisOf, PREIS_ARTEN } = require('./werte');
+const { eanOf, nameOf, preisOf, policyOf, pruefzifferOk, vollstaendigkeitOf, preisHinweisOf, eanFotoBefund, gtin14, PREIS_ARTEN } = require('./werte');
+const { SPERREN, ladeSperren, kontoSperreVon, sperreAusDaten } = require('./kontoSperre');
 const { auffaelligkeiten } = require('./ort');
 const { bildDefektOf } = require('./einreichung');
 const { warnungen } = require('./warnungen');
@@ -59,6 +63,8 @@ const ENTSCHEIDER = 'worker-fotorunde';
 // Nach dieser Zeit beginnt die Runde nichts Neues mehr; der Rest ist morgen dran.
 // Die Function darf 30 Minuten laufen — Luft für Schreiben und Buchungs-Abwarten.
 const ARBEITSZEIT_MS = 18 * 60 * 1000;
+/** Präfix aller Produktfoto-Dateien — für den Abgleich gegen ALLE früheren Einreichungen. */
+const UPLOAD_PRAEFIX = 'crowduploads/';
 /** Ab hier gilt ein geplanter Nachlauf des Lesedienstes als hängend (Takt: 15 min). */
 const NAMER_HAENGT_MS = 2 * 60 * 60 * 1000;
 const BUCHUNG_WARTEN_MS = 5 * 60 * 1000;
@@ -74,7 +80,8 @@ const berlinZeit = (t) => new Date(t).toLocaleTimeString('sv-SE', { timeZone: 'E
 function noteFor(reason, ctx = {}) {
   const until = fmtDate(ctx.lockUntil);
   switch (reason) {
-    case 'sperre_30_tage_gleicher_nutzer': return `Dieses Produkt liegt uns von dir schon vor — die erste Einreichung zählt. Ab ${until || 'morgen'} zählt derselbe Artikel wieder, und mit neuem Preis, Hersteller oder Markt sofort.`;
+    case REASON.SAME_USER_WEEK: return `Dieses Produkt hast du diese Woche schon eingereicht — die erste Einreichung zählt. Ab ${until || 'nächster Woche'} zählt derselbe Artikel wieder.`;
+    case KONTO_GESPERRT: return 'Für dieses Konto ist die Teilnahme an den Aktionen pausiert.';
     case 'unvollstaendig': return `Es fehlen Fotos (${(ctx.missing || []).join(', ') || 'siehe Liste'}). Mit allen sieben Ansichten klappt es beim nächsten Mal.`;
     case 'ean_fehlt': return 'Der Barcode (EAN, 8–14 Ziffern) ordnet das Produkt eindeutig zu — beim nächsten Mal bitte scannen oder eintippen.';
     case 'kein_produktname': return 'Der Produktname war nicht erkennbar — Vorderseite gut ausgeleuchtet und ohne Spiegelung, dann passt es.';
@@ -103,7 +110,7 @@ const PROMPT_PREIS = [
 ].join('\n');
 const AUDIT_ANWEISUNG = [
   'Erwartung je Schritt: front=Vorderseite, rueckseite=Rückseite, hersteller=Hersteller-/Adressangabe, ean=Barcode, naehrwerte=Nährwerttabelle, zutaten=Zutatenliste, preis=Preisschild oder Bon.',
-  'JSON: {"echt":true|false,"loseWare":true|false,"traegtAngaben":true|false,"gleicheAnsicht":true|false,"preisSichtbar":true|false|null,"grund":"kurz"}.',
+  'JSON: {"echt":true|false,"loseWare":true|false,"traegtAngaben":true|false,"gleicheAnsicht":true|false,"preisSichtbar":true|false|null,"eanFoto":"","grund":"kurz"}.',
   'echt=false NUR bei eindeutigem Ausschluss: kein reales Produkt, abfotografierter Bildschirm, fremde Motive, Schritte grob falsch belegt.',
   'Unscharf, angeschnitten oder zwei vertauschte Schritte = trotzdem echt=true.',
   // 26.09.2026 (Entscheidung Patrick): der Preis ist Pflicht. Die Frage
@@ -121,6 +128,11 @@ const AUDIT_ANWEISUNG = [
   'traegtAngaben: trägt DIESES Produkt von Natur aus eine Zutatenliste oder Nährwerttabelle? false bei unverarbeitetem frischem Obst und Gemüse (auch im Netz, in der Schale, mit Banderole und echtem Barcode), frischen Kräutern, Eiern und Ware von der Frischetheke. true bei verarbeiteten, verpackten Lebensmitteln und bei Drogerieartikeln mit Inhaltsstoffliste.',
   'gleicheAnsicht=true NUR, wenn mindestens fünf Fotos dasselbe Motiv zeigen UND dadurch Angaben fehlen, die dieses Produkt tatsächlich trägt (z. B. Zutaten und Nährwerte stehen auf der Packung, fotografiert wurde aber immer nur Vorderseite oder Barcode). Trägt das Produkt keine weiteren Angaben und ist sein Etikett lesbar fotografiert, ist gleicheAnsicht=false.',
   'loseWare=true bei unverpackter Ware ohne Produkt-Barcode (Kräuterbund, Obst, Frischetheke mit Waage-Etikett).',
+  // 02.10.2026 (Entscheidung Patrick, „Super-Vorschlag"): die Nummer vom
+  // Barcode-Foto gegen die gespeicherte prüfen. Bewusst OHNE die gespeicherte
+  // EAN im Auftrag (bildAudit nennt sie nicht mehr) — sonst schreibt das
+  // Modell sie ab, statt zu lesen.
+  'eanFoto: die Ziffern unter dem Strichcode auf dem Foto "ean", vollständig und in gedruckter Reihenfolge, nur Ziffern. Nicht vollständig und zweifelsfrei lesbar, kein Strichcode auf diesem Foto oder nur ein Waage-/Preisetikett → leer. Nichts raten, nichts ergänzen.',
 ].join('\n');
 
 /* ─────────────────────────── Bilder lesen ─────────────────────────── */
@@ -147,7 +159,7 @@ async function frage(ai, bucket, images, slots, text) {
  * bleibt, wie gut die Ersterkennung liest. Gibt zurück, was übernommen wurde
  * und woran das Nachlesen technisch scheiterte (das ist kein Urteil).
  */
-async function rettungFuer(ai, bucket, ref, x) {
+async function rettungFuer(ai, bucket, ref, x, { schreiben = true } = {}) {
   const patch = {};
   const fehler = {};
   const offenName = !nameOf(x);
@@ -188,6 +200,7 @@ async function rettungFuer(ai, bucket, ref, x) {
     } catch (e) { fehler.preis = String(e.message).slice(0, 120); }
   }
   if (!Object.keys(patch).length) return { patch: null, fehler };
+  if (!schreiben) return { patch, fehler };
   patch.rescueAt = FieldValue.serverTimestamp();
   patch.rescueQuelle = `${MODELL}/vertex mit Denken, zwei übereinstimmende Lesungen (Morgenrunde)`;
   await ref.set(patch, { merge: true });
@@ -229,7 +242,9 @@ async function bildAudit(ai, bucket, x) {
   parts.push({
     text: [
       'Du prüfst eine Produkt-Einreichung (die Fotos sind oben je Schritt benannt).',
-      `Erwartet: echtes Einzelhandels-Produkt "${nameOf(x) || 'unbekannt'}" (EAN ${eanOf(x) || 'unbekannt'}).`,
+      // Ohne gespeicherte EAN: das Modell liest sie selbst (eanFoto) — mit der
+      // erwarteten Nummer im Auftrag schriebe es sie ab (02.10.2026).
+      `Erwartet: echtes Einzelhandels-Produkt "${nameOf(x) || 'unbekannt'}".`,
       AUDIT_ANWEISUNG,
     ].join('\n'),
   });
@@ -243,6 +258,8 @@ async function bildAudit(ai, bucket, x) {
     echt: p.echt !== false, loseWare: p.loseWare === true, traegtAngaben: p.traegtAngaben !== false, gleicheAnsicht: p.gleicheAnsicht === true,
     // null = nicht beurteilt → die Runde lässt den Fall liegen, statt zu raten.
     preisSichtbar: typeof p.preisSichtbar === 'boolean' ? p.preisSichtbar : null,
+    // Nur Ziffern; ob es eine gültige GTIN ist, prüft werte.eanFotoBefund.
+    eanFoto: String(p.eanFoto ?? '').replace(/\D/g, '').slice(0, 14) || null,
     grund: String(p.grund || '').slice(0, 140),
   };
 }
@@ -253,7 +270,8 @@ function regelVersion() {
   const h = crypto.createHash('sha1');
   // werte.js gehört dazu: es bestimmt, welche EAN, welcher Preis und welcher
   // Hersteller in die Regeln eingehen; ort.js, wann der Aufnahmeort auffällt.
-  for (const f of ['duplicatePolicy.js', 'fotoRundeRegeln.js', 'werte.js', 'ort.js']) h.update(fs.readFileSync(path.join(__dirname, f)));
+  // kontoSperre.js: welche Konten als gesperrt gelten (02.10.2026).
+  for (const f of ['duplicatePolicy.js', 'fotoRundeRegeln.js', 'werte.js', 'ort.js', 'kontoSperre.js']) h.update(fs.readFileSync(path.join(__dirname, f)));
   // Ebenso die Anweisungen an das Modell: sie entscheiden mit (Gegenprüfung 26.09.).
   h.update([PROMPT_NAME, PROMPT_EAN, PROMPT_PREIS, AUDIT_ANWEISUNG].join('\n'));
   return h.digest('hex').slice(0, 10);
@@ -267,9 +285,11 @@ function schnittQuote(alle, jetzt) {
     const t = ms(d.x.reviewedAt);
     if (!t || t < ab) continue;
     if (d.x.status === 'approved') fr++;
-    // „Preis fehlt" zählt nicht mit — sonst verschöbe die neue Regel den
-    // Vergleichswert der Gesamt-Notbremse (siehe fotoRundeRegeln.notbremse).
-    else if (d.x.status === 'rejected' && !PREIS_GRUENDE.has(d.x.rejectReason)) ab2++;
+    // Gründe mit eigener Bremse zählen nicht mit — sonst verschöbe eine neue
+    // oder verschärfte Regel den Vergleichswert der Gesamt-Notbremse (siehe
+    // fotoRundeRegeln.notbremse). Die Wochen-Sperre steht am Dokument unter dem
+    // App-Code (doppelt_eingereicht), ihr interner Grund in review.reason.
+    else if (d.x.status === 'rejected' && !AUSSER_GESAMTQUOTE.has(d.x.rejectReason) && !AUSSER_GESAMTQUOTE.has(d.x.review && d.x.review.reason)) ab2++;
   }
   return fr + ab2 >= 30 ? ab2 / (fr + ab2) : null;
 }
@@ -323,24 +343,63 @@ async function aktionsLage(db) {
 /* ─────────────────────────── Der Lauf ─────────────────────────── */
 
 /**
+ * Alle Produktfoto-Dateien mit md5 und Größe — EINE Liste statt einer Abfrage
+ * je Datei. Gemessen 02.10.2026: 28.741 Dateien in 6 Seiten, 3,4 s. Damit
+ * lässt sich jedes Identitätsfoto gegen ALLE früheren Einreichungen prüfen
+ * (Entscheidung Patrick 02.10.2026), nicht nur gegen die im Lauf offenen.
+ * @returns {Promise<Map<string,{md5:string|null,size:number}>|null>} null = Liste gescheitert
+ */
+async function dateiListe(storage) {
+  try {
+    const out = new Map();
+    let query = { prefix: UPLOAD_PRAEFIX, autoPaginate: false, maxResults: 5000, fields: 'items(name,md5Hash,size),nextPageToken' };
+    for (;;) {
+      const [files, next] = await storage.getFiles(query);
+      for (const f of files) {
+        // Mit `fields` liefert die Bibliothek rohe Objekte statt File-Instanzen.
+        const m = f.metadata || f;
+        out.set(f.name, { md5: m.md5Hash || null, size: Number(m.size) || 0 });
+      }
+      if (!next || !next.pageToken) return out;
+      query = { ...query, pageToken: next.pageToken };
+    }
+  } catch (e) {
+    logger.warn('Storage-Liste der Uploads gescheitert — heute keine Freigaben', { fehler: String(e && e.message).slice(0, 160) });
+    return null;
+  }
+}
+
+/**
  * @param {object} opts
  * @param {string[]} [opts.vergleich]  REIN RECHNEN über schon entschiedene Fälle:
  *   diese IDs gelten als offen (nur im Speicher), es wird nichts nachgelesen,
  *   nichts geschrieben und kein Bericht angelegt; zurück kommt der Plan.
  *   Zweck: eine Regel- oder Prompt-Änderung gegen echte Entscheidungen prüfen
  *   (erstmals 24.09.2026: Runde gegen die Handrunde desselben Tages).
+ * @param {boolean} [opts.nurLesen]  Trockenlauf OHNE jeden Schreibvorgang über
+ *   die heute offenen Fälle: liest nach und prüft (Ergebnisse nur im
+ *   Speicher), schreibt weder nachgelesene Angaben noch `eanFotoOcr` noch
+ *   einen Bericht; zurück kommt der Plan mit den Eingaben je Fall. Zweck: eine
+ *   Regeländerung vor dem Ausrollen gegen echte Daten prüfen (erstmals
+ *   02.10.2026, Wochen-Sperre). Der normale Trockenlauf (`dryRun`) schreibt
+ *   dagegen Nachlesungen und Bericht.
+ * @param {number} [opts.arbeitszeitMs]  Nach dieser Zeit beginnt die Runde nichts Neues mehr.
  */
-async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser = 'zeitplan', vergleich = null } = {}) {
-  if (vergleich) dryRun = true;
+async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser = 'zeitplan', vergleich = null, nurLesen = false, arbeitszeitMs = ARBEITSZEIT_MS } = {}) {
+  if (vergleich || nurLesen) dryRun = true;
+  // Nachgelesene Angaben und die Foto-Nummer sind Tatsachen über die Fotos und
+  // werden auch im normalen Trockenlauf gespeichert — nur nicht beim reinen Rechnen.
+  const schreibtAngaben = !vergleich && !nurLesen;
   const db = admin.firestore();
   const bucket = bucketName || `${projekt}.appspot.com`;
   const ai = new GoogleGenAI({ vertexai: true, project: projekt, location: 'global' });
   const start = Date.now();
-  const frist = start + ARBEITSZEIT_MS;
+  const frist = start + arbeitszeitMs;
   const tag = berlinTag(start);
   const lauf = `${tag}_${berlinZeit(start)}${dryRun ? '_trocken' : ''}`;
 
-  const alle = (await db.collection(COL).get()).docs.map((d) => ({ id: d.id, ref: d.ref, x: d.data() }));
+  const [alleSnap, sperren] = await Promise.all([db.collection(COL).get(), ladeSperren(db)]);
+  const alle = alleSnap.docs.map((d) => ({ id: d.id, ref: d.ref, x: d.data() }));
   if (vergleich) {
     const ids = new Set(vergleich);
     // Die Entscheidung von damals ausblenden: Status wieder offen, Entscheidungs-
@@ -357,12 +416,17 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     .filter((d) => d.x.status === 'pending' && (!vergleich || d.vorher))
     .sort((a, b) => (ms(a.x.createdAt) ?? 0) - (ms(b.x.createdAt) ?? 0));
 
+  // 0) Gesperrte Konten (Entscheidung Patrick 02.10.2026). Für sie wird nichts
+  //    nachgelesen und nichts angesehen — die Entscheidung hängt nicht daran.
+  const kontoVon = new Map(pending.map((d) => [d.id, kontoSperreVon(sperren, d.x.userId)]));
+  const zuBearbeiten = pending.filter((d) => kontoVon.get(d.id) !== 'gesperrt');
+
   // 1) Fehlende Angaben nachlesen
   const nachgelesen = { name: 0, ean: 0, preis: 0, hersteller: 0 };
   const rettungFehler = new Map();
-  const nichtNachgelesen = vergleich ? [] : await arbeite(pending, async (d) => {
+  const nichtNachgelesen = vergleich ? [] : await arbeite(zuBearbeiten, async (d) => {
     try {
-      const { patch, fehler } = await rettungFuer(ai, bucket, d.ref, d.x);
+      const { patch, fehler } = await rettungFuer(ai, bucket, d.ref, d.x, { schreiben: schreibtAngaben });
       if (Object.keys(fehler).length) rettungFehler.set(d.id, fehler);
       if (patch) {
         Object.assign(d.x, patch);
@@ -377,32 +441,48 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   }, PARALLEL_KI, frist);
   nichtNachgelesen.forEach((d) => rettungFehler.set(d.id, rettungNichtGeschafft()));
 
-  // 2) Bilddateien: leer, unlesbar, oder aus einer früheren Einreichung bekannt
+  // 2) Bilddateien: leer, unlesbar, oder schon in einer FRÜHEREN Einreichung —
+  //    gegen ALLE Einreichungen (Entscheidung Patrick 02.10.2026). Vorher nur
+  //    gegen die im Lauf offenen; seit Beginn 1 Freigabe trotz identischem Foto
+  //    einer eigenen älteren Freigabe, 2 mit Foto eines fremden Kontos.
   const storage = admin.storage().bucket(bucket);
+  const liste = await dateiListe(storage);
   const metaVon = new Map();
-  await arbeite(pending, async (d) => {
+  await arbeite(zuBearbeiten, async (d) => {
     const metas = await Promise.all(Object.entries(d.x.images || {}).map(async ([k, p]) => {
+      const bekannt = liste && liste.get(String(p));
+      if (bekannt) return { k, p, md5: bekannt.md5, size: bekannt.size };
+      // Nicht in der Liste (gerade hochgeladen, anderer Pfad, Liste gescheitert): einzeln nachsehen.
       try { const [m] = await storage.file(String(p)).getMetadata(); return { k, p, md5: m.md5Hash || null, size: Number(m.size) || 0 }; }
       catch { return { k, p, md5: null, size: -1 }; }
     }));
     metaVon.set(d.id, metas);
   }, 20, null);
-  const alterVon = new Map(alle.map((d) => [d.id, ms(d.x.createdAt) ?? 0]));
+  // Gruppen gleicher Identitätsfotos: gleicher Speicherpfad oder gleiche Bytes
+  // (md5, nur nicht-leere Dateien — alle leeren Dateien hätten dieselbe md5).
   const gruppen = new Map();
   const merke = (key, id) => { if (!gruppen.has(key)) gruppen.set(key, new Set()); gruppen.get(key).add(id); };
-  alle.forEach((d) => Object.entries(d.x.images || {}).forEach(([k, p]) => { if (IDENTITY_SLOTS.has(k)) merke(`p:${p}`, d.id); }));
-  for (const [id, metas] of metaVon) for (const m of metas) if (m.md5 && IDENTITY_SLOTS.has(m.k)) merke(`m:${m.md5}`, id);
-  const wiederverwendet = new Set();
+  for (const d of alle) {
+    const eigene = metaVon.get(d.id);
+    for (const [k, p] of Object.entries(d.x.images || {})) {
+      if (!IDENTITY_SLOTS.has(k)) continue;
+      merke(`p:${p}`, d.id);
+      const m = eigene ? eigene.find((e) => e.k === k) : liste && liste.get(String(p));
+      if (m && m.md5 && m.size > 0) merke(`m:${m.md5}`, d.id);
+    }
+  }
+  const partnerVon = new Map();
   for (const ids of gruppen.values()) {
     if (ids.size < 2) continue;
-    // Die ÄLTESTE Einreichung ist die Erstnutzung und behält ihre Chance —
-    // bestraft wird die Wiederverwendung, nie das Original (Regel 10.09.).
-    [...ids].sort((a, b) => (alterVon.get(a) ?? 0) - (alterVon.get(b) ?? 0)).slice(1).forEach((i) => wiederverwendet.add(i));
+    for (const i of ids) {
+      if (!partnerVon.has(i)) partnerVon.set(i, new Set());
+      for (const j of ids) if (j !== i) partnerVon.get(i).add(j);
+    }
   }
 
   // 3) Vorprüfung, die ohne Reihenfolge auskommt
   const vor = new Map();
-  for (const d of pending) {
+  for (const d of zuBearbeiten) {
     const x = d.x;
     const comp = completenessCheck(vollstaendigkeitOf(x), REQUIRED);
     const metas = metaVon.get(d.id) || [];
@@ -410,7 +490,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   }
 
   // 4) Bildprüfung für alles, dem nicht schon ein Foto fehlt
-  const zuPruefen = pending.filter((d) => { const v = vor.get(d.id); return !v.comp.problems.includes('unvollstaendig') && !v.leer.length && !v.unlesbar.length; });
+  const zuPruefen = zuBearbeiten.filter((d) => { const v = vor.get(d.id); return !v.comp.problems.includes('unvollstaendig') && !v.leer.length && !v.unlesbar.length; });
   const audit = new Map(); const auditFehler = new Map();
   const nichtGeprueft = await arbeite(zuPruefen, async (d) => {
     try { audit.set(d.id, await bildAudit(ai, bucket, d.x)); }
@@ -418,20 +498,67 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   }, PARALLEL_KI, frist);
   nichtGeprueft.forEach((d) => auditFehler.set(d.id, 'zeit_abgelaufen'));
 
+  // 4b) Nummer vom Barcode-Foto gegen die gespeicherte (Entscheidung Patrick
+  //     02.10.2026). Gelesen im Aufruf der Bildprüfung — kein Zusatzaufruf.
+  //     Am Dokument abgelegt (`eanFotoOcr`), damit die Prüfkonsole dasselbe sieht.
+  const eanFoto = new Map();
+  for (const d of zuPruefen) {
+    const a = audit.get(d.id);
+    if (a) eanFoto.set(d.id, eanFotoBefund(d.x.ean, a.eanFoto));
+  }
+  if (schreibtAngaben) {
+    await arbeite([...eanFoto.keys()], async (id) => {
+      const d = pending.find((p) => p.id === id);
+      const b = eanFoto.get(id);
+      try {
+        await d.ref.set({ eanFotoOcr: { ean: b.gelesen, befund: b.art, at: FieldValue.serverTimestamp(), quelle: `${MODELL}/vertex, Bildprüfung der Morgenrunde`, lauf } }, { merge: true });
+      } catch (e) {
+        // Nur Anzeige in der Konsole — die Entscheidung der Runde hängt nicht daran.
+        logger.warn('eanFotoOcr nicht gespeichert', { id, fehler: String(e.message).slice(0, 160) });
+      }
+    }, 20, null);
+  }
+
   // 5) Chronologisch entscheiden — eine im selben Lauf entschiedene Einreichung
   //    ist für die nächste derselben EAN Referenz bzw. kein offener Vorgänger mehr.
   const byEan = new Map();
-  alle.forEach((d) => { const e = eanOf(d.x); if (!e) return; if (!byEan.has(e)) byEan.set(e, []); byEan.get(e).push(policyOf(d.id, d.x)); });
+  const nachGtin = new Map();
+  const merkeEan = (map, key, v) => { if (!map.has(key)) map.set(key, []); map.get(key).push(v); };
+  alle.forEach((d) => {
+    const e = eanOf(d.x);
+    if (!e) return;
+    const p = policyOf(d.id, d.x);
+    merkeEan(byEan, e, p);
+    merkeEan(nachGtin, gtin14(e), p);
+  });
   const statusJetzt = new Map(alle.map((d) => [d.id, d.x.status]));
+  const infoVon = new Map(alle.map((d) => [d.id, { userId: d.x.userId ?? null, createdAt: ms(d.x.createdAt) }]));
+  const info = (id) => (infoVon.has(id) ? { ...infoVon.get(id), status: statusJetzt.get(id) } : null);
+  const datumVon = (id) => { const t = infoVon.get(id) && infoVon.get(id).createdAt; return t ? fmtDate(t) : '?'; };
   const plan = [];
   for (const d of pending) {
+    const kontoSperre = kontoVon.get(d.id);
+    if (kontoSperre === 'gesperrt') {
+      const e = entscheideFall({ kontoSperre });
+      plan.push({ ...d, ...e, comp: { ok: true, problems: [], missing: [] }, dup: { verdict: 'ok', reason: null, lockUntil: null }, audit: null, eingabe: { kontoSperre } });
+      statusJetzt.set(d.id, 'rejected');
+      continue;
+    }
     const v = vor.get(d.id);
     const andere = (byEan.get(eanOf(d.x)) || []).filter((o) => o.id !== d.id).map((o) => ({ ...o, status: statusJetzt.get(o.id) || o.status }));
     const dup = eanOf(d.x) ? evaluateDuplicate(policyOf(d.id, d.x), andere) : { verdict: 'ok', reason: null, lockUntil: null };
-    const refDoc = dup.priorId ? alle.find((a) => a.id === dup.priorId) : null;
-    const preisFehlt = !preisOf(d.x) || (refDoc ? !preisOf(refDoc.x) : false);
-    // Die Referenz (binnen 24 h freigegeben) lief selbst schon durch dieses
-    // Nachlesen, als sie offen war — deshalb hier nur der Fehler des Kandidaten.
+    // Die Doppel-Prüfung zusätzlich unter der Nummer vom Barcode-Foto — eine
+    // falsch getippte EAN soll die Wochen-Sperre nicht umgehen. Weicht die
+    // Nummer ab, bleibt der Fall ohnehin liegen; der Befund steht im Hinweis.
+    const ef = eanFoto.get(d.id) || null;
+    let eanFotoHinweis = null;
+    if (ef && ef.art === 'abweichend') {
+      const unterFoto = (nachGtin.get(gtin14(ef.gelesen)) || []).filter((o) => o.id !== d.id).map((o) => ({ ...o, status: statusJetzt.get(o.id) || o.status }));
+      const dupFoto = evaluateDuplicate({ ...policyOf(d.id, d.x), ean: ef.gelesen }, unterFoto);
+      eanFotoHinweis = `Barcode-Foto zeigt ${ef.gelesen}, gespeichert ist ${ef.gespeichert}`
+        + (dupFoto.verdict === 'locked' ? ` — unter der Foto-Nummer gibt es eine eigene Freigabe vom ${datumVon(dupFoto.priorId)} (Wochen-Sperre)`
+          : dupFoto.verdict === 'hold' ? ' — unter der Foto-Nummer liegt eine ältere eigene, noch offene Einreichung' : '');
+    }
     const rf = { ...(rettungFehler.get(d.id) || {}) };
     const gps = d.x.capture && d.x.capture.gps;
     const ort = gps ? auffaelligkeiten({ lat: gps.lat, lon: gps.lon, genauigkeitM: gps.accuracyM, erwartetesLand: d.x.marketLand, quelle: 'geraet' })
@@ -445,13 +572,16 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     // ab (firebase-storage 22.0.1). Ein echtes JPEG endet praktisch nie so.
     const preisMeta = (metaVon.get(d.id) || []).find((m) => m.k === 'preis');
     const preisBildDefekt = bildDefektOf(d.x).some((b) => b.slot === 'preis') || !!(preisMeta && preisMeta.size > 0 && preisMeta.size % 524288 === 0);
-    const e = entscheideFall({
-      comp: v.comp, dup, leer: v.leer, unlesbar: v.unlesbar, wiederverwendet: wiederverwendet.has(d.id),
-      audit: audit.get(d.id) || null, auditFehler: auditFehler.get(d.id) || null, rettungFehler: rf, preisFehlt,
+    const eingabe = {
+      kontoSperre, comp: v.comp, dup, leer: v.leer, unlesbar: v.unlesbar,
+      bild: bildBefund(d.id, partnerVon.get(d.id) || [], info), fotoAbgleichFehlt: liste == null,
+      eanFoto: ef, eanFotoHinweis,
+      audit: audit.get(d.id) || null, auditFehler: auditFehler.get(d.id) || null, rettungFehler: rf,
       preisVorhanden: !!preisOf(d.x), preisHinweis: preisHinweisOf(d.x), ortAuffaellig: ort ? ort.text : null,
       namerLaeuft: namerAb != null && namerAb > start - NAMER_HAENGT_MS, preisBildDefekt,
-    });
-    plan.push({ ...d, ...e, comp: v.comp, dup, audit: audit.get(d.id) || null });
+    };
+    const e = entscheideFall(eingabe);
+    plan.push({ ...d, ...e, comp: v.comp, dup, audit: audit.get(d.id) || null, eingabe });
     if (e.entscheidung === 'freigeben') statusJetzt.set(d.id, 'approved');
     else if (e.entscheidung === 'ablehnen') statusJetzt.set(d.id, 'rejected');
   }
@@ -459,14 +589,18 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   // 6) Notbremse
   const bremse = notbremse(plan, { schnittQuote: schnittQuote(alle, start) });
 
-  if (vergleich) {
+  if (vergleich || nurLesen) {
     return {
       notbremse: bremse,
+      fotoAbgleich: { dateien: liste ? liste.size : null },
+      kontoSperren: sperren ? [...sperren.values()].filter((s) => s.gesperrt === true).length : null,
       plan: plan.map((p) => ({
-        id: p.id, name: String(nameOf(p.x) || '?').slice(0, 60), markt: p.x.marketName || null,
-        entscheidung: p.entscheidung, grund: p.grund, loseWare: !!p.loseWare, zurueckgehalten: p.zurueckgehaltenGrund || null,
+        id: p.id, userId: p.x.userId ?? null, name: String(nameOf(p.x) || '?').slice(0, 60), markt: p.x.marketName || null,
+        entscheidung: p.entscheidung, grund: p.grund, hinweis: p.ctx?.hinweis || null, loseWare: !!p.loseWare, zurueckgehalten: p.zurueckgehaltenGrund || null,
         audit: p.audit || null, auditFehler: auditFehler.get(p.id) || null,
-        vorher: p.vorher,
+        // Eingaben inkl. der (nur im Speicher) nachgelesenen Werte — damit sich
+        // ein Lauf nach alter Regel daneben rechnen lässt.
+        eingabe: p.eingabe, policy: policyOf(p.id, p.x), vorher: p.vorher,
       })),
     };
   }
@@ -484,32 +618,53 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       };
       const bild = p.audit ? { echt: p.audit.echt, loseWare: p.audit.loseWare, traegtAngaben: p.audit.traegtAngaben, gleicheAnsicht: p.audit.gleicheAnsicht, preisSichtbar: p.audit.preisSichtbar, grund: p.audit.grund } : null;
       try {
-      await db.runTransaction(async (tx) => {
-        const s = await tx.get(p.ref);
-        if (!s.exists || s.data().status !== 'pending') { p.uebersprungen = true; return; }
-        // Die Runde dauert bis zu 18 min. Hat der Lesedienst in der Zeit doch
-        // einen Preis oder ein Preisschild gefunden, ist „Preis fehlt" überholt
-        // — nicht ablehnen, morgen neu entscheiden (Gegenprüfung 26.09.).
-        if (p.grund === 'preis_fehlt' && (preisOf(s.data()) || preisHinweisOf(s.data()))) { p.uebersprungen = true; return; }
-        if (p.entscheidung === 'freigeben') {
-          tx.update(p.ref, {
-            status: 'approved', reviewedAt: FieldValue.serverTimestamp(), reviewedBy: ENTSCHEIDER, updatedAt: FieldValue.serverTimestamp(),
-            review: { precheck, decidedBy: ENTSCHEIDER, forced: false, bildAudit: bild, lauf },
-            holdReasons: FieldValue.delete(), rejectReason: FieldValue.delete(),
-            // KEINE Push-Merker setzen: die Nachricht schickt der Sammler in
-            // crowd-upload-reward. Ein hier gesetztes `rewardPushSentAt` hielte
-            // er für „schon verschickt" — die Person bekäme gar nichts.
-            ...(p.loseWare ? { loseWare: { art: 'vom_bildaudit_erkannt', markiertAm: FieldValue.serverTimestamp() } } : {}),
-            ...(p.ohneAngaben ? { frischwareOhneAngaben: true } : {}),
-          });
-        } else {
-          tx.update(p.ref, {
-            status: 'rejected', rejectReason: p.grund, holdReasons: [...new Set([...(s.data().holdReasons || []), p.grund])],
-            reviewNote: noteFor(p.grund, p.ctx), reviewedAt: FieldValue.serverTimestamp(), reviewedBy: ENTSCHEIDER, updatedAt: FieldValue.serverTimestamp(),
-            review: { precheck, decidedBy: ENTSCHEIDER, reason: p.grund, lockUntil: p.ctx.lockUntil || null, bildAudit: bild, lauf },
-          });
+        // Ergebnis der Transaktion als Rückgabe, nicht als Flag aus dem Callback:
+        // Firestore wiederholt den Callback bei Konflikten.
+        const ausgang = await db.runTransaction(async (tx) => {
+          const s = await tx.get(p.ref);
+          if (!s.exists || s.data().status !== 'pending') return 'uebersprungen';
+          // Die Runde dauert bis zu 18 min. Hat der Lesedienst in der Zeit doch
+          // einen Preis oder ein Preisschild gefunden, ist „Preis fehlt" überholt
+          // — nicht ablehnen, morgen neu entscheiden (Gegenprüfung 26.09.).
+          if (p.grund === 'preis_fehlt' && (preisOf(s.data()) || preisHinweisOf(s.data()))) return 'uebersprungen';
+          // Kontosperre im Moment des Schreibens nachlesen: eine Freigabe nur
+          // ohne Sperre, eine Sperr-Ablehnung nur mit. Lesefehler → Wurf → offen.
+          if (p.entscheidung === 'freigeben' || p.grund === KONTO_GESPERRT) {
+            const uid = s.data().userId;
+            const sperre = uid ? sperreAusDaten((await tx.get(db.collection(SPERREN).doc(uid))).data()) : null;
+            if (p.entscheidung === 'freigeben' && sperre) return sperre === 'gesperrt' ? 'konto_gesperrt_im_lauf' : 'kontosperre_unbekannt';
+            if (p.grund === KONTO_GESPERRT && sperre !== 'gesperrt') return 'uebersprungen';
+          }
+          if (p.entscheidung === 'freigeben') {
+            tx.update(p.ref, {
+              status: 'approved', reviewedAt: FieldValue.serverTimestamp(), reviewedBy: ENTSCHEIDER, updatedAt: FieldValue.serverTimestamp(),
+              review: { precheck, decidedBy: ENTSCHEIDER, forced: false, bildAudit: bild, lauf },
+              holdReasons: FieldValue.delete(), rejectReason: FieldValue.delete(),
+              // KEINE Push-Merker setzen: die Nachricht schickt der Sammler in
+              // crowd-upload-reward. Ein hier gesetztes `rewardPushSentAt` hielte
+              // er für „schon verschickt" — die Person bekäme gar nichts.
+              ...(p.loseWare ? { loseWare: { art: 'vom_bildaudit_erkannt', markiertAm: FieldValue.serverTimestamp() } } : {}),
+              ...(p.ohneAngaben ? { frischwareOhneAngaben: true } : {}),
+            });
+          } else {
+            // Am Dokument steht der Code, nach dem die APP ihren Text wählt
+            // (appGrund, siehe duplicatePolicy.APP_GRUND); der interne Grund
+            // bleibt in review.reason für Bericht, Notbremse und Auswertung.
+            const code = appGrund(p.grund);
+            tx.update(p.ref, {
+              status: 'rejected', rejectReason: code, holdReasons: [...new Set([...(s.data().holdReasons || []), code])],
+              reviewNote: noteFor(p.grund, p.ctx), reviewedAt: FieldValue.serverTimestamp(), reviewedBy: ENTSCHEIDER, updatedAt: FieldValue.serverTimestamp(),
+              review: { precheck, decidedBy: ENTSCHEIDER, reason: p.grund, lockUntil: p.ctx.lockUntil || null, bildAudit: bild, lauf },
+            });
+          }
+          return 'geschrieben';
+        });
+        if (ausgang === 'uebersprungen') p.uebersprungen = true;
+        else if (ausgang !== 'geschrieben') {
+          p.zurueckgehaltenGrund = p.grund;
+          p.entscheidung = 'offen';
+          p.grund = ausgang;
         }
-      });
       } catch (e) {
         // Ein einzelner Schreibfehler darf die Runde nicht abbrechen (kein
         // Bericht, restliche Fälle unentschieden, retryCount 0). Der Fall
@@ -580,6 +735,9 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     auditVersucht: zuPruefen.length - nichtGeprueft.length, auditFehler: [...auditFehler.values()].filter((f) => f !== 'zeit_abgelaufen').length,
     nichtGeschafft: new Set([...nichtNachgelesen, ...nichtGeprueft].map((d) => d.id)).size,
     schreibFehler: plan.filter((p) => p.grund === 'schreib_fehler').length,
+    // Ohne diese beiden Abgleiche gibt die Runde nichts frei (fail-closed).
+    fotoAbgleichGescheitert: liste == null,
+    kontoSperrenUnlesbar: sperren == null,
     // Was liegen bleibt, wartet auf einen Menschen — seit wann?
     aeltesteOffenTage: offen.length ? Math.floor((start - Math.min(...offen.map((p) => ms(p.x.createdAt) ?? start))) / (24 * 60 * 60 * 1000)) : null,
   };
@@ -612,7 +770,13 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     bildpruefung: { versucht: runde.auditVersucht, gescheitert: runde.auditFehler, unpassend: plan.filter((p) => BILD_GRUENDE.has(p.grund) || BILD_GRUENDE.has(p.zurueckgehaltenGrund)).length },
     nichtGeschafft: runde.nichtGeschafft,
     schreibFehler: runde.schreibFehler,
-    notbremse: { bild: bremse.bild, gesamt: bremse.gesamt, preis: bremse.preis },
+    notbremse: { bild: bremse.bild, gesamt: bremse.gesamt, preis: bremse.preis, woche: bremse.woche, konto: bremse.konto },
+    // Neu 02.10.2026 (Entscheidungen Patrick): Nummer vom Barcode-Foto, Abgleich
+    // gegen alle früheren Fotos, gesperrte Konten — nur Zahlen, die Fälle stehen
+    // in wartetAufDich bzw. abgelehntListe.
+    eanFoto: zaehle([...eanFoto.values()], 'art'),
+    fotoAbgleich: { dateien: liste ? liste.size : null, gescheitert: liste == null },
+    kontoSperren: { aktiv: sperren ? [...sperren.values()].filter((x) => x.gesperrt === true).length : null, unlesbar: sperren == null },
     wartetAufDich: offen.slice(0, 100).map(fall),
     abgelehntListe: abgelehnt.slice(0, 100).map(fall),
     bons: lage.bons,

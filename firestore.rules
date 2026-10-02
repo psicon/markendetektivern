@@ -168,6 +168,9 @@ service cloud.firestore {
         'priceRescueOcr', 'manufacturerRescueOcr', 'rescueAt', 'rescueQuelle',
         'productNameRescueAt', 'productNameRescueQuelle',
         'eanRescueAt', 'eanRescueQuelle',
+        // Nummer vom Barcode-Foto (Morgenrunde, 02.10.2026) — die Prüfkonsole
+        // hält bei Abweichung an; ein mitgeschickter Wert gäbe „stimmt" vor.
+        'eanFotoOcr',
         // Prüfung (Morgenrunde + Prüfkonsole)
         'review', 'reviewedBy', 'reviewedAt', 'reviewNote', 'holdReasons',
         'rejectReason', 'loseWare', 'frischwareOhneAngaben',

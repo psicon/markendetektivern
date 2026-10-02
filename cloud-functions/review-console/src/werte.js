@@ -78,6 +78,59 @@ function herkunftOf(x) {
   };
 }
 
+/* ── Barcode-Nummer vom Foto (Entscheidung Patrick 02.10.2026, „Super-Vorschlag") ──
+ * Die Morgenrunde liest die Ziffern unter dem Strichcode des Barcode-Fotos
+ * mit (im Aufruf der Bildprüfung) und legt sie in `eanFotoOcr` ab. Weicht die
+ * gelesene Nummer von der gespeicherten ab, bleibt die Einreichung liegen —
+ * ein Mensch entscheidet. Anlass: Einreichungen mit falschen EANs, und eine
+ * falsch getippte EAN umginge die Wochen-Sperre.
+ */
+const ziffern = (v) => String(v ?? '').replace(/\D/g, '');
+/** GTIN auf 14 Stellen: EAN-13 „0…"/UPC-A und EAN-13 sind dann vergleichbar. */
+const gtin14 = (c) => ziffern(c).padStart(14, '0');
+
+/**
+ * Händler-/Waagen-Code (GS1 „restricted circulation"): GTIN-13-Präfix 02, 04
+ * und 20–29, bei EAN-8 die Präfixe 0 und 2. Gilt nur in einem Markt, trägt bei
+ * Waage-Etiketten Gewicht oder Preis. Lose Ware wird angenommen (Entscheidung
+ * Patrick 20.09.2026) — liest das Modell so einen Code, ist das kein Beleg für
+ * eine falsche EAN.
+ */
+function istHandelsCode(code) {
+  const c = ziffern(code);
+  if (c.length === 8) return c[0] === '0' || c[0] === '2';
+  if (c.length < 12 || c.length > 14) return false;
+  return /^(02|04|2)/.test(gtin14(c).slice(1));
+}
+
+/** Die vom Barcode-Foto gelesene Nummer — nur mit gültiger Prüfziffer. */
+function eanFotoOf(x) {
+  const e = x && x.eanFotoOcr && typeof x.eanFotoOcr === 'object' ? ziffern(x.eanFotoOcr.ean) : '';
+  return e && pruefzifferOk(e) ? e : null;
+}
+
+/**
+ * Gespeicherte EAN gegen die Nummer vom Barcode-Foto.
+ *
+ * Verglichen wird mit `ean` — der Nummer, die die App gescannt oder der Nutzer
+ * eingetippt hat. Eine nur nachgelesene EAN (`eanRescueOcr`) stammt selbst aus
+ * den Fotos; dort gäbe es nichts zu prüfen.
+ *
+ * @returns {{art:'gleich'|'abweichend'|'kein_urteil', gelesen:string|null, gespeichert:string|null, grund?:string}}
+ *   `kein_urteil`: Foto nicht lesbar bzw. Prüfziffer falsch (nur eine gültige
+ *   GTIN zählt als gelesen), Händler-/Waagen-Code gelesen, oder keine
+ *   gespeicherte EAN. Daraus folgt weder Halten noch Freigeben.
+ */
+function eanFotoBefund(gespeichertRoh, gelesenRoh) {
+  const gelesen = ziffern(gelesenRoh);
+  const gespeichert = ziffern(gespeichertRoh) || null;
+  if (!gelesen || !pruefzifferOk(gelesen)) return { art: 'kein_urteil', gelesen: null, gespeichert, grund: gelesen ? 'pruefziffer' : 'nicht_lesbar' };
+  if (istHandelsCode(gelesen)) return { art: 'kein_urteil', gelesen, gespeichert, grund: 'handelscode' };
+  if (!gespeichert) return { art: 'kein_urteil', gelesen, gespeichert, grund: 'nichts_gespeichert' };
+  if (gtin14(gelesen) === gtin14(gespeichert)) return { art: 'gleich', gelesen, gespeichert };
+  return { art: 'abweichend', gelesen, gespeichert };
+}
+
 /** Bildarten, auf denen ein Preis steht (Lesedienst und Nachlesung benutzen dieselben Namen). */
 const PREIS_ARTEN = ['preisschild', 'kassenbon', 'beides'];
 
@@ -96,4 +149,7 @@ function preisHinweisOf(x) {
   return null;
 }
 
-module.exports = { pruefzifferOk, eanOf, nameOf, preisOf, policyOf, herstellerAnzeige, vollstaendigkeitOf, herkunftOf, preisHinweisOf, PREIS_ARTEN };
+module.exports = {
+  pruefzifferOk, eanOf, nameOf, preisOf, policyOf, herstellerAnzeige, vollstaendigkeitOf, herkunftOf, preisHinweisOf, PREIS_ARTEN,
+  gtin14, istHandelsCode, eanFotoOf, eanFotoBefund,
+};
