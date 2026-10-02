@@ -2,33 +2,114 @@
  * LLM-Extractor — Herzstück des Scrapers.
  *
  * Nimmt HTML einer beliebigen Produkt-Seite (Discounter / Hersteller /
- * Codecheck / etc.) und extrahiert die strukturierten Daten via
- * Claude. Damit brauchen wir KEINEN site-spezifischen Parser — eine
- * Pipeline für ALLE Sites.
+ * Codecheck / etc.) und extrahiert die strukturierten Daten per KI. Damit
+ * brauchen wir KEINEN site-spezifischen Parser — eine Pipeline für ALLE Sites.
  *
  * Output-Schema: reweapify-kompatibel (attr_ingredientStatement,
  * nutr_*_val + _unit), damit der Backfill (CF2) das direkt
  * konsumieren kann.
  *
- * Kosten: Claude Haiku 3.5
- *   - Input: $0.80 / M Tokens
- *   - Output: $4 / M Tokens
- *   - Typische HTML-Seite gestrippt: ~5-15k Tokens Input, ~200 Tokens
- *     Output → ~$0.005 pro Call
- *   - 7000 EANs × $0.005 = ~$35 für full-cover-Run
+ * ═══ Modell (seit 02.10.2026: Gemini über Vertex, vorher Claude Haiku) ═══
+ * Bis 01.10.2026 lief das Auslesen über Claude (Anthropic-API). Ab dem
+ * 18.08.2026 war das Anthropic-Guthaben aufgebraucht: jede Extraktion endete
+ * mit 400 „credit balance is too low“, wurde aber als „nichts gefunden“
+ * gemeldet (return null). Folge: scrapeEan meldete „all_failed“, der
+ * external-misses-processor schloss jede EAN dauerhaft als „no-data“ ab —
+ * rund 5.400 EANs in sechs Wochen, während Serper/Apify weiter bezahlt wurden.
  *
- * API-Key wird via Functions-Config gelesen:
- *   firebase functions:config:set anthropic.api_key="sk-ant-..."
+ * Jetzt: gemini-3.5-flash über Vertex (Projekt-Billing, Startup-Guthaben),
+ * Standort `eu` (für 3.5-flash zugesagt, siehe cashback-pipeline/lib/
+ * geminiModelle.js), Denken über `thinkingLevel` (CLAUDE.md: nie
+ * `thinkingBudget`). Rückschalter ohne Codeänderung: Umgebungsvariablen
+ * SCRAPER_GEMINI_MODEL / SCRAPER_GEMINI_LOCATION.
+ *
+ * ═══ Fehlervertrag (die eigentliche Reparatur) ═══
+ *   • Daten gefunden                → Objekt
+ *   • Seite hat nichts Verwertbares → null   (inhaltliche Aussage)
+ *   • KI nicht erreichbar / Kontingent / Zeitlimit / kaputtes JSON nach
+ *     Wiederholungen → wirft ExtractUnavailableError (code
+ *     'extract_unavailable'). Ein Infrastrukturfehler ist NIE eine Aussage
+ *     über das Produkt — die Aufrufer dürfen daraus kein „keine Daten“ machen.
  */
 
-const Anthropic = require('@anthropic-ai/sdk');
+const { GoogleGenAI } = require('@google/genai');
+
+const { ExtractUnavailableError } = require('./fehler');
+
+const MODEL = process.env.SCRAPER_GEMINI_MODEL || 'gemini-3.5-flash';
+const LOCATION = process.env.SCRAPER_GEMINI_LOCATION || 'eu';
+const PROJECT = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'markendetektive-895f7';
+// Gemessen 02.10.2026 (eu, LOW): 1–11 s je Seite. 45 s lässt Luft und hält
+// den schlimmsten Fall (3 Versuche + Pausen ≈ 150 s) unter dem Zeitbudget
+// von scrapeEan.
+const CALL_TIMEOUT_MS = 45_000;
+const MAX_ATTEMPTS = 3;
+// Inhaltliche Ablehnung durch das Modell: Wiederholen bringt nichts, und es
+// ist kein Ausfall — die Seite gilt als „nichts Verwertbares“.
+const BLOCKIERT = new Set(['SAFETY', 'RECITATION', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'SPII', 'IMAGE_SAFETY']);
 
 let _client = null;
-function getClient(apiKey) {
+function getClient() {
   if (!_client) {
-    _client = new Anthropic.default({ apiKey });
+    _client = new GoogleGenAI({ vertexai: true, project: PROJECT, location: LOCATION });
   }
   return _client;
+}
+
+/** Ein Aufruf mit hartem Zeitlimit (Muster aus cashback-pipeline/lib/ocr.js). */
+async function callGemini({ systemInstruction, userText, model }) {
+  const abort = new AbortController();
+  const request = getClient().models.generateContent({
+    model,
+    contents: [{ role: 'user', parts: [{ text: userText }] }],
+    config: {
+      systemInstruction,
+      responseMimeType: 'application/json',
+      // Denk-Token zählen zu maxOutputTokens — großzügig, damit die Antwort
+      // nicht abgeschnitten wird (CLAUDE.md: 512 war beim Namer zu knapp).
+      maxOutputTokens: 4096,
+      thinkingConfig: { thinkingLevel: 'LOW' },
+      abortSignal: abort.signal,
+    },
+  });
+  request.catch(() => {});
+  let timer = null;
+  try {
+    return await Promise.race([
+      request,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          abort.abort();
+          const err = new Error(`Gemini timeout after ${CALL_TIMEOUT_MS} ms`);
+          err.code = 'timeout';
+          reject(err);
+        }, CALL_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** Antworttext → Objekt. Wirft bei leerer/abgeschnittener/kaputter Antwort. */
+function parseResponse(resp) {
+  const finishReason = resp?.candidates?.[0]?.finishReason ?? null;
+  const text = resp?.text;
+  if (!text) {
+    const err = new Error(`Gemini ohne Text (finishReason=${finishReason})`);
+    err.code = BLOCKIERT.has(finishReason) ? 'blocked' : 'empty';
+    throw err;
+  }
+  let jsonText = text.trim();
+  const fence = jsonText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (fence) jsonText = fence[1].trim();
+  try {
+    return JSON.parse(jsonText);
+  } catch (e) {
+    const err = new Error(`JSON parse failed (finishReason=${finishReason}): ${e?.message}`);
+    err.code = 'json';
+    throw err;
+  }
 }
 
 // Keywords die "hier kommt Zutaten/Nährwerte/Preis/Hersteller" markieren.
@@ -86,7 +167,7 @@ function stripHtml(html) {
   s = s.replace(/<!--[\s\S]*?-->/g, '');
   // SVG-Inhalt raus (oft seitenweise dekoratives Markup)
   s = s.replace(/<svg[\s\S]*?<\/svg>/gi, '');
-  // ALLE Tags raus — Claude braucht für Text-Extraction die Struktur
+  // ALLE Tags raus — die KI braucht für Text-Extraction die Struktur
   // nicht, nur den Content. Sparen massiv Tokens.
   s = s.replace(/<[^>]+>/g, ' ');
   // HTML-Entities die wichtig sind decoden
@@ -280,112 +361,60 @@ HTML:
 {HTML_CONTENT}`;
 
 /** Extrahiert strukturierte Produkt-Daten aus HTML.
- *  Returnt das geparste Objekt oder null wenn nichts brauchbares
- *  gefunden wurde / confidence zu niedrig. */
-async function extractFromHtml({ html, apiKey, productName = null, modelOverride = null }) {
-  if (!apiKey) {
-    throw new Error('extractFromHtml: api key fehlt');
-  }
+ *  Returnt das geparste Objekt, null wenn die Seite nichts Verwertbares
+ *  hat — und WIRFT ExtractUnavailableError, wenn die KI nicht antwortet
+ *  (siehe Fehlervertrag oben). `apiKey` wird seit dem Wechsel auf Vertex
+ *  nicht mehr gebraucht und ignoriert. */
+async function extractFromHtml({ html, productName = null, modelOverride = null } = {}) {
   const stripped = stripHtml(html);
   if (stripped.length < 200) {
     // Kein/zu wenig Content
     return null;
   }
 
-  // Prompt-Caching: der EXTRACTION_PROMPT (~2500 tokens) ist für JEDE
-  // EAN identisch — wir nutzen Anthropic Prompt-Caching damit der
-  // statische Teil 10× günstiger gerechnet wird. System-Prompt enthält
-  // den cacheable Anweisungs-Teil, User-Message enthält nur das
-  // variable HTML.
   const promptHtml = productName
     ? `[Erwarteter Produkt-Name: "${productName}"]\n\n${stripped}`
     : stripped;
 
-  const client = getClient(apiKey);
-  const model = modelOverride || 'claude-haiku-4-5';
-
   // EXTRACTION_PROMPT enthält "{HTML_CONTENT}" Marker am Ende —
-  // wir splitten in statischen Teil (cached) + dynamischen Teil.
+  // statischer Teil als Systemanweisung, das HTML als Nutzer-Nachricht.
   const promptParts = EXTRACTION_PROMPT.split('{HTML_CONTENT}');
-  const staticInstructions = promptParts[0]; // wird gecached
-  const dynamicSuffix = promptParts[1] || ''; // nach dem HTML (selten was)
+  const systemInstruction = promptParts[0];
+  const dynamicSuffix = promptParts[1] || '';
+  const userText = 'HTML:\n' + promptHtml + dynamicSuffix;
+  const model = modelOverride || MODEL;
 
-  const callClaude = async () =>
-    await client.messages.create({
-      model,
-      max_tokens: 900, // optimiert — meiste Outputs sind <800 tokens
-      // System-Prompt = cacheable Instructions
-      system: [
-        {
-          type: 'text',
-          text: staticInstructions,
-          cache_control: { type: 'ephemeral' }, // → Anthropic Prompt-Caching
-        },
-      ],
-      messages: [
-        {
-          role: 'user',
-          content: 'HTML:\n' + promptHtml + dynamicSuffix,
-        },
-      ],
-    });
-
-  // Anthropic Rate-Limit (z.B. 10k tokens/min auf Tier 1) ist der
-  // Bottleneck bei parallelen Batches. 4 retries mit exponential
-  // backoff: 15s, 30s, 45s, 60s. Total max ~150sec wartezeit pro
-  // Extract — die Page-Daten werden nicht verloren wenn Rate-Limit
-  // gerade zuschlägt.
-  let resp;
-  let attempt = 0;
-  const MAX_ATTEMPTS = 5; // initial + 4 retries
-  while (attempt < MAX_ATTEMPTS) {
+  let parsed = null;
+  let resp = null;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      resp = await callClaude();
-      break; // success
+      resp = await callGemini({ systemInstruction, userText, model });
+      parsed = parseResponse(resp);
+      break;
     } catch (e) {
-      attempt++;
-      const status = e?.status || e?.response?.status;
-      const isRetryable = status === 429 || (status >= 500 && status < 600);
-      if (!isRetryable || attempt >= MAX_ATTEMPTS) {
-        console.warn(
-          `[extractor] Claude API error (attempt ${attempt}/${MAX_ATTEMPTS}, status=${status}):`,
-          e?.message || e,
-        );
+      if (e?.code === 'blocked') {
+        console.warn(`[extractor] Modell lehnt die Seite inhaltlich ab: ${e.message}`);
         return null;
       }
-      // Wait time: prefer server's retry-after header, fallback zu
-      // exponential backoff: 15s, 30s, 45s, 60s
-      const retryAfterHeader = Number(
-        e?.headers?.['retry-after'] ||
-          e?.response?.headers?.['retry-after'] ||
-          0,
-      );
-      const backoffMs = attempt * 15000;
-      const waitMs = Math.min(
-        Math.max(retryAfterHeader * 1000, backoffMs),
-        70000,
-      );
+      lastErr = e;
+      const status = e?.status ?? e?.code;
       console.warn(
-        `[extractor] Claude ${status} attempt ${attempt}, retry in ${waitMs}ms`,
+        `[extractor] Gemini Versuch ${attempt}/${MAX_ATTEMPTS} gescheitert (${status}): ${String(e?.message || e).slice(0, 200)}`,
       );
-      await new Promise((r) => setTimeout(r, waitMs));
+      if (attempt < MAX_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, attempt === 1 ? 4000 : 12000));
+      }
     }
   }
-  if (!resp) return null;
-
-  const text = resp?.content?.[0]?.text;
-  if (!text) return null;
-
-  // JSON aus Response parsen — manchmal wickelt Claude in ```json ... ```
-  let jsonText = text.trim();
-  const fence = jsonText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  if (fence) jsonText = fence[1].trim();
-
-  let parsed;
-  try {
-    parsed = JSON.parse(jsonText);
-  } catch (e) {
-    console.warn('[extractor] JSON parse failed:', e?.message);
+  if (!parsed) {
+    throw new ExtractUnavailableError(
+      `KI-Auslesen nicht verfügbar: ${String(lastErr?.message || lastErr).slice(0, 300)}`,
+      lastErr,
+    );
+  }
+  if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+    // Kein Objekt (z. B. eine Liste) — inhaltlich unbrauchbar, kein Ausfall.
     return null;
   }
 
@@ -421,31 +450,20 @@ async function extractFromHtml({ html, apiKey, productName = null, modelOverride
     return null;
   }
 
-  // Log cache-stats damit wir sehen ob Prompt-Caching greift.
-  // Bei einem Cache-Hit ist cache_read_input_tokens > 0 — der Großteil
-  // des statischen System-Prompts wird dann 10× günstiger gerechnet.
-  if (resp.usage?.cache_read_input_tokens) {
-    console.log(
-      `[extractor] cache HIT: read=${resp.usage.cache_read_input_tokens}, ` +
-        `creation=${resp.usage.cache_creation_input_tokens || 0}, ` +
-        `input=${resp.usage.input_tokens}, output=${resp.usage.output_tokens}`,
-    );
-  } else if (resp.usage?.cache_creation_input_tokens) {
-    console.log(
-      `[extractor] cache CREATED: ${resp.usage.cache_creation_input_tokens} tokens, ` +
-        `input=${resp.usage.input_tokens}, output=${resp.usage.output_tokens}`,
-    );
-  }
+  const usage = resp?.usageMetadata || {};
+  console.log(
+    `[extractor] ${model}@${LOCATION}: in=${usage.promptTokenCount ?? '?'} ` +
+      `out=${usage.candidatesTokenCount ?? '?'} denken=${usage.thoughtsTokenCount ?? 0}`,
+  );
 
   return {
     ...out,
     _confidence: confidence,
     _model: model,
-    _tokensIn: resp.usage?.input_tokens ?? null,
-    _tokensOut: resp.usage?.output_tokens ?? null,
-    _tokensCacheRead: resp.usage?.cache_read_input_tokens ?? 0,
-    _tokensCacheCreation: resp.usage?.cache_creation_input_tokens ?? 0,
+    _tokensIn: usage.promptTokenCount ?? null,
+    _tokensOut: usage.candidatesTokenCount ?? null,
+    _tokensThought: usage.thoughtsTokenCount ?? 0,
   };
 }
 
-module.exports = { extractFromHtml, stripHtml };
+module.exports = { extractFromHtml, stripHtml, ExtractUnavailableError };

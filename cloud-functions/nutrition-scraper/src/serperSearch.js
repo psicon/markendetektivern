@@ -26,10 +26,15 @@
  * Für ~8000 uncovered Produkte: ~$8 (oder Free + Starter).
  */
 
+const { SearchUnavailableError } = require('./fehler');
+
 const SERPER_ENDPOINT = 'https://google.serper.dev/search';
 
 /** Sucht via Serper. Returnt Liste von { link, title, snippet }.
- *  Bei Auth-Fehler / API-Error: leeres Array.
+ *  Leere Liste NUR, wenn die Suche funktioniert und nichts findet. Netz-,
+ *  Zeit-, HTTP- und Antwortfehler (z. B. leeres Serper-Guthaben, 400 „Not
+ *  enough credits“) werfen SearchUnavailableError — sonst würde ein Ausfall
+ *  als „keine Treffer“ und damit als „keine Daten“ enden (siehe src/fehler.js).
  *
  *  @param {object} args
  *  @param {string} args.ean
@@ -62,7 +67,7 @@ async function searchByEan({ ean, apiKey, pageSize = 10, gl = 'de', hl = 'de' })
     });
   } catch (e) {
     console.warn('[serperSearch] fetch error:', e?.message);
-    return [];
+    throw new SearchUnavailableError(`Serper nicht erreichbar: ${e?.message}`, e);
   }
 
   if (!resp.ok) {
@@ -70,14 +75,14 @@ async function searchByEan({ ean, apiKey, pageSize = 10, gl = 'de', hl = 'de' })
     console.warn(
       `[serperSearch] HTTP ${resp.status}: ${txt.slice(0, 200)}`,
     );
-    return [];
+    throw new SearchUnavailableError(`Serper HTTP ${resp.status}: ${txt.slice(0, 120)}`);
   }
 
   let json;
   try {
     json = await resp.json();
-  } catch {
-    return [];
+  } catch (e) {
+    throw new SearchUnavailableError('Serper-Antwort kein JSON', e);
   }
 
   // Serper-Response: { organic: [{ link, title, snippet, position }, ...] }

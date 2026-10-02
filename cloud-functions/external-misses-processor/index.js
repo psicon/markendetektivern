@@ -45,9 +45,18 @@
  * ─── Status-Übergänge ─────────────────────────────────────────────────
  *
  *   pending   → processing → resolved
- *                          → no-data
- *                          → pending (bei Fehler — wir versuchen's nächste Stunde wieder)
+ *                          → no-data  (NUR wenn scrapeEan inhaltlich nichts fand)
+ *                          → pending  (bei Fehler — nächste Stunde wieder)
+ *                          → error    (nach MAX_ERRORS Fehlern in Folge; nicht
+ *                                      „no-data“, damit man sie gezielt wieder
+ *                                      öffnen kann)
  *   skipped   ← manuelle Markierung in Admin-UI
+ *
+ * Vorfall 18.08.–01.10.2026: scrapeEan meldete bei leerem Anthropic-Guthaben
+ * „all_failed“ statt eines Fehlers → ~5.400 EANs fälschlich „no-data“. Seit
+ * 02.10. antwortet scrapeEan bei einem KI-Ausfall mit 503
+ * (extract_unavailable); das landet hier im Fehlerzweig. `processedResult`
+ * hält fest, WARUM eine EAN abgeschlossen wurde (no_urls / all_failed).
  */
 
 const functions = require('firebase-functions/v2');
@@ -78,6 +87,17 @@ const BATCH_LIMIT = 5;
 // betrachten und zurück auf 'pending' setzen. Schützt vor Worker-
 // Crashes die das Lock-Feld nie freigeben.
 const LOCK_STALE_MS = 30 * 60 * 1000; // 30 min
+
+// Nach so vielen Fehlern in Folge (scrapeEan nicht erreichbar, KI-Ausfall,
+// Zeitlimit) wird die EAN auf 'error' gestellt statt endlos jede Stunde
+// erneut Serper/Apify zu bezahlen. 'error' ist bewusst NICHT 'no-data'.
+const MAX_ERRORS = 5;
+
+// Keine neue EAN mehr anfangen, wenn der Lauf schon so lange dauert: der
+// Aufruf an scrapeEan darf bis 240 s brauchen, die Funktion endet nach 540 s.
+// Sonst würde die Funktion mitten in einer EAN beendet, und die EAN bliebe
+// auf 'processing' hängen.
+const NEUE_EAN_BIS_MS = 280_000;
 
 // ════════════════════════════════════════════════════════════════════
 // Endpoint 1 — scheduled (production)
@@ -149,7 +169,14 @@ async function runProcessor(triggerKey) {
   let noData = 0;
   let errored = 0;
 
+  const laufStart = Date.now();
+  let ausgelassen = 0;
   for (const miss of pending) {
+    if (Date.now() - laufStart > NEUE_EAN_BIS_MS) {
+      // Bleibt 'pending' (noch nicht gesperrt) — der nächste Lauf holt sie.
+      ausgelassen += 1;
+      continue;
+    }
     const ean = miss.id;
     console.log(`[misses-processor] processing ean=${ean}`);
 
@@ -168,10 +195,13 @@ async function runProcessor(triggerKey) {
     let resultStatus = 'pending';
     let resultSource = null;
     let resultError = null;
+    let resultCode = null;
+    const bisherigeFehler = Number(miss.get('errorCount') || 0);
 
     try {
       const scrapeRes = await callScrapeEan(ean, triggerKey);
       const result = scrapeRes?.result;
+      resultCode = typeof result === 'string' ? result : null;
       if (result === 'ok') {
         resultStatus = 'resolved';
         resultSource = scrapeRes.successShop || 'scraper';
@@ -195,13 +225,22 @@ async function runProcessor(triggerKey) {
 
     // 3c. Status zurückschreiben
     try {
+      if (resultError && bisherigeFehler + 1 >= MAX_ERRORS) {
+        resultStatus = 'error';
+      }
       const update = {
         status: resultStatus,
         processedAt: admin.firestore.FieldValue.serverTimestamp(),
         processedSource: resultSource,
+        processedResult: resultCode,
       };
-      if (resultError) update.processingError = resultError;
-      else update.processingError = admin.firestore.FieldValue.delete();
+      if (resultError) {
+        update.processingError = resultError;
+        update.errorCount = admin.firestore.FieldValue.increment(1);
+      } else {
+        update.processingError = admin.firestore.FieldValue.delete();
+        update.errorCount = admin.firestore.FieldValue.delete();
+      }
       // Lock-Feld räumen
       update.lockAt = admin.firestore.FieldValue.delete();
 
@@ -219,6 +258,7 @@ async function runProcessor(triggerKey) {
     resolved,
     noData,
     errored,
+    ausgelassen,
   };
   console.log('[misses-processor] done', summary);
   return summary;
@@ -244,10 +284,13 @@ async function unstickStaleLocks() {
     console.log(`[misses-processor] unsticking ${snap.size} stale locks`);
     const batch = db.batch();
     snap.docs.forEach((d) => {
+      // Ein abgebrochener Lauf ist ein Fehler dieser EAN → mitzählen, sonst
+      // könnte eine dauerhaft hängende EAN nie 'error' erreichen.
       batch.update(d.ref, {
         status: 'pending',
         lockAt: admin.firestore.FieldValue.delete(),
         processingError: 'lock-recovery: vorheriger Run timeout/crashed',
+        errorCount: admin.firestore.FieldValue.increment(1),
       });
     });
     await batch.commit();
@@ -291,12 +334,13 @@ async function pickPendingMisses(n) {
  * Returnt das JSON-Result. Wirft bei Netzwerk-Error / non-2xx.
  */
 async function callScrapeEan(ean, triggerKey) {
-  // Node 22 hat global fetch.
-  const url = `${SCRAPE_EAN_URL}?key=${encodeURIComponent(triggerKey)}`;
-  const resp = await fetch(url, {
+  // Node 22 hat global fetch. Der Schlüssel geht im Body, NICHT in der
+  // Adresse: Adressen landen im Klartext in den Google-Zugriffsprotokollen
+  // (Befund Funktionsinventar 01.10.2026). scrapeEan liest beides.
+  const resp = await fetch(SCRAPE_EAN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ean: String(ean) }),
+    body: JSON.stringify({ ean: String(ean), key: triggerKey }),
     // CF-internal timeout — scrapeEan hat selbst 540s, wir kappen
     // hier bei 240s damit wir auf jeden Fall die anderen Misses
     // noch durchkriegen.

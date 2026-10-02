@@ -17,6 +17,8 @@
  * (oder rohes HTML wenn das nicht reicht).
  */
 
+const { FetchUnavailableError } = require('./fehler');
+
 // Echter Chrome-User-Agent. Lernung 2026-05-17: viele Shops
 // (mytime, lidl, rewe, ...) servieren mit Bot-UA nur 380-byte
 // leeres SPA-Skelett, mit Chrome-UA aber 270k vollen HTML inkl.
@@ -166,6 +168,11 @@ async function fetchViaApify(url, { apifyToken } = {}) {
   if (!resp.ok) {
     const txt = await resp.text().catch(() => '');
     console.warn(`[fetcher/apify] HTTP ${resp.status} for ${url}: ${txt.slice(0, 200)}`);
+    // Konto-/Kontingentfehler betreffen JEDE Seite (Token ungültig, Guthaben
+    // leer, gesperrt, Ratenlimit) — kein Seitenproblem, siehe src/fehler.js.
+    if ([401, 402, 403, 429].includes(resp.status)) {
+      throw new FetchUnavailableError(`Apify HTTP ${resp.status}: ${txt.slice(0, 120)}`);
+    }
     return null;
   }
 

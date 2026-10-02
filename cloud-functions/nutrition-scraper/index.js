@@ -21,7 +21,9 @@
  *      Throttle + Limit + dryRun-Modes.
  *
  * Auth: shared key Secret NUTRITION_SCRAPER_TRIGGER_KEY
- * Claude-API-Key: Secret ANTHROPIC_API_KEY
+ * KI-Auslesen: gemini-3.5-flash über Vertex (Projekt-Billing, kein Schlüssel),
+ *   siehe src/extractor.js. Bis 01.10.2026 Claude (Anthropic-Guthaben ab
+ *   18.08.2026 leer → jede EAN fälschlich „keine Daten“).
  * Serper.dev (Google-Search via API): Secret SERPER_API_KEY
  */
 
@@ -31,6 +33,7 @@ const admin = require('firebase-admin');
 
 const { fetchHtml } = require('./src/fetcher');
 const { extractFromHtml } = require('./src/extractor');
+const { InfrastrukturFehler } = require('./src/fehler');
 const { resolveCandidates } = require('./src/resolver');
 const { writeScrapeResult, incrementTelemetryFail } = require('./src/writer');
 const { isPageGoodCandidate } = require('./src/domains');
@@ -42,7 +45,6 @@ const db = admin.firestore();
 // legacy functions.config(). Auf Deploy werden die Werte aus
 // .env.<project> oder Secret Manager gelesen.
 const TRIGGER_KEY = params.defineSecret('NUTRITION_SCRAPER_TRIGGER_KEY');
-const ANTHROPIC_API_KEY = params.defineSecret('ANTHROPIC_API_KEY');
 // Serper.dev — echte google.com-Searches per API. Replacement für
 // Vertex AI Search das EANs nicht im Snippet-Index hat. Optional —
 // wenn nicht gesetzt, wird nur Direct-URL-Pfad genutzt.
@@ -118,7 +120,7 @@ function isPlausibleEan(s) {
 exports.scrapeSingleUrl = functions.onRequest(
   {
     ...COMMON_OPTS,
-    secrets: [TRIGGER_KEY, ANTHROPIC_API_KEY, APIFY_API_TOKEN],
+    secrets: [TRIGGER_KEY, APIFY_API_TOKEN],
   },
   async (req, res) => {
     if (!checkAuth(req, TRIGGER_KEY.value())) {
@@ -136,16 +138,31 @@ exports.scrapeSingleUrl = functions.onRequest(
     }
 
     try {
-      const fetched = await fetchHtml(url, { apifyToken: APIFY_API_TOKEN.value() });
+      let fetched;
+      try {
+        fetched = await fetchHtml(url, { apifyToken: APIFY_API_TOKEN.value() });
+      } catch (e) {
+        if (e instanceof InfrastrukturFehler) {
+          res.status(503).json({ result: e.code, url, error: e.message });
+          return;
+        }
+        throw e;
+      }
       if (!fetched) {
         res.status(200).json({ result: 'fetch_failed', url });
         return;
       }
-      const extracted = await extractFromHtml({
-        html: fetched.html,
-        apiKey: ANTHROPIC_API_KEY.value(),
-        productName,
-      });
+      let extracted;
+      try {
+        extracted = await extractFromHtml({ html: fetched.html, productName });
+      } catch (e) {
+        if (e instanceof InfrastrukturFehler) {
+          // KI-Ausfall ist keine Aussage über die Seite → 503, nicht „failed“.
+          res.status(503).json({ result: e.code, url, error: e.message });
+          return;
+        }
+        throw e;
+      }
       if (!extracted) {
         res.status(200).json({ result: 'extract_failed', url });
         return;
@@ -168,7 +185,7 @@ exports.scrapeSingleUrl = functions.onRequest(
 exports.scrapeEan = functions.onRequest(
   {
     ...COMMON_OPTS,
-    secrets: [TRIGGER_KEY, ANTHROPIC_API_KEY, SERPER_API_KEY, APIFY_API_TOKEN],
+    secrets: [TRIGGER_KEY, SERPER_API_KEY, APIFY_API_TOKEN],
   },
   async (req, res) => {
     if (!checkAuth(req, TRIGGER_KEY.value())) {
@@ -187,9 +204,20 @@ exports.scrapeEan = functions.onRequest(
 
     try {
       const serperKey = SERPER_API_KEY.value();
-      const candidates = await resolveCandidates([String(ean)], {
-        serper: serperKey ? { apiKey: serperKey } : null,
-      });
+      let candidates;
+      try {
+        candidates = await resolveCandidates([String(ean)], {
+          serper: serperKey ? { apiKey: serperKey } : null,
+        });
+      } catch (e) {
+        if (e instanceof InfrastrukturFehler) {
+          // Suche ausgefallen (z. B. Serper-Guthaben leer) ≠ „keine Treffer“.
+          console.warn(`[scrapeEan] ${e.code}: ${e.message}`);
+          res.status(503).json({ result: e.code, error: e.message });
+          return;
+        }
+        throw e;
+      }
 
       if (candidates.length === 0) {
         res.status(200).json({ result: 'no_urls' });
@@ -199,11 +227,37 @@ exports.scrapeEan = functions.onRequest(
       // Versuche URLs sequentiell in Prio-Reihenfolge (Shops zuerst,
       // OF + codecheck als Fallback). 1. erfolgreicher Extract wins.
       const apifyToken = APIFY_API_TOKEN.value();
+      // KI-Ausfälle zählen getrennt von „Seite ohne Daten“: Fiel das Auslesen
+      // aus, ist „all_failed“ falsch — dann antwortet scrapeEan mit 503, und
+      // der Aufrufer (external-misses-processor) versucht es später erneut,
+      // statt die EAN dauerhaft als „no-data“ abzuschließen (Vorfall
+      // 18.08.–01.10.2026, ~5.400 EANs).
+      let extractErrors = 0;
+      let errorsInFolge = 0;
+      let zeitlimitErreicht = false;
+      let letzterFehlerCode = null;
+      // Gesamtfrist: der external-misses-processor bricht seinen Aufruf nach
+      // 240 s ab. Danach keine neuen Kandidaten mehr anfangen, sondern
+      // ehrlich „später erneut“ antworten.
+      const FRIST_MS = 190_000;
+      const gestartet = Date.now();
       for (const candidate of candidates) {
-        const fetched = await fetchHtml(candidate.url, {
-          requiresJS: candidate.requiresJS,
-          apifyToken,
-        });
+        if (Date.now() - gestartet > FRIST_MS) { zeitlimitErreicht = true; break; }
+        let fetched;
+        try {
+          fetched = await fetchHtml(candidate.url, {
+            requiresJS: candidate.requiresJS,
+            apifyToken,
+          });
+        } catch (e) {
+          if (!(e instanceof InfrastrukturFehler)) throw e;
+          extractErrors += 1;
+          errorsInFolge += 1;
+          letzterFehlerCode = e.code;
+          console.warn(`[scrapeEan] ${e.code} (${candidate.shop}): ${e.message}`);
+          if (errorsInFolge >= 2) break;
+          continue;
+        }
         if (!fetched) continue;
         // Quality-Check für UNKNOWN-Domain-Hits (serper-unknown):
         // bevor wir Claude-Tokens verbrennen, prüfen wir ob die Page
@@ -217,11 +271,21 @@ exports.scrapeEan = functions.onRequest(
             continue;
           }
         }
-        const extracted = await extractFromHtml({
-          html: fetched.html,
-          apiKey: ANTHROPIC_API_KEY.value(),
-          productName,
-        });
+        let extracted;
+        try {
+          extracted = await extractFromHtml({ html: fetched.html, productName });
+        } catch (e) {
+          if (!(e instanceof InfrastrukturFehler)) throw e;
+          extractErrors += 1;
+          errorsInFolge += 1;
+          letzterFehlerCode = e.code;
+          console.warn(`[scrapeEan] KI-Auslesen nicht verfügbar (${candidate.shop}): ${e.message}`);
+          // Zweimal hintereinander ausgefallen → die KI ist gerade weg; keine
+          // weiteren Seiten holen (spart Apify-Abrufe), später erneut.
+          if (errorsInFolge >= 2) break;
+          continue;
+        }
+        errorsInFolge = 0;
         if (!extracted) continue;
         const writeRes = await writeScrapeResult({
           ean: String(ean),
@@ -240,6 +304,16 @@ exports.scrapeEan = functions.onRequest(
         });
         return;
       }
+      if (extractErrors > 0 || zeitlimitErreicht) {
+        // Mindestens ein Dienst fiel aus oder die Frist lief ab, bevor alle
+        // Kandidaten geprüft waren → keine inhaltliche Aussage möglich.
+        res.status(503).json({
+          result: extractErrors > 0 ? letzterFehlerCode : 'zeitlimit',
+          triedUrls: candidates.length,
+          extractErrors,
+        });
+        return;
+      }
       res.status(200).json({ result: 'all_failed', triedUrls: candidates.length });
     } catch (e) {
       console.error('[scrapeEan] error:', e);
@@ -253,7 +327,7 @@ exports.scrapeBatch = functions.onRequest(
   {
     ...COMMON_OPTS,
     timeoutSeconds: 3600, // Gen 2 max 60min
-    secrets: [TRIGGER_KEY, ANTHROPIC_API_KEY, SERPER_API_KEY, APIFY_API_TOKEN],
+    secrets: [TRIGGER_KEY, SERPER_API_KEY, APIFY_API_TOKEN],
   },
   async (req, res) => {
     if (!checkAuth(req, TRIGGER_KEY.value())) {
@@ -397,7 +471,6 @@ exports.scrapeBatch = functions.onRequest(
 
       const serperKey = SERPER_API_KEY.value();
       const serperCfg = serperKey ? { apiKey: serperKey } : null;
-      const apiKey = ANTHROPIC_API_KEY.value();
       const apifyToken = APIFY_API_TOKEN.value();
 
       // Single-Doc-Processor — extracted für within-batch-Concurrency
@@ -472,14 +545,17 @@ exports.scrapeBatch = functions.onRequest(
               continue;
             }
           }
-          // BEFORE-CLAUDE GUARD: die HTML MUSS die EAN als Text enthalten.
+          // VOR DEM KI-AUFRUF: die HTML MUSS die EAN als Text enthalten.
           if (fetched.html && !fetched.html.includes(eans[0])) {
             incrementTelemetryFail(db, candidate.shop, eans[0], 'ean_not_in_html').catch(()=>{});
             continue;
           }
+          // Wirft bei KI-Ausfall (ExtractUnavailableError) → processDoc bricht
+          // ab, der Worker zählt einen Fehler, und es wird KEIN Failure-Marker
+          // geschrieben (sonst würde das Produkt nach 3 Ausfällen für immer
+          // übersprungen).
           const extracted = await extractFromHtml({
             html: fetched.html,
-            apiKey,
             productName: product?.name,
           });
           if (!extracted) continue;
@@ -549,10 +625,9 @@ exports.scrapeBatch = functions.onRequest(
         return { type: 'failed' };
       };
 
-      // Within-Batch-Concurrency: 3 EANs parallel.
-      // Anthropic Tier 2 = 60k tokens/min, eine call ist ~3000 tokens =
-      // ~20 calls/min möglich. Mit 3 parallel kommen wir nahe an die
-      // theoretische Grenze ohne 429-Cascade.
+      // Within-Batch-Concurrency: 3 EANs parallel (war auf das frühere
+      // Anthropic-Ratenlimit abgestimmt; Vertex verträgt mehr, bleibt aber
+      // bewusst bei 3, weil Apify-Renderings der eigentliche Kostentreiber sind).
       const CONCURRENCY = 3;
       let cursor = 0;
       const workers = Array(CONCURRENCY).fill(0).map(async () => {

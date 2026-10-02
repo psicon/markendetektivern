@@ -462,6 +462,25 @@ Recent-Sessions.
   Onboarding fehlerfrei. (3) Der Patch wirkt nur mit einem neuen nativen
   Build (iOS) — ein JS-Update allein behebt nichts.
 
+- **Einen bezahlten Fremddienst (KI, Suche, Rendering) scheitern lassen und das
+  als „nichts gefunden“ weitergeben (Vorfall 18.08.–01.10.2026).** Die
+  Produktdaten-Suche (`nutrition-scraper/scrapeEan`) las Shop-Seiten mit Claude
+  aus. Ab 18.08. war das Anthropic-Guthaben leer — jede Antwort 400 „credit
+  balance is too low“, der Extractor gab `null` zurück, scrapeEan meldete
+  `all_failed`, und `external-misses-processor` schloss **5.301 EANs dauerhaft als
+  'no-data'** ab, während Serper und Apify weiter bezahlt wurden. Sechs Wochen
+  unbemerkt; gefunden nur über das Funktionsinventar. Serper (Guthaben) und Apify
+  (Konto) hatten dieselbe Schwäche. Seit 02.10.: Auslesen über Gemini/Vertex,
+  `src/fehler.js` (ExtractUnavailable/SearchUnavailable/FetchUnavailable) → 503,
+  der Processor zählt `errorCount` und stellt nach 5 Fehlern auf 'error' (nie
+  'no-data'). Regeln: (1) Jeder Fremddienst-Fehler wird als eigener Fehlertyp
+  geworfen, nie als leeres Ergebnis zurückgegeben. (2) Ein Status, der eine
+  inhaltliche Aussage trifft („keine Daten“), braucht den Beweis, dass der Weg
+  dorthin funktioniert hat. (3) Dienste mit Prepaid-Guthaben (Serper: am 02.10.
+  12.249 Suchen übrig, ~120/Tag) gehören in eine Überwachung, sonst laufen sie
+  still leer. (4) Ein Status-Wechsel auf 'no-data' ohne `processedResult` ist
+  nicht nachvollziehbar — der Processor schreibt ihn seit 02.10. mit.
+
 - **Test-, Köder- oder Teildatensätze in `produkte`/`markenProdukte` anlegen, die
   alte App-Versionen als „neueste“ laden (Vorfall 01.–08.09.2026, per Crashlytics
   am 30.09. belegt).** `scripts/canary/create_canaries.py` legte 12 Köder mit
