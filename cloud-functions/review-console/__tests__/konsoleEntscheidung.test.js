@@ -287,3 +287,38 @@ describe('Befunde der Morgenrunde (review.rundeOffen, Prüfrunde 2, 02.10.2026)'
     expect(g.precheck).toMatchObject({ verdict: 'hold', reasons: ['foto_fremdes_konto'] });
   });
 });
+
+describe('Schlussprüfung 03.10.2026: Zurückholen und Referenz-ID', () => {
+  it('Zurückholen einer Runden-Ablehnung „wiederverwendet" behält den Grund — danach Freigabe nur mit force + Notiz', async () => {
+    lege('k', { status: 'rejected', rejectReason: 'bilder_wiederverwendet', holdReasons: ['bilder_wiederverwendet'], reviewedBy: 'worker-fotorunde', review: { decidedBy: 'worker-fotorunde', reason: 'bilder_wiederverwendet', lauf: '2026-10-02_080000' } });
+    const r = await entscheide({ ids: ['k'], decision: 'reopen' });
+    expect(r.results[0].outcome).toBe('reopened');
+    expect(doc('k')).toMatchObject({ status: 'pending', review: { reopenedBy: 'patrick', wiedereroeffnet: { vorherGrund: 'bilder_wiederverwendet', vorherIntern: 'bilder_wiederverwendet', vorherVon: 'worker-fotorunde' } } });
+    expect(doc('k').rejectReason).toBeUndefined();
+    const ohne = await entscheide({ ids: ['k'], decision: 'approve' });
+    expect(ohne.results[0]).toMatchObject({ outcome: 'blocked', reason: 'zurueckgeholt_doppel' });
+    expect(doc('k').status).toBe('pending');
+    const mit = await entscheide({ ids: ['k'], decision: 'approve', force: true, note: 'eigene neue Fotos, nur gleicher Hintergrund' });
+    expect(mit.results[0].outcome).toBe('approved');
+    expect(doc('k').review).toMatchObject({ forced: true, precheck: { verdict: 'hold', reasons: ['zurueckgeholt_doppel'] } });
+  });
+
+  it('… Wochen-Sperre (am Dokument doppelt_eingereicht) ebenso; ein behebbarer Grund hält nicht', async () => {
+    lege('w', { status: 'rejected', rejectReason: 'doppelt_eingereicht', review: { decidedBy: 'worker-fotorunde', reason: 'sperre_woche_gleicher_nutzer' } });
+    await entscheide({ ids: ['w'], decision: 'reopen' });
+    expect(doc('w').review.wiedereroeffnet).toMatchObject({ vorherGrund: 'doppelt_eingereicht', vorherIntern: 'sperre_woche_gleicher_nutzer' });
+    expect((await entscheide({ ids: ['w'], decision: 'approve' })).results[0]).toMatchObject({ outcome: 'blocked', reason: 'zurueckgeholt_doppel' });
+    lege('u', { userId: 'u2', ean: ANDERE, status: 'rejected', rejectReason: 'unvollstaendig', review: { decidedBy: 'patrick', reason: 'unvollstaendig' } });
+    await entscheide({ ids: ['u'], decision: 'reopen' });
+    expect((await entscheide({ ids: ['u'], decision: 'approve' })).results[0].outcome).toBe('approved');
+  });
+
+  it('Freigabe mit FREMDER Referenz derselben EAN: am Dokument keine fremde Referenz-ID', async () => {
+    lege('u9_fremd', { userId: 'u9', status: 'approved', createdAt: ts(T0 - 40 * TAG_MS) });
+    lege('u1_k');
+    const r = await entscheide({ ids: ['u1_k'], decision: 'approve' });
+    expect(r.results[0].outcome).toBe('approved');
+    expect(doc('u1_k').review.precheck.dup).toMatchObject({ verdict: 'ok', priorId: null, sameUser: false });
+    expect(JSON.stringify(doc('u1_k').review)).not.toContain('u9');
+  });
+});

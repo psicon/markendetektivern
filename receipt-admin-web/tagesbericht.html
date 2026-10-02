@@ -318,7 +318,7 @@
               <div class="zeile"><span>davon unpassend</span><span>${b.bildpruefung?.unpassend ?? 0}</span></div>
               ${b.kontoSperren?.offenEinreichungen ? `<div class="zeile"><span>gesperrte Konten — liegen still (nicht in „Wartet auf dich")</span><span>${b.kontoSperren.offenEinreichungen}</span></div>` : ''}
               ${b.eanFotoVorbefund?.haelt ? `<div class="zeile"><span>Barcode-Befund früherer Läufe hält weiter</span><span>${b.eanFotoVorbefund.haelt}</span></div>` : ''}
-              ${b.eanFotoVorbefund?.aufgehoben ? `<div class="zeile"><span>Barcode-Befund mit zwei Lesungen aufgehoben</span><span>${b.eanFotoVorbefund.aufgehoben}</span></div>` : ''}
+              ${b.fotoVorbefund?.haelt ? `<div class="zeile"><span>Foto-Befund früherer Läufe hält weiter</span><span>${b.fotoVorbefund.haelt}</span></div>` : ''}
             </section>
             <section class="box"><h3>Bons — letzte 24 Stunden (${bons.letzte24h?.gesamt ?? 0})</h3>
               ${Object.entries(bons.letzte24h?.status || {}).map(([k, v]) => `<div class="zeile"><span>${esc(STATUS[k] || k)}</span><span>${v}</span></div>`).join('') || '<div class="leer">keine</div>'}

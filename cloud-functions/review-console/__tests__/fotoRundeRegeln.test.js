@@ -3,7 +3,7 @@
  * Regeln der Morgenrunde. Jeder Fall hier ist einer, der in den Handrunden
  * 09.–24.09.2026 vorkam und dort von Hand entschieden werden musste.
  */
-const { entscheideFall, notbremse, bildBefund, belegeVon, rundeOffenEintrag, rundeBefunde, AUSSER_GESAMTQUOTE, DOPPEL_GRUENDE, RUNDE_SPERREND } = require('../src/fotoRundeRegeln');
+const { entscheideFall, notbremse, bildBefund, fotoVorbefund, bildMitVorbefund, belegeVon, rundeOffenEintrag, rundeBefunde, AUSSER_GESAMTQUOTE, DOPPEL_GRUENDE, RUNDE_SPERREND } = require('../src/fotoRundeRegeln');
 const WOCHE = 'sperre_woche_gleicher_nutzer';
 
 const ok = { ok: true, problems: [], missing: [] };
@@ -465,7 +465,7 @@ describe('Halte-Grund für die Prüfkonsole (review.rundeOffen, Prüfrunde 2, 02
     const e = rundeOffenEintrag(p, { lauf: 'L' });
     expect(e).toEqual({
       grund: 'foto_fremdes_konto', hinweis: 'Gleiches Foto bei 2 Einreichungen eines anderen Kontos — welche, steht im Tagesbericht', zurueckgehalten: null,
-      sperrend: ['foto_fremdes_konto'], eanFoto: null, lauf: 'L', trocken: false,
+      sperrend: ['foto_fremdes_konto'], fotoSeit: 'L', eanFoto: null, lauf: 'L', trocken: false,
     });
     expect(JSON.stringify(e)).not.toMatch(/fremdUid123/);
     expect(rundeOffenEintrag(plan({ bild: { art: 'fremdes_konto', mit: ['x'] } }), {}).hinweis).toBe('Gleiches Foto bei 1 Einreichung eines anderen Kontos — welche, steht im Tagesbericht');
@@ -505,5 +505,73 @@ describe('Halte-Grund für die Prüfkonsole (review.rundeOffen, Prüfrunde 2, 02
   it('entscheideFall: zweifelhaft (sollte nach der zweiten Lesung nie ankommen) hält wie unsicher', () => {
     expect(entscheideFall(fall({ eanFoto: { art: 'zweifelhaft', roh: '4013602313647', gelesen: null, gespeichert: '4250231136474' } })))
       .toMatchObject({ entscheidung: 'offen', grund: 'ean_unsicher' });
+  });
+});
+
+describe('Foto-Befund eines früheren Laufs (Schlussprüfung 03.10.2026)', () => {
+  const ro = (sperrend, extra = {}) => ({ review: { rundeOffen: { grund: sperrend[0] || 'x', sperrend, lauf: '2026-10-03_080000', ...extra } } });
+
+  it('fotoVorbefund: der stärkste Foto-Code aus rundeOffen.sperrend, seit = fotoSeit, sonst Lauf des Eintrags', () => {
+    expect(fotoVorbefund(ro(['foto_fremdes_konto']))).toEqual({ art: 'fremdes_konto', seit: '2026-10-03_080000' });
+    expect(fotoVorbefund(ro(['foto_aeltere_offen', 'bilder_wiederverwendet'], { fotoSeit: '2026-10-01_080000' }))).toEqual({ art: 'wiederverwendet', seit: '2026-10-01_080000' });
+    expect(fotoVorbefund(ro(['ean_abweichend', 'foto_aeltere_offen']))).toMatchObject({ art: 'aeltere_offen' });
+    for (const x of [ro([]), ro(['ean_abweichend']), ro(['erfunden']), { review: { rundeOffen: { sperrend: 'foto_fremdes_konto' } } }, { review: {} }, {}, null]) {
+      expect(fotoVorbefund(x)).toBeNull();
+    }
+  });
+
+  const v = (art, seit = 'L1') => ({ art, seit });
+  const heute = (art) => ({ art, mit: ['x'] });
+
+  it('ohne früheren Befund → der heutige, unverändert', () => {
+    const h = heute('wiederverwendet');
+    expect(bildMitVorbefund(h, null, { vollstaendig: true })).toBe(h);
+    expect(bildMitVorbefund(null, null, { vollstaendig: false })).toBeNull();
+  });
+  it('heute vollständig gerechnet: eigene Befunde (aeltere_offen, wiederverwendet) werden NICHT übernommen — die Konsolen-Entscheidung über die ältere löst sie', () => {
+    expect(bildMitVorbefund(null, v('aeltere_offen'), { vollstaendig: true })).toBeNull();
+    expect(bildMitVorbefund(null, v('wiederverwendet'), { vollstaendig: true })).toBeNull();
+    expect(bildMitVorbefund(heute('wiederverwendet'), v('aeltere_offen'), { vollstaendig: true })).toEqual(heute('wiederverwendet'));
+    // derselbe Befund wie gestern: bleibt der heutige (mit IDs), seit dem ersten Lauf
+    expect(bildMitVorbefund(heute('aeltere_offen'), v('aeltere_offen'), { vollstaendig: true })).toEqual({ art: 'aeltere_offen', mit: ['x'], seit: 'L1' });
+  });
+  it('fremdes Konto gilt IMMER weiter, bis ein Mensch entscheidet — auch wenn heute vollständig nichts mehr zu finden ist (Original überschrieben)', () => {
+    expect(bildMitVorbefund(null, v('fremdes_konto'), { vollstaendig: true })).toEqual({ art: 'fremdes_konto', mit: [], seit: 'L1', vorbefund: { grund: 'bis_zur_entscheidung' }, heute: null });
+    // ein heute schwächerer Befund verdrängt ihn nicht, steht aber daneben
+    expect(bildMitVorbefund(heute('wiederverwendet'), v('fremdes_konto'), { vollstaendig: true })).toMatchObject({ art: 'fremdes_konto', vorbefund: expect.any(Object), heute: 'wiederverwendet' });
+    // heute wieder fremdes Konto → der heutige (frische IDs für den Bericht)
+    expect(bildMitVorbefund(heute('fremdes_konto'), v('fremdes_konto'), { vollstaendig: true })).toEqual({ art: 'fremdes_konto', mit: ['x'], seit: 'L1' });
+  });
+  it('heute NICHT vollständig (Liste gescheitert, Datei fehlt, md5 fehlt): jeder frühere Foto-Befund gilt weiter, ein stärkerer heutiger geht vor', () => {
+    for (const art of ['fremdes_konto', 'wiederverwendet', 'aeltere_offen']) {
+      expect(bildMitVorbefund(null, v(art), { vollstaendig: false })).toMatchObject({ art, mit: [], seit: 'L1', vorbefund: { grund: art === 'fremdes_konto' ? 'bis_zur_entscheidung' : 'heute_nicht_pruefbar' } });
+    }
+    expect(bildMitVorbefund(heute('aeltere_offen'), v('wiederverwendet'), { vollstaendig: false })).toMatchObject({ art: 'wiederverwendet', vorbefund: expect.any(Object), heute: 'aeltere_offen' });
+    expect(bildMitVorbefund(heute('fremdes_konto'), v('aeltere_offen'), { vollstaendig: false })).toEqual(heute('fremdes_konto'));
+    // ohne Angabe gilt „nicht vollständig" (fail-closed)
+    expect(bildMitVorbefund(null, v('aeltere_offen'))).toMatchObject({ vorbefund: expect.any(Object) });
+  });
+
+  it('entscheideFall: ein übernommener Befund hält nur an — auch „wiederverwendet" wird NIE zur Ablehnung', () => {
+    for (const [art, grund] of [['fremdes_konto', 'foto_fremdes_konto'], ['wiederverwendet', 'bilder_wiederverwendet'], ['aeltere_offen', 'foto_aeltere_offen']]) {
+      const bild = bildMitVorbefund(null, v(art, '2026-10-02_080000'), { vollstaendig: false });
+      const e = entscheideFall(fall({ bild, fotoAbgleichFehlt: true }));
+      expect(e).toMatchObject({ entscheidung: 'offen', grund });
+      expect(e.ctx.hinweis).toMatch(/Befund vom 2026-10-02_080000/);
+    }
+    expect(entscheideFall(fall({ bild: bildMitVorbefund(null, v('fremdes_konto'), { vollstaendig: true }) })).ctx.hinweis).toMatch(/gilt bis zur Entscheidung in der Konsole/);
+    // Gegenprobe: ein heute berechneter Befund lehnt weiter ab
+    expect(entscheideFall(fall({ bild: heute('wiederverwendet') })).entscheidung).toBe('ablehnen');
+  });
+
+  it('rundeOffenEintrag: übernommener Befund bleibt sperrend, mit fotoSeit des ersten Laufs, heutigem Zusatzbefund und OHNE IDs', () => {
+    const bild = bildMitVorbefund({ art: 'wiederverwendet', mit: ['u1_eigen'] }, { art: 'fremdes_konto', seit: 'L1' }, { vollstaendig: true });
+    const eingabe = fall({ bild });
+    const e = rundeOffenEintrag({ ...entscheideFall(eingabe), eingabe }, { lauf: 'L2' });
+    expect(e).toMatchObject({ grund: 'foto_fremdes_konto', sperrend: ['foto_fremdes_konto', 'bilder_wiederverwendet'], fotoSeit: 'L1', lauf: 'L2' });
+    expect(e.hinweis).toMatch(/anderen Konto.*Befund vom L1, gilt bis zur Entscheidung in der Konsole; heute: bilder_wiederverwendet/);
+    expect(rundeBefunde(eingabe)).toEqual(['foto_fremdes_konto', 'bilder_wiederverwendet']);
+    // fotoSeit nur mit Foto-Befund
+    expect(rundeOffenEintrag({ ...entscheideFall(fall({ audit: null, auditFehler: '429' })), eingabe: fall({ audit: null }) }, { lauf: 'L2' }).fotoSeit).toBeUndefined();
   });
 });

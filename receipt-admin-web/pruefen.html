@@ -241,6 +241,9 @@
         ['foto_fremdes_konto', 'Gleiches Foto bei einem anderen Konto'],
         ['foto_aeltere_offen', 'Gleiches Foto in älterer, offener Einreichung'],
         ['foto_abgleich_gescheitert', 'Foto-Abgleich gescheitert (Technik)'],
+        // Schlussprüfung 03.10.2026: zurückgeholte Ablehnung als Doppel bzw.
+        // mit wiederverwendeten Fotos — Freigabe nur mit Begründung.
+        ['zurueckgeholt_doppel', 'Zurückgeholt — war als Doppel bzw. mit wiederverwendeten Fotos abgelehnt'],
         // Weitere Gründe, mit denen die Morgenrunde einen Fall liegen lässt
         // (review.rundeOffen, Prüfrunde 2, 02.10.2026) — nur Anzeige.
         ['sperre_woche_gleicher_nutzer', 'Doppelt (selbe Person, binnen 7 Tagen)'],
@@ -594,6 +597,7 @@
               ${urteilHerkunft}</div>
             ${entschieden}
             ${rundeZeile(r)}
+            ${zurueckZeile(r)}
             <div class="folge ${c.folge && c.folge.buchtCent > 0 ? 'zahlt' : 'zahlt-nicht'}">
               ${c.folge && c.folge.buchtCent > 0
                 ? `Freigabe bucht <b>${euro(c.folge.buchtCent)}</b>`
@@ -637,14 +641,26 @@
           ${ro.hinweis ? `<br><small>${esc(ro.hinweis)}</small>` : ''}</div>`;
       }
 
+      /**
+       * Woraus der Fall zurückgeholt wurde (review.wiedereroeffnet, Schlussprüfung
+       * 03.10.2026). Das Zurückholen löscht den Ablehngrund am Dokument — ohne
+       * diese Zeile sähe man nicht mehr, dass die Runde z. B. wiederverwendete
+       * Fotos gefunden hatte.
+       */
+      function zurueckZeile(r) {
+        const w = r.status === 'pending' ? r.wiedereroeffnet : null;
+        const grund = w && (w.vorherIntern || w.vorherGrund);
+        if (!grund) return '';
+        const wer = w.vorherVon === 'worker-fotorunde' ? 'von der Morgenrunde' : 'in der Konsole';
+        return `<div class="folge zahlt-nicht">Zurückgeholt — vorher ${wer} abgelehnt: <b>${esc(REASON_DE[grund] || grund)}</b></div>`;
+      }
+
       /** Nummer vom Barcode-Foto, wo sie etwas zu sagen hat. */
       function eanFotoZeile(ef) {
-        if (!ef || ef.art === 'kein_urteil' || (ef.art === 'gleich' && !ef.vorher)) return '';
+        if (!ef || ef.art === 'kein_urteil' || ef.art === 'gleich') return '';
         const nummer = ef.gelesen || ef.roh;
         const text = `Foto: ${nummer ? esc(nummer) + ' — ' : ''}${esc(EANFOTO_DE[ef.art] || ef.art)}${ef.zweit ? ` (zweite Lesung ${esc(ef.zweit)})` : ''}`;
-        const frueher = ef.vorher && ef.vorher.befund ? `<br><small style="color:var(--fg3)">früher ${esc(EANFOTO_DE[ef.vorher.befund] || ef.vorher.befund)}${ef.vorher.ean ? ' ' + esc(ef.vorher.ean) : ''}, mit zwei Lesungen der gespeicherten Nummer aufgehoben</small>` : '';
-        const farbe = ef.art === 'gleich' ? 'var(--fg3)' : 'var(--no)';
-        return `<br><small style="color:${farbe}">${text}</small>${frueher}`;
+        return `<br><small style="color:var(--no)">${text}</small>`;
       }
 
       function renderReceipt(c) {

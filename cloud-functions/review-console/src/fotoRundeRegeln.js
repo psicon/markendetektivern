@@ -67,7 +67,7 @@ const AUSSER_GESAMTQUOTE = new Set([...EIGENE_BREMSEN.flatMap((b) => b.gruende),
  * @param {{verdict:string, reason:string|null, lockUntil:number|null}} f.dup  evaluateDuplicate
  * @param {string[]} f.leer         Slots mit 0-Byte-Datei (echter Mangel)
  * @param {string[]} f.unlesbar     Slots, deren Metadaten Storage nicht lieferte (unsere Technik)
- * @param {{art:'wiederverwendet'|'aeltere_offen'|'fremdes_konto', mit:string[]}|null} [f.bild]  bildBefund
+ * @param {{art:'wiederverwendet'|'aeltere_offen'|'fremdes_konto', mit:string[], seit?:string|null, vorbefund?:object, heute?:string|null}|null} [f.bild]  bildBefund / bildMitVorbefund
  * @param {boolean} [f.fotoAbgleichFehlt]  Abgleich gegen frühere Einreichungen nicht möglich (Storage-Liste gescheitert)
  * @param {{art:string, gelesen:string|null, gespeichert:string|null, zweit?:string|null}|null} [f.eanFoto]  werte.eanFotoBefund / eanFotoBestaetigen
  * @param {string|null} [f.eanFotoHinweis]  Text für den Menschen (z. B. eigene Freigabe unter der Foto-Nummer)
@@ -131,8 +131,11 @@ function entscheideFall(f) {
 
   // Identisches Identitätsfoto in einer FRÜHEREN Einreichung (Abgleich gegen
   // alle, Entscheidung Patrick 02.10.2026). Die älteste Einreichung einer
-  // Gruppe trägt nie einen Befund (bildBefund).
+  // Gruppe trägt nie einen Befund (bildBefund). Ein aus einem früheren Lauf
+  // übernommener Befund (bildMitVorbefund, `vorbefund`) hält nur an — er wird
+  // nie zur Ablehnung, denn heute ließ er sich nicht nachprüfen.
   const bild = f.bild || null;
+  if (bild && bild.vorbefund && BILD_CODE[bild.art]) return offen(BILD_CODE[bild.art], { hinweis: vorbefundHinweis(bild) });
   if (bild && bild.art === 'fremdes_konto') return offen('foto_fremdes_konto', { hinweis: `Gleiches Foto bei anderem Konto: ${(bild.mit || []).slice(0, 3).join(', ')}` });
   if (bild && bild.art === 'wiederverwendet') return ablehnen('bilder_wiederverwendet');
   if (bild && bild.art === 'aeltere_offen') return offen('foto_aeltere_offen', { hinweis: `Gleiches Foto in älterer, noch offener Einreichung: ${(bild.mit || []).slice(0, 3).join(', ')}` });
@@ -233,6 +236,78 @@ function bildBefund(id, partner, info, freigabeVon = null) {
   const offenAelter = aeltere.filter((a) => a.status === 'pending');
   if (offenAelter.length) return { art: 'aeltere_offen', mit: offenAelter.map((a) => a.id) };
   return null;
+}
+
+/** Rangfolge der Foto-Befunde — wie in bildBefund: fremdes Konto vor eigener bezahlter vor eigener offener. */
+const BILD_RANG = Object.freeze(['fremdes_konto', 'wiederverwendet', 'aeltere_offen']);
+const bildRang = (art) => { const i = BILD_RANG.indexOf(art); return i < 0 ? BILD_RANG.length : i; };
+
+/**
+ * Foto-Befund eines FRÜHEREN Laufs aus `review.rundeOffen.sperrend`
+ * (Schlussprüfung 03.10.2026) — der stärkste nach BILD_RANG. `seit`: Lauf, in
+ * dem der Befund zuerst stand (`fotoSeit`, sonst der Lauf des Eintrags).
+ * @returns {{art:string, seit:string|null}|null}
+ */
+function fotoVorbefund(x) {
+  const ro = x && x.review && typeof x.review === 'object' && x.review.rundeOffen && typeof x.review.rundeOffen === 'object' ? x.review.rundeOffen : null;
+  if (!ro || !Array.isArray(ro.sperrend)) return null;
+  const art = BILD_RANG.find((a) => ro.sperrend.includes(BILD_CODE[a]));
+  if (!art) return null;
+  const lauf = (v) => (typeof v === 'string' && v ? v.slice(0, 40) : null);
+  return { art, seit: lauf(ro.fotoSeit) || lauf(ro.lauf) };
+}
+
+/**
+ * Heutiger Foto-Befund (bildBefund) mit dem eines früheren Laufs
+ * (fotoVorbefund) verbinden — Schlussprüfung 03.10.2026, analog
+ * werte.eanFotoMitVorbefund.
+ *
+ *  - Heute KEIN vollständiger Abgleich möglich (Storage-Liste gescheitert, ein
+ *    Identitätsfoto nicht abrufbar oder ohne md5): der frühere Befund gilt
+ *    weiter. Bis dahin verschwand ein Halt dann aus `review.rundeOffen`, die
+ *    Konsole zeigte den Fall als „ok", und F gab ihn ohne Notiz frei — ein
+ *    Technikausfall hob den Halt auf.
+ *  - `fremdes_konto` gilt IMMER weiter, bis ein Mensch in der Konsole
+ *    entscheidet (jede Entscheidung dort ersetzt `review` und nimmt den
+ *    Eintrag mit). Die md5-Grundlage kann sich ändern: der Eigentümer darf
+ *    seine Dateien in `crowduploads/` überschreiben (storage.rules) — wer zwei
+ *    Konten hat, überschriebe das Original im anderen Konto, und der Halt wäre
+ *    am nächsten Morgen weg.
+ *  - Sonst (vollständig berechnet) gilt der heutige Befund: `aeltere_offen`
+ *    löst sich auf, sobald die ältere Einreichung entschieden ist.
+ * Ist der heutige Befund mindestens so stark (BILD_RANG), gilt er — mit `seit`
+ * des früheren, wenn es derselbe ist. Übernommen → `vorbefund`; `heute` nennt,
+ * was heute (ggf. unvollständig) gefunden wurde. `mit` bleibt leer: die IDs
+ * stehen nur im Tagesbericht des Laufs `seit` (Datenschutz, siehe rundeOffenEintrag).
+ *
+ * @param {object|null} heute  bildBefund
+ * @param {{art:string, seit:string|null}|null} vorher  fotoVorbefund
+ * @param {{vollstaendig:boolean}} opts
+ */
+function bildMitVorbefund(heute, vorher, { vollstaendig } = {}) {
+  if (!vorher) return heute;
+  const uebernehmen = vorher.art === 'fremdes_konto' || !vollstaendig;
+  if (heute && (!uebernehmen || bildRang(heute.art) <= bildRang(vorher.art))) {
+    return heute.art === vorher.art ? { ...heute, seit: vorher.seit } : heute;
+  }
+  if (!uebernehmen) return heute;
+  return {
+    art: vorher.art, mit: [], seit: vorher.seit,
+    vorbefund: { grund: vorher.art === 'fremdes_konto' ? 'bis_zur_entscheidung' : 'heute_nicht_pruefbar' },
+    heute: heute ? heute.art : null,
+  };
+}
+
+const BILD_TEXT = {
+  fremdes_konto: 'Gleiches Foto bei einem anderen Konto (welche Einreichung, steht im Tagesbericht dieses Laufs)',
+  wiederverwendet: 'Gleiches Foto in einer bezahlten eigenen Einreichung',
+  aeltere_offen: 'Gleiches Foto in einer älteren, noch offenen eigenen Einreichung',
+};
+/** Hinweis zu einem übernommenen Foto-Befund — OHNE IDs (er landet auch am Dokument, rundeOffenEintrag). */
+function vorbefundHinweis(bild) {
+  const warum = bild.vorbefund.grund === 'bis_zur_entscheidung' ? 'gilt bis zur Entscheidung in der Konsole' : 'heute nicht nachprüfbar (Foto-Abgleich unvollständig)';
+  const heute = bild.heute && bild.heute !== bild.art ? `; heute: ${BILD_CODE[bild.heute]}` : '';
+  return `${BILD_TEXT[bild.art]} — Befund vom ${bild.seit || 'früheren Lauf'}, ${warum}${heute}`;
 }
 
 /**
@@ -361,6 +436,8 @@ function rundeBefunde(eingabe) {
   const e = eingabe || {};
   const out = [];
   if (e.bild && BILD_CODE[e.bild.art]) out.push(BILD_CODE[e.bild.art]);
+  // Übernommener Befund (bildMitVorbefund): auch, was heute gefunden wurde.
+  if (e.bild && e.bild.heute && BILD_CODE[e.bild.heute] && !out.includes(BILD_CODE[e.bild.heute])) out.push(BILD_CODE[e.bild.heute]);
   const ef = e.eanFoto;
   if (ef && ef.art === 'abweichend') out.push('ean_abweichend');
   else if (ef && (ef.art === 'unsicher' || ef.art === 'zweifelhaft')) out.push('ean_unsicher');
@@ -376,7 +453,10 @@ function rundeBefunde(eingabe) {
  *  - `grund`/`hinweis`/`zurueckgehalten`: warum die Runde nicht entschieden
  *    hat — Anzeige in der Konsole.
  *  - `sperrend`: Befunde aus RUNDE_SPERREND — daraus leitet die Konsole das
- *    Urteil `hold` ab (Freigabe nur mit force + Notiz).
+ *    Urteil `hold` ab (Freigabe nur mit force + Notiz). Die Foto-Befunde
+ *    darunter übernimmt der nächste Lauf, wo er sie nicht vollständig
+ *    nachrechnen kann, `foto_fremdes_konto` immer (fotoVorbefund/bildMitVorbefund).
+ *  - `fotoSeit`: Lauf, seit dem der Foto-Befund steht (nur mit Foto-Befund).
  *  - `eanFoto`: Halte-Befund der Barcode-Nummer als Rückfall für die nächste
  *    Runde, falls `eanFotoOcr` nicht gespeichert werden konnte (eanFotoVorbefund).
  *  - Im Trockenlauf (`trocken`) bleibt auch ein geplanter Entscheid offen —
@@ -399,8 +479,10 @@ function rundeOffenEintrag(p, { lauf, trocken = false } = {}) {
   if (p.entscheidung === 'freigeben' && !sperrend.length) return null;
   const ef = p.eingabe && p.eingabe.eanFoto;
   const eanHalt = ef && (ef.art === 'abweichend' || ef.art === 'unsicher' || ef.art === 'zweifelhaft');
-  const fremd = p.grund === 'foto_fremdes_konto' ? ((p.eingabe && p.eingabe.bild && p.eingabe.bild.mit) || []).length : 0;
-  const hinweis = p.grund === 'foto_fremdes_konto'
+  const bild = p.eingabe && p.eingabe.bild;
+  const fremd = p.grund === 'foto_fremdes_konto' ? ((bild && bild.mit) || []).length : 0;
+  // Ein übernommener Befund trägt keine IDs; sein Hinweis darf ans Dokument.
+  const hinweis = p.grund === 'foto_fremdes_konto' && !(bild && bild.vorbefund)
     ? `Gleiches Foto bei ${fremd || 'einer'} Einreichung${fremd === 1 || !fremd ? '' : 'en'} eines anderen Kontos — welche, steht im Tagesbericht`
     : (p.ctx && p.ctx.hinweis) ? String(p.ctx.hinweis).slice(0, 300) : null;
   return {
@@ -409,6 +491,9 @@ function rundeOffenEintrag(p, { lauf, trocken = false } = {}) {
     hinweis,
     zurueckgehalten: p.zurueckgehaltenGrund || null,
     sperrend,
+    // Seit welchem Lauf der Foto-Befund steht — der nächste Lauf übernimmt ihn
+    // damit (fotoVorbefund), auch wenn der Eintrag täglich neu geschrieben wird.
+    ...(bild && BILD_CODE[bild.art] ? { fotoSeit: bild.seit || lauf || null } : {}),
     eanFoto: eanHalt ? {
       befund: ef.art === 'abweichend' ? 'abweichend' : 'unsicher', ean: ef.gelesen || ef.roh || null,
       ...(ef.art === 'abweichend' ? { bestaetigt: ef.bestaetigt === true } : { zweit: ef.zweit || null }),
@@ -478,7 +563,7 @@ function notbremse(plan, { schnittQuote = null, bildMaxAnteil = 0.1, bildMin = 5
 }
 
 module.exports = {
-  entscheideFall, bildBefund, belegeVon, notbremse, nameAusLesungen, eanAusLesungen, rettungNichtGeschafft,
+  entscheideFall, bildBefund, fotoVorbefund, bildMitVorbefund, belegeVon, notbremse, nameAusLesungen, eanAusLesungen, rettungNichtGeschafft,
   rundeBefunde, rundeOffenEintrag,
   BILD_GRUENDE, EIGENE_BREMSEN, AUSSER_GESAMTQUOTE, KONTO_GESPERRT, DOPPEL_GRUENDE, RUNDE_SPERREND,
 };

@@ -5,7 +5,7 @@
  * denselben Fall dasselbe sagen (Befund 26.09.2026).
  */
 const {
-  rowOf, stripPolicy, precheckOf, precheckFuerFall, nachbarnAus, nachbarnVon, gruppiereNachEan, eanIndex, baueFotoListe, bildDefektOf, safeStatus, rundeOffenOf,
+  rowOf, stripPolicy, precheckOf, precheckFuerFall, nachbarnAus, nachbarnVon, gruppiereNachEan, eanIndex, baueFotoListe, bildDefektOf, safeStatus, rundeOffenOf, wiedereroeffnetOf,
 } = require('../src/einreichung');
 const { eanSchluessel } = require('../src/werte');
 
@@ -333,9 +333,40 @@ describe('Barcode-Befund der Runde hält in der Konsole (Prüfrunde 2, 02.10.202
     // nah dran (eine Ziffer) → kein Urteil
     expect(precheckOf(sauber({ eanFotoOcr: { ean: '4061464833828' } }), []).verdict).toBe('ok');
   });
-  it('mit zwei Lesungen aufgehoben → ok, alter Befund sichtbar', () => {
-    const r = sauber({ eanFotoOcr: { ean: GUELTIG, befund: 'gleich', grund: 'vorbefund_aufgehoben', bestaetigt: true, vorher: { befund: 'unsicher', ean: ANDERE, lauf: 'L' } } });
-    expect(r.eanFoto).toMatchObject({ art: 'gleich', vorher: { befund: 'unsicher', ean: ANDERE } });
+  it('erster Tag: zweite Lesung bestätigte die gespeicherte Nummer → ok (offene Frage an Patrick, WISSEN-FOTORUNDE.md)', () => {
+    const r = sauber({ eanFotoOcr: { ean: GUELTIG, befund: 'gleich', grund: 'zweite_lesung' } });
+    expect(r.eanFoto).toMatchObject({ art: 'gleich' });
+    expect(r.eanFoto.vorher).toBeUndefined();
     expect(precheckOf(r, []).verdict).toBe('ok');
+  });
+});
+
+describe('Zurückgeholte Ablehnung (review.wiedereroeffnet, Schlussprüfung 03.10.2026)', () => {
+  const sauber = (extra = {}) => rowOf(doc('k', basis({ ean: GUELTIG, productNameOcr: 'Skyr', priceOcr: { priceCents: 129 }, ...extra })));
+  const zurueck = (vorherGrund, vorherIntern = vorherGrund) => ({ review: { reopenedBy: 'patrick', wiedereroeffnet: { vorherGrund, vorherIntern, vorherVon: 'worker-fotorunde' } } });
+
+  it('vorher als Doppel bzw. mit wiederverwendeten Fotos abgelehnt → hold (Freigabe nur mit Begründung)', () => {
+    for (const [code, intern] of [['bilder_wiederverwendet'], ['doppelt_eingereicht', 'sperre_woche_gleicher_nutzer'], ['doppelt_eingereicht', null], ['x', 'sperre_woche_gleicher_nutzer']]) {
+      expect(precheckOf(sauber(zurueck(code, intern)), [])).toMatchObject({ verdict: 'hold', reasons: ['zurueckgeholt_doppel'] });
+    }
+  });
+  it('… andere Gründe (behebbarer Mangel, Bildprüfung) → kein Halt; gilt nur für offene Fälle', () => {
+    for (const code of ['unvollstaendig', 'fotos_unpassend', 'preis_fehlt', null]) {
+      expect(precheckOf(sauber(zurueck(code)), [])).toMatchObject({ verdict: 'ok', reasons: [] });
+    }
+    expect(precheckOf(sauber({ ...zurueck('bilder_wiederverwendet'), status: 'approved' }), []).verdict).toBe('ok');
+  });
+  it('ein strengeres Urteil bleibt (Wochen-Sperre locked)', () => {
+    const ref = rowOf(doc('ref', basis({ ean: GUELTIG, productNameOcr: 'Skyr', status: 'approved', createdAt: T0 - STUNDE })));
+    expect(precheckOf(sauber(zurueck('doppelt_eingereicht', 'sperre_woche_gleicher_nutzer')), [ref])).toMatchObject({ verdict: 'locked', reasons: ['sperre_woche_gleicher_nutzer', 'zurueckgeholt_doppel'] });
+  });
+  it('wiedereroeffnetOf: bereinigt', () => {
+    expect(wiedereroeffnetOf({})).toBeNull();
+    expect(wiedereroeffnetOf({ review: { wiedereroeffnet: { vorherGrund: 'g'.repeat(99), vorherIntern: 42, vorherVon: 'p' } } })).toEqual({ vorherGrund: 'g'.repeat(60), vorherIntern: null, vorherVon: 'p' });
+    expect(sauber(zurueck('bilder_wiederverwendet')).wiedereroeffnet).toEqual({ vorherGrund: 'bilder_wiederverwendet', vorherIntern: 'bilder_wiederverwendet', vorherVon: 'worker-fotorunde' });
+  });
+  it('Warteschlange zeigt den Fall als „zurückhalten"', () => {
+    const l = baueFotoListe([doc('k', basis({ ean: GUELTIG, productNameOcr: 'Skyr', ...zurueck('bilder_wiederverwendet') }))], new Map(), {}, '');
+    expect(l.rows[0]).toMatchObject({ verdict: 'hold', reasons: ['zurueckgeholt_doppel'] });
   });
 });

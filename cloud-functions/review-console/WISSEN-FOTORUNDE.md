@@ -13,7 +13,7 @@ hat, steht hier als Regel. Wer die Runde ändert, ändert zuerst diese Datei.
 | Doppel-Regel | `src/duplicatePolicy.js` — DIESELBE Datei wie die Prüfkonsole |
 | Gesperrte Konten | `src/kontoSperre.js` — liest `cashback_sperren/{uid}` (server-only), Runde UND Konsole |
 | Nummer vom Barcode-Foto | `src/werte.js` (`eanFotoBefund`, `eanFotoMitVorbefund`), gelesen in der Bildprüfung, abgelegt in `eanFotoOcr` |
-| Halte-Grund für die Prüfkonsole | `review.rundeOffen` (`fotoRundeRegeln.rundeOffenEintrag`), gelesen in `einreichung.precheckOf` |
+| Halte-Grund für die Prüfkonsole | `review.rundeOffen` (`fotoRundeRegeln.rundeOffenEintrag`), gelesen in `einreichung.precheckOf`; Foto-Befunde früherer Läufe: `fotoRundeRegeln.bildMitVorbefund` |
 | Warnungen | `src/warnungen.js` (+ Tests) |
 | Buchung + Push | `crowd-upload-reward` (Trigger bei `approved` bucht; der Sammler `crowd_push_sammler` verschickt EINE Nachricht pro Person) |
 | Bericht | Firestore `ops_tagesberichte/{lauf}` und `ops_tagesberichte/aktuell` |
@@ -47,7 +47,8 @@ Notbremse zurückhält — das steht im Bericht unter `wartetAufDich`.
 4. **Bildprüfung** aller Fälle, denen kein Foto fehlt. Sie liest im selben
    Aufruf die Nummer unter dem Strichcode des Barcode-Fotos mit (`eanFoto`);
    wo nötig folgt eine zweite Lesung nur dieses Fotos (innerhalb der
-   Arbeitszeit). Ein Halte-Befund eines früheren Laufs gilt weiter. Die Runde
+   Arbeitszeit). Ein Halte-Befund eines früheren Laufs gilt weiter, bis ein
+   Mensch in der Konsole entscheidet. Die Runde
    legt das Ergebnis in `eanFotoOcr` ab (als Ganzes ersetzt), auch im Trockenlauf.
 5. **Chronologisch entscheiden** (`entscheideFall`) — eine im selben Lauf
    entschiedene Einreichung ist für die nächste derselben EAN Referenz bzw.
@@ -117,7 +118,12 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   Eintrag hier `unbekannt`, dort „gesperrt"). Lesefehler
   = `unbekannt` → NIE freigeben, aber auch nicht wegen der Sperre ablehnen
   (`kontosperre_unbekannt`, rote Warnung). In der Schreib-Transaktion wird die
-  Sperre noch einmal gelesen (`konto_gesperrt_im_lauf`). Bereits Gebuchtes
+  Sperre vor JEDER Entscheidung noch einmal gelesen, auch vor einer Ablehnung
+  (Schlussprüfung 03.10.2026): gesperrt → `konto_gesperrt_im_lauf`, der Fall
+  bleibt unverändert und stumm liegen (auch kein `review.rundeOffen`); ein
+  Lesefehler → `schreib_fehler`, weder Freigabe noch Ablehnung. Vorher galt das
+  nur vor einer Freigabe — war die Sperrliste beim Laden nicht lesbar, wurde
+  ein gesperrtes Konto voll bearbeitet und sichtbar abgelehnt. Bereits Gebuchtes
   wird nicht zurückgebucht; Gutschrift und Auszahlung sperrt die
   Gutschrift-Seite (eigener Zweig).
 - **Nummer vom Barcode-Foto (Entscheidung Patrick 02.10.2026).** Weicht die
@@ -141,22 +147,25 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   `unsicher`, offen `ean_unsicher` (Prüfrunde 02.10.2026 — bis dahin wurde so
   ein Fall freigegeben, obwohl die gespeicherte Nummer nie bestätigt war);
   scheitert die Lesung technisch oder reicht die Arbeitszeit nicht mehr, bleibt
-  der Fall ebenfalls liegen. **Der Befund hält über Tage (Prüfrunde 2,
-  02.10.2026):** ein gespeichertes `abweichend`/`unsicher` gilt, bis ein Mensch
-  in der Konsole entscheidet — ein späteres „kein Urteil" oder eine
-  ausgefallene Bildprüfung hebt es nicht auf (vorher bewertete die Runde jeden
-  Morgen nur die Lesung des Tages; Kfs5jFA6qqOF8gD9iTEk wäre am zweiten Tag
-  mit einer unlesbaren Nummer freigegeben worden). Aufgehoben wird er nur,
-  wenn an einem späteren Tag ZWEI Lesungen (Bildprüfung + zweite Lesung) die
-  gespeicherte Nummer liefern UND der alte Befund keine bestätigte Abweichung
-  war — dasselbe Maß wie am ersten Tag (dort widerlegt schon eine Lesung der
-  gespeicherten Nummer eine einzelne abweichende), nur strenger. Zwei
-  bestätigte Lesungen gegen zwei bestätigte (oft zwei Strichcodes auf einem
-  Foto) entscheidet ein Mensch. Am Dokument: `eanFotoOcr.befund: 'gleich'`,
-  `grund: 'vorbefund_aufgehoben'`, `vorher: {befund, ean, lauf}`. Eine heute
-  bestätigte Abweichung ersetzt einen alten Befund; alles andere lässt ihn
-  stehen. Scheiterte das Speichern von `eanFotoOcr`, steht der Befund auch in
-  `review.rundeOffen.eanFoto` (`werte.eanFotoVorbefund`; der jüngere Lauf gilt).
+  der Fall ebenfalls liegen. **Der Befund hält, bis ein Mensch in der Konsole
+  entscheidet (Prüfrunde 2, 02.10.2026; Schlussprüfung 03.10.2026):** ein
+  gespeichertes `abweichend`/`unsicher` gilt weiter, egal was spätere Läufe
+  lesen — ein „kein Urteil", eine ausgefallene Bildprüfung und auch ZWEI
+  Lesungen der gespeicherten Nummer heben ihn NICHT auf. Freigabe nur in der
+  Konsole mit force + Notiz (Entscheidung Patrick 2a: „Weicht sie ab, bleibt
+  die Einreichung liegen" — ein Mensch entscheidet). Vorher bewertete die Runde
+  jeden Morgen nur die Lesung des Tages (Kfs5jFA6qqOF8gD9iTEk wäre am zweiten
+  Tag mit einer unlesbaren Nummer freigegeben worden), und bis zur
+  Schlussprüfung hob sie einen Halt mit zwei Lesungen der gespeicherten
+  Nummer selbst auf — eine eigene Abschwächung, die Patrick nie vorgelegt war
+  (nachgestellt: Tag 1 angehalten, Tag 2 ohne Menschen freigegeben). Ein heutiges
+  „gleich" bekommt deshalb auch keine zweite Lesung mehr. Eine heute
+  bestätigte Abweichung ersetzt einen alten Befund (hält weiter); alles andere
+  lässt ihn stehen. Scheiterte das Speichern von `eanFotoOcr`, steht der Befund
+  auch in `review.rundeOffen.eanFoto` (`werte.eanFotoVorbefund`); hält EINE der
+  beiden Quellen an, gilt der Halt (vorher: der jüngere Lauf). Der erste Tag
+  ist davon unberührt: dort führt eine zweite Lesung der gespeicherten Nummer
+  weiter zu `gleich` — siehe „Offen für Patrick" (d).
   **Falsche Prüfziffer, weit weg (Prüfrunde 2):** liest das Modell eine
   Nummer mit falscher Prüfziffer, die sich an mehr als 2 von 14 Stellen von
   der gespeicherten unterscheidet (`zweifelhaft`), wird sie wie eine
@@ -196,6 +205,27 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   offenen; gemessen seit Beginn: 35 Einreichungen mit identischem Foto einer
   älteren, davon 1 eigene und 2 fremde dennoch freigegeben. Scheitert die
   Storage-Liste → keine Freigaben (`foto_abgleich_gescheitert`, rote Warnung).
+  **Foto-Befunde früherer Läufe (Schlussprüfung 03.10.2026,
+  `fotoRundeRegeln.bildMitVorbefund`):** lässt sich der Abgleich für einen
+  Fall heute nicht VOLLSTÄNDIG rechnen (Storage-Liste gescheitert, ein
+  Identitätsfoto nicht abrufbar oder ohne md5), gelten die Foto-Codes aus
+  `review.rundeOffen.sperrend` des Vortags weiter. Bis dahin verschwand ein
+  Halt dann aus `rundeOffen`, die Konsole zeigte „ok", und F gab ohne Notiz
+  frei — ein Technikausfall hob den Halt auf. `foto_fremdes_konto` gilt
+  IMMER weiter, bis ein Mensch in der Konsole entscheidet, auch wenn sich die
+  md5-Grundlage ändert: storage.rules erlaubt dem Eigentümer, eigene Dateien
+  in `crowduploads/` zu überschreiben — wer zwei Konten hat, überschriebe das
+  Original im anderen, und der Halt wäre am nächsten Morgen weg. Ein
+  übernommener Befund hält nur an, er wird nie zur Ablehnung (auch
+  `bilder_wiederverwendet` nicht); er trägt keine IDs (die stehen im
+  Tagesbericht des Laufs `fotoSeit`). Ein heute gefundener stärkerer Befund
+  geht vor; einer, der heute zusätzlich gefunden wurde, steht mit in
+  `sperrend`. Ist der Abgleich heute vollständig, wird `foto_aeltere_offen`/
+  `bilder_wiederverwendet` NICHT übernommen — die ältere Einreichung kann
+  inzwischen entschieden sein. Bericht: `fotoVorbefund.haelt`,
+  `fotoAbgleich.unvollstaendig`. Langfristig offen: Updates auf
+  `crowduploads/` nach dem ersten Hochladen sperren (Wiederholungen der
+  Upload-Queue beachten).
 
 - **Der Preis ist Pflicht (Entscheidung Patrick 26.09.2026).** Die Bildprüfung
   beantwortet `preisSichtbar` getrennt von `echt`. Freigabe nur, wenn der Preis
@@ -300,9 +330,25 @@ gesperrten Konten), dort als „Vorprüfung ok" mit Freigabe-Taste.
   von firestore.rules (Rules-Test vorhanden).
 - Aktualisiert bzw. entfernt wird der Eintrag beim nächsten Lauf (in einer
   Transaktion: hat inzwischen jemand entschieden, bleibt das Dokument
-  unberührt). Jede Entscheidung (Runde oder Konsole) ersetzt `review` und
-  nimmt ihn mit; „Zurückstellen" in der Konsole lässt ihn stehen. Gesperrte
-  Konten bekommen keinen (sie liegen stumm).
+  unberührt) — seine Foto-Befunde übernimmt der Lauf, wo er sie nicht
+  vollständig nachrechnen kann, `foto_fremdes_konto` immer (siehe
+  Foto-Abgleich); `fotoSeit` merkt sich den ersten Lauf. Jede Entscheidung
+  (Runde oder Konsole) ersetzt `review` und nimmt ihn mit; „Zurückstellen" in
+  der Konsole lässt ihn stehen. Gesperrte Konten bekommen keinen (sie liegen
+  stumm), auch nicht bei einer erst beim Schreiben bemerkten Sperre.
+- **Zurückholen** (reopen) einer Ablehnung ersetzt `review` und löscht
+  `rejectReason`, behält den Grund aber in `review.wiedereroeffnet`
+  (`vorherGrund` = Code am Dokument, `vorherIntern` = `review.reason`,
+  `vorherVon`). War es ein Doppel-Grund (`DOPPEL_GRUENDE`, z. B.
+  `bilder_wiederverwendet`, `doppelt_eingereicht`/Wochen-Sperre), liefert die
+  Konsole `hold` (`zurueckgeholt_doppel`) — Freigabe nur mit force + Notiz
+  (Schlussprüfung 03.10.2026; vorher stand eine Runden-Ablehnung wegen
+  wiederverwendeter Fotos nach dem Zurückholen als „ok" da). Die Morgenrunde
+  prüft einen zurückgeholten Fall am nächsten Morgen trotzdem neu.
+- `review.precheck.dup.priorId` steht nur bei einer EIGENEN Referenz am
+  Dokument (`sameUser === true`): die Doc-IDs beginnen mit der uid, eine fremde
+  Referenz-ID verriet die uid eines anderen Kontos (03.10.: 237 Dokumente im
+  Bestand, nicht bereinigt).
 - Scheitert das Speichern bei einem Fall mit sperrendem Befund → rote Warnung
   `befund_nicht_gespeichert`.
 
@@ -372,6 +418,15 @@ Freigaben laufen IMMER — sie sind die harmlose Richtung. Zurückgehalten
   (13 Dokumente, 10 Personen), las in der App „ab dem nächsten Tag zählt es
   wieder". (c) Gespeicherte EAN mit falscher Prüfziffer und unlesbares
   Barcode-Foto → heute kein Urteil (6 von 3.894 gespeicherten EANs).
+  (d) **Barcode, erster Tag (eigene Annahme, Patrick vorgelegt am
+  03.10.2026):** liest die Bildprüfung eine ANDERE gültige Nummer und die
+  zweite Lesung die gespeicherte, gilt die erste als Fehllesung → `gleich`,
+  die Runde entscheidet normal weiter (meist Freigabe). Begründung: die erste
+  Lesung war eine Fehllesung — die zweite, nur auf das Barcode-Foto gerichtete
+  Lesung liefert die gespeicherte Nummer. Patricks
+  Wortlaut („weicht sie ab, bleibt die Einreichung liegen") ließe auch Halten
+  zu. Wirkung laut Trockenlauf ~1 Fall/Tag. **Frage: so lassen, oder auch
+  dann liegen lassen?** (`werte.eanFotoBestaetigen`)
   Ebenso: die alten Handrunden-Skripte (`.crowd-review-0909/1309.js`, nicht
   versioniert) schreiben `dup.reason` unverändert — nicht mehr benutzen.
 
@@ -383,7 +438,9 @@ oder knapp, **Zweitprüfung eingeschaltet aber 48 h nicht gelaufen** (23.09.:
 ein Ausrollen von einem Zweig ohne diesen Code nahm sie still raus), Bons
 hängen ≥ 3 Tage in der Prüfung, > 5 % Bons ohne Aktion, Bildprüfung
 scheitert reihenweise, Runde nicht fertig geworden, Notbremse, Sperrliste
-nicht lesbar bzw. Foto-Abgleich gescheitert (dann gab es keine Freigaben), Regeln
+nicht lesbar bzw. Foto-Abgleich gescheitert (dann gab es keine Freigaben;
+Foto-Befunde früherer Läufe gelten weiter, heute erstmals geprüfte Fälle stehen
+in der Konsole ohne Foto-Befund), Regeln
 oder Anweisungen an das Modell seit dem letzten Lauf geändert, Produktfotos
 warten ≥ 3 Tage auf eine Entscheidung (seit der Preis-Pflicht bleibt bei
 Zweifel mehr liegen), mehr als 10 % (mind. 8) der geprüften Fälle heute NEU

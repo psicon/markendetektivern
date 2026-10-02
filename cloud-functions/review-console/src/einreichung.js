@@ -12,7 +12,7 @@
  */
 const { evaluateDuplicate, completenessCheck, ms } = require('./duplicatePolicy');
 const { eanOf, nameOf, preisOf, policyOf, herstellerAnzeige, vollstaendigkeitOf, herkunftOf, eanFotoBefund, eanSchluessel, EAN_HALTEN } = require('./werte');
-const { RUNDE_SPERREND } = require('./fotoRundeRegeln');
+const { RUNDE_SPERREND, DOPPEL_GRUENDE } = require('./fotoRundeRegeln');
 
 const REQUIRED_STEPS = ['front', 'rueckseite', 'hersteller', 'ean', 'naehrwerte', 'zutaten', 'preis'];
 const SLOTS = new Set(REQUIRED_STEPS);
@@ -52,8 +52,6 @@ function bildDefektOf(x) {
  *  - Ergibt die Neuberechnung `zweifelhaft` (falsche Prüfziffer, weit weg von
  *    der gespeicherten Nummer), kann die Konsole keine zweite Lesung machen →
  *    `unsicher` (fail-closed).
- *  - `vorher`: der Befund, den die Runde mit zwei Lesungen der gespeicherten
- *    Nummer aufgehoben hat (nur Anzeige).
  */
 function eanFotoZeile(x) {
   const o = x.eanFotoOcr;
@@ -67,7 +65,6 @@ function eanFotoZeile(x) {
     ...b, art,
     ...(art === 'unsicher' ? { gelesen: b.gelesen, roh: String(o.ean ?? '').replace(/\D/g, '').slice(0, 14) || null, zweit } : {}),
     ...(typeof o.bestaetigt === 'boolean' ? { bestaetigt: o.bestaetigt } : {}),
-    ...(o.vorher && typeof o.vorher === 'object' ? { vorher: { befund: String(o.vorher.befund || '').slice(0, 20), ean: String(o.vorher.ean || '').replace(/\D/g, '').slice(0, 14) || null } } : {}),
     at: ms(o.at),
   };
 }
@@ -93,6 +90,17 @@ function rundeOffenOf(x) {
     trocken: r.trocken === true,
     at: ms(r.at),
   };
+}
+
+/**
+ * Woraus eine Einreichung zurückgeholt wurde (`review.wiedereroeffnet`, gesetzt
+ * von „Zurückholen" in der Prüfkonsole, Schlussprüfung 03.10.2026) —
+ * bereinigt, die Werte landen in der Oberfläche.
+ */
+function wiedereroeffnetOf(x) {
+  const w = x.review && typeof x.review === 'object' ? x.review.wiedereroeffnet : null;
+  if (!w || typeof w !== 'object') return null;
+  return { vorherGrund: kurz(w.vorherGrund, 60), vorherIntern: kurz(w.vorherIntern, 60), vorherVon: kurz(w.vorherVon, 60) };
 }
 
 function rowOf(d) {
@@ -162,6 +170,8 @@ function rowOf(d) {
     review: x.review ?? null,
     // Warum die Morgenrunde den Fall liegen ließ (Prüfrunde 2, 02.10.2026).
     rundeOffen: rundeOffenOf(x),
+    // Woraus der Fall zurückgeholt wurde (Schlussprüfung 03.10.2026).
+    wiedereroeffnet: wiedereroeffnetOf(x),
     // Intern (vor der Auslieferung entfernt, stripPolicy): Eingaben der Regeln —
     // mit dem Server-Zeitpunkt des Dokuments (werte.einreichZeit).
     _policy: policyOf(d.id, x, d.createTime),
@@ -202,6 +212,12 @@ const OHNE_DOPPEL = { verdict: 'ok', reason: null, priorId: null, priorUserId: n
  *    (Prüfrunde 2, 02.10.2026). Freigabe dann nur mit force + Notiz. Der
  *    nächste Lauf aktualisiert oder entfernt den Eintrag; jede Entscheidung
  *    ersetzt `review` und nimmt ihn mit.
+ *  - Zurückgeholte Ablehnung als Doppel bzw. mit wiederverwendeten Fotos
+ *    (`row.wiedereroeffnet`, DOPPEL_GRUENDE) → `hold` mit
+ *    `zurueckgeholt_doppel` (Schlussprüfung 03.10.2026). Das Zurückholen
+ *    ersetzt `review` und löscht `rejectReason` — ohne diesen Vermerk stand
+ *    eine Runden-Ablehnung wegen wiederverwendeter Fotos danach als „ok" da
+ *    (den md5-Abgleich kann die Konsole nicht selbst), F gab ohne Notiz frei.
  */
 function precheckOf(row, sameEanRows, { kontoSperre = null, fotoEanRows = null } = {}) {
   const completeness = completenessCheck(row._komplett, REQUIRED_STEPS);
@@ -228,6 +244,11 @@ function precheckOf(row, sameEanRows, { kontoSperre = null, fotoEanRows = null }
   const runde = row.status === 'pending' && row.rundeOffen ? row.rundeOffen : null;
   for (const code of (runde ? runde.sperrend : [])) {
     if (!reasons.includes(code)) reasons.push(code);
+    if (verdict === 'ok') verdict = 'hold';
+  }
+  const zurueck = row.status === 'pending' && row.wiedereroeffnet ? row.wiedereroeffnet : null;
+  if (zurueck && (DOPPEL_GRUENDE.has(zurueck.vorherGrund) || DOPPEL_GRUENDE.has(zurueck.vorherIntern))) {
+    reasons.push('zurueckgeholt_doppel');
     if (verdict === 'ok') verdict = 'hold';
   }
   if (kontoSperre === 'gesperrt') { reasons.unshift('konto_gesperrt'); verdict = 'locked'; }
@@ -359,5 +380,5 @@ function baueFotoListe(openDocs, byEan, p, q, kontoSperre = () => null) {
 
 module.exports = {
   REQUIRED_STEPS, INDEX_FELDER, safeStatus, rowOf, stripPolicy, precheckOf, precheckFuerFall,
-  nachbarnAus, nachbarnVon, gruppiereNachEan, eanIndex, baueFotoListe, bildDefektOf, eanFotoZeile, rundeOffenOf,
+  nachbarnAus, nachbarnVon, gruppiereNachEan, eanIndex, baueFotoListe, bildDefektOf, eanFotoZeile, rundeOffenOf, wiedereroeffnetOf,
 };

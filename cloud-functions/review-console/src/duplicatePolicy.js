@@ -239,11 +239,16 @@ function evaluateDuplicate(candidate, others) {
  * Bewusst OHNE `priorUserId` und `diff`: der Einreicher darf sein Dokument
  * lesen (firestore.rules), und die Referenz kann einem anderen Nutzer gehören —
  * dessen uid, Preis und Markt gehören nicht in fremde Dokumente.
+ * `priorId` deshalb NUR bei einer eigenen Referenz (`sameUser === true`,
+ * Schlussprüfung 03.10.2026): die Doc-IDs beginnen mit der uid des
+ * Einreichers — eine fremde Referenz-ID verriet genau die uid, die oben
+ * weggelassen wird (gemessen 03.10.: 237 Dokumente). Der Bestand wird nicht
+ * bereinigt.
  */
 function dupZumSpeichern(dup) {
   if (!dup) return null;
   return {
-    verdict: dup.verdict ?? 'ok', reason: dup.reason ?? null, priorId: dup.priorId ?? null,
+    verdict: dup.verdict ?? 'ok', reason: dup.reason ?? null, priorId: dup.sameUser === true ? dup.priorId ?? null : null,
     sameUser: dup.sameUser ?? null, lockUntil: dup.lockUntil ?? null,
     updatedFields: Array.isArray(dup.updatedFields) ? dup.updatedFields : [],
   };

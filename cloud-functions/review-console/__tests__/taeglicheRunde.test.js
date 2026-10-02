@@ -286,7 +286,7 @@ describe('Morgenrunde — Entscheidungen Patrick 02.10.2026', () => {
     expect(b.wartetAufDich[0]).toMatchObject({ id: 'k', grund: 'ean_unsicher' });
   });
 
-  it('zweite Lesung liest die GESPEICHERTE Nummer → die erste war falsch gelesen, freigegeben', async () => {
+  it('zweite Lesung liest die GESPEICHERTE Nummer → die erste war falsch gelesen, freigegeben (erster Tag; eigene Annahme, Patrick vorgelegt 03.10.)', async () => {
     einreichung('k');
     mockAudit.set(doc('k').images.ean, ANDERE);
     mockZweit.set(doc('k').images.ean, EAN);
@@ -484,7 +484,7 @@ describe('Prüfrunde 2 (02.10.2026): Barcode-Befund hält über Tage, Konsole er
     expect(f.hinweis).toMatch(/heute kein Urteil/);
     expect(eanFotoWrites('k')).toEqual([]); // der alte Befund bleibt, wie er war
     expect(doc('k').eanFotoOcr).toMatchObject({ ean: FOTO_GESTERN, befund: 'abweichend', lauf: GESTERN });
-    expect(b.eanFotoVorbefund).toEqual({ haelt: 1, aufgehoben: 0 });
+    expect(b.eanFotoVorbefund).toEqual({ haelt: 1 });
     expect(rundeOffen('k')).toMatchObject({ grund: 'ean_abweichend', sperrend: ['ean_abweichend'], eanFoto: { befund: 'abweichend', ean: FOTO_GESTERN, bestaetigt: true } });
   });
 
@@ -508,17 +508,26 @@ describe('Prüfrunde 2 (02.10.2026): Barcode-Befund hält über Tage, Konsole er
     expect(doc('k').eanFotoOcr).toMatchObject({ ean: KFS, befund: 'gleich', grund: 'zweite_lesung' });
   });
 
-  it('gestern unsicher, heute zwei Lesungen der gespeicherten Nummer → Befund aufgehoben, freigegeben, nachvollziehbar am Dokument', async () => {
-    einreichung('k', { ean: KFS, eanFotoOcr: { ean: FOTO_GESTERN, befund: 'unsicher', zweit: null, grund: 'zweite_lesung_leer', lauf: GESTERN } });
-    mockZweit.set(doc('k').images.ean, KFS);
-    const b = await scharf(); // Bildprüfung und zweite Lesung lesen die gespeicherte Nummer
-    expect(mockLage.zweitLesungen).toEqual([[doc('k').images.ean]]);
-    expect(doc('k').status).toBe('approved');
-    expect(doc('k').eanFotoOcr).toEqual(expect.objectContaining({
-      ean: KFS, befund: 'gleich', grund: 'vorbefund_aufgehoben', bestaetigt: true, vorher: { befund: 'unsicher', ean: FOTO_GESTERN, lauf: GESTERN },
-    }));
-    expect(doc('k').eanFotoOcr.zweit).toBeUndefined(); // als Ganzes ersetzt, keine Reste des alten Befunds
-    expect(b.eanFotoVorbefund).toEqual({ haelt: 0, aufgehoben: 1 });
+  it('gestern unsicher, heute liest die Bildprüfung die gespeicherte Nummer (und eine zweite Lesung täte es auch) → bleibt liegen, kein automatisches Aufheben (Schlussprüfung 03.10.)', async () => {
+    for (const vorher of [
+      { ean: FOTO_GESTERN, befund: 'unsicher', zweit: null, grund: 'zweite_lesung_leer', lauf: GESTERN },
+      { ean: FOTO_GESTERN, befund: 'abweichend', bestaetigt: false, lauf: GESTERN },
+    ]) {
+      mockStore.clear(); mockWrites.length = 0; mockLage.zweitLesungen = [];
+      mockStore.set('cashback_config/v1', { fotoWorker: true });
+      einreichung('k', { ean: KFS, eanFotoOcr: vorher });
+      mockZweit.set(doc('k').images.ean, KFS);
+      const b = await scharf(); // die Bildprüfung liest die gespeicherte Nummer
+      expect(mockLage.zweitLesungen).toEqual([]); // keine zweite Lesung — sie könnte nichts mehr aufheben
+      expect(doc('k').status).toBe('pending');
+      expect(eanFotoWrites('k')).toEqual([]);
+      expect(doc('k').eanFotoOcr).toEqual(vorher);
+      expect(b.eanFotoVorbefund).toEqual({ haelt: 1 });
+      const f = b.wartetAufDich.find((x) => x.id === 'k');
+      expect(f.grund).toBe(vorher.befund === 'unsicher' ? 'ean_unsicher' : 'ean_abweichend');
+      expect(f.hinweis).toMatch(/gilt bis zur Entscheidung in der Konsole; heute gleich/);
+      expect(rundeOffen('k').sperrend).toEqual([vorher.befund === 'unsicher' ? 'ean_unsicher' : 'ean_abweichend']);
+    }
   });
 
   it('… nur EINE Lesung der gespeicherten Nummer (zweite liest etwas anderes) → bleibt liegen', async () => {
@@ -583,7 +592,7 @@ describe('Prüfrunde 2 (02.10.2026): Barcode-Befund hält über Tage, Konsole er
     expect(doc('neu').status).toBe('pending');
     expect(rundeOffen('neu')).toEqual({
       grund: 'foto_fremdes_konto', hinweis: 'Gleiches Foto bei 1 Einreichung eines anderen Kontos — welche, steht im Tagesbericht', zurueckgehalten: null,
-      sperrend: ['foto_fremdes_konto'], eanFoto: null, lauf: b.lauf, trocken: false, at: mockSentinel,
+      sperrend: ['foto_fremdes_konto'], fotoSeit: b.lauf, eanFoto: null, lauf: b.lauf, trocken: false, at: mockSentinel,
     });
     // die ID der fremden Einreichung steht nur im Bericht (Admins), nicht am Dokument des Einreichers
     expect(b.wartetAufDich.find((x) => x.id === 'neu').hinweis).toMatch(/fremd/);
@@ -592,22 +601,80 @@ describe('Prüfrunde 2 (02.10.2026): Barcode-Befund hält über Tage, Konsole er
     expect(b.rundeOffen).toMatchObject({ geschrieben: 1, fehler: 0 });
   });
 
-  it('… am nächsten Morgen nicht mehr betroffen: Trockenlauf würde freigeben → Eintrag entfernt; Bildprüfung gescheitert → Eintrag aktualisiert', async () => {
+  it('… Foto eines fremden Kontos hält bis zur Entscheidung in der Konsole, auch wenn sich die md5-Grundlage ändert (Original überschrieben, Schlussprüfung 03.10.)', async () => {
     einreichung('fremd', { uid: 'u9', status: 'approved', createdAt: T0 - 40 * TAG_MS, ean: ANDERE });
     einreichung('neu', { md5: { front: 'md5_fremd_front' } });
-    await scharf();
-    expect(rundeOffen('neu').sperrend).toEqual(['foto_fremdes_konto']);
-    // das fremde Foto ist weg (z. B. gelöscht) und die Bildprüfung scheitert heute
-    mockListe.set(doc('neu').images.front, { md5: 'md5_neu_front_eigen', size: 1234 });
+    const b1 = await scharf();
+    expect(rundeOffen('neu')).toMatchObject({ sperrend: ['foto_fremdes_konto'], fotoSeit: b1.lauf });
+    // das fremde Konto überschreibt sein Original (storage.rules erlaubt es) → heute kein gemeinsames Foto mehr
+    mockListe.set(doc('fremd').images.front, { md5: 'md5_fremd_front_neu', size: 1234 });
+    dateSpy.mockImplementation(() => T0 + TAG_MS);
+    const b2 = await scharf();
+    expect(doc('neu').status).toBe('pending');
+    expect(rundeOffen('neu')).toMatchObject({ grund: 'foto_fremdes_konto', sperrend: ['foto_fremdes_konto'], fotoSeit: b1.lauf, lauf: b2.lauf });
+    expect(rundeOffen('neu').hinweis).toMatch(new RegExp(`Befund vom ${b1.lauf}, gilt bis zur Entscheidung in der Konsole`));
+    expect(JSON.stringify(rundeOffen('neu'))).not.toMatch(/fremd"|: fremd/);
+    expect(b2.fotoVorbefund).toEqual({ haelt: 1 });
+    // auch ein Trockenlauf und eine gescheiterte Bildprüfung lassen ihn stehen
     mockAudit.set(doc('neu').images.ean, 'AUDIT_FEHLER');
-    await scharf();
-    expect(rundeOffen('neu')).toMatchObject({ grund: 'bild_audit_gescheitert', sperrend: [] });
-    // Trockenlauf mit funktionierender Bildprüfung: würde freigeben → Eintrag weg
+    await taeglicheRunde({ dryRun: true, projekt: 'p', bucketName: 'b', ausloeser: 'manuell' });
+    expect(rundeOffen('neu')).toMatchObject({ sperrend: ['foto_fremdes_konto'], fotoSeit: b1.lauf, trocken: true });
+    // erst ein Mensch löst ihn: jede Entscheidung in der Konsole ersetzt `review` — hier Ablehnen + Zurückholen
+    // (nachgestellt wie index.js 'reopen') → die Runde rechnet neu und gibt frei
+    mockStore.set('crowd_uploads/neu', { ...doc('neu'), review: { reopenedBy: 'patrick', wiedereroeffnet: { vorherGrund: 'fotos_unpassend', vorherIntern: 'fotos_unpassend', vorherVon: 'patrick' } } });
     mockAudit.delete(doc('neu').images.ean);
+    await scharf();
+    expect(doc('neu').status).toBe('approved');
+  });
+
+  it('Eintrag ohne Foto-Befund, der heute nicht mehr zutrifft → entfernt (Trockenlauf würde freigeben)', async () => {
+    einreichung('neu', { review: { rundeOffen: { grund: 'bild_audit_gescheitert', sperrend: [], lauf: GESTERN } } });
     const b = await taeglicheRunde({ dryRun: true, projekt: 'p', bucketName: 'b', ausloeser: 'manuell' });
     expect(doc('neu').status).toBe('pending');
     expect(doc('neu').review).toEqual({});
     expect(b.rundeOffen).toMatchObject({ entfernt: 1 });
+  });
+
+  it('… ältere eigene offene Einreichung entschieden → foto_aeltere_offen löst sich auf (kein Übernehmen, wenn heute vollständig gerechnet)', async () => {
+    einreichung('a', { createdAt: T0 - 2 * TAG_MS, ean: ANDERE, status: 'rejected', rejectReason: 'ean_fehlt' });
+    einreichung('b', { createdAt: T0 - TAG_MS, md5: { rueckseite: 'md5_a_rueckseite' }, review: { rundeOffen: { grund: 'foto_aeltere_offen', sperrend: ['foto_aeltere_offen'], lauf: GESTERN } } });
+    await scharf();
+    expect(doc('b').status).toBe('approved');
+  });
+
+  it('M1: Foto-Halt vom Vortag, heute scheitert die Storage-Liste → Halt bleibt in rundeOffen (die Konsole hält weiter an)', async () => {
+    for (const code of ['foto_fremdes_konto', 'foto_aeltere_offen', 'bilder_wiederverwendet']) {
+      mockStore.clear(); mockWrites.length = 0;
+      mockStore.set('cashback_config/v1', { fotoWorker: true });
+      mockLage.listeFehler = true;
+      einreichung('k', { review: { rundeOffen: { grund: code, sperrend: [code], lauf: GESTERN } } });
+      const b = await scharf();
+      expect(doc('k').status).toBe('pending'); // nie abgelehnt, nie freigegeben
+      expect(rundeOffen('k')).toMatchObject({ grund: code, sperrend: [code], fotoSeit: GESTERN });
+      expect(rundeOffen('k').hinweis).toMatch(/heute nicht nachprüfbar|gilt bis zur Entscheidung/);
+      expect(b.fotoAbgleich).toMatchObject({ gescheitert: true, unvollstaendig: 1 });
+    }
+  });
+
+  it('M1: … ebenso bei einem nicht abrufbaren oder md5-losen Identitätsfoto des Falls', async () => {
+    for (const kaputt of [() => mockListe.delete(doc('k').images.front), () => mockListe.set(doc('k').images.front, { md5: null, size: 5000 })]) {
+      mockStore.clear(); mockWrites.length = 0; mockListe.clear();
+      mockStore.set('cashback_config/v1', { fotoWorker: true });
+      einreichung('k', { review: { rundeOffen: { grund: 'foto_aeltere_offen', sperrend: ['foto_aeltere_offen'], lauf: GESTERN } } });
+      kaputt();
+      const b = await scharf();
+      expect(doc('k').status).toBe('pending');
+      expect(rundeOffen('k')).toMatchObject({ sperrend: ['foto_aeltere_offen'], fotoSeit: GESTERN });
+      expect(b.fotoAbgleich.unvollstaendig).toBe(1);
+    }
+  });
+
+  it('M1: Gegenprobe — ohne Vortags-Befund und mit vollständigem Abgleich wird nichts übernommen (normal freigegeben)', async () => {
+    einreichung('k', { review: { rundeOffen: { grund: 'bild_audit_gescheitert', sperrend: [], lauf: GESTERN } } });
+    const b = await scharf();
+    expect(doc('k').status).toBe('approved');
+    expect(b.fotoVorbefund).toEqual({ haelt: 0 });
+    expect(b.fotoAbgleich).toMatchObject({ gescheitert: false, unvollstaendig: 0 });
   });
 
   it('Trockenlauf: geplante Ablehnung wegen wiederverwendeter Fotos landet mit `geplant` am Dokument (die Konsole hält an)', async () => {
@@ -646,5 +713,41 @@ describe('Prüfrunde 2 (02.10.2026): Barcode-Befund hält über Tage, Konsole er
     einreichung('k', { ean: KFS, eanFotoOcr: { ean: FOTO_GESTERN, befund: 'abweichend', lauf: GESTERN } });
     await scharf();
     expect(mockWrites.filter((w) => w.path === 'crowd_uploads/k')).toEqual([]);
+  });
+});
+
+describe('Schlussprüfung 03.10.2026: Kontosperre vor einer Ablehnung', () => {
+  it('Sperrliste nicht lesbar, Konto gesperrt, die Runde würde ablehnen → unverändert liegen (stumm), nichts am Dokument', async () => {
+    mockLage.sperrenFehler = true;
+    mockStore.set('cashback_sperren/boese', { gesperrt: true });
+    einreichung('alt', { uid: 'boese', status: 'approved', createdAt: T0 - 3 * TAG_MS });
+    einreichung('neu', { uid: 'boese' });
+    const b = await scharf();
+    expect(doc('neu').status).toBe('pending');
+    expect(doc('neu').rejectReason).toBeUndefined();
+    expect(doc('neu').review).toBeUndefined();
+    expect(mockWrites.filter((w) => w.path === 'crowd_uploads/neu' && !w.data.eanFotoOcr)).toEqual([]);
+    expect(b.abgelehnt).toBe(0);
+    expect(b.offenGruende).toEqual({ konto_gesperrt_im_lauf: 1 });
+  });
+
+  it('… nicht gesperrtes Konto: die Ablehnung wird geschrieben', async () => {
+    mockLage.sperrenFehler = true;
+    einreichung('alt', { status: 'approved', createdAt: T0 - 3 * TAG_MS });
+    einreichung('neu');
+    await scharf();
+    expect(doc('neu')).toMatchObject({ status: 'rejected', review: { reason: 'sperre_woche_gleicher_nutzer' } });
+  });
+
+  it('… Sperre beim Schreiben nicht lesbar → weder Ablehnung noch Freigabe (schreib_fehler)', async () => {
+    einreichung('alt', { status: 'approved', createdAt: T0 - 3 * TAG_MS });
+    einreichung('neu');
+    const orig = mockDb.runTransaction;
+    mockDb.runTransaction = async (fn) => orig((tx) => fn({ ...tx, get: (ref) => (ref.path.startsWith('cashback_sperren/') ? Promise.reject(new Error('UNAVAILABLE')) : tx.get(ref)) }));
+    try {
+      const b = await scharf();
+      expect(doc('neu').status).toBe('pending');
+      expect(b.offenGruende).toEqual({ schreib_fehler: 1 });
+    } finally { mockDb.runTransaction = orig; }
   });
 });

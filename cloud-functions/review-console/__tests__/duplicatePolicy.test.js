@@ -176,9 +176,19 @@ describe('dupZumSpeichern', () => {
     const d = evaluateDuplicate(kand, [prior]);
     expect(d.priorUserId).toBe('andere');
     const s = dupZumSpeichern(d);
-    expect(s).toEqual({ verdict: 'ok', reason: null, priorId: 'p', sameUser: false, lockUntil: d.lockUntil, updatedFields: ['price', 'market'] });
+    // priorId einer FREMDEN Referenz nicht (die Doc-ID beginnt mit deren uid, Schlussprüfung 03.10.2026)
+    expect(d.priorId).toBe('p');
+    expect(s).toEqual({ verdict: 'ok', reason: null, priorId: null, sameUser: false, lockUntil: d.lockUntil, updatedFields: ['price', 'market'] });
     expect(JSON.stringify(s)).not.toContain('andere');
     expect(JSON.stringify(s)).not.toContain('199');
+    expect(JSON.stringify(s)).not.toContain('"p"');
+  });
+  it('eigene Referenz → priorId bleibt (Wochen-Sperre, ältere offene, eigene Freigabe außerhalb des Fensters)', () => {
+    const eigen = { id: 'ich_alt', userId: 'ich', ean: '4061464833821', status: 'approved', createdAt: T - 3 * 86400000 };
+    const kand = { id: 'ich_neu', userId: 'ich', ean: '4061464833821', status: 'pending', createdAt: T };
+    expect(dupZumSpeichern(evaluateDuplicate(kand, [eigen]))).toMatchObject({ verdict: 'locked', priorId: 'ich_alt', sameUser: true });
+    expect(dupZumSpeichern(evaluateDuplicate(kand, [{ ...eigen, status: 'pending' }]))).toMatchObject({ verdict: 'hold', priorId: 'ich_alt', sameUser: true });
+    expect(dupZumSpeichern(evaluateDuplicate(kand, [{ ...eigen, createdAt: T - 40 * 86400000 }]))).toMatchObject({ verdict: 'ok', priorId: 'ich_alt', sameUser: true });
   });
   it('Kurzform der Runde ohne EAN ({verdict, reason, lockUntil}) und null', () => {
     expect(dupZumSpeichern({ verdict: 'ok', reason: null, lockUntil: null })).toEqual({ verdict: 'ok', reason: null, priorId: null, sameUser: null, lockUntil: null, updatedFields: [] });

@@ -244,13 +244,16 @@ function eanFotoBefund(gespeichertRoh, gelesenRoh) {
  * weiter, wenn eine Lesung die GESPEICHERTE Nummer liefert. Kosten: rund
  * 2 von 270 Fällen zusätzlich für den Menschen.
  *
- * Seit Prüfrunde 2 (02.10.2026) auch für
- *  - `zweifelhaft` (falsche Prüfziffer, weit weg): zweite Lesung = gespeichert
- *    → `gleich`, sonst `unsicher` (halten). Eine einzelne gültige, andere
- *    Nummer bestätigt hier nichts — die erste Lesung war ja keine gültige.
- *  - `gleich`, wenn ein früherer Lauf den Fall wegen der Nummer angehalten hat
- *    (eanFotoMitVorbefund): `bestaetigt: true` nur, wenn auch die zweite Lesung
- *    die gespeicherte Nummer liefert.
+ * Seit Prüfrunde 2 (02.10.2026) auch für `zweifelhaft` (falsche Prüfziffer,
+ * weit weg): zweite Lesung = gespeichert → `gleich`, sonst `unsicher`
+ * (halten). Eine einzelne gültige, andere Nummer bestätigt hier nichts — die
+ * erste Lesung war ja keine gültige. Das ist strenger als vorher (bis dahin
+ * „kein Urteil", also weiter), keine Abschwächung.
+ *
+ * Das „gleich" gilt nur, solange kein früherer Lauf den Fall wegen der Nummer
+ * angehalten hat — sonst gilt dessen Befund bis zur Entscheidung in der
+ * Konsole, auch gegen ein heutiges „gleich" (eanFotoMitVorbefund,
+ * Schlussprüfung 03.10.2026).
  *
  * @param {object} befund  eanFotoBefund aus der Bildprüfung
  * @param {string|null} zweitRoh  Ziffern der zweiten Lesung
@@ -262,6 +265,11 @@ function eanFotoBestaetigen(befund, zweitRoh) {
   const istGespeichert = gueltig && !!befund.gespeichert && gtin14(zweit) === gtin14(befund.gespeichert);
   if (befund.art === 'abweichend') {
     if (gueltig && gtin14(zweit) === gtin14(befund.gelesen)) return { ...befund, bestaetigt: true };
+    // Erste Lesung eine ANDERE gültige Nummer, zweite die gespeicherte → weiter
+    // wie „gleich". Eigene Annahme, Patrick vorgelegt am 03.10.2026
+    // (WISSEN-FOTORUNDE.md, „Offen für Patrick"): die erste Lesung gilt als
+    // Fehllesung. Patricks Wortlaut („weicht sie ab, bleibt die Einreichung
+    // liegen") ließe auch Halten zu. Wirkung laut Trockenlauf ~1 Fall/Tag.
     if (istGespeichert) return { art: 'gleich', gelesen: zweit, gespeichert: befund.gespeichert, grund: 'zweite_lesung' };
     return { art: 'unsicher', gelesen: befund.gelesen, gespeichert: befund.gespeichert, zweit: gueltig ? zweit : null, grund: gueltig ? 'lesungen_uneinig' : 'zweite_lesung_leer' };
   }
@@ -269,7 +277,6 @@ function eanFotoBestaetigen(befund, zweitRoh) {
     if (istGespeichert) return { art: 'gleich', gelesen: zweit, gespeichert: befund.gespeichert, grund: 'zweite_lesung' };
     return { art: 'unsicher', gelesen: null, roh: befund.roh, gespeichert: befund.gespeichert, zweit: gueltig ? zweit : null, grund: gueltig ? 'lesungen_uneinig' : 'zweite_lesung_leer' };
   }
-  if (befund.art === 'gleich') return istGespeichert ? { ...befund, bestaetigt: true } : { ...befund, bestaetigt: false, zweit: gueltig ? zweit : null };
   return befund;
 }
 
@@ -277,14 +284,13 @@ function eanFotoBestaetigen(befund, zweitRoh) {
  * Die zweite Lesung kam nicht zustande (technischer Fehler oder Arbeitszeit
  * abgelaufen). Nie ein Urteil über die Einreichung, aber auch keine Freigabe:
  * eine Abweichung bleibt (unbestätigt) stehen, eine zweifelhafte Lesung wird
- * `unsicher`, ein `gleich` gegen einen alten Befund hebt diesen nicht auf.
+ * `unsicher`.
  */
 function eanFotoOhneZweitlesung(befund, fehler) {
   if (!befund) return befund;
   const f = String(fehler || 'unbekannt').slice(0, 80);
   if (befund.art === 'abweichend') return { ...befund, bestaetigt: false, fehler: f };
   if (befund.art === 'zweifelhaft') return { art: 'unsicher', gelesen: null, roh: befund.roh, gespeichert: befund.gespeichert, zweit: null, grund: 'zweite_lesung_gescheitert', fehler: f };
-  if (befund.art === 'gleich') return { ...befund, bestaetigt: false, fehler: f };
   return befund;
 }
 
@@ -301,8 +307,11 @@ const EAN_HALTEN = new Set(['abweichend', 'unsicher']);
  *
  * Quelle ist `eanFotoOcr`; scheiterte dessen Speichern, steht derselbe Befund
  * in `review.rundeOffen.eanFoto` (Prüfkonsolen-Feld, siehe
- * fotoRundeRegeln.rundeOffenEintrag). Sind beide da, gilt der jüngere Lauf
- * (Lauf-Kennung „YYYY-MM-DD_HHMMSS", bei Gleichstand `eanFotoOcr`).
+ * fotoRundeRegeln.rundeOffenEintrag). Hält EINE der beiden Quellen an, gilt
+ * der Halt (fail-closed, Schlussprüfung 03.10.2026) — `eanFotoOcr` zuerst.
+ * Bis dahin galt der jüngere Lauf: ein neueres „gleich" konnte einen älteren
+ * Halt verdrängen. Das ging nur über das automatische Aufheben, das es nicht
+ * mehr gibt.
  * @returns {{befund:'abweichend'|'unsicher', gelesen:string|null, gespeichert:string|null, bestaetigt:boolean, zweit:string|null, lauf:string|null, quelle:'eanFotoOcr'|'rundeOffen'}|null}
  */
 function eanFotoVorbefund(x) {
@@ -311,35 +320,36 @@ function eanFotoVorbefund(x) {
   const o = x.eanFotoOcr && typeof x.eanFotoOcr === 'object' ? x.eanFotoOcr : null;
   const ro = x.review && typeof x.review === 'object' && x.review.rundeOffen && typeof x.review.rundeOffen === 'object' ? x.review.rundeOffen : null;
   const r = ro && ro.eanFoto && typeof ro.eanFoto === 'object' ? { ...ro.eanFoto, lauf: ro.lauf } : null;
-  const neuer = o && r ? (String(lauf(o.lauf) || '') >= String(lauf(r.lauf) || '') ? o : r) : (o || r);
-  if (!neuer || !EAN_HALTEN.has(neuer.befund)) return null;
+  const haelt = (b) => !!b && EAN_HALTEN.has(b.befund);
+  const quelle = haelt(o) ? o : haelt(r) ? r : null;
+  if (!quelle) return null;
   return {
-    befund: neuer.befund,
-    gelesen: ziffern(neuer.ean) || null,
+    befund: quelle.befund,
+    gelesen: ziffern(quelle.ean) || null,
     gespeichert: ziffern(x.ean) || null,
-    bestaetigt: neuer.bestaetigt === true,
-    zweit: ziffern(neuer.zweit) || null,
-    lauf: lauf(neuer.lauf),
-    quelle: neuer === o ? 'eanFotoOcr' : 'rundeOffen',
+    bestaetigt: quelle.bestaetigt === true,
+    zweit: ziffern(quelle.zweit) || null,
+    lauf: lauf(quelle.lauf),
+    quelle: quelle === o ? 'eanFotoOcr' : 'rundeOffen',
   };
 }
 
 /**
  * Befund dieses Laufs mit dem Halte-Befund eines früheren verbinden
- * (Prüfrunde 2, 02.10.2026).
+ * (Prüfrunde 2, 02.10.2026; Schlussprüfung 03.10.2026).
  *
- * Ein früher Halte-Befund hält weiter an — ein späteres „kein Urteil" (Foto
- * diesmal unlesbar, Prüfziffer falsch) oder eine ausgefallene Bildprüfung hebt
- * ihn nicht auf. Aufgehoben wird er nur, wenn HEUTE ZWEI Lesungen die
- * gespeicherte Nummer liefern (Bildprüfung + zweite Lesung,
- * eanFotoBestaetigen) UND der frühere Befund keine bestätigte Abweichung war.
- * Begründung: am ersten Tag reicht eine Lesung der gespeicherten Nummer, um
- * eine einzelne abweichende Lesung zu widerlegen (eanFotoBestaetigen); hier
- * gilt dieselbe Richtung mit strengerem Maß. Haben dagegen schon einmal zwei
- * Lesungen dieselbe ANDERE Nummer gesehen, stehen zwei bestätigte Lesungen
- * gegeneinander (oft zwei Strichcodes auf einem Foto) — das entscheidet ein
- * Mensch, nicht die nächste Lesung. Eine heute bestätigte Abweichung ersetzt
- * den alten Befund (stärkerer Beleg); alles andere lässt ihn stehen.
+ * Ein früher Halte-Befund hält weiter an, bis ein Mensch in der Konsole
+ * entscheidet (force + Notiz) — egal, was heute gelesen wird. Ein späteres
+ * „kein Urteil" (Foto diesmal unlesbar, Prüfziffer falsch), eine ausgefallene
+ * Bildprüfung und auch zwei Lesungen der GESPEICHERTEN Nummer heben ihn nicht
+ * auf (Entscheidung Patrick 2a: „Weicht sie ab, bleibt die Einreichung
+ * liegen" — ein Mensch entscheidet). Bis zur Schlussprüfung 03.10.2026 hob
+ * die Runde einen Halt mit zwei Lesungen der gespeicherten Nummer selbst auf —
+ * eine eigene Abschwächung, die Patrick nie vorgelegt war; ein einmal
+ * angehaltener Fall kam damit ohne Menschen zur Freigabe.
+ *
+ * Einzige Änderung am alten Befund: eine heute BESTÄTIGTE Abweichung ersetzt
+ * ihn (stärkerer Beleg, er hält weiter an); alles andere lässt ihn stehen.
  *
  * @param {object|null} heute   Befund dieses Laufs (nach zweiter Lesung) oder null (heute keine Bildprüfung)
  * @param {object|null} vorher  eanFotoVorbefund
@@ -348,12 +358,6 @@ function eanFotoVorbefund(x) {
  */
 function eanFotoMitVorbefund(heute, vorher) {
   if (!vorher) return heute;
-  if (heute && heute.art === 'gleich' && heute.bestaetigt === true && !(vorher.befund === 'abweichend' && vorher.bestaetigt)) {
-    return {
-      art: 'gleich', gelesen: heute.gelesen, gespeichert: heute.gespeichert, bestaetigt: true, grund: 'vorbefund_aufgehoben',
-      vorher: { befund: vorher.befund, ean: vorher.gelesen, lauf: vorher.lauf },
-    };
-  }
   if (heute && heute.art === 'abweichend' && heute.bestaetigt === true) return heute;
   return {
     art: vorher.befund, gelesen: vorher.gelesen, gespeichert: vorher.gespeichert || (heute && heute.gespeichert) || null,
@@ -375,9 +379,8 @@ function eanFotoEintrag(b) {
   return {
     ean: b.gelesen || b.roh || null, befund,
     ...(b.grund ? { grund: b.grund } : {}),
-    ...(befund === 'abweichend' || (befund === 'gleich' && typeof b.bestaetigt === 'boolean') ? { bestaetigt: b.bestaetigt === true } : {}),
+    ...(befund === 'abweichend' ? { bestaetigt: b.bestaetigt === true } : {}),
     ...(befund === 'unsicher' ? { zweit: b.zweit || null } : {}),
-    ...(b.vorher ? { vorher: b.vorher } : {}),
     ...(b.fehler ? { fehler: String(b.fehler).slice(0, 80) } : {}),
   };
 }

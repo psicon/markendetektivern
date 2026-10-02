@@ -80,7 +80,10 @@ function warnungen(k) {
     // Ohne diese Abgleiche gibt die Runde nichts frei (Entscheidungen Patrick
     // 02.10.2026, fail-closed) — still wäre das ein Tag ohne jede Freigabe.
     if (r.kontoSperrenUnlesbar) rot('kontosperren_unlesbar', 'Die Liste gesperrter Konten (cashback_sperren) war nicht lesbar — heute wurde nichts freigegeben. Die Fälle sind morgen wieder dran.');
-    if (r.fotoAbgleichGescheitert) rot('foto_abgleich_gescheitert', 'Der Abgleich der Fotos mit früheren Einreichungen ist gescheitert (Storage-Liste) — heute wurde nichts freigegeben. Die Fälle sind morgen wieder dran.');
+    // Foto-Befunde früherer Läufe gelten weiter (fotoRundeRegeln.bildMitVorbefund);
+    // wer heute zum ersten Mal geprüft wurde, hat aber keinen — die Konsole
+    // rechnet den Foto-Abgleich nicht selbst (Schlussprüfung 03.10.2026).
+    if (r.fotoAbgleichGescheitert) rot('foto_abgleich_gescheitert', 'Der Abgleich der Fotos mit früheren Einreichungen ist gescheitert (Storage-Liste) — heute wurde nichts freigegeben. Foto-Befunde früherer Läufe gelten weiter; Einreichungen, die heute zum ersten Mal geprüft wurden, zeigt die Prüfkonsole ohne Foto-Befund — dort vor einer Freigabe die Fotos selbst ansehen. Die Fälle sind morgen wieder dran.');
     if (r.schreibFehler > 0) rot('schreibfehler', `${r.schreibFehler} Entscheidungen konnten nicht gespeichert werden — die Fälle sind offen geblieben und morgen wieder dran.`);
     if (r.nichtGeschafft > 0) gelb('runde_unvollstaendig', `${r.nichtGeschafft} Einreichungen hat die Runde in der Zeit nicht mehr geschafft — sie sind morgen dran.`);
     // Seit der Preis-Pflicht (26.09.) bleibt bei Zweifel mehr liegen als vorher.

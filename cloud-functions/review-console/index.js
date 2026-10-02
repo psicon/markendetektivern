@@ -282,7 +282,8 @@ exports.reviewGetUpload = onCall({ region: REGION }, async (req) => {
 
 // 'reopen' holt eine ABGELEHNTE Einreichung zurück in die Warteschlange —
 // die Rücknahme im Prüf-Werkzeug. Bewusst nur aus 'rejected': eine Freigabe
-// hat bereits gebucht, die nimmt man nicht per Klick zurück.
+// hat bereits gebucht, die nimmt man nicht per Klick zurück. Der bisherige
+// Grund bleibt in `review.wiedereroeffnet` (Doppel-Gründe → `hold`, precheckOf).
 const DECISIONS = new Set(['approve', 'reject', 'hold', 'unhold', 'reopen']);
 
 exports.reviewDecideUploads = onCall({ region: REGION, timeoutSeconds: 120 }, async (req) => {
@@ -379,6 +380,13 @@ exports.reviewDecideUploads = onCall({ region: REGION, timeoutSeconds: 120 }, as
 
         if (decision === 'reopen') {
           if (row.status !== 'rejected') return { id, outcome: 'skipped', reason: `status_${row.status}` };
+          // Den bisherigen Grund behalten (Schlussprüfung 03.10.2026): sonst
+          // stand eine Runden-Ablehnung wegen wiederverwendeter Fotos nach dem
+          // Zurückholen als „ok" da — den md5-Abgleich kann die Konsole nicht
+          // selbst — und F gab ohne Notiz frei. precheckOf hält damit an.
+          const alt = snap.data() || {};
+          const altReview = alt.review && typeof alt.review === 'object' ? alt.review : {};
+          const kurz = (v) => (typeof v === 'string' && v ? v.slice(0, 60) : null);
           tx.update(ref, {
             status: 'pending',
             rejectReason: FieldValue.delete(),
@@ -387,7 +395,10 @@ exports.reviewDecideUploads = onCall({ region: REGION, timeoutSeconds: 120 }, as
             reviewedAt: FieldValue.delete(),
             updatedAt: ts,
             reviewedBy: adminUid,
-            review: { reopenedBy: adminUid, at: ts },
+            review: {
+              reopenedBy: adminUid, at: ts,
+              wiedereroeffnet: { vorherGrund: kurz(alt.rejectReason), vorherIntern: kurz(altReview.reason), vorherVon: kurz(altReview.decidedBy) || kurz(alt.reviewedBy) },
+            },
           });
           return { id, outcome: 'reopened' };
         }
