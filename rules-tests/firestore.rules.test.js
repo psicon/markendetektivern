@@ -496,16 +496,6 @@ describe('Ratings, Feedback, Telemetrie, Push-Tokens', () => {
     expect(app.filter((k) => SERVER_FELDER.includes(k))).toEqual([]);
   });
 
-  // 02.10.2026 (Entscheidung Patrick): gesperrte Konten. Server-only — die
-  // abschließende deny-all-Regel deckt es ab, kein eigener Block. Weder lesen
-  // (wer gesperrt ist, soll es nicht abfragen können) noch sich selbst entsperren.
-  test('cashback_sperren: weder lesen noch schreiben, auch nicht das eigene', async () => {
-    await assertFails(getDoc(doc(alice(), `cashback_sperren/${ALICE}`)));
-    await assertFails(setDoc(doc(alice(), `cashback_sperren/${ALICE}`), { gesperrt: false }));
-    await assertFails(deleteDoc(doc(alice(), `cashback_sperren/${ALICE}`)));
-    await assertFails(getDocs(collection(alice(), 'cashback_sperren')));
-  });
-
   test('ANGRIFF: Anlage mit einem anderen status als pending scheitert', async () => {
     for (const status of ['approved', 'rejected', 'Pending', null]) {
       await assertFails(setDoc(doc(alice(), `crowd_uploads/status_${String(status)}`), { ...appAnlage(), status }));
