@@ -77,6 +77,7 @@ const { laufBeginnen, laufBeenden, entscheidungBeanspruchen, entscheidungFreigeb
 const { resolveMerchant } = require('./lib/merchant');
 const { sendCashbackReady } = require('./lib/push');
 const { erstelleGastUebernahme, kontoPruefen, tokenPruefen } = require('./lib/gastUebernahme');
+const { sperreRef, istGesperrt, sperreLesen, GRUND_KONTO_GESPERRT, GRUND_SPERRE_UNPRUEFBAR } = require('./lib/kontoSperre');
 const {
   computeDHash,
   hammingDistance,
@@ -667,6 +668,13 @@ async function writePurchasedProducts(uid, cashbackId, parsed, merchantInfo, met
  *   - Status not approved + no prior earn: noop.
  *
  * Runs in a transaction so concurrent re-publishes can't race.
+ *
+ * Kontosperre (Entscheidung Patrick 02.10.2026, lib/kontoSperre.js): die
+ * Transaktion liest `cashback_sperren/{uid}` mit. Gesperrt → KEIN neuer Earn
+ * (capReason `konto_gesperrt`, der Aufrufer setzt daraus `no_reward`) und keine
+ * Aufwärts-Korrektur. Bestehende Gutschriften bleiben, wie sie sind — die Sperre
+ * storniert nichts. Weil dies die EINZIGE Stelle ist, an der ein Bon Geld
+ * bekommt, gilt das für processCashback und resolveCashbackReview gleichermaßen.
  */
 async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, bonDateIso, campaignId, campaignMode, caps = null, opts = {}) {
   const ledgerCol = userRef.collection('cashback_ledger');
@@ -703,6 +711,11 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
       ledgerCol.where('receiptId', '==', cashbackId).where('type', '==', 'reverse'),
     );
     const userSnap = await tx.get(userRef);
+    // Kontosperre IN der Transaktion: eine während des Laufs gesetzte Sperre
+    // kann nicht zwischen Prüfung und Buchung durchrutschen. Scheitert der
+    // Lesevorgang, scheitert die Buchung als Ganzes (Wiederholungsweg des
+    // Aufrufers) — gebucht wird nie, solange die Sperre unbekannt ist.
+    const gesperrt = istGesperrt(await tx.get(sperreRef(db, userRef.id)));
     // Aktions-Budget FRISCH in der Transaktion lesen → race-frei cappen.
     const campaignRef = campaignId ? db.collection(CAMPAIGNS_COL).doc(campaignId) : null;
     const campaignSnap = campaignMode && campaignRef ? await tx.get(campaignRef) : null;
@@ -776,6 +789,13 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
       // Aktions-Modus: Betrag ATOMAR auf das verbleibende Budget cappen —
       // das schließt die Race-Lücke (2 Bons am letzten Budget-Rest).
       let earnCents = cashbackCents;
+      if (gesperrt) {
+        // Gesperrtes Konto: nichts buchen. Alle Prüfungen unten hängen an
+        // `earnCents > 0` und entfallen damit; budgetExhausted bleibt false,
+        // weil capReason gesetzt ist — der Grund am Bon ist die Sperre.
+        earnCents = 0;
+        capReason = GRUND_KONTO_GESPERRT;
+      }
       if (caps) {
         if (earnCents > 0 && campaignMode && campaignId && caps.weeklyBonCap > 0) {
           const used = (((u.cashback_campaign_weekly || {})[campaignId] || {})[weekKey] || {}).count || 0;
@@ -893,7 +913,14 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
         );
         earns.docs.forEach((d) => tx.set(d.ref, { bonDate: bonDay }, { merge: true }));
       }
-      if (netActive !== cashbackCents) {
+      if (gesperrt && cashbackCents > netActive) {
+        // Eine Aufwärts-Korrektur wäre eine NEUE Gutschrift — bei gesperrtem
+        // Konto unterbleibt sie. Der bestehende Betrag bleibt (keine Storno-
+        // Wirkung der Sperre); dem Aufrufer wird der tatsächlich aktive Betrag
+        // gemeldet, damit Bon und Spiegel dasselbe zeigen wie das Ledger.
+        creditedCents = netActive;
+        capReason = GRUND_KONTO_GESPERRT;
+      } else if (netActive !== cashbackCents) {
         const delta = cashbackCents - netActive;
         // Adjust to match current cents — write a delta entry.
         const ref = ledgerCol.doc();
@@ -2425,28 +2452,42 @@ async function verarbeiteCashback(event) {
       // den Status) noch ändern kann. Idempotent per receiptId.
       const userRef = db.doc(`users/${uid}`);
       const campaignMode = config.campaignsEnabled && !!selectedCampaign;
-      const settle = await syncLedgerForReceipt(
-        userRef,
-        cashbackId,
-        status,
-        cashbackCents,
-        ocr.parsed.bonDate,
-        selectedCampaign?.id || null,
-        campaignMode,
-        {
-          weeklyBonCap: campaignMode ? Number(selectedCampaign.weeklyBonCap) || 0 : 0,
-          maxPerUserCents: campaignMode ? Number(selectedCampaign.maxPerUserCents) || 0 : 0,
-          monthlyMaxCents: !campaignMode ? Number(config.monthlyMaxCents) || 0 : 0,
-          dailyCap: Number(config.dailyCap) || 0,
-          legacyFallback: config.dailyCapLegacyFallback !== false,
-        },
-        // Reverse-Kandidat: das GESPEICHERTE Bon-Datum (Backfill-Schlüssel),
-        // falls die frische OCR-Lesung ein anderes Datum liefert.
-        { extraDays: [receipt.bonDate] },
-      );
-      // Transaktion hat den Betrag gedeckelt (Budget leer ODER ein Limit
-      // race-frei erkannt) → Betrag + Status korrigieren, damit Mirror/Receipt
-      // das echte Ergebnis zeigen (kein „approved +X" ohne Gutschrift).
+      let settle;
+      try {
+        settle = await syncLedgerForReceipt(
+          userRef,
+          cashbackId,
+          status,
+          cashbackCents,
+          ocr.parsed.bonDate,
+          selectedCampaign?.id || null,
+          campaignMode,
+          {
+            weeklyBonCap: campaignMode ? Number(selectedCampaign.weeklyBonCap) || 0 : 0,
+            maxPerUserCents: campaignMode ? Number(selectedCampaign.maxPerUserCents) || 0 : 0,
+            monthlyMaxCents: !campaignMode ? Number(config.monthlyMaxCents) || 0 : 0,
+            dailyCap: Number(config.dailyCap) || 0,
+            legacyFallback: config.dailyCapLegacyFallback !== false,
+          },
+          // Reverse-Kandidat: das GESPEICHERTE Bon-Datum (Backfill-Schlüssel),
+          // falls die frische OCR-Lesung ein anderes Datum liefert.
+          { extraDays: [receipt.bonDate] },
+        );
+      } catch (e) {
+        // Eine gescheiterte Ledger-Transaktion ist Infrastruktur, keine Aussage
+        // über den Bon (seit 02.10.2026 liest sie auch die Kontosperre mit).
+        // Bisher endete sie nach MAX_PROCESS_ATTEMPTS als 'rejected /
+        // max_retries_exceeded' — ein normaler Nutzer verlor damit seinen Bon
+        // wegen einer Störung. Mit eigenem Code landet sie stattdessen auf
+        // 'review' (Mensch), wie ocr_unavailable und ledger_precheck_failed.
+        const err = new Error(`ledger tx failed: ${e.message}`);
+        err.code = 'ledger_tx_failed';
+        throw err;
+      }
+      // Transaktion hat den Betrag gedeckelt (Budget leer, ein Limit race-frei
+      // erkannt ODER das Konto gesperrt) → Betrag + Status korrigieren, damit
+      // Mirror/Receipt das echte Ergebnis zeigen (kein „approved +X" ohne
+      // Gutschrift). Bei gesperrtem Konto: no_reward / konto_gesperrt.
       if (status === 'approved' && settle.creditedCents !== cashbackCents) {
         cashbackCents = settle.creditedCents;
         if (cashbackCents === 0) {
@@ -2679,7 +2720,7 @@ async function verarbeiteCashback(event) {
         // republishen) oder resolveCashbackReview. Nur echte Poison-Messages
         // (Bild kaputt, Parser-Crash) enden weiterhin als 'rejected'.
         const infraCode =
-          err && (err.code === 'ocr_unavailable' || err.code === 'ledger_precheck_failed' || err.code === 'referee_unavailable')
+          err && (err.code === 'ocr_unavailable' || err.code === 'ledger_precheck_failed' || err.code === 'referee_unavailable' || err.code === 'ledger_tx_failed')
             ? err.code
             : null;
         const infra = !!infraCode;
@@ -2753,10 +2794,28 @@ exports.requestPayout = onRequest(
     // Gewünschter Teil-Betrag (optional). Fehlt/ungültig → ganze Balance.
     const requestedCents = Math.round(Number((req.body || {}).amountCents));
 
+    // Kontosperre (Entscheidung Patrick 02.10.2026, lib/kontoSperre.js): IN der
+    // Abbuchungs-Transaktion gelesen, damit eine gerade gesetzte Sperre nicht
+    // zwischen Prüfung und Abbuchung durchrutscht. Lesefehler → fail-closed mit
+    // wiederholbarem 503 (`sperre_unpruefbar`): keine Abbuchung, kein Payout-
+    // Dokument, die App bittet um einen späteren Versuch. Merker pro Versuch
+    // zurücksetzen — Firestore wiederholt den Callback bei Konflikten.
+    let sperreLesefehler = false;
     try {
       const result = await db.runTransaction(async (tx) => {
+        sperreLesefehler = false;
         const userRef = db.doc(`users/${uid}`);
         const userSnap = await tx.get(userRef);
+        let sperreSnap;
+        try {
+          sperreSnap = await tx.get(sperreRef(db, uid));
+        } catch (e) {
+          sperreLesefehler = true;
+          throw e;
+        }
+        if (istGesperrt(sperreSnap)) {
+          return { error: GRUND_KONTO_GESPERRT };
+        }
         const u = userSnap.exists ? userSnap.data() : {};
         const balance = u.cashback_balance_cents || 0;
 
@@ -2796,6 +2855,14 @@ exports.requestPayout = onRequest(
         return { ok: true, payoutId: payoutRef.id, amountCents, method };
       });
 
+      if (result.error === GRUND_KONTO_GESPERRT) {
+        // Nur der Code, kein Guthaben/keine Schwelle in der Antwort. Die
+        // ausgelieferte App zeigt für unbekannte Codes „Auszahlung konnte nicht
+        // angefragt werden. Bitte versuch es später nochmal." — nichts Falsches.
+        logger.warn('payout-konto-gesperrt', { uid });
+        res.status(403).json({ code: GRUND_KONTO_GESPERRT });
+        return;
+      }
       if (result.error) {
         res.status(400).json({ code: result.error, ...result });
         return;
@@ -2803,6 +2870,11 @@ exports.requestPayout = onRequest(
       logger.info('payout-requested', { uid, payoutId: result.payoutId, amountCents: result.amountCents, method });
       res.status(200).json(result);
     } catch (e) {
+      if (sperreLesefehler) {
+        logger.error('payout-sperre-unpruefbar', { uid, err: e.message });
+        res.status(503).json({ code: GRUND_SPERRE_UNPRUEFBAR });
+        return;
+      }
       logger.error('requestPayout-failed', { uid, err: e.message });
       res.status(500).json({ code: 'internal' });
     }
@@ -2858,6 +2930,49 @@ async function refundFailedPayout(uid, payoutId, amountCents) {
   });
 }
 
+/**
+ * Auszahlung wegen Kontosperre anhalten (Entscheidung Patrick 02.10.2026):
+ * 'requested' → 'failed' und Guthaben zurück, in EINER Transaktion.
+ *
+ * Der Status wird FRISCH gelesen, nicht aus dem Ereignis genommen: Firestore
+ * stellt das Anlege-Ereignis mindestens einmal zu, und der Schnappschuss darin
+ * zeigt immer 'requested'. Ohne diese Prüfung buchte eine zweite Zustellung —
+ * nach einer inzwischen gesetzten Sperre — eine Auszahlung zurück, die längst
+ * an Tremendous verschickt ist. Idempotent wie refundFailedPayout (höchstens
+ * eine Rückbuchung je payoutId).
+ *
+ * @returns {Promise<boolean>} true = angehalten; false = war nicht mehr 'requested'
+ */
+async function auszahlungAnhalten(uid, payoutRef, grund) {
+  const userRef = db.doc(`users/${uid}`);
+  const ledgerCol = userRef.collection('cashback_ledger');
+  return db.runTransaction(async (tx) => {
+    const payoutSnap = await tx.get(payoutRef);
+    const vorhanden = await tx.get(
+      ledgerCol.where('payoutId', '==', payoutRef.id).where('type', '==', 'admin_adjust'),
+    );
+    const userSnap = await tx.get(userRef);
+    if (!payoutSnap.exists || payoutSnap.data().status !== 'requested') return false;
+    const ts = admin.firestore.FieldValue.serverTimestamp();
+    const amountCents = Number(payoutSnap.data().amountCents) || 0;
+    tx.update(payoutRef, { status: 'failed', error: grund, updatedAt: ts });
+    if (vorhanden.empty && amountCents > 0) {
+      const balance = userSnap.exists ? userSnap.data().cashback_balance_cents || 0 : 0;
+      tx.set(ledgerCol.doc(), {
+        type: 'admin_adjust',
+        cents: amountCents,
+        payoutId: payoutRef.id,
+        balanceAfterCents: balance + amountCents,
+        reason: 'payout_failed_refund',
+        anlass: grund,
+        createdAt: ts,
+      });
+      tx.set(userRef, { cashback_balance_cents: balance + amountCents }, { merge: true });
+    }
+    return true;
+  });
+}
+
 exports.processPayout = onDocumentCreated(
   {
     document: 'cashback_payouts/{payoutId}',
@@ -2873,6 +2988,36 @@ exports.processPayout = onDocumentCreated(
     const payoutId = event.params.payoutId;
     const uid = payout.userId;
     const amountCents = Number(payout.amountCents) || 0;
+
+    // Kontosperre (Entscheidung Patrick 02.10.2026, lib/kontoSperre.js) — VOR
+    // der Tremendous-Bestellung. requestPayout prüft schon; diese zweite
+    // Schranke fängt eine Sperre, die zwischen Anfrage und Verarbeitung gesetzt
+    // wurde, und jede Auszahlung, die nicht über requestPayout entstand
+    // (Admin-Skript). Gesperrt → anhalten: `failed` + Guthaben zurück (es
+    // bleibt eingefroren, weil keine neue Anfrage durchkommt). Lesefehler →
+    // genauso (fail-closed): der Trigger läuft ohne Wiederholung, ein Wurf ließe
+    // die Anfrage abgebucht in 'requested' liegen. Nach der Rückbuchung kann
+    // ein nicht gesperrter Nutzer einfach erneut anfragen.
+    if (uid) {
+      let sperrGrund = null;
+      try {
+        if (await sperreLesen(db, uid)) sperrGrund = GRUND_KONTO_GESPERRT;
+      } catch (e) {
+        logger.error('payout-sperre-unpruefbar', { payoutId, uid, err: e.message });
+        sperrGrund = GRUND_SPERRE_UNPRUEFBAR;
+      }
+      if (sperrGrund) {
+        try {
+          const angehalten = await auszahlungAnhalten(uid, snap.ref, sperrGrund);
+          logger.warn('payout-angehalten', { payoutId, uid, grund: sperrGrund, amountCents, angehalten });
+        } catch (e) {
+          // Nichts verschickt; die Anfrage bleibt 'requested' und ist im
+          // Dashboard (Guthaben & Auszahlungen) sichtbar.
+          logger.error('payout-anhalten-failed', { payoutId, uid, grund: sperrGrund, err: e.message });
+        }
+        return;
+      }
+    }
 
     const apiKey = TREMENDOUS_API_KEY.value();
     if (!apiKey) {

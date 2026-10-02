@@ -58,6 +58,7 @@ beforeAll(async () => {
     await setDoc(doc(db, 'poll_responses/resp-mallory'), { userId: MALLORY, pollId: 'poll1' });
     await setDoc(doc(db, 'receipts/r1'), { userId: ALICE, status: 'approved' });
     await setDoc(doc(db, 'cashback_payouts/pay1'), { userId: ALICE, amountCents: 100 });
+    await setDoc(doc(db, `cashback_sperren/${MALLORY}`), { gesperrt: true, grund: 'test', quelle: 'test' });
     await setDoc(doc(db, 'gamification/actions'), { search_product: { points: 1 } });
     await setDoc(doc(db, 'aggregates/leaderboard_v1'), { top: [] });
     await setDoc(doc(db, 'leaderboards/' + ALICE), { displayName: 'Alice', stats: {} });
@@ -167,6 +168,25 @@ describe('Geld-Pfad: Guthaben & Ledger sind server-only', () => {
     await assertSucceeds(getDocs(query(
       collection(alice(), 'cashback_payouts'), where('userId', '==', ALICE))));
     await assertFails(getDoc(doc(mallory(), 'cashback_payouts/pay1')));
+  });
+});
+
+// Kontosperre (Entscheidung Patrick 02.10.2026): cashback_sperren/{uid} ist
+// server-only — kein Block in firestore.rules, das finale deny-all greift.
+// Der Betroffene darf die eigene Sperre weder sehen (sonst weicht er auf ein
+// neues Konto aus) noch löschen; niemand darf sich selbst oder andere sperren.
+describe('Kontosperre: cashback_sperren ist server-only', () => {
+  test('ANGRIFF: eigene Sperre lesen, löschen oder aufheben scheitert', async () => {
+    await assertFails(getDoc(doc(mallory(), `cashback_sperren/${MALLORY}`)));
+    await assertFails(deleteDoc(doc(mallory(), `cashback_sperren/${MALLORY}`)));
+    await assertFails(setDoc(doc(mallory(), `cashback_sperren/${MALLORY}`), { gesperrt: false }));
+    await assertFails(updateDoc(doc(mallory(), `cashback_sperren/${MALLORY}`), { gesperrt: false }));
+  });
+  test('ANGRIFF: fremde Sperren lesen/anlegen und die Sammlung abfragen scheitert', async () => {
+    await assertFails(getDoc(doc(alice(), `cashback_sperren/${MALLORY}`)));
+    await assertFails(setDoc(doc(mallory(), `cashback_sperren/${ALICE}`), { gesperrt: true }));
+    await assertFails(getDocs(collection(alice(), 'cashback_sperren')));
+    await assertFails(getDoc(doc(unauth(), `cashback_sperren/${MALLORY}`)));
   });
 });
 

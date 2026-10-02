@@ -39,6 +39,11 @@
  *
  * JEDER Ausstieg schreibt sein Ergebnis ans Dokument (src/ergebnis.js), damit
  * gilt: `status === 'approved'` ohne `rewardResult` = echter Fehler.
+ *
+ * KONTOSPERRE (Entscheidung Patrick 02.10.2026): Für ein Konto in
+ * `cashback_sperren/{uid}` wird nichts gebucht — geprüft IN der Buchungs-
+ * Transaktion, Ergebnis `not_credited / konto_gesperrt` am Dokument. Bereits
+ * Gebuchtes bleibt unangetastet. Regel und Lesefehler-Verhalten: src/kontoSperre.js.
  */
 
 const { onDocumentUpdated } = require('firebase-functions/v2/firestore');
@@ -51,6 +56,7 @@ const { resolveRegion, matchesTargeting } = require('./src/targeting');
 const { ergebnisFelder } = require('./src/ergebnis');
 const { campaignZurAufnahmezeit } = require('./src/campaignFallback');
 const { zurSammlungHinzufuegen, gesammelteSenden } = require('./src/push');
+const { sperreRef, istGesperrt, GRUND_KONTO_GESPERRT } = require('./src/kontoSperre');
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -295,11 +301,18 @@ exports.onCrowdUploadApproved = onDocumentUpdated(
         const campRef = db.collection(CAMPAIGNS_COL).doc(cid);
         const outcome = await db.runTransaction(async (tx) => {
           // ── Reads zuerst (Firestore-Transaktionsregel) ──
-          const [ledgerSnap, userSnap, campSnap, uploadSnap] = await Promise.all([
+          // Die Kontosperre wird IN derselben Transaktion gelesen wie das
+          // Ledger: eine Sperre, die während eines Laufs gesetzt wird, kann so
+          // nicht zwischen Prüfung und Buchung durchrutschen. Scheitert der
+          // Lesevorgang, scheitert die ganze Buchung und läuft in die
+          // Wiederholung unten (technischerFehler) — gebucht wird nie, solange
+          // die Sperre unbekannt ist, und abgelehnt wird deswegen auch nichts.
+          const [ledgerSnap, userSnap, campSnap, uploadSnap, sperreSnap] = await Promise.all([
             tx.get(ledgerRef),
             tx.get(userRef),
             tx.get(campRef),
             tx.get(uploadRef),
+            tx.get(sperreRef(db, uid)),
           ]);
 
           // Sicherung gegen zwei gleichzeitige Zustellungen: der Vorab-Check
@@ -310,6 +323,10 @@ exports.onCrowdUploadApproved = onDocumentUpdated(
           // wird nicht gebucht.
           if (!uploadSnap.exists) return { cents: 0, reason: 'geloescht' };
           if (uploadSnap.get('status') !== 'approved') return { cents: 0, reason: 'status_geaendert' };
+          // Gesperrtes Konto (Entscheidung Patrick 02.10.2026): keine neue
+          // Gutschrift. Steht VOR den Aktionsprüfungen, damit am Dokument der
+          // wahre Grund steht und nicht zufällig „Budget leer".
+          if (istGesperrt(sperreSnap)) return { cents: 0, reason: GRUND_KONTO_GESPERRT };
           if (!campSnap.exists) return { cents: 0, reason: 'campaign_missing' };
 
           const camp = campSnap.data();
@@ -380,6 +397,8 @@ exports.onCrowdUploadApproved = onDocumentUpdated(
         const credited = outcome.cents;
         if (credited > 0) {
           logger.info('[crowd-reward] gutgeschrieben', { uploadId, uid, cid, cents: credited, rewardLocationRule });
+        } else if (outcome.reason === GRUND_KONTO_GESPERRT) {
+          logger.warn('[crowd-reward] Konto gesperrt — nichts gebucht', { uploadId, uid, cid });
         } else if (outcome.reason === 'campaign_missing') {
           logger.warn('[crowd-reward] Aktion existiert nicht', { uploadId, cid });
         } else {
