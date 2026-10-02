@@ -43,7 +43,7 @@ const {
   BILD_GRUENDE, AUSSER_GESAMTQUOTE, KONTO_GESPERRT,
 } = require('./fotoRundeRegeln');
 // Werte-Helfer gemeinsam mit der Prüfkonsole (index.js/einreichung.js) — eine Quelle.
-const { eanOf, nameOf, preisOf, policyOf, pruefzifferOk, vollstaendigkeitOf, preisHinweisOf, eanFotoBefund, gtin14, PREIS_ARTEN } = require('./werte');
+const { eanOf, nameOf, preisOf, policyOf, pruefzifferOk, vollstaendigkeitOf, preisHinweisOf, eanFotoBefund, eanFotoBestaetigen, gtin14, PREIS_ARTEN } = require('./werte');
 const { SPERREN, ladeSperren, kontoSperreVon, sperreAusDaten } = require('./kontoSperre');
 const { auffaelligkeiten } = require('./ort');
 const { bildDefektOf } = require('./einreichung');
@@ -500,18 +500,31 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
 
   // 4b) Nummer vom Barcode-Foto gegen die gespeicherte (Entscheidung Patrick
   //     02.10.2026). Gelesen im Aufruf der Bildprüfung — kein Zusatzaufruf.
+  //     NUR bei einer Abweichung (gemessen ~3 %) eine zweite Lesung allein des
+  //     Barcode-Fotos; sie muss dieselbe Nummer liefern (eanFotoBestaetigen).
+  //     Scheitert sie an unserer Technik, bleibt die Abweichung stehen — der
+  //     Fall wird dann gehalten, nicht freigegeben (fail-closed für die Freigabe).
   //     Am Dokument abgelegt (`eanFotoOcr`), damit die Prüfkonsole dasselbe sieht.
   const eanFoto = new Map();
   for (const d of zuPruefen) {
     const a = audit.get(d.id);
     if (a) eanFoto.set(d.id, eanFotoBefund(d.x.ean, a.eanFoto));
   }
+  const zuBestaetigen = zuPruefen.filter((d) => (eanFoto.get(d.id) || {}).art === 'abweichend');
+  await arbeite(zuBestaetigen, async (d) => {
+    try {
+      const zweit = await frage(ai, bucket, d.x.images || {}, ['ean'], PROMPT_EAN);
+      eanFoto.set(d.id, eanFotoBestaetigen(eanFoto.get(d.id), zweit && zweit.sicher !== false ? zweit.ean : null));
+    } catch (e) {
+      eanFoto.set(d.id, { ...eanFoto.get(d.id), bestaetigt: false, fehler: String(e.message).slice(0, 80) });
+    }
+  }, PARALLEL_KI, null);
   if (schreibtAngaben) {
     await arbeite([...eanFoto.keys()], async (id) => {
       const d = pending.find((p) => p.id === id);
       const b = eanFoto.get(id);
       try {
-        await d.ref.set({ eanFotoOcr: { ean: b.gelesen, befund: b.art, at: FieldValue.serverTimestamp(), quelle: `${MODELL}/vertex, Bildprüfung der Morgenrunde`, lauf } }, { merge: true });
+        await d.ref.set({ eanFotoOcr: { ean: b.gelesen, befund: b.art, ...(b.grund ? { grund: b.grund } : {}), ...(b.art === 'abweichend' ? { bestaetigt: b.bestaetigt === true } : {}), at: FieldValue.serverTimestamp(), quelle: `${MODELL}/vertex, Bildprüfung der Morgenrunde`, lauf } }, { merge: true });
       } catch (e) {
         // Nur Anzeige in der Konsole — die Entscheidung der Runde hängt nicht daran.
         logger.warn('eanFotoOcr nicht gespeichert', { id, fehler: String(e.message).slice(0, 160) });
@@ -556,6 +569,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       const unterFoto = (nachGtin.get(gtin14(ef.gelesen)) || []).filter((o) => o.id !== d.id).map((o) => ({ ...o, status: statusJetzt.get(o.id) || o.status }));
       const dupFoto = evaluateDuplicate({ ...policyOf(d.id, d.x), ean: ef.gelesen }, unterFoto);
       eanFotoHinweis = `Barcode-Foto zeigt ${ef.gelesen}, gespeichert ist ${ef.gespeichert}`
+        + (ef.bestaetigt === false ? ' (zweite Lesung gescheitert)' : '')
         + (dupFoto.verdict === 'locked' ? ` — unter der Foto-Nummer gibt es eine eigene Freigabe vom ${datumVon(dupFoto.priorId)} (Wochen-Sperre)`
           : dupFoto.verdict === 'hold' ? ' — unter der Foto-Nummer liegt eine ältere eigene, noch offene Einreichung' : '');
     }

@@ -131,6 +131,25 @@ function eanFotoBefund(gespeichertRoh, gelesenRoh) {
   return { art: 'abweichend', gelesen, gespeichert };
 }
 
+/**
+ * Eine Abweichung zählt erst, wenn eine ZWEITE, nur auf das Barcode-Foto
+ * gerichtete Lesung dieselbe Nummer liefert (gemessen 02.10.2026 an 273
+ * offenen Fällen: 9 Abweichungen in der Bildprüfung, davon 7 echt — eine von
+ * einem unscharfen Foto, bei dem jede Lesung eine andere, aber gültige Nummer
+ * erfand, eine von einem dunklen Foto mit einer falsch gelesenen Ziffer). Eine
+ * Prüfziffer allein schützt nicht: das Modell erfindet gültige Nummern.
+ * Wie bei der EAN-Rettung (zwei übereinstimmende Lesungen).
+ * @param {object} befund  eanFotoBefund aus der Bildprüfung
+ * @param {string|null} zweitRoh  Ziffern der zweiten Lesung
+ * @returns {object} `abweichend` mit `bestaetigt: true`, oder `kein_urteil` (`lesungen_uneinig`)
+ */
+function eanFotoBestaetigen(befund, zweitRoh) {
+  if (!befund || befund.art !== 'abweichend') return befund;
+  const zweit = ziffern(zweitRoh);
+  if (zweit && pruefzifferOk(zweit) && gtin14(zweit) === gtin14(befund.gelesen)) return { ...befund, bestaetigt: true };
+  return { art: 'kein_urteil', gelesen: null, gespeichert: befund.gespeichert, grund: 'lesungen_uneinig' };
+}
+
 /** Bildarten, auf denen ein Preis steht (Lesedienst und Nachlesung benutzen dieselben Namen). */
 const PREIS_ARTEN = ['preisschild', 'kassenbon', 'beides'];
 
@@ -151,5 +170,5 @@ function preisHinweisOf(x) {
 
 module.exports = {
   pruefzifferOk, eanOf, nameOf, preisOf, policyOf, herstellerAnzeige, vollstaendigkeitOf, herkunftOf, preisHinweisOf, PREIS_ARTEN,
-  gtin14, istHandelsCode, eanFotoOf, eanFotoBefund,
+  gtin14, istHandelsCode, eanFotoOf, eanFotoBefund, eanFotoBestaetigen,
 };

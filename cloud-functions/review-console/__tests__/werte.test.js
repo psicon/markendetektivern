@@ -155,6 +155,18 @@ describe('Nummer vom Barcode-Foto (Entscheidung Patrick 02.10.2026)', () => {
   it('nichts gespeichert → kein Urteil', () => {
     expect(eanFotoBefund(null, GUELTIG)).toMatchObject({ art: 'kein_urteil', grund: 'nichts_gespeichert' });
   });
+  it('Abweichung zählt nur, wenn die zweite Lesung dieselbe gültige Nummer liest', () => {
+    const { eanFotoBestaetigen } = require('../src/werte');
+    const ab = eanFotoBefund(GUELTIG, ANDERE);
+    expect(eanFotoBestaetigen(ab, ANDERE)).toMatchObject({ art: 'abweichend', bestaetigt: true });
+    // erfundene, aber gültige Nummer bei unscharfem Foto (gemessen 02.10.)
+    expect(eanFotoBestaetigen(ab, '4001382088125')).toMatchObject({ art: 'kein_urteil', grund: 'lesungen_uneinig', gelesen: null });
+    // eine Ziffer falsch gelesen → Prüfziffer falsch → kein Urteil
+    expect(eanFotoBestaetigen(ab, '4000417025006').art).toBe('kein_urteil');
+    expect(eanFotoBestaetigen(ab, '').art).toBe('kein_urteil');
+    // nichts zu bestätigen
+    expect(eanFotoBestaetigen(eanFotoBefund(GUELTIG, GUELTIG), '')).toMatchObject({ art: 'gleich' });
+  });
   it('eanFotoOf liest nur gültige Nummern aus eanFotoOcr', () => {
     expect(eanFotoOf({ eanFotoOcr: { ean: GUELTIG } })).toBe(GUELTIG);
     expect(eanFotoOf({ eanFotoOcr: { ean: FALSCHE_PRUEFZIFFER } })).toBeNull();

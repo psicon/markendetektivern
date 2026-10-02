@@ -14,11 +14,12 @@
 // ── In-Memory-Firestore ────────────────────────────────────────────────
 const mockStore = new Map();
 const mockWrites = [];
-const mockLage = { sperrenFehler: false, listeFehler: false, auditAufrufe: [], auditTexte: [] };
+const mockLage = { sperrenFehler: false, listeFehler: false, auditAufrufe: [], auditTexte: [], zweitLesungen: [] };
 const mockSentinel = { __feld: 'serverTimestamp' };
 const mockDelete = { __feld: 'delete' };
 const mockListe = new Map(); // Pfad → { md5, size }
 const mockAudit = new Map(); // Pfad des ean-Fotos → eanFoto-Antwort
+const mockZweit = new Map(); // Pfad des ean-Fotos → Antwort der zweiten Lesung ('FEHLER' = wirft)
 
 function kopie(v) {
   if (Array.isArray(v)) return v.map(kopie);
@@ -103,8 +104,15 @@ jest.mock('@google/genai', () => ({
         generateContent: async ({ contents }) => {
           const parts = contents[0].parts;
           const text = parts.map((p) => p.text || '').join('\n');
-          if (!text.includes('Du prüfst eine Produkt-Einreichung')) throw new Error('unerwarteter Aufruf (Nachlesen sollte nicht nötig sein)');
           const pfade = parts.filter((p) => p.fileData).map((p) => p.fileData.fileUri.replace('gs://b/', ''));
+          if (text.includes('Lies die EAN/GTIN')) {
+            // Zweite Lesung nur des Barcode-Fotos (nur bei Abweichung).
+            mockLage.zweitLesungen.push(pfade);
+            const z = mockZweit.has(pfade[0]) ? mockZweit.get(pfade[0]) : mockAudit.get(pfade[0]);
+            if (z === 'FEHLER') throw new Error('INVALID_ARGUMENT kaputt');
+            return { text: JSON.stringify({ ean: z, sicher: true }) };
+          }
+          if (!text.includes('Du prüfst eine Produkt-Einreichung')) throw new Error('unerwarteter Aufruf (Nachlesen sollte nicht nötig sein)');
           mockLage.auditAufrufe.push(pfade);
           mockLage.auditTexte.push(text);
           const eanPfad = pfade.find((p) => p.includes('/ean'));
@@ -149,6 +157,8 @@ beforeEach(() => {
   mockLage.listeFehler = false;
   mockLage.auditAufrufe = [];
   mockLage.auditTexte = [];
+  mockLage.zweitLesungen = [];
+  mockZweit.clear();
   dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => T0);
   mockStore.set('cashback_config/v1', { fotoWorker: true });
 });
@@ -228,10 +238,31 @@ describe('Morgenrunde — Entscheidungen Patrick 02.10.2026', () => {
     mockAudit.set(doc('k').images.ean, ANDERE);
     const b = await scharf();
     expect(doc('k').status).toBe('pending');
-    expect(doc('k').eanFotoOcr).toMatchObject({ ean: ANDERE, befund: 'abweichend' });
+    expect(doc('k').eanFotoOcr).toMatchObject({ ean: ANDERE, befund: 'abweichend', bestaetigt: true });
+    expect(mockLage.zweitLesungen).toEqual([[doc('k').images.ean]]);
     const f = b.wartetAufDich.find((x) => x.id === 'k');
     expect(f).toMatchObject({ grund: 'ean_abweichend' });
     expect(f.hinweis).toMatch(/eigene Freigabe/);
+  });
+
+  it('zweite Lesung liest etwas anderes (erfundene Nummer bei unscharfem Foto) → kein Urteil, freigegeben', async () => {
+    einreichung('k');
+    mockAudit.set(doc('k').images.ean, ANDERE);
+    mockZweit.set(doc('k').images.ean, '4001382088125');
+    const b = await scharf();
+    expect(doc('k').status).toBe('approved');
+    expect(doc('k').eanFotoOcr).toMatchObject({ ean: null, befund: 'kein_urteil', grund: 'lesungen_uneinig' });
+    expect(b.eanFoto).toEqual({ kein_urteil: 1 });
+  });
+
+  it('zweite Lesung scheitert technisch → Abweichung bleibt, Fall wird gehalten (nie freigegeben)', async () => {
+    einreichung('k');
+    mockAudit.set(doc('k').images.ean, ANDERE);
+    mockZweit.set(doc('k').images.ean, 'FEHLER');
+    const b = await scharf();
+    expect(doc('k').status).toBe('pending');
+    expect(doc('k').eanFotoOcr).toMatchObject({ befund: 'abweichend', bestaetigt: false });
+    expect(b.wartetAufDich[0].hinweis).toMatch(/zweite Lesung gescheitert/);
   });
 
   it('Barcode-Foto nicht lesbar oder Waagen-Code → kein Urteil, normal freigegeben', async () => {
@@ -243,6 +274,7 @@ describe('Morgenrunde — Entscheidungen Patrick 02.10.2026', () => {
     expect(doc('a').status).toBe('approved');
     expect(doc('c').status).toBe('approved');
     expect(b.eanFoto).toEqual({ kein_urteil: 2 });
+    expect(mockLage.zweitLesungen).toEqual([]); // nur bei Abweichung
   });
 
   it('Bildprüfung bekommt die gespeicherte EAN NICHT mit (sonst schreibt das Modell sie ab)', async () => {

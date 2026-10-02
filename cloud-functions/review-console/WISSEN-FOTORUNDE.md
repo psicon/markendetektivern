@@ -99,8 +99,16 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   gespeicherte EAN → kein Urteil. Die Doppel-Regel läuft zusätzlich unter der
   Foto-Nummer; eine eigene Freigabe dort steht im Hinweis. Die gespeicherte EAN
   steht NICHT mehr im Auftrag der Bildprüfung — sonst schreibt das Modell sie
-  ab. Kosten: ~15 Ausgabe-Token je Fall im ohnehin laufenden Aufruf (Eingabe
-  ~8.200 Token für 7 Fotos, gemessen 02.10.).
+  ab. **Eine Abweichung zählt erst, wenn eine zweite Lesung nur des
+  Barcode-Fotos dieselbe Nummer liefert** (`eanFotoBestaetigen`); scheitert
+  diese Lesung technisch, bleibt der Fall liegen. Grund (Trockenlauf 02.10.,
+  273 offene Fälle): 198 gleich, 65 ohne Urteil, 9 Abweichungen — 6 davon am
+  Foto eindeutig echt (gespeicherte EAN falsch), 1 Foto mit zwei Strichcodes,
+  2 falsch gelesen: bei einem unscharfen Foto erfand jede Lesung eine andere,
+  GÜLTIGE Nummer, bei einem dunklen Foto war eine Ziffer falsch. Die
+  Prüfziffer allein schützt also nicht. Kosten: ~15 Ausgabe-Token je Fall im
+  ohnehin laufenden Aufruf (Eingabe ~8.200 Token für 7 Fotos), dazu eine
+  Lesung eines einzelnen Fotos je Abweichung (~3 % der Fälle).
 - **Foto-Abgleich gegen ALLE früheren Einreichungen (Entscheidung Patrick
   02.10.2026).** Gruppen gleicher Identitätsfotos (Pfad oder md5, leere
   Dateien ausgenommen). Die älteste Einreichung einer Gruppe trägt nie einen
