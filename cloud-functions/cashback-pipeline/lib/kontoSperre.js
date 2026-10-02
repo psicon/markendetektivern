@@ -32,6 +32,13 @@
  * still durchzuwinken. Wer sperrt, schreibt trotzdem `gesperrt: true` — dann
  * sind sich alle Leser einig, auch solche, die nur auf `=== true` prüfen.
  *
+ * Die Freigabe-Seite (review-console/src/kontoSperre.js, Zweig
+ * claude/dubletten-woche) liest dreiwertig: kein Dokument / `false` → frei,
+ * `true` → gesperrt, alles andere und Lesefehler → `unbekannt` (Fall bleibt
+ * liegen, wird weder freigegeben noch abgelehnt). Für den unklaren Eintrag
+ * heißt das hier „keine Gutschrift", dort „keine Freigabe" — beide Seiten
+ * bewegen in diesem Fall kein Geld. Abgestimmt in der Prüfrunde 02.10.2026.
+ *
  * ═══ Wer die Sperre liest (jede Verweigerung braucht einen LESER) ═══
  *
  *  - Bons: syncLedgerForReceipt (index.js) IN der Ledger-Transaktion. Keine
@@ -40,16 +47,23 @@
  *    (Prüfkonsole, Bon-Runde) — beide buchen nur über diese Funktion.
  *  - Auszahlung: requestPayout (in der Abbuchungs-Transaktion; 403
  *    `konto_gesperrt`, Lesefehler 503 `sperre_unpruefbar`) und processPayout
- *    (vor der Tremendous-Bestellung; Rückbuchung + `failed`).
+ *    (im Anspruch vor der Tremendous-Bestellung; Rückbuchung + `failed`).
  *  - Produktfotos: crowd-upload-reward, KOPIE dieser Datei
  *    (cloud-functions/crowd-upload-reward/src/kontoSperre.js).
- *  - Freigabe offener Produktfotos: Morgenrunde/Prüfkonsole (review-console).
- *  - Umfragen: survey-reward liest die Sperre NICHT. Dort liegt seit Juni ein
- *    nie ausgerollter Stand (7d8e91b); ein Deploy nur für die Sperre würde ihn
- *    ungeprüft mitnehmen. Schutz ist die Auszahlungssperre: gutgeschriebene
- *    Umfrage-Taler eines gesperrten Kontos lassen sich nicht auszahlen.
+ *  - Umfragen: survey-reward, KOPIE dieser Datei
+ *    (cloud-functions/survey-reward/src/kontoSperre.js), in der Ledger-
+ *    Transaktion. Der Deploy dafür nimmt 7d8e91b mit (Zeitfenster der Umfrage
+ *    wird geprüft) — in der Prüfrunde 02.10.2026 gelesen: nur zusätzliche
+ *    Gründe, NICHT zu zahlen, keiner, mehr zu zahlen.
+ *  - Freigabe offener Produktfotos: Morgenrunde/Prüfkonsole (review-console,
+ *    Teil A). Erst wenn auch dieser Leser live ist, die Sperre anlegen —
+ *    sonst gibt die Morgenrunde Fotos frei, die nichts mehr bringen, und die
+ *    App meldet „Vergütung liegt in deinem Guthaben". Das Skript
+ *    `.konto-sperre-0210.js` prüft das am ausgerollten Code.
  *  - OFFEN: Gast-Übernahme Stufe 2 (Umbuchung Gast → Zielkonto) muss die
  *    Sperre BEIDER Konten prüfen, bevor sie gebaut wird.
+ *  - Ops-Skripte, die direkt ins Ledger schreiben, umgehen die Sperre. Wer so
+ *    ein Skript schreibt, liest sie selbst.
  *
  * Die Sperre gilt je uid. Ein neues Konto derselben Person ist nicht gesperrt.
  *
@@ -61,6 +75,9 @@
  * Lesevorgang, scheitert die ganze Buchung und läuft in den Wiederholungsweg
  * des Aufrufers (nie in eine Ablehnung). Die Auszahlung bleibt bei einem
  * Lesefehler zu und meldet einen wiederholbaren Fehler.
+ * Ausnahme Umfragen: survey-reward hat (seit jeher, für jeden Fehler in der
+ * Ledger-Transaktion) keinen Wiederholungsweg — dort bleibt die Antwort
+ * gespeichert, der Taler fällt bei einem Lesefehler aus.
  */
 
 const SPERREN_SAMMLUNG = 'cashback_sperren';

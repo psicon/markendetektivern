@@ -120,13 +120,10 @@ describe('istGesperrt — wann gilt ein Konto als gesperrt', () => {
   });
 });
 
-describe('Kopie in crowd-upload-reward ist identisch', () => {
-  test('nur der KOPIE-Kopf unterscheidet sich', () => {
+describe('Kopien in crowd-upload-reward und survey-reward sind identisch', () => {
+  test.each([['crowd-upload-reward'], ['survey-reward']])('%s: nur der KOPIE-Kopf unterscheidet sich', (codebase) => {
     const quelle = fs.readFileSync(path.join(__dirname, '..', 'lib', 'kontoSperre.js'), 'utf8');
-    const kopie = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'crowd-upload-reward', 'src', 'kontoSperre.js'),
-      'utf8',
-    );
+    const kopie = fs.readFileSync(path.join(__dirname, '..', '..', codebase, 'src', 'kontoSperre.js'), 'utf8');
     expect(kopie).toMatch(/KOPIE von cloud-functions\/cashback-pipeline\/lib\/kontoSperre\.js/);
     const ohneKopf = kopie.replace(/\/\* ─+\n[\s\S]*?─+ \*\/\n\n/, '');
     expect(ohneKopf).toBe(quelle);
@@ -402,10 +399,83 @@ describe('processPayout: zweite Schranke vor Tremendous', () => {
     expect(fake.store.get(`users/${UID}`).cashback_balance_cents).toBe(1505);
   });
 
-  test('nicht gesperrt → Bestellung wie bisher', async () => {
-    await fn.processPayout(ereignis());
+  test('nicht gesperrt → Bestellung wie bisher, Anspruch bleibt als Spur', async () => {
+    await fn.processPayout({ ...ereignis(), id: 'ev1' });
     expect(bestellungen).toHaveLength(1);
-    expect(fake.store.get('cashback_payouts/p1')).toMatchObject({ status: 'sent', tremendousOrderId: 'o1' });
+    const p = fake.store.get('cashback_payouts/p1');
+    expect(p).toMatchObject({ status: 'sent', tremendousOrderId: 'o1', bestellung: { eventId: 'ev1' } });
     expect(fake.store.get(`users/${UID}`).cashback_balance_cents).toBe(0);
+  });
+
+  // ── Anspruch (Prüfrunde 02.10.2026): doppelte, parallele Zustellung ──
+
+  /** Lässt die Tremendous-Bestellung warten, bis `freigeben()` gerufen wird. */
+  function bestellungAnhalten() {
+    let freigeben;
+    let gestartet;
+    const tor = new Promise((r) => { freigeben = r; });
+    const laeuft = new Promise((r) => { gestartet = r; });
+    const vorher = global.fetch;
+    global.fetch = async (url, opts = {}) => {
+      if (!String(url).endsWith('/funding_sources')) {
+        gestartet();
+        await tor;
+      }
+      return vorher(url, opts);
+    };
+    return { freigeben, laeuft };
+  }
+
+  test('zweite Zustellung, während die erste bestellt, Sperre inzwischen gesetzt: tut nichts — kein Gutschein UND Guthaben', async () => {
+    const { freigeben, laeuft } = bestellungAnhalten();
+    const erste = fn.processPayout({ ...ereignis(), id: 'ev1' });
+    await laeuft; // erste hat den Anspruch und wartet auf Tremendous
+    sperren();
+    await fn.processPayout({ ...ereignis(), id: 'ev1' }); // dieselbe Event-ID, wie bei Firestore
+    expect(fake.store.get('cashback_payouts/p1').status).toBe('requested');
+    expect(ledger()).toHaveLength(0);
+    freigeben();
+    await erste;
+    expect(bestellungen).toHaveLength(1);
+    expect(fake.store.get('cashback_payouts/p1').status).toBe('sent');
+    expect(fake.store.get(`users/${UID}`).cashback_balance_cents).toBe(0);
+    expect(ledger()).toHaveLength(0);
+  });
+
+  test('zweite Zustellung mit Lesefehler, während die erste bestellt: hält NICHT an', async () => {
+    const { freigeben, laeuft } = bestellungAnhalten();
+    const erste = fn.processPayout({ ...ereignis(), id: 'ev1' });
+    await laeuft;
+    fake.fehler.add(`cashback_sperren/${UID}`);
+    await fn.processPayout({ ...ereignis(), id: 'ev2' });
+    expect(fake.store.get('cashback_payouts/p1').status).toBe('requested');
+    expect(ledger()).toHaveLength(0);
+    freigeben();
+    await erste;
+    expect(bestellungen).toHaveLength(1);
+    expect(fake.store.get('cashback_payouts/p1').status).toBe('sent');
+    expect(fake.store.get(`users/${UID}`).cashback_balance_cents).toBe(0);
+  });
+
+  test('Anspruch eines abgebrochenen Laufs: keine Bestellung, kein Anhalten — die Anfrage bleibt sichtbar stehen', async () => {
+    fake.store.set('cashback_payouts/p1', {
+      userId: UID, amountCents: 1505, status: 'requested', bestellung: { eventId: 'alt', seit: fake.zeit(1) },
+    });
+    sperren();
+    await fn.processPayout({ ...ereignis(), id: 'ev9' });
+    expect(bestellungen).toHaveLength(0);
+    expect(fake.store.get('cashback_payouts/p1').status).toBe('requested');
+    expect(ledger()).toHaveLength(0);
+  });
+
+  test('Anfrage ohne userId (kein Sperr-Schlüssel) läuft wie vorher bis zur Rückfrage nach der E-Mail', async () => {
+    fake.store.set('cashback_payouts/p2', { amountCents: 1505, status: 'requested' });
+    await fn.processPayout({
+      id: 'ev3',
+      params: { payoutId: 'p2' },
+      data: { data: () => ({ amountCents: 1505, status: 'requested' }), ref: db.doc('cashback_payouts/p2') },
+    });
+    expect(bestellungen).toHaveLength(0);
+    expect(fake.store.get('cashback_payouts/p2')).toMatchObject({ status: 'failed', error: 'no_email' });
   });
 });

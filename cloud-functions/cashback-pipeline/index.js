@@ -77,7 +77,7 @@ const { laufBeginnen, laufBeenden, entscheidungBeanspruchen, entscheidungFreigeb
 const { resolveMerchant } = require('./lib/merchant');
 const { sendCashbackReady } = require('./lib/push');
 const { erstelleGastUebernahme, kontoPruefen, tokenPruefen } = require('./lib/gastUebernahme');
-const { sperreRef, istGesperrt, sperreLesen, GRUND_KONTO_GESPERRT, GRUND_SPERRE_UNPRUEFBAR } = require('./lib/kontoSperre');
+const { sperreRef, istGesperrt, GRUND_KONTO_GESPERRT, GRUND_SPERRE_UNPRUEFBAR } = require('./lib/kontoSperre');
 const {
   computeDHash,
   hammingDistance,
@@ -2931,44 +2931,111 @@ async function refundFailedPayout(uid, payoutId, amountCents) {
 }
 
 /**
- * Auszahlung wegen Kontosperre anhalten (Entscheidung Patrick 02.10.2026):
- * 'requested' → 'failed' und Guthaben zurück, in EINER Transaktion.
- *
- * Der Status wird FRISCH gelesen, nicht aus dem Ereignis genommen: Firestore
- * stellt das Anlege-Ereignis mindestens einmal zu, und der Schnappschuss darin
- * zeigt immer 'requested'. Ohne diese Prüfung buchte eine zweite Zustellung —
- * nach einer inzwischen gesetzten Sperre — eine Auszahlung zurück, die längst
- * an Tremendous verschickt ist. Idempotent wie refundFailedPayout (höchstens
- * eine Rückbuchung je payoutId).
- *
- * @returns {Promise<boolean>} true = angehalten; false = war nicht mehr 'requested'
+ * Schreibteil des Anhaltens: 'requested' → 'failed' und Guthaben zurück.
+ * Läuft IN der Transaktion des Aufrufers, nachdem dieser alles gelesen hat
+ * (Firestore: erst lesen, dann schreiben). Höchstens eine Rückbuchung je
+ * payoutId — derselbe admin_adjust-Merker wie refundFailedPayout.
  */
-async function auszahlungAnhalten(uid, payoutRef, grund) {
+function anhaltenSchreiben(tx, { payoutRef, payout, userRef, userSnap, ledgerCol, vorhandeneRueckbuchung, grund }) {
+  const ts = admin.firestore.FieldValue.serverTimestamp();
+  const amountCents = Number(payout.amountCents) || 0;
+  tx.update(payoutRef, { status: 'failed', error: grund, updatedAt: ts });
+  if (vorhandeneRueckbuchung.empty && amountCents > 0) {
+    const balance = userSnap.exists ? userSnap.data().cashback_balance_cents || 0 : 0;
+    tx.set(ledgerCol.doc(), {
+      type: 'admin_adjust',
+      cents: amountCents,
+      payoutId: payoutRef.id,
+      balanceAfterCents: balance + amountCents,
+      reason: 'payout_failed_refund',
+      anlass: grund,
+      createdAt: ts,
+    });
+    tx.set(userRef, { cashback_balance_cents: balance + amountCents }, { merge: true });
+  }
+}
+
+/** Liest, was anhaltenSchreiben braucht (in derselben Transaktion). */
+async function anhaltenLesen(tx, uid, payoutRef) {
   const userRef = db.doc(`users/${uid}`);
   const ledgerCol = userRef.collection('cashback_ledger');
+  const vorhandeneRueckbuchung = await tx.get(
+    ledgerCol.where('payoutId', '==', payoutRef.id).where('type', '==', 'admin_adjust'),
+  );
+  const userSnap = await tx.get(userRef);
+  return { userRef, ledgerCol, vorhandeneRueckbuchung, userSnap };
+}
+
+/**
+ * Bestellung beanspruchen — Status, Kontosperre und Anspruch in EINER
+ * Transaktion, bevor Tremendous gerufen wird (Entscheidung Patrick 02.10.2026
+ * zur Sperre; Anspruch aus der Prüfrunde desselben Tages).
+ *
+ * Warum der Anspruch: Firestore stellt das Anlege-Ereignis mindestens einmal
+ * zu, auch doppelt und parallel mit DERSELBEN Event-ID. Ohne Anspruch konnte
+ * eine zweite Zustellung die Auszahlung anhalten (failed + Rückbuchung),
+ * während die erste schon bei Tremendous bestellte und danach 'sent' schrieb —
+ * Gutschein UND Guthaben. Mit Anspruch tut jede weitere Zustellung nichts,
+ * auch eine mit derselben Event-ID (es gibt keine Wiederholung, die ihn
+ * bräuchte: der Trigger läuft ohne retry).
+ *
+ * Der Anspruch steht als `bestellung: { eventId, seit }` am Dokument und
+ * bleibt als Spur. Der Status bleibt 'requested' — die App kennt keinen
+ * weiteren Wert („Wird vorbereitet"). Stirbt der Lauf zwischen Anspruch und
+ * Bestellung, bleibt die Anfrage stehen wie vorher bei jedem Absturz; das
+ * Dashboard zeigt sie nach 15 Minuten unter „hängt" (review-console
+ * src/auszahlung.js).
+ *
+ * `merker.sperreLesefehler` sagt dem Aufrufer, ob ein Wurf vom Lesen der
+ * Sperre kam (pro Versuch zurückgesetzt — Firestore wiederholt den Callback).
+ *
+ * @returns {Promise<'frei'|'nicht_offen'|'belegt'|'angehalten'>}
+ */
+async function auszahlungBeanspruchen(uid, payoutRef, eventId, merker) {
+  return db.runTransaction(async (tx) => {
+    merker.sperreLesefehler = false;
+    const payoutSnap = await tx.get(payoutRef);
+    if (!payoutSnap.exists || payoutSnap.data().status !== 'requested') return 'nicht_offen';
+    const payout = payoutSnap.data();
+    if (payout.bestellung) return 'belegt';
+    if (uid) {
+      let sperreSnap;
+      try {
+        sperreSnap = await tx.get(sperreRef(db, uid));
+      } catch (e) {
+        merker.sperreLesefehler = true;
+        throw e;
+      }
+      if (istGesperrt(sperreSnap)) {
+        const gelesen = await anhaltenLesen(tx, uid, payoutRef);
+        anhaltenSchreiben(tx, { payoutRef, payout, ...gelesen, grund: GRUND_KONTO_GESPERRT });
+        return 'angehalten';
+      }
+    }
+    tx.update(payoutRef, {
+      bestellung: { eventId: eventId || null, seit: admin.firestore.Timestamp.now() },
+    });
+    return 'frei';
+  });
+}
+
+/**
+ * Auszahlung anhalten, wenn der Anspruch selbst scheiterte (z. B. Sperre nicht
+ * lesbar). Status FRISCH gelesen; angehalten wird nur eine Anfrage, die noch
+ * 'requested' ist UND die kein anderer Lauf beansprucht hat — sonst könnte
+ * diese Zustellung eine Auszahlung zurückbuchen, die der andere Lauf gerade
+ * bei Tremendous bestellt.
+ *
+ * @returns {Promise<boolean>} true = angehalten
+ */
+async function auszahlungAnhalten(uid, payoutRef, grund) {
   return db.runTransaction(async (tx) => {
     const payoutSnap = await tx.get(payoutRef);
-    const vorhanden = await tx.get(
-      ledgerCol.where('payoutId', '==', payoutRef.id).where('type', '==', 'admin_adjust'),
-    );
-    const userSnap = await tx.get(userRef);
-    if (!payoutSnap.exists || payoutSnap.data().status !== 'requested') return false;
-    const ts = admin.firestore.FieldValue.serverTimestamp();
-    const amountCents = Number(payoutSnap.data().amountCents) || 0;
-    tx.update(payoutRef, { status: 'failed', error: grund, updatedAt: ts });
-    if (vorhanden.empty && amountCents > 0) {
-      const balance = userSnap.exists ? userSnap.data().cashback_balance_cents || 0 : 0;
-      tx.set(ledgerCol.doc(), {
-        type: 'admin_adjust',
-        cents: amountCents,
-        payoutId: payoutRef.id,
-        balanceAfterCents: balance + amountCents,
-        reason: 'payout_failed_refund',
-        anlass: grund,
-        createdAt: ts,
-      });
-      tx.set(userRef, { cashback_balance_cents: balance + amountCents }, { merge: true });
-    }
+    if (!payoutSnap.exists) return false;
+    const payout = payoutSnap.data();
+    if (payout.status !== 'requested' || payout.bestellung) return false;
+    const gelesen = await anhaltenLesen(tx, uid, payoutRef);
+    anhaltenSchreiben(tx, { payoutRef, payout, ...gelesen, grund });
     return true;
   });
 }
@@ -2989,34 +3056,44 @@ exports.processPayout = onDocumentCreated(
     const uid = payout.userId;
     const amountCents = Number(payout.amountCents) || 0;
 
-    // Kontosperre (Entscheidung Patrick 02.10.2026, lib/kontoSperre.js) — VOR
-    // der Tremendous-Bestellung. requestPayout prüft schon; diese zweite
-    // Schranke fängt eine Sperre, die zwischen Anfrage und Verarbeitung gesetzt
-    // wurde, und jede Auszahlung, die nicht über requestPayout entstand
-    // (Admin-Skript). Gesperrt → anhalten: `failed` + Guthaben zurück (es
-    // bleibt eingefroren, weil keine neue Anfrage durchkommt). Lesefehler →
-    // genauso (fail-closed): der Trigger läuft ohne Wiederholung, ein Wurf ließe
-    // die Anfrage abgebucht in 'requested' liegen. Nach der Rückbuchung kann
-    // ein nicht gesperrter Nutzer einfach erneut anfragen.
-    if (uid) {
-      let sperrGrund = null;
+    // Anspruch + Kontosperre (Entscheidung Patrick 02.10.2026,
+    // lib/kontoSperre.js) — VOR der Tremendous-Bestellung, in einer
+    // Transaktion (auszahlungBeanspruchen). requestPayout prüft die Sperre
+    // schon; diese zweite Schranke fängt eine Sperre, die zwischen Anfrage und
+    // Verarbeitung gesetzt wurde, und jede Auszahlung, die nicht über
+    // requestPayout entstand (Admin-Skript). Gesperrt → `failed` + Guthaben
+    // zurück (es bleibt eingefroren, weil keine neue Anfrage durchkommt).
+    //
+    // Scheitert der Anspruch (meist: Sperre nicht lesbar) → anhalten, sofern
+    // kein anderer Lauf beansprucht hat (fail-closed). Bewusst nicht
+    // „liegen lassen": der Trigger läuft ohne Wiederholung, die Anfrage bliebe
+    // mit abgebuchtem Guthaben auf 'requested'. So kommt das Geld zurück und
+    // ein nicht gesperrter Nutzer fragt einfach erneut an. Scheitert auch das
+    // Anhalten, bleibt die Anfrage stehen (Dashboard: „hängt").
+    const merker = { sperreLesefehler: false };
+    let anspruch;
+    try {
+      anspruch = await auszahlungBeanspruchen(uid, snap.ref, event.id, merker);
+    } catch (e) {
+      const grund = merker.sperreLesefehler ? GRUND_SPERRE_UNPRUEFBAR : 'vorpruefung_fehlgeschlagen';
+      logger.error('payout-anspruch-failed', { payoutId, uid, grund, err: e.message });
       try {
-        if (await sperreLesen(db, uid)) sperrGrund = GRUND_KONTO_GESPERRT;
-      } catch (e) {
-        logger.error('payout-sperre-unpruefbar', { payoutId, uid, err: e.message });
-        sperrGrund = GRUND_SPERRE_UNPRUEFBAR;
+        const angehalten = uid ? await auszahlungAnhalten(uid, snap.ref, grund) : false;
+        logger.warn('payout-angehalten', { payoutId, uid, grund, amountCents, angehalten });
+      } catch (e2) {
+        // Nichts verschickt; die Anfrage bleibt 'requested' und ist im
+        // Dashboard (Guthaben & Auszahlungen) unter „hängt" sichtbar.
+        logger.error('payout-anhalten-failed', { payoutId, uid, grund, err: e2.message });
       }
-      if (sperrGrund) {
-        try {
-          const angehalten = await auszahlungAnhalten(uid, snap.ref, sperrGrund);
-          logger.warn('payout-angehalten', { payoutId, uid, grund: sperrGrund, amountCents, angehalten });
-        } catch (e) {
-          // Nichts verschickt; die Anfrage bleibt 'requested' und ist im
-          // Dashboard (Guthaben & Auszahlungen) sichtbar.
-          logger.error('payout-anhalten-failed', { payoutId, uid, grund: sperrGrund, err: e.message });
-        }
-        return;
+      return;
+    }
+    if (anspruch !== 'frei') {
+      if (anspruch === 'angehalten') {
+        logger.warn('payout-angehalten', { payoutId, uid, grund: GRUND_KONTO_GESPERRT, amountCents, angehalten: true });
+      } else {
+        logger.info('payout-uebersprungen', { payoutId, uid, anspruch });
       }
+      return;
     }
 
     const apiKey = TREMENDOUS_API_KEY.value();
