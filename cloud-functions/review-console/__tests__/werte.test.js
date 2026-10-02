@@ -145,9 +145,21 @@ describe('Nummer vom Barcode-Foto (Entscheidung Patrick 02.10.2026)', () => {
     expect(istHandelsCode(waage)).toBe(true);
     expect(eanFotoBefund(GUELTIG, waage)).toMatchObject({ art: 'kein_urteil', grund: 'handelscode' });
     expect(istHandelsCode('0212345678909')).toBe(true);
-    expect(istHandelsCode('20123451')).toBe(true);
+    expect(istHandelsCode('0412345678904')).toBe(true);
+    expect(istHandelsCode('412345678903')).toBe(true); // UPC-A, Zahlsystem 4 (Ladennummer)
     expect(istHandelsCode(GUELTIG)).toBe(false);
     expect(istHandelsCode(ANDERE)).toBe(false);
+  });
+  it('EAN-8 mit 0 oder 2 vorne ist KEIN Waagen-Code: Lidl/Penny/Norma-Eigenmarken werden verglichen (Prüfrunde 02.10.)', () => {
+    for (const ean8 of ['20917937', '20005269', '02345673']) {
+      expect(pruefzifferOk(ean8)).toBe(true);
+      expect(istHandelsCode(ean8)).toBe(false);
+    }
+    // gespeichert ganz andere EAN, Foto zeigt die Lidl-EAN-8 → abweichend (vorher: kein Urteil)
+    expect(eanFotoBefund('4006381333931', '20917937')).toMatchObject({ art: 'abweichend', gelesen: '20917937' });
+    expect(eanFotoBefund('20005269', '20917937').art).toBe('abweichend');
+    expect(eanFotoBefund('20917937', '20917937').art).toBe('gleich');
+    expect(eanFotoBefund('020917937', '20917937').art).toBe('gleich'); // führende Null eingetippt
   });
   it('gespeichert ist ein Waagen-Code, das Foto zeigt eine echte EAN → abweichend (ein Mensch sieht hin)', () => {
     expect(eanFotoBefund('2112345000008', GUELTIG).art).toBe('abweichend');
@@ -155,15 +167,19 @@ describe('Nummer vom Barcode-Foto (Entscheidung Patrick 02.10.2026)', () => {
   it('nichts gespeichert → kein Urteil', () => {
     expect(eanFotoBefund(null, GUELTIG)).toMatchObject({ art: 'kein_urteil', grund: 'nichts_gespeichert' });
   });
-  it('Abweichung zählt nur, wenn die zweite Lesung dieselbe gültige Nummer liest', () => {
+  it('zweite Lesung: dieselbe Nummer → bestätigt; die gespeicherte → gleich; sonst → unsicher (halten), nie still frei (Prüfrunde 02.10.)', () => {
     const { eanFotoBestaetigen } = require('../src/werte');
     const ab = eanFotoBefund(GUELTIG, ANDERE);
     expect(eanFotoBestaetigen(ab, ANDERE)).toMatchObject({ art: 'abweichend', bestaetigt: true });
-    // erfundene, aber gültige Nummer bei unscharfem Foto (gemessen 02.10.)
-    expect(eanFotoBestaetigen(ab, '4001382088125')).toMatchObject({ art: 'kein_urteil', grund: 'lesungen_uneinig', gelesen: null });
-    // eine Ziffer falsch gelesen → Prüfziffer falsch → kein Urteil
-    expect(eanFotoBestaetigen(ab, '4000417025006').art).toBe('kein_urteil');
-    expect(eanFotoBestaetigen(ab, '').art).toBe('kein_urteil');
+    // die zweite Lesung liest die GESPEICHERTE Nummer → die erste war falsch gelesen
+    expect(eanFotoBestaetigen(ab, GUELTIG)).toEqual({ art: 'gleich', gelesen: GUELTIG, gespeichert: GUELTIG, grund: 'zweite_lesung' });
+    expect(eanFotoBestaetigen(ab, '0' + GUELTIG).art).toBe('gleich');
+    // erfundene, aber gültige dritte Nummer bei unscharfem Foto (gemessen 02.10.)
+    expect(eanFotoBestaetigen(ab, '4001382088125')).toEqual({ art: 'unsicher', gelesen: ANDERE, gespeichert: GUELTIG, zweit: '4001382088125', grund: 'lesungen_uneinig' });
+    // eine Ziffer falsch gelesen → Prüfziffer falsch; leer → ebenfalls unsicher
+    expect(eanFotoBestaetigen(ab, '4000417025006')).toMatchObject({ art: 'unsicher', zweit: null, grund: 'zweite_lesung_leer' });
+    expect(eanFotoBestaetigen(ab, '')).toMatchObject({ art: 'unsicher', grund: 'zweite_lesung_leer' });
+    expect(eanFotoBestaetigen(ab, null).art).toBe('unsicher');
     // nichts zu bestätigen
     expect(eanFotoBestaetigen(eanFotoBefund(GUELTIG, GUELTIG), '')).toMatchObject({ art: 'gleich' });
   });
@@ -186,5 +202,49 @@ describe('preisHinweisOf (Gegenzeichen zur Preis-Pflicht, 26.09.2026)', () => {
     expect(preisHinweisOf({ priceImageKind: 'produktfoto' })).toBeNull();
     expect(preisHinweisOf({ priceImageKind: 'fehlt', priceReceipt: {} })).toBeNull();
     expect(preisHinweisOf({})).toBeNull();
+  });
+});
+
+describe('EAN-Schreibweisen: dieselbe GTIN ist dasselbe Produkt (Prüfrunde 02.10.2026)', () => {
+  const { eanSchluessel, eanVarianten } = require('../src/werte');
+  it('„0" + EAN-13, UPC-A und EAN-13 haben denselben Schlüssel', () => {
+    expect(eanSchluessel('4006381333931')).toBe(eanSchluessel('04006381333931'));
+    expect(eanSchluessel('012345678905')).toBe(eanSchluessel('0012345678905'));
+    expect(eanSchluessel('20917937')).toBe(eanSchluessel('020917937'));
+    expect(eanSchluessel('4006381333931')).not.toBe(eanSchluessel('4000417025005'));
+  });
+  it('unbrauchbare Eingaben bleiben bei sich (fallen nicht in eine gemeinsame Gruppe)', () => {
+    expect(eanSchluessel('123')).toBe('123');
+    expect(eanSchluessel('123')).not.toBe(eanSchluessel('456'));
+    expect(eanSchluessel('')).toBeNull();
+    expect(eanSchluessel(null)).toBeNull();
+  });
+  it('Varianten für Abfragen: jede Länge 8–14 mit nur weggelassenen führenden Nullen, Rohwert immer dabei, höchstens 8', () => {
+    expect(eanVarianten('4006381333931').sort()).toEqual(['04006381333931', '4006381333931']);
+    expect(eanVarianten('04006381333931').sort()).toEqual(['04006381333931', '4006381333931']);
+    const v8 = eanVarianten('20917937');
+    expect(v8).toHaveLength(7);
+    expect(v8).toContain('20917937');
+    expect(v8).toContain('00000020917937');
+    for (const e of ['4006381333931', '20917937', '012345678905', '123', ' 4006381333931']) {
+      const v = eanVarianten(e);
+      expect(v).toContain(e);
+      expect(v.length).toBeLessThanOrEqual(8);
+      v.filter((x) => /^\d+$/.test(x)).forEach((x) => expect(eanSchluessel(x)).toBe(eanSchluessel(e)));
+    }
+    expect(eanVarianten(null)).toEqual([]);
+  });
+});
+
+describe('Einreich-Zeitpunkt: Server-Zeit statt Client-Feld (Prüfrunde 02.10.2026)', () => {
+  const { einreichZeit } = require('../src/werte');
+  it('createTime des Dokuments geht vor createdAt', () => {
+    expect(einreichZeit({ createdAt: { toMillis: () => 1 } }, { toMillis: () => 5000 })).toBe(5000);
+    expect(policyOf('a', { createdAt: { toMillis: () => 1 } }, { toMillis: () => 5000 }).createdAt).toBe(5000);
+  });
+  it('ohne createTime (Tests, Altaufrufer) → createdAt', () => {
+    expect(einreichZeit({ createdAt: { toMillis: () => 7 } })).toBe(7);
+    expect(policyOf('a', { createdAt: 7 }).createdAt).toBe(7);
+    expect(einreichZeit({})).toBeNull();
   });
 });

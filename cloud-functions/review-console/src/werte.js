@@ -57,10 +57,28 @@ const herstellerAnzeige = (x) =>
  * Produktfoto-Runde 20.09.2026). Ein nachgelesener PREIS darf dagegen lösen:
  * der Preis vom Schild ist eindeutig.
  */
-const policyOf = (id, x) => ({
+const policyOf = (id, x, serverZeit = null) => ({
   id, userId: x.userId ?? null, ean: eanOf(x), marketId: x.marketId ?? null,
-  status: x.status, createdAt: ms(x.createdAt), priceOcr: preisOf(x), manufacturerOcr: x.manufacturerOcr ?? null,
+  status: x.status, createdAt: einreichZeit(x, serverZeit), priceOcr: preisOf(x), manufacturerOcr: x.manufacturerOcr ?? null,
 });
+
+/**
+ * Einreich-Zeitpunkt für die Regeln: der Server-Zeitpunkt des Dokuments
+ * (`createTime` des Snapshots), wo der Aufrufer ihn hat — sonst `createdAt`.
+ *
+ * Warum (Prüfrunde 02.10.2026): `createdAt` schreibt der Client, und
+ * firestore.rules prüft den Wert beim Anlegen nicht. Die App setzt
+ * serverTimestamp(); ein veränderter Client könnte das Feld aber um mehr als
+ * sieben Tage verschieben und so die Wochen-Sperre und die Regel „ältere
+ * eigene noch offen" umgehen. `createTime` setzt Firestore selbst. Gemessen
+ * 02.10.2026: bei 0 von 4.102 Einreichungen weichen die beiden um mehr als
+ * 10 Minuten ab — die Umstellung ändert am Bestand nichts. Ein Rules-Zwang
+ * (`createdAt == request.time`) wäre die Alternative, sperrte aber jede
+ * ältere App-Version aus, die das Feld anders setzt.
+ */
+function einreichZeit(x, serverZeit = null) {
+  return ms(serverZeit) ?? ms(x && x.createdAt);
+}
 
 /** Eingabe der Vollständigkeitsprüfung (completenessCheck) mit effektiver EAN und effektivem Namen. */
 const vollstaendigkeitOf = (x) => ({
@@ -82,23 +100,62 @@ function herkunftOf(x) {
  * Die Morgenrunde liest die Ziffern unter dem Strichcode des Barcode-Fotos
  * mit (im Aufruf der Bildprüfung) und legt sie in `eanFotoOcr` ab. Weicht die
  * gelesene Nummer von der gespeicherten ab, bleibt die Einreichung liegen —
- * ein Mensch entscheidet. Anlass: Einreichungen mit falschen EANs, und eine
- * falsch getippte EAN umginge die Wochen-Sperre.
+ * ein Mensch entscheidet. Anlass: Einreichungen mit falschen EANs.
  */
 const ziffern = (v) => String(v ?? '').replace(/\D/g, '');
 /** GTIN auf 14 Stellen: EAN-13 „0…"/UPC-A und EAN-13 sind dann vergleichbar. */
 const gtin14 = (c) => ziffern(c).padStart(14, '0');
 
 /**
- * Händler-/Waagen-Code (GS1 „restricted circulation"): GTIN-13-Präfix 02, 04
- * und 20–29, bei EAN-8 die Präfixe 0 und 2. Gilt nur in einem Markt, trägt bei
- * Waage-Etiketten Gewicht oder Preis. Lose Ware wird angenommen (Entscheidung
- * Patrick 20.09.2026) — liest das Modell so einen Code, ist das kein Beleg für
- * eine falsche EAN.
+ * Gruppenschlüssel einer EAN für die Doppel-Regel: dieselbe GTIN in jeder
+ * Schreibweise (führende Nullen, UPC-A als 12 Stellen, EAN-13 mit „0" davor).
+ *
+ * Warum (Prüfrunde 02.10.2026): die App nimmt beim Eintippen 8–14 Ziffern
+ * ohne Normalisierung an. Wer „0" + EAN-13 eintippt, landete in einer eigenen
+ * Gruppe — und die Wochen-Sperre griff nicht. Nach GS1 ist die links mit
+ * Nullen aufgefüllte 14-stellige Form DIE kanonische GTIN; zwei Schreibweisen
+ * mit derselben Form sind dasselbe Produkt. Ohne 8–14 Ziffern bleibt der
+ * Rohwert (sonst fielen alle unbrauchbaren Eingaben in EINE Gruppe).
+ * @returns {string|null}
+ */
+function eanSchluessel(e) {
+  if (e == null || e === '') return null;
+  const z = ziffern(e);
+  return z.length >= 8 && z.length <= 14 ? z.padStart(14, '0') : String(e);
+}
+
+/**
+ * Alle Schreibweisen derselben GTIN, wie sie in `ean`/`eanRescueOcr` stehen
+ * können (8–14 Stellen, nur führende Nullen weggelassen) — für Abfragen mit
+ * `in` (höchstens 8 Werte, Firestore erlaubt 30). Der Rohwert ist immer dabei.
+ */
+function eanVarianten(e) {
+  const s = eanSchluessel(e);
+  if (!s) return [];
+  const out = new Set([String(e)]);
+  if (/^\d{14}$/.test(s)) {
+    for (let n = 8; n <= 14; n++) {
+      if (/^0*$/.test(s.slice(0, 14 - n))) out.add(s.slice(14 - n));
+    }
+  }
+  return [...out];
+}
+
+/**
+ * Waagen-/Händler-Code mit eingerechnetem Gewicht oder Preis (GS1 „variable
+ * measure" / Ladennummern): GTIN-13 mit Präfix 02, 04 oder 20–29, UPC-A mit
+ * Zahlsystem 2 oder 4. Die Nummer wechselt von Packung zu Packung — liest das
+ * Modell so einen Code, ist das kein Beleg für eine falsche EAN. Lose Ware
+ * wird angenommen (Entscheidung Patrick 20.09.2026).
+ *
+ * EAN-8 ist NIE ausgenommen (Prüfrunde 02.10.2026): EAN-8 mit 0 oder 2 vorne
+ * sind bei Lidl, Penny und Norma fest gedruckte Produkt-Barcodes der
+ * Eigenmarken (294 von 3.910 Einreichungen mit EAN, 7,5 %). Bis dahin fiel
+ * für sie der Abgleich ganz weg — auch wenn eine völlig andere EAN gespeichert
+ * war, also genau das Muster „falsche EANs".
  */
 function istHandelsCode(code) {
   const c = ziffern(code);
-  if (c.length === 8) return c[0] === '0' || c[0] === '2';
   if (c.length < 12 || c.length > 14) return false;
   return /^(02|04|2)/.test(gtin14(c).slice(1));
 }
@@ -118,7 +175,7 @@ function eanFotoOf(x) {
  *
  * @returns {{art:'gleich'|'abweichend'|'kein_urteil', gelesen:string|null, gespeichert:string|null, grund?:string}}
  *   `kein_urteil`: Foto nicht lesbar bzw. Prüfziffer falsch (nur eine gültige
- *   GTIN zählt als gelesen), Händler-/Waagen-Code gelesen, oder keine
+ *   GTIN zählt als gelesen), Waagen-/Händler-Code gelesen, oder keine
  *   gespeicherte EAN. Daraus folgt weder Halten noch Freigeben.
  */
 function eanFotoBefund(gespeichertRoh, gelesenRoh) {
@@ -132,22 +189,35 @@ function eanFotoBefund(gespeichertRoh, gelesenRoh) {
 }
 
 /**
- * Eine Abweichung zählt erst, wenn eine ZWEITE, nur auf das Barcode-Foto
- * gerichtete Lesung dieselbe Nummer liefert (gemessen 02.10.2026 an 273
+ * Eine Abweichung aus der Bildprüfung wird mit einer ZWEITEN, nur auf das
+ * Barcode-Foto gerichteten Lesung nachgeprüft (gemessen 02.10.2026 an 273
  * offenen Fällen: 9 Abweichungen in der Bildprüfung, davon 7 echt — eine von
  * einem unscharfen Foto, bei dem jede Lesung eine andere, aber gültige Nummer
- * erfand, eine von einem dunklen Foto mit einer falsch gelesenen Ziffer). Eine
- * Prüfziffer allein schützt nicht: das Modell erfindet gültige Nummern.
- * Wie bei der EAN-Rettung (zwei übereinstimmende Lesungen).
+ * erfand, eine von einem dunklen Foto mit einer falsch gelesenen Ziffer).
+ *
+ *  - zweite Lesung = erste       → `abweichend`, `bestaetigt: true`
+ *  - zweite Lesung = gespeichert → `gleich` (die erste Lesung war falsch)
+ *  - sonst (leer, unsicher, ungültig, eine dritte Nummer) → `unsicher`
+ *
+ * `unsicher` hält den Fall ebenfalls an (Prüfrunde 02.10.2026). Patricks
+ * Vorgabe lautet: weicht die gelesene Nummer ab, bleibt der Fall liegen. Bis
+ * dahin wurde ein unbestätigter Fall freigegeben — auch wenn die zweite Lesung
+ * die gespeicherte Nummer genauso wenig bestätigte. Ohne Befund geht es nur
+ * weiter, wenn eine Lesung die GESPEICHERTE Nummer liefert. Kosten: rund
+ * 2 von 270 Fällen zusätzlich für den Menschen.
+ *
  * @param {object} befund  eanFotoBefund aus der Bildprüfung
  * @param {string|null} zweitRoh  Ziffern der zweiten Lesung
- * @returns {object} `abweichend` mit `bestaetigt: true`, oder `kein_urteil` (`lesungen_uneinig`)
  */
 function eanFotoBestaetigen(befund, zweitRoh) {
   if (!befund || befund.art !== 'abweichend') return befund;
   const zweit = ziffern(zweitRoh);
-  if (zweit && pruefzifferOk(zweit) && gtin14(zweit) === gtin14(befund.gelesen)) return { ...befund, bestaetigt: true };
-  return { art: 'kein_urteil', gelesen: null, gespeichert: befund.gespeichert, grund: 'lesungen_uneinig' };
+  const gueltig = !!zweit && pruefzifferOk(zweit);
+  if (gueltig && gtin14(zweit) === gtin14(befund.gelesen)) return { ...befund, bestaetigt: true };
+  if (gueltig && befund.gespeichert && gtin14(zweit) === gtin14(befund.gespeichert)) {
+    return { art: 'gleich', gelesen: zweit, gespeichert: befund.gespeichert, grund: 'zweite_lesung' };
+  }
+  return { art: 'unsicher', gelesen: befund.gelesen, gespeichert: befund.gespeichert, zweit: gueltig ? zweit : null, grund: gueltig ? 'lesungen_uneinig' : 'zweite_lesung_leer' };
 }
 
 /** Bildarten, auf denen ein Preis steht (Lesedienst und Nachlesung benutzen dieselben Namen). */
@@ -169,6 +239,6 @@ function preisHinweisOf(x) {
 }
 
 module.exports = {
-  pruefzifferOk, eanOf, nameOf, preisOf, policyOf, herstellerAnzeige, vollstaendigkeitOf, herkunftOf, preisHinweisOf, PREIS_ARTEN,
-  gtin14, istHandelsCode, eanFotoOf, eanFotoBefund, eanFotoBestaetigen,
+  pruefzifferOk, eanOf, nameOf, preisOf, policyOf, einreichZeit, herstellerAnzeige, vollstaendigkeitOf, herkunftOf, preisHinweisOf, PREIS_ARTEN,
+  gtin14, eanSchluessel, eanVarianten, istHandelsCode, eanFotoOf, eanFotoBefund, eanFotoBestaetigen,
 };

@@ -231,9 +231,12 @@
         // Altbestand bis 02.10.2026 (24-h-Sperre).
         ['sperre_30_tage_gleicher_nutzer', 'Doppelt (selber Nutzer, alte 24-h-Regel)'],
         // Entscheidungen Patrick 02.10.2026.
+        // Gesperrte Konten: die Runde lässt sie STUMM liegen (keine Ablehnung),
+        // die Konsole verweigert die Freigabe; sie stehen am Ende der Liste.
         ['konto_gesperrt', 'Konto gesperrt — Freigabe nicht möglich'],
         ['kontosperre_unbekannt', 'Kontosperre nicht lesbar — nicht freigeben'],
         ['ean_abweichend', 'Barcode-Foto zeigt andere Nummer als gespeichert'],
+        ['ean_unsicher', 'Barcode-Foto: zwei Lesungen uneinig — Nummer selbst prüfen'],
         ['foto_nummer_doppelt', 'Unter der Foto-Nummer: eigene Freigabe binnen 7 Tagen'],
         ['foto_fremdes_konto', 'Gleiches Foto bei einem anderen Konto'],
         ['foto_aeltere_offen', 'Gleiches Foto in älterer, offener Einreichung'],
@@ -436,9 +439,11 @@
           ? `<div class="empty">Keine Treffer für „${esc(S.gesucht)}"<br><span style="font-size:12.5px">Suchfeld leeren zeigt wieder alle offenen Fälle.</span></div>`
           : '<div class="empty">Nichts offen 🎉</div>');
         // Wie viele davon sind auffällig? Bisher wurde das gerechnet und nie gezeigt.
-        const auff = (S.counts.locked || 0) + (S.counts.hold || 0) + (S.counts.incomplete || 0);
+        // Gesperrte Konten stehen am Ende und zählen getrennt — sie warten auf niemanden.
+        const gesperrt = S.counts.gesperrt || 0;
+        const auff = (S.counts.locked || 0) + (S.counts.hold || 0) + (S.counts.incomplete || 0) - gesperrt;
         $('prog').textContent = S.queue.length
-          ? `${Math.min(S.idx + 1, S.queue.length)} von ${S.queue.length}${auff ? ` · ${auff} auffällig` : ''}`
+          ? `${Math.min(S.idx + 1, S.queue.length)} von ${S.queue.length}${auff ? ` · ${auff} auffällig` : ''}${gesperrt ? ` · ${gesperrt} gesperrte Konten (am Ende)` : ''}`
           : '';
         const on = l.querySelector('.qi.on');
         if (on) on.scrollIntoView({ block: 'nearest' });

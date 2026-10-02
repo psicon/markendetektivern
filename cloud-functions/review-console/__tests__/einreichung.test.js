@@ -5,8 +5,9 @@
  * denselben Fall dasselbe sagen (Befund 26.09.2026).
  */
 const {
-  rowOf, stripPolicy, precheckOf, precheckFuerFall, nachbarnAus, gruppiereNachEan, eanIndex, baueFotoListe, bildDefektOf, safeStatus,
+  rowOf, stripPolicy, precheckOf, precheckFuerFall, nachbarnAus, nachbarnVon, gruppiereNachEan, eanIndex, baueFotoListe, bildDefektOf, safeStatus,
 } = require('../src/einreichung');
+const { eanSchluessel } = require('../src/werte');
 
 const GUELTIG = '4061464833821';
 const ANDERE = '4000417025005';
@@ -123,10 +124,25 @@ describe('precheckOf: gesperrte Konten und Barcode-Foto (Entscheidungen Patrick 
   it('gleiche Nummer oder nicht lesbar → kein Einfluss', () => {
     expect(precheckOf(sauber({ eanFotoOcr: { ean: GUELTIG } }), []).verdict).toBe('ok');
     expect(precheckOf(sauber({ eanFotoOcr: { ean: null } }), []).verdict).toBe('ok');
+    // die zweite Lesung der Runde las die gespeicherte Nummer (befund gleich, ean = gespeichert)
+    expect(precheckOf(sauber({ eanFotoOcr: { ean: GUELTIG, befund: 'gleich', grund: 'zweite_lesung' } }), []).verdict).toBe('ok');
   });
-  it('Warteschlange reicht die Kontosperre je Person durch', () => {
-    const l = baueFotoListe([doc('k', basis({ ean: GUELTIG, productNameOcr: 'Skyr' }))], new Map(), {}, '', (uid) => (uid === 'u1' ? 'gesperrt' : null));
-    expect(l.rows[0]).toMatchObject({ verdict: 'locked', reasons: ['konto_gesperrt'] });
+  it('zweite Lesung der Runde uneinig (befund unsicher) → hold ean_unsicher, nicht „bestätigte Abweichung" (Prüfrunde 02.10.)', () => {
+    const r = sauber({ eanFotoOcr: { ean: ANDERE, befund: 'unsicher', zweit: '4001382088125' } });
+    expect(r.eanFoto).toMatchObject({ art: 'unsicher', gelesen: ANDERE, zweit: '4001382088125' });
+    const pre = precheckOf(r, [], { fotoEanRows: [] });
+    expect(pre).toMatchObject({ verdict: 'hold', reasons: ['ean_unsicher'] });
+    expect(pre.dupFoto).toBeUndefined();
+  });
+  it('Warteschlange reicht die Kontosperre je Person durch; gesperrte stehen am Ende und zählen getrennt', () => {
+    const l = baueFotoListe([
+      doc('k', basis({ ean: GUELTIG, productNameOcr: 'Skyr', createdAt: T0 })),
+      doc('j', basis({ userId: 'u2', ean: ANDERE, productNameOcr: 'Quark', createdAt: T0 + STUNDE })),
+    ], new Map(), {}, '', (uid) => (uid === 'u1' ? 'gesperrt' : null));
+    expect(l.rows.map((r) => r.id)).toEqual(['j', 'k']);
+    expect(l.rows[1]).toMatchObject({ verdict: 'locked', reasons: ['konto_gesperrt'], gesperrt: true });
+    expect(l.rows[0].gesperrt).toBeUndefined();
+    expect(l.counts).toEqual({ ok: 1, locked: 1, gesperrt: 1 });
   });
 });
 
@@ -182,11 +198,23 @@ describe('EAN-Nachbarn über beide Felder', () => {
     expect(r.map((x) => x.id)).toEqual(['b']);
   });
 
-  it('gruppiereNachEan: je effektiver EAN, ohne EAN nicht dabei', () => {
+  it('gruppiereNachEan: je effektiver EAN (Schlüssel: GTIN in jeder Schreibweise), ohne EAN nicht dabei', () => {
     const g = gruppiereNachEan([gescannt, nachgelesen, beides, falsch, beides]);
-    expect([...g.keys()].sort()).toEqual([ANDERE, GUELTIG].sort());
-    expect(g.get(GUELTIG).map((x) => x.id).sort()).toEqual(['a', 'b']);
-    expect(g.get(ANDERE).map((x) => x.id)).toEqual(['c']);
+    expect([...g.keys()].sort()).toEqual([eanSchluessel(ANDERE), eanSchluessel(GUELTIG)].sort());
+    expect(nachbarnVon(g, GUELTIG).map((x) => x.id).sort()).toEqual(['a', 'b']);
+    expect(nachbarnVon(g, ANDERE).map((x) => x.id)).toEqual(['c']);
+    expect(nachbarnVon(g, null)).toEqual([]);
+  });
+
+  it('„0" + EAN-13 ist derselbe Artikel: Nachbar, Gruppe und Doppel-Regel (Prüfrunde 02.10.)', () => {
+    const variante = doc('v', basis({ ean: '0' + GUELTIG }));
+    expect(nachbarnAus([gescannt, variante], GUELTIG, 'a').map((x) => x.id)).toEqual(['v']);
+    expect(nachbarnVon(gruppiereNachEan([gescannt, variante]), '0' + GUELTIG).map((x) => x.id).sort()).toEqual(['a', 'v']);
+    // Freigabe unter der kurzen Schreibweise sperrt die lange binnen 7 Tagen
+    const ref = rowOf(doc('ref', basis({ ean: GUELTIG, productNameOcr: 'Skyr', status: 'approved', createdAt: T0 })));
+    const k = rowOf(doc('k', basis({ ean: '0' + GUELTIG, productNameOcr: 'Skyr', createdAt: T0 + 24 * STUNDE })));
+    expect(precheckOf(k, nachbarnAus([doc('ref', basis({ ean: GUELTIG, status: 'approved', createdAt: T0 }))], k.anzeigeEan, 'k')).verdict).toBe('locked');
+    expect(precheckOf(k, [ref])).toMatchObject({ verdict: 'locked', reasons: ['sperre_woche_gleicher_nutzer'] });
   });
 
   it('eanIndex der Warteschlange: nachgelesene EAN + Preis, nie der nachgelesene Hersteller', () => {
@@ -194,10 +222,21 @@ describe('EAN-Nachbarn über beide Felder', () => {
       doc('x', { userId: 'u1', eanRescueOcr: GUELTIG, status: 'approved', createdAt: T0, priceRescueOcr: { priceCents: 229 }, manufacturerOcr: null }),
       doc('y', { userId: 'u2', status: 'pending', createdAt: T0 }),
     ]);
-    expect([...idx.keys()]).toEqual([GUELTIG]);
-    const e = idx.get(GUELTIG)[0];
+    expect([...idx.keys()]).toEqual([eanSchluessel(GUELTIG)]);
+    const e = nachbarnVon(idx, GUELTIG)[0];
     expect(e._policy).toMatchObject({ id: 'x', ean: GUELTIG, priceOcr: { priceCents: 229 }, manufacturerOcr: null });
     expect(e.ean).toBe(GUELTIG);
+  });
+
+  it('Server-Zeitpunkt (createTime) geht vor createdAt — ein verschobenes createdAt hebt die Sperre nicht auf (Prüfrunde 02.10.)', () => {
+    const mitZeit = (id, x, createTime) => ({ id, data: () => x, createTime: { toMillis: () => createTime } });
+    const ref = rowOf(mitZeit('ref', basis({ ean: GUELTIG, productNameOcr: 'Skyr', status: 'approved', createdAt: T0 }), T0));
+    // Client behauptet, die neue Einreichung sei 30 Tage älter — der Server weiß: 1 Tag später.
+    const k = rowOf(mitZeit('k', basis({ ean: GUELTIG, productNameOcr: 'Skyr', createdAt: T0 - 30 * 24 * STUNDE }), T0 + 24 * STUNDE));
+    expect(k._policy.createdAt).toBe(T0 + 24 * STUNDE);
+    expect(k.createdAt).toBe(T0 - 30 * 24 * STUNDE); // Anzeige bleibt das Feld
+    expect(precheckOf(k, [ref]).verdict).toBe('locked');
+    expect(nachbarnVon(eanIndex([mitZeit('ref', { userId: 'u1', ean: GUELTIG, status: 'approved', createdAt: T0 - 90 * 24 * STUNDE }, T0)]), GUELTIG)[0]._policy.createdAt).toBe(T0);
   });
 });
 

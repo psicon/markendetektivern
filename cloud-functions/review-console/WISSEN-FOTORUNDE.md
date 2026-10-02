@@ -34,9 +34,10 @@ Notbremse zurückhält — das steht im Bericht unter `wartetAufDich`.
 
 ## Reihenfolge des Laufs
 
-1. **Offene Einreichungen laden**, älteste zuerst, dazu die Liste gesperrter
-   Konten. Einreichungen gesperrter Konten werden weder nachgelesen noch
-   angesehen.
+1. **Offene Einreichungen laden**, älteste zuerst (Server-Zeitpunkt
+   `createTime`, siehe unten), dazu die Liste gesperrter Konten.
+   Einreichungen gesperrter Konten werden weder nachgelesen noch angesehen —
+   sie bleiben stumm liegen.
 2. **Nachlesen** fehlender Angaben (Name, EAN, Preis, Hersteller) — siehe unten.
 3. **Dateien prüfen**: leer (0 Byte) = Mangel; nicht abrufbar = unsere Technik;
    Identitätsfoto schon in einer älteren Einreichung — gegen ALLE
@@ -47,7 +48,8 @@ Notbremse zurückhält — das steht im Bericht unter `wartetAufDich`.
    die Runde legt sie in `eanFotoOcr` ab, auch im Trockenlauf.
 5. **Chronologisch entscheiden** (`entscheideFall`) — eine im selben Lauf
    entschiedene Einreichung ist für die nächste derselben EAN Referenz bzw.
-   kein offener Vorgänger mehr.
+   kein offener Vorgänger mehr. „Dieselbe EAN" heißt dieselbe GTIN in jeder
+   Schreibweise (`werte.eanSchluessel`).
 6. **Notbremse** prüfen, dann schreiben.
 7. **Auf die Buchungen warten** (höchstens 5 Minuten) — nur für die Zahlen im
    Bericht. Die Nachricht an die Nutzer schickt der Sammler in crowd-upload-reward.
@@ -61,7 +63,16 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
 - **Dieselbe Person, dasselbe Produkt: einmal pro Woche (Entscheidung Patrick
   02.10.2026: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche").**
   Rollierend 168 h gegen die eigenen FREIGEGEBENEN Einreichungen derselben
-  wirksamen EAN (`eanOf`), symmetrisch um den Einreichzeitpunkt. KEINE
+  wirksamen EAN (`eanOf`), symmetrisch um den Einreichzeitpunkt. „Dieselbe EAN"
+  = dieselbe GTIN in jeder Schreibweise (`werte.eanSchluessel`, links mit
+  Nullen auf 14 Stellen): die App nimmt beim Eintippen 8–14 Ziffern ohne
+  Normalisierung an, „0" + EAN-13 lag sonst in einer eigenen Gruppe (Prüfrunde
+  02.10.2026; im Bestand noch nicht ausgenutzt, 0 Gruppen). Die Konsole fragt
+  dafür alle Schreibweisen ab (`werte.eanVarianten`, `in`-Abfrage).
+  Einreichzeitpunkt = `createTime` des Dokuments (Server), nicht das vom Client
+  geschriebene `createdAt` — das prüfen die Regeln beim Anlegen nicht, ein
+  veränderter Client könnte es um mehr als 7 Tage verschieben (gemessen: 0 von
+  4.102 Dokumenten weichen > 10 min ab, die Umstellung ändert am Bestand nichts). KEINE
   Ausnahme mehr für anderen Preis, Hersteller oder Markt — der Markt wird vom
   Nutzer frei gewählt (Buschbohnen 02.10.: REWE und Netto binnen 10 Minuten,
   beide bezahlt), Preis und Hersteller liest die Texterkennung. Fremde
@@ -79,12 +90,22 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
 - **Gesperrte Konten (Entscheidung Patrick 02.10.2026, „Ja, dann sperr die
   Konten").** `cashback_sperren/{uid}` = `{ gesperrt: true, seit, grund,
   quelle }`, server-only (deny-all in firestore.rules, Test vorhanden).
-  Gesperrt → Runde lehnt ab mit `konto_gesperrt` (vor allem anderen, ohne
-  Bildprüfung); die Konsole gibt NIE frei, auch nicht mit force (Ausgang
-  `refused`). Abgelehnt statt dauerhaft gehalten: ein Konto reichte ~4 am Tag
-  ein, liegen gelassen füllten die Fälle jeden Morgen „wartet auf dich"; wird
-  die Sperre aufgehoben, holt „Zurückholen" sie in die Schlange. `gesperrt:
-  false` oder kein Dokument = nicht gesperrt. Unklarer Eintrag oder Lesefehler
+  Gesperrt → **die Runde lässt die Einreichung STUMM liegen** (`offen
+  konto_gesperrt`, vor allem anderen, ohne Nachlesen und Bildprüfung, nichts
+  ans Dokument geschrieben); die Konsole gibt NIE frei, auch nicht mit force
+  (Ausgang `refused`). Patricks Vorgabe heißt „nicht freigegeben", nicht
+  „abgelehnt": eine Ablehnung wäre endgültig und für den Nutzer sichtbar, und
+  eine Sperre, die der Betroffene sieht, lädt zum Ausweichen auf ein neues
+  Konto ein (so auch die Gutschrift-Seite, `cashback-pipeline/lib/kontoSperre.js`).
+  Bis zur Prüfrunde 02.10.2026 lehnte die Runde ab — eine eigene Verschärfung,
+  die nie vorgelegt wurde. Ob es sichtbar abgelehnt werden soll, entscheidet
+  Patrick; dann braucht es vorher einen App-Text (`konto_gesperrt` hat bewusst
+  KEINEN REASON_COPY-Eintrag, der Server vergibt den Code nie). Der Bericht
+  zählt diese Fälle getrennt (`kontoSperren.offenEinreichungen`) — sie stehen
+  NICHT in „wartet auf dich" und lösen keine „wartet seit"-Warnung aus; in der
+  Konsole stehen sie am Ende der Liste (`gesperrt: true`, `counts.gesperrt`).
+  Wird die Sperre aufgehoben, prüft die nächste Runde sie ganz normal.
+  `gesperrt: false` oder kein Dokument = nicht gesperrt. Unklarer Eintrag oder Lesefehler
   = `unbekannt` → NIE freigeben, aber auch nicht wegen der Sperre ablehnen
   (`kontosperre_unbekannt`, rote Warnung). In der Schreib-Transaktion wird die
   Sperre noch einmal gelesen (`konto_gesperrt_im_lauf`). Bereits Gebuchtes
@@ -92,16 +113,25 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   Gutschrift-Seite (eigener Zweig).
 - **Nummer vom Barcode-Foto (Entscheidung Patrick 02.10.2026).** Weicht die
   gelesene Nummer von der gespeicherten (`ean`, gescannt/getippt) ab → offen
-  `ean_abweichend`, ein Mensch entscheidet; nie ablehnen, nie freigeben. Nur
-  eine gültige GTIN zählt als gelesen (Prüfziffer, Vergleich auf 14 Stellen,
-  UPC-A = EAN-13 mit führender 0). Nicht lesbar, Händler-/Waagen-Code (02, 04,
-  20–29; EAN-8: 0, 2 — lose Ware wird angenommen, 20.09.) oder keine
-  gespeicherte EAN → kein Urteil. Die Doppel-Regel läuft zusätzlich unter der
+  `ean_abweichend`, ein Mensch entscheidet; nie ablehnen, nie freigeben. Das
+  gilt VOR der Wochen-Sperre: die rechnet mit der gespeicherten EAN, und ist
+  die falsch, träfe sie womöglich ein anderes Produkt. Nur eine gültige GTIN
+  zählt als gelesen (Prüfziffer, Vergleich auf 14 Stellen, UPC-A = EAN-13 mit
+  führender 0). Nicht lesbar, Waagen-/Händler-Code mit eingerechnetem Gewicht
+  oder Preis (GTIN-13 mit 02, 04, 20–29; UPC-A mit 2 oder 4 — lose Ware wird
+  angenommen, 20.09.) oder keine gespeicherte EAN → kein Urteil. **EAN-8 wird
+  IMMER verglichen** (Prüfrunde 02.10.2026): EAN-8 mit 0 oder 2 vorne sind bei
+  Lidl, Penny und Norma fest gedruckte Eigenmarken-Barcodes (294 von 3.910
+  Einreichungen mit EAN) — bis dahin fiel für sie der Abgleich ganz weg. Die Doppel-Regel läuft zusätzlich unter der
   Foto-Nummer; eine eigene Freigabe dort steht im Hinweis. Die gespeicherte EAN
   steht NICHT mehr im Auftrag der Bildprüfung — sonst schreibt das Modell sie
-  ab. **Eine Abweichung zählt erst, wenn eine zweite Lesung nur des
-  Barcode-Fotos dieselbe Nummer liefert** (`eanFotoBestaetigen`); scheitert
-  diese Lesung technisch, bleibt der Fall liegen. Grund (Trockenlauf 02.10.,
+  ab. **Eine Abweichung wird mit einer zweiten Lesung nur des Barcode-Fotos
+  nachgeprüft** (`eanFotoBestaetigen`): dieselbe Nummer → bestätigt (offen
+  `ean_abweichend`); die GESPEICHERTE Nummer → `gleich`, die erste Lesung war
+  falsch, normal weiter; alles andere (leer, unsicher, dritte Nummer) →
+  `unsicher`, offen `ean_unsicher` (Prüfrunde 02.10.2026 — bis dahin wurde so
+  ein Fall freigegeben, obwohl die gespeicherte Nummer nie bestätigt war);
+  scheitert die Lesung technisch, bleibt der Fall ebenfalls liegen. Grund (Trockenlauf 02.10.,
   273 offene Fälle): 198 gleich, 65 ohne Urteil, 9 Abweichungen — 6 davon am
   Foto eindeutig echt (gespeicherte EAN falsch), 1 Foto mit zwei Strichcodes,
   2 falsch gelesen: bei einem unscharfen Foto erfand jede Lesung eine andere,
@@ -114,7 +144,14 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   Dateien ausgenommen). Die älteste Einreichung einer Gruppe trägt nie einen
   Befund. Ältere eines FREMDEN Kontos → offen `foto_fremdes_konto`; sonst
   ältere eigene freigegeben → `bilder_wiederverwendet`; ältere eigene offen →
-  offen `foto_aeltere_offen`; alle älteren abgelehnt → normal prüfen (erlaubte
+  offen `foto_aeltere_offen`; ältere eigene als DOPPEL abgelehnt
+  (`DOPPEL_GRUENDE`: Wochen-Sperre, `doppelt_eingereicht`, alte 24-h-Sperre,
+  `bilder_wiederverwendet`, `produkt_bereits_verguetet`) →
+  `bilder_wiederverwendet` — sonst ließen sich die Fotos einer als Doppel
+  abgelehnten Einreichung eine Woche später einfach noch einmal einreichen
+  (Prüfrunde 02.10.2026, im Bestand 12 solche jüngeren Einreichungen, 1 davon
+  freigegeben — eine legitime Korrektur nach `unvollstaendig`); ältere nur
+  wegen eines behebbaren Mangels abgelehnt → normal prüfen (erlaubte
   Korrektur). Der Status ist im Lauf nachgezogen. Vorher nur gegen die im Lauf
   offenen; gemessen seit Beginn: 35 Einreichungen mit identischem Foto einer
   älteren, davon 1 eigene und 2 fremde dennoch freigegeben. Scheitert die
@@ -159,6 +196,14 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   auch die korrekte Erst-Einreichung leer aus (passiert am 10.09., 3 Gruppen).
 - **Bild-Wiederverwendung trifft nur die jüngere Einreichung**, nie beide
   (seit 02.10. über `fotoRundeRegeln.bildBefund`, siehe oben).
+- **Eine Sperr-Ablehnung braucht einen Beleg, der feststeht (Prüfrunde
+  02.10.2026).** Wochen-Sperre und `bilder_wiederverwendet` stützen sich auf
+  eine andere Einreichung (`fotoRundeRegeln.belegeVon`). Geschrieben wird so
+  eine Ablehnung nur, wenn mindestens ein Beleg schon vor dem Lauf entschieden
+  war oder im selben Lauf TATSÄCHLICH geschrieben wurde. Sonst (Referenz-
+  Freigabe übersprungen, gescheitert, von der Notbremse oder einer frischen
+  Kontosperre zurückgehalten) bleibt der Fall offen
+  (`beleg_nicht_geschrieben`) — am Ende wäre sonst keine Kopie bezahlt.
 - **Bild-Dedup zählt nur die Identitäts-Fotos** (front, rueckseite, hersteller,
   ean, naehrwerte, zutaten) — NICHT `preis`. Zwei echte Sorten teilen sich oft
   ein gemeinsames Regal-/Aktionsschild.
@@ -221,11 +266,27 @@ Freigaben laufen IMMER — sie sind die harmlose Richtung. Zurückgehalten
 - **Wochen-Sperre auffällig oft:** mindestens 10 und mehr als 15 % aller Fälle
   des Laufs → nur diese Ablehnungen (gemessen 3,3 %). Eher ein Fehler beim
   Gruppieren als echte Doppel.
-- **Kontosperre auffällig oft:** mindestens 10 und mehr als 30 % aller Fälle →
-  nur diese Ablehnungen; dann die Sperrliste prüfen.
-- Wochen-Sperre, alte 24-h-Sperre und Kontosperre zählen wie „Preis fehlt"
-  NICHT in die Gesamtquote — weder heute noch im 30-Tage-Schnitt
-  (`AUSSER_GESAMTQUOTE`, geprüft an `rejectReason` UND `review.reason`).
+- Wochen-Sperre und alte 24-h-Sperre zählen wie „Preis fehlt" NICHT in die
+  Gesamtquote — weder heute noch im 30-Tage-Schnitt (`AUSSER_GESAMTQUOTE`,
+  geprüft an `rejectReason` UND `review.reason`). Gesperrte Konten brauchen
+  keine Bremse: sie werden nicht abgelehnt.
+
+## Bekannte Lücken (bewusst offen, Prüfrunde 02.10.2026)
+
+- **Lose Ware und Waagen-Codes fallen nie unter die Wochen-Sperre.** Ohne EAN
+  gibt es keine Gruppe (19 Freigaben im Bestand); ein Waagen-Code mit
+  eingerechnetem Preis oder Gewicht ändert sich je Packung (rund 38 GTIN-13
+  mit 02/2x/04). Gleiche Person, gleicher Name binnen 7 Tagen: 1 Paar (16 ct).
+- **Händlercodes zweier Ketten können kollidieren.** Seit der Markt keine
+  Ausnahme mehr ist, sperrt ein Händlercode von dm den gleichen Code von Netto
+  derselben Person (im Bestand 1 Paar, dort dasselbe Produkt). Gehört zu
+  ClickUp 12487v2akqg (Händlercodes kennzeichnen, Doppel-Prüfung nach Markt).
+- **„Dieselbe Person" heißt „dieselbe uid".** Gast-Konto und Zielkonto eines
+  Kontowechsels, oder mehrere Konten einer Person (wie bei den beiden
+  gesperrten), zählen als verschiedene Personen — für Wochen-Sperre UND
+  Kontosperre. Heute ohne Geldwirkung (Gäste zahlen nicht aus, Übernahme
+  Stufe 2 ist aus). **Pflichtpunkt für Gast-Übernahme Stufe 2:** beide Regeln
+  müssen Gast und Zielkonto als eine Person behandeln.
 
 ## Warnungen im Bericht
 

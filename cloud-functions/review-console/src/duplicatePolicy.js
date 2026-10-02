@@ -164,7 +164,7 @@ const ANDERS = ['price', 'manufacturer', 'market'];
 /**
  * @param {object} candidate  die zu prüfende Einreichung (mit id, userId, ean, marketId, createdAt, status)
  * @param {object[]} others   alle anderen Einreichungen mit derselben EAN (beliebiger Status)
- * @returns {{verdict:'ok'|'locked'|'hold', reason:string|null, priorId:string|null, priorUserId:string|null,
+ * @returns {{verdict:'ok'|'locked'|'hold', reason:string|null, priorId:string|null, priorIds?:string[], priorUserId:string|null,
  *            sameUser:boolean|null, lockUntil:number|null, updatedFields:string[], diff:object|null}}
  *
  * Das Fenster ist SYMMETRISCH (|Kandidat − Referenz| < 7 Tage): wird ein
@@ -218,11 +218,14 @@ function evaluateDuplicate(candidate, others) {
 
   // Jede eigene Freigabe im Fenster sperrt — ohne Ausnahme (Entscheidung
   // Patrick 02.10.2026). Frist: die jüngste Freigabe + 7 Tage.
+  // `priorIds`: ALLE sperrenden Freigaben. Die Morgenrunde schreibt eine
+  // Sperr-Ablehnung nur, wenn mindestens eine davon tatsächlich feststeht
+  // (vorher entschieden oder im selben Lauf wirklich geschrieben).
   const ref = inWindow[0];
   const diff = dataDiffers(candidate, ref);
   return {
     verdict: 'locked', reason: REASON.SAME_USER_WEEK,
-    priorId: ref.id, priorUserId: ref.userId ?? null, sameUser: true,
+    priorId: ref.id, priorIds: inWindow.map((o) => o.id), priorUserId: ref.userId ?? null, sameUser: true,
     lockUntil: (ms(ref.createdAt) ?? 0) + SAME_USER_LOCK_MS,
     updatedFields: ANDERS.filter((k) => diff[k]), diff: diff.details,
   };

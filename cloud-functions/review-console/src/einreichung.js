@@ -11,7 +11,7 @@
  * gegen Doppel geprüft.
  */
 const { evaluateDuplicate, completenessCheck, ms } = require('./duplicatePolicy');
-const { eanOf, nameOf, preisOf, policyOf, herstellerAnzeige, vollstaendigkeitOf, herkunftOf, eanFotoBefund } = require('./werte');
+const { eanOf, nameOf, preisOf, policyOf, herstellerAnzeige, vollstaendigkeitOf, herkunftOf, eanFotoBefund, eanSchluessel } = require('./werte');
 
 const REQUIRED_STEPS = ['front', 'rueckseite', 'hersteller', 'ean', 'naehrwerte', 'zutaten', 'preis'];
 const SLOTS = new Set(REQUIRED_STEPS);
@@ -35,6 +35,26 @@ function bildDefektOf(x) {
     out.push({ slot, grund: e && typeof e.grund === 'string' ? e.grund.slice(0, 80) : null });
   }
   return out;
+}
+
+/**
+ * Nummer vom Barcode-Foto (Morgenrunde, `eanFotoOcr`) gegen die gespeicherte —
+ * dieselbe Rechnung wie in der Runde (werte.eanFotoBefund), nicht deren
+ * gespeichertes Ergebnis. Einzige Ausnahme: hat die zweite Lesung der Runde
+ * die Abweichung weder bestätigt noch widerlegt (`befund: 'unsicher'`), steht
+ * das so da — aus der ersten Lesung allein sähe es wie eine bestätigte
+ * Abweichung aus. `eanFotoOcr` schreibt nur der Server (firestore.rules).
+ */
+function eanFotoZeile(x) {
+  const o = x.eanFotoOcr;
+  if (!o || typeof o !== 'object') return null;
+  const b = eanFotoBefund(x.ean, o.ean);
+  const unsicher = o.befund === 'unsicher' && b.art === 'abweichend';
+  return {
+    ...b, ...(unsicher ? { art: 'unsicher', zweit: typeof o.zweit === 'string' ? o.zweit.slice(0, 14) : null } : {}),
+    ...(typeof o.bestaetigt === 'boolean' ? { bestaetigt: o.bestaetigt } : {}),
+    at: ms(o.at),
+  };
 }
 
 function rowOf(d) {
@@ -64,10 +84,7 @@ function rowOf(d) {
     // … angezeigt und geprüft wird der effektive Wert.
     anzeigeName: nameOf(x),
     anzeigeEan: eanOf(x),
-    // Nummer vom Barcode-Foto (Morgenrunde, `eanFotoOcr`) gegen die gespeicherte —
-    // dieselbe Rechnung wie in der Runde (werte.eanFotoBefund), nicht deren
-    // gespeichertes Ergebnis.
-    eanFoto: x.eanFotoOcr && typeof x.eanFotoOcr === 'object' ? { ...eanFotoBefund(x.ean, x.eanFotoOcr.ean), at: ms(x.eanFotoOcr.at) } : null,
+    eanFoto: eanFotoZeile(x),
     herkunft,
     images: x.images ?? {},
     bildDefekt: bildDefektOf(x),
@@ -105,8 +122,9 @@ function rowOf(d) {
       ? { merchant: x.priceReceipt.merchant ?? null, street: x.priceReceipt.street ?? null, zip: x.priceReceipt.zip ?? null, city: x.priceReceipt.city ?? null, bonDate: x.priceReceipt.bonDate ?? null, complete: !!x.priceReceipt.complete }
       : null,
     review: x.review ?? null,
-    // Intern (vor der Auslieferung entfernt, stripPolicy): Eingaben der Regeln.
-    _policy: policyOf(d.id, x),
+    // Intern (vor der Auslieferung entfernt, stripPolicy): Eingaben der Regeln —
+    // mit dem Server-Zeitpunkt des Dokuments (werte.einreichZeit).
+    _policy: policyOf(d.id, x, d.createTime),
     _komplett: vollstaendigkeitOf(x),
   };
 }
@@ -135,7 +153,8 @@ const OHNE_DOPPEL = { verdict: 'ok', reason: null, priorId: null, priorUserId: n
  *  - Zeigt das Barcode-Foto eine andere Nummer (`ean_abweichend`) → `hold`;
  *    mit `fotoEanRows` (Einreichungen unter der Foto-Nummer) wird die
  *    Doppel-Regel auch dort gerechnet (`dupFoto`) — eine falsch getippte EAN
- *    soll die Wochen-Sperre nicht umgehen.
+ *    soll die Wochen-Sperre nicht umgehen. Bestätigte die zweite Lesung der
+ *    Runde weder die eine noch die andere Nummer → `ean_unsicher`, ebenfalls `hold`.
  */
 function precheckOf(row, sameEanRows, { kontoSperre = null, fotoEanRows = null } = {}) {
   const completeness = completenessCheck(row._komplett, REQUIRED_STEPS);
@@ -147,6 +166,10 @@ function precheckOf(row, sameEanRows, { kontoSperre = null, fotoEanRows = null }
 
   const ef = row.eanFoto && row.eanFoto.art === 'abweichend' ? row.eanFoto : null;
   let dupFoto = null;
+  if (row.eanFoto && row.eanFoto.art === 'unsicher') {
+    reasons.push('ean_unsicher');
+    if (verdict === 'ok') verdict = 'hold';
+  }
   if (ef) {
     reasons.push('ean_abweichend');
     if (fotoEanRows) {
@@ -194,20 +217,31 @@ function eindeutigeZeilen(docs) {
  * Nachbarn einer EAN aus den Treffern beider Abfragen (`ean` und `eanRescueOcr`).
  * Gezählt wird nur, wessen EFFEKTIVE EAN passt — genau wie die Runde gruppiert
  * (eanOf): eine Einreichung mit gescannter EAN A und nachgelesener B gehört zu A.
+ * „Passt" heißt: dieselbe GTIN in jeder Schreibweise (werte.eanSchluessel) —
+ * „0" + EAN-13 ist derselbe Artikel (Prüfrunde 02.10.2026). Die Abfragen
+ * dafür laufen über alle Schreibweisen (werte.eanVarianten).
  */
 function nachbarnAus(docs, ean, ohneId) {
-  return eindeutigeZeilen(docs).filter((r) => r.id !== ohneId && r.anzeigeEan === ean);
+  const key = eanSchluessel(ean);
+  return eindeutigeZeilen(docs).filter((r) => r.id !== ohneId && eanSchluessel(r.anzeigeEan) === key);
 }
 
-/** Treffer beider Abfragen → Zeilen je effektiver EAN. */
+/** Treffer beider Abfragen → Zeilen je GTIN (Schlüssel: werte.eanSchluessel). Nachschlagen mit nachbarnVon. */
 function gruppiereNachEan(docs) {
   const out = new Map();
   for (const r of eindeutigeZeilen(docs)) {
-    if (!r.anzeigeEan) continue;
-    if (!out.has(r.anzeigeEan)) out.set(r.anzeigeEan, []);
-    out.get(r.anzeigeEan).push(r);
+    const key = eanSchluessel(r.anzeigeEan);
+    if (!key) continue;
+    if (!out.has(key)) out.set(key, []);
+    out.get(key).push(r);
   }
   return out;
+}
+
+/** Einträge einer EAN aus gruppiereNachEan/eanIndex — in jeder Schreibweise. */
+function nachbarnVon(byEan, ean) {
+  const key = eanSchluessel(ean);
+  return (key && byEan.get(key)) || [];
 }
 
 /** Felder, die der EAN-Index der Warteschlange aus dem Bestand liest (select). */
@@ -224,10 +258,11 @@ const INDEX_FELDER = ['userId', 'ean', 'eanRescueOcr', 'marketId', 'status', 'cr
 function eanIndex(docs) {
   const index = new Map();
   for (const d of docs) {
-    const policy = policyOf(d.id, d.data() || {});
-    if (!policy.ean) continue;
-    if (!index.has(policy.ean)) index.set(policy.ean, []);
-    index.get(policy.ean).push({ ...policy, _policy: policy });
+    const policy = policyOf(d.id, d.data() || {}, d.createTime);
+    const key = eanSchluessel(policy.ean);
+    if (!key) continue;
+    if (!index.has(key)) index.set(key, []);
+    index.get(key).push({ ...policy, _policy: policy });
   }
   return index;
 }
@@ -235,13 +270,19 @@ function eanIndex(docs) {
 /**
  * Die Warteschlange der Produktfotos aus den offenen Dokumenten und dem Index.
  * `kontoSperre(uid)` liefert 'gesperrt' | 'unbekannt' | null (src/kontoSperre.js).
+ *
+ * Einreichungen gesperrter Konten stehen am ENDE (`gesperrt: true`, Zähler
+ * `counts.gesperrt`): sie bleiben stumm liegen (Entscheidung Patrick
+ * 02.10.2026, „nicht freigeben"), warten also auf niemanden — vorne würden sie
+ * die Fälle verdrängen, die auf eine Entscheidung warten.
  */
 function baueFotoListe(openDocs, byEan, p, q, kontoSperre = () => null) {
   let rows = openDocs.map((d) => {
     const r = rowOf(d);
-    const pre = precheckOf(r, byEan.get(r.anzeigeEan) || [], {
-      kontoSperre: kontoSperre(r.userId),
-      fotoEanRows: r.eanFoto && r.eanFoto.art === 'abweichend' ? byEan.get(r.eanFoto.gelesen) || [] : null,
+    const sperre = kontoSperre(r.userId);
+    const pre = precheckOf(r, nachbarnVon(byEan, r.anzeigeEan), {
+      kontoSperre: sperre,
+      fotoEanRows: r.eanFoto && r.eanFoto.art === 'abweichend' ? nachbarnVon(byEan, r.eanFoto.gelesen) : null,
     });
     return {
       id: r.id, userId: r.userId, productName: r.anzeigeName, ean: r.anzeigeEan,
@@ -249,6 +290,7 @@ function baueFotoListe(openDocs, byEan, p, q, kontoSperre = () => null) {
       marketName: r.marketName || r.marketId, createdAt: r.createdAt, campaignId: r.campaignId,
       priceCents: r.priceCents, manufacturer: r.manufacturer, priceImageKind: r.priceImageKindAnzeige,
       stepCount: r.stepCount, verdict: pre.verdict, reasons: pre.reasons, hinweise: pre.hinweise,
+      ...(sperre === 'gesperrt' ? { gesperrt: true } : {}),
       // Nur für die Suche, wird unten entfernt.
       _suche: [r.id, r.userId, r.anzeigeName, r.productName, r.productNameOcr, r.productNameRescueOcr, r.anzeigeEan, r.ean, r.marketName, r.manufacturer],
     };
@@ -256,12 +298,14 @@ function baueFotoListe(openDocs, byEan, p, q, kontoSperre = () => null) {
   if (q) rows = rows.filter((r) => r._suche.some((v) => v && String(v).toLowerCase().includes(q)));
   rows = rows.map(({ _suche, ...r }) => r);
   if (p.verdict && p.verdict !== 'all') rows = rows.filter((r) => r.verdict === p.verdict);
-  rows.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+  rows.sort((a, b) => (a.gesperrt ? 1 : 0) - (b.gesperrt ? 1 : 0) || (a.createdAt ?? 0) - (b.createdAt ?? 0));
   const counts = rows.reduce((acc, r) => ((acc[r.verdict] = (acc[r.verdict] || 0) + 1), acc), {});
+  const gesperrt = rows.filter((r) => r.gesperrt).length;
+  if (gesperrt) counts.gesperrt = gesperrt;
   return { type: 'photos', rows, total: rows.length, counts };
 }
 
 module.exports = {
   REQUIRED_STEPS, INDEX_FELDER, safeStatus, rowOf, stripPolicy, precheckOf, precheckFuerFall,
-  nachbarnAus, gruppiereNachEan, eanIndex, baueFotoListe, bildDefektOf,
+  nachbarnAus, nachbarnVon, gruppiereNachEan, eanIndex, baueFotoListe, bildDefektOf, eanFotoZeile,
 };

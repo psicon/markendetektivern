@@ -39,7 +39,7 @@ describe('productSubmissionCopy (86cbam5ep)', () => {
   });
 
   it('Copy-Ton: nie „abgelehnt"/„falsch"/„Fehler" in Nutzer-Texten', () => {
-    const codes = ['ean_fehlt', 'kein_produktname', 'produkt_bereits_verguetet', 'doppelt_eingereicht', 'bilder_wiederverwendet', 'fotos_unpassend', 'preis_fehlt', 'sperre_woche_gleicher_nutzer', 'konto_gesperrt', 'unbekannt'];
+    const codes = ['ean_fehlt', 'kein_produktname', 'produkt_bereits_verguetet', 'doppelt_eingereicht', 'bilder_wiederverwendet', 'fotos_unpassend', 'preis_fehlt', 'sperre_woche_gleicher_nutzer', 'unbekannt'];
     for (const code of codes) {
       const c = describeSubmission({ status: 'rejected', rejectReason: code });
       expect(`${c.label} ${c.headline} ${c.body}`).not.toMatch(/abgelehnt|falsch|Fehler/i);
@@ -63,12 +63,6 @@ describe('productSubmissionCopy (86cbam5ep)', () => {
       expect(`${c.headline} ${c.body}`).not.toMatch(/Preis|Hersteller|Markt|nächsten Tag/);
     }
     expect(describeSubmission({ status: 'rejected', rejectReason: 'sperre_woche_gleicher_nutzer' }).body).toMatch(/nächster Woche/);
-  });
-
-  it('konto_gesperrt hat einen eigenen, sachlichen Text', () => {
-    const c = describeSubmission({ status: 'rejected', rejectReason: 'konto_gesperrt' });
-    expect(c.headline).toMatch(/Konto/);
-    expect(`${c.headline} ${c.body}`).not.toMatch(/abgelehnt|falsch|Fehler|Betrug|Verstoß/i);
   });
 
   it('primaryReasonCode bevorzugt holdReasons und strippt den Suffix', () => {

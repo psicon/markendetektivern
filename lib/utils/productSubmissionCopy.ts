@@ -81,12 +81,6 @@ const REASON_COPY: Record<string, { headline: string; body: string }> = {
     headline: 'Dieses Produkt hast du diese Woche schon eingereicht',
     body: 'Die erste Einreichung zählt. Ab nächster Woche zählt derselbe Artikel wieder — ein anderes Produkt bringt sofort etwas.',
   },
-  // 02.10.2026 (Entscheidung Patrick): Einreichungen gesperrter Konten. Sachlich,
-  // ohne Vorwurf — der Grund steht nicht im Text.
-  konto_gesperrt: {
-    headline: 'Dein Konto nimmt gerade nicht an den Aktionen teil',
-    body: 'Deine Einreichungen werden derzeit nicht gezählt. Wenn du Fragen dazu hast, schreib uns einfach.',
-  },
   // Altbestand: bis zum 20.09.2026 sperrte auch die Einreichung eines ANDEREN
   // Nutzers. Das gilt nicht mehr; der Text sagt das, statt eine Frist zu nennen,
   // die es nicht mehr gibt.

@@ -20,6 +20,7 @@ const mockDelete = { __feld: 'delete' };
 const mockListe = new Map(); // Pfad → { md5, size }
 const mockAudit = new Map(); // Pfad des ean-Fotos → eanFoto-Antwort
 const mockZweit = new Map(); // Pfad des ean-Fotos → Antwort der zweiten Lesung ('FEHLER' = wirft)
+const mockCreate = new Map(); // Dokumentpfad → Server-Zeitpunkt (createTime), sonst keiner
 
 function kopie(v) {
   if (Array.isArray(v)) return v.map(kopie);
@@ -28,7 +29,8 @@ function kopie(v) {
 }
 function snapshot(pfad, daten) {
   const d = daten === undefined ? undefined : kopie(daten);
-  return { id: pfad.split('/').pop(), ref: docRef(pfad), exists: d !== undefined, data: () => (d === undefined ? undefined : kopie(d)), get: (f) => (d === undefined ? undefined : kopie(d[f])) };
+  const createTime = mockCreate.has(pfad) ? { toMillis: () => mockCreate.get(pfad) } : undefined;
+  return { id: pfad.split('/').pop(), ref: docRef(pfad), exists: d !== undefined, createTime, data: () => (d === undefined ? undefined : kopie(d)), get: (f) => (d === undefined ? undefined : kopie(d[f])) };
 }
 function anwenden(pfad, daten, merge) {
   const vorher = merge ? mockStore.get(pfad) || {} : {};
@@ -159,6 +161,7 @@ beforeEach(() => {
   mockLage.auditTexte = [];
   mockLage.zweitLesungen = [];
   mockZweit.clear();
+  mockCreate.clear();
   dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => T0);
   mockStore.set('cashback_config/v1', { fotoWorker: true });
 });
@@ -190,15 +193,21 @@ describe('Morgenrunde — Entscheidungen Patrick 02.10.2026', () => {
     expect(doc('neu').status).toBe('approved');
   });
 
-  it('gesperrtes Konto → abgelehnt konto_gesperrt, ohne Bildprüfung', async () => {
+  it('gesperrtes Konto → bleibt STUMM liegen: nichts geschrieben, keine Bildprüfung, nicht in „wartet auf dich"', async () => {
     mockStore.set('cashback_sperren/boese', { gesperrt: true, seit: ts(T0 - TAG_MS), grund: 'Fotos zu Hause', quelle: 'Entscheidung Patrick 02.10.2026' });
-    einreichung('k', { uid: 'boese' });
+    einreichung('k', { uid: 'boese', createdAt: T0 - 10 * TAG_MS });
     einreichung('frei', { uid: 'u2' });
     const b = await scharf();
-    expect(doc('k')).toMatchObject({ status: 'rejected', rejectReason: 'konto_gesperrt', review: { reason: 'konto_gesperrt' } });
+    expect(doc('k').status).toBe('pending');
+    expect(doc('k').rejectReason).toBeUndefined();
+    expect(doc('k').holdReasons).toBeUndefined();
+    expect(mockWrites.filter((w) => w.path === 'crowd_uploads/k')).toEqual([]);
     expect(doc('frei').status).toBe('approved');
     expect(mockLage.auditAufrufe).toHaveLength(1);
-    expect(b.kontoSperren).toEqual({ aktiv: 1, unlesbar: false });
+    expect(b).toMatchObject({ abgelehnt: 0, offen: 0, wartetAufDich: [], offenGruende: {} });
+    expect(b.kontoSperren).toEqual({ aktiv: 1, unlesbar: false, offenEinreichungen: 1 });
+    // liegt seit 10 Tagen — trotzdem keine „wartet seit"-Warnung: er wartet auf niemanden
+    expect(b.warnungen.map((w) => w.code)).not.toContain('fotos_warten');
   });
 
   it('aufgehobene Sperre (gesperrt:false) → normal geprüft', async () => {
@@ -245,14 +254,42 @@ describe('Morgenrunde — Entscheidungen Patrick 02.10.2026', () => {
     expect(f.hinweis).toMatch(/eigene Freigabe/);
   });
 
-  it('zweite Lesung liest etwas anderes (erfundene Nummer bei unscharfem Foto) → kein Urteil, freigegeben', async () => {
+  it('zweite Lesung liest eine dritte Nummer (unscharfes Foto) → unsicher, bleibt liegen — nie still freigegeben (Prüfrunde 02.10.)', async () => {
     einreichung('k');
     mockAudit.set(doc('k').images.ean, ANDERE);
     mockZweit.set(doc('k').images.ean, '4001382088125');
     const b = await scharf();
+    expect(doc('k').status).toBe('pending');
+    expect(doc('k').eanFotoOcr).toMatchObject({ ean: ANDERE, befund: 'unsicher', zweit: '4001382088125', grund: 'lesungen_uneinig' });
+    expect(b.eanFoto).toEqual({ unsicher: 1 });
+    expect(b.wartetAufDich[0]).toMatchObject({ id: 'k', grund: 'ean_unsicher' });
+  });
+
+  it('zweite Lesung liest die GESPEICHERTE Nummer → die erste war falsch gelesen, freigegeben', async () => {
+    einreichung('k');
+    mockAudit.set(doc('k').images.ean, ANDERE);
+    mockZweit.set(doc('k').images.ean, EAN);
+    const b = await scharf();
     expect(doc('k').status).toBe('approved');
-    expect(doc('k').eanFotoOcr).toMatchObject({ ean: null, befund: 'kein_urteil', grund: 'lesungen_uneinig' });
-    expect(b.eanFoto).toEqual({ kein_urteil: 1 });
+    expect(doc('k').eanFotoOcr).toMatchObject({ ean: EAN, befund: 'gleich', grund: 'zweite_lesung' });
+    expect(b.eanFoto).toEqual({ gleich: 1 });
+  });
+
+  it('Lidl-EAN-8 auf dem Foto, gespeichert eine ganz andere EAN → bleibt liegen (vorher: kein Urteil, Prüfrunde 02.10.)', async () => {
+    einreichung('k');
+    mockAudit.set(doc('k').images.ean, '20917937');
+    await scharf();
+    expect(doc('k').status).toBe('pending');
+    expect(doc('k').eanFotoOcr).toMatchObject({ ean: '20917937', befund: 'abweichend', bestaetigt: true });
+  });
+
+  it('Abweichung geht der Wochen-Sperre vor: gespeicherte EAN gehört zu einer eigenen Freigabe, das Foto zeigt etwas anderes → liegen lassen', async () => {
+    einreichung('alt', { status: 'approved', createdAt: T0 - 3 * TAG_MS });
+    einreichung('k');
+    mockAudit.set(doc('k').images.ean, ANDERE);
+    const b = await scharf();
+    expect(doc('k').status).toBe('pending');
+    expect(b.wartetAufDich[0]).toMatchObject({ id: 'k', grund: 'ean_abweichend' });
   });
 
   it('zweite Lesung scheitert technisch → Abweichung bleibt, Fall wird gehalten (nie freigegeben)', async () => {
@@ -341,11 +378,69 @@ describe('Morgenrunde — Entscheidungen Patrick 02.10.2026', () => {
     const r = await taeglicheRunde({ projekt: 'p', bucketName: 'b', nurLesen: true });
     expect(mockWrites).toEqual([]);
     expect(doc('neu').status).toBe('pending');
+    // gleicher Zeitpunkt → nach ID (eindeutige Reihenfolge)
     expect(r.plan.map((p) => [p.id, p.entscheidung, p.grund])).toEqual([
+      ['k', 'offen', 'konto_gesperrt'],
       ['neu', 'ablehnen', 'sperre_woche_gleicher_nutzer'],
-      ['k', 'ablehnen', 'konto_gesperrt'],
     ]);
-    expect(r.plan[0].eingabe.dup).toMatchObject({ verdict: 'locked', priorId: 'alt' });
+    expect(r.plan.find((p) => p.id === 'neu').eingabe.dup).toMatchObject({ verdict: 'locked', priorId: 'alt' });
     expect(r.kontoSperren).toBe(1);
+  });
+
+  it('„0" + EAN-13 eingetippt umgeht die Wochen-Sperre nicht (Prüfrunde 02.10.)', async () => {
+    einreichung('alt', { status: 'approved', createdAt: T0 - 3 * TAG_MS });
+    einreichung('neu', { ean: '0' + EAN });
+    const b = await scharf();
+    expect(doc('neu')).toMatchObject({ status: 'rejected', rejectReason: 'doppelt_eingereicht', review: { reason: 'sperre_woche_gleicher_nutzer' } });
+    expect(b.ablehnGruende).toEqual({ sperre_woche_gleicher_nutzer: 1 });
+  });
+
+  it('verschobenes createdAt (veränderter Client) umgeht die Wochen-Sperre nicht: es gilt der Server-Zeitpunkt (Prüfrunde 02.10.)', async () => {
+    einreichung('alt', { status: 'approved', createdAt: T0 - 3 * TAG_MS });
+    einreichung('neu', { createdAt: T0 - 40 * TAG_MS });
+    mockCreate.set('crowd_uploads/neu', T0 - TAG_MS);
+    await scharf();
+    expect(doc('neu')).toMatchObject({ status: 'rejected', review: { reason: 'sperre_woche_gleicher_nutzer' } });
+  });
+
+  it('Fotos einer als Doppel abgelehnten Einreichung eine Woche später erneut eingereicht → wiederverwendet (Prüfrunde 02.10.)', async () => {
+    einreichung('a', { status: 'approved', createdAt: T0 - 10 * TAG_MS });
+    einreichung('b', { status: 'rejected', createdAt: T0 - 9 * TAG_MS, rejectReason: 'doppelt_eingereicht', review: { reason: 'sperre_woche_gleicher_nutzer' } });
+    einreichung('c', { createdAt: T0 - TAG_MS, md5: { front: 'md5_b_front', zutaten: 'md5_b_zutaten' } });
+    await scharf();
+    expect(doc('c')).toMatchObject({ status: 'rejected', rejectReason: 'bilder_wiederverwendet' });
+  });
+
+  it('… nach einer Ablehnung wegen eines behebbaren Mangels bleibt die Korrektur mit denselben Fotos möglich', async () => {
+    einreichung('b', { status: 'rejected', createdAt: T0 - 9 * TAG_MS, rejectReason: 'ean_fehlt' });
+    einreichung('c', { createdAt: T0 - TAG_MS, md5: { front: 'md5_b_front' } });
+    await scharf();
+    expect(doc('c').status).toBe('approved');
+  });
+
+  it('Referenz-Freigabe im Lauf NICHT geschrieben → die Sperr-Ablehnung, die sich auf sie stützt, auch nicht (Prüfrunde 02.10.)', async () => {
+    einreichung('a', { createdAt: T0 - 3 * TAG_MS });
+    einreichung('b', { createdAt: T0 - TAG_MS });
+    const orig = mockDb.runTransaction;
+    let erste = true;
+    // Während der Runde entscheidet jemand anderes über a (Status nicht mehr pending) → a wird übersprungen.
+    mockDb.runTransaction = async (fn) => {
+      if (erste) { erste = false; mockStore.set('crowd_uploads/a', { ...doc('a'), status: 'rejected', rejectReason: 'fotos_unpassend' }); }
+      return orig(fn);
+    };
+    try {
+      const b = await scharf();
+      expect(doc('b').status).toBe('pending');
+      expect(b.wartetAufDich.find((x) => x.id === 'b')).toMatchObject({ grund: 'beleg_nicht_geschrieben', zurueckgehalten: 'sperre_woche_gleicher_nutzer' });
+      expect(b.abgelehnt).toBe(0);
+    } finally { mockDb.runTransaction = orig; }
+  });
+
+  it('… im Normalfall wird die Referenz zuerst geschrieben, dann die Sperre', async () => {
+    einreichung('a', { createdAt: T0 - 3 * TAG_MS });
+    einreichung('b', { createdAt: T0 - TAG_MS });
+    await scharf();
+    expect(doc('a').status).toBe('approved');
+    expect(doc('b')).toMatchObject({ status: 'rejected', review: { reason: 'sperre_woche_gleicher_nutzer' } });
   });
 });

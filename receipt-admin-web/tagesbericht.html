@@ -119,15 +119,15 @@
         sperre_30_tage_gleicher_nutzer: 'Doppelt (dieselbe Person, alte 24-h-Regel)',
         // Entscheidungen Patrick 02.10.2026
         sperre_woche_gleicher_nutzer: 'Doppelt (dieselbe Person, binnen 7 Tagen)',
-        konto_gesperrt: 'Konto gesperrt',
         kontosperre_unbekannt: 'Kontosperre nicht lesbar (Technik)',
         konto_gesperrt_im_lauf: 'Konto während der Runde gesperrt',
         ean_abweichend: 'Barcode-Foto zeigt andere Nummer',
+        ean_unsicher: 'Barcode-Foto: zwei Lesungen uneinig',
+        beleg_nicht_geschrieben: 'Doppel-Beleg heute nicht gespeichert',
         foto_fremdes_konto: 'Gleiches Foto bei anderem Konto',
         foto_aeltere_offen: 'Gleiches Foto in älterer offener Einreichung',
         foto_abgleich_gescheitert: 'Foto-Abgleich gescheitert (Technik)',
         notbremse_wochensperre: 'Notbremse (Wochen-Sperre)',
-        notbremse_kontosperre: 'Notbremse (gesperrte Konten)',
         bilder_wiederverwendet: 'Fotos wiederverwendet',
         fotos_unpassend: 'Fotos unpassend',
         gleiche_ansicht_mehrfach: 'Immer dieselbe Ansicht',
@@ -316,6 +316,7 @@
               <div class="zeile"><span>Bildprüfungen</span><span>${b.bildpruefung?.versucht ?? 0}</span></div>
               <div class="zeile"><span>davon gescheitert (Technik)</span><span>${b.bildpruefung?.gescheitert ?? 0}</span></div>
               <div class="zeile"><span>davon unpassend</span><span>${b.bildpruefung?.unpassend ?? 0}</span></div>
+              ${b.kontoSperren?.offenEinreichungen ? `<div class="zeile"><span>gesperrte Konten — liegen still (nicht in „Wartet auf dich")</span><span>${b.kontoSperren.offenEinreichungen}</span></div>` : ''}
             </section>
             <section class="box"><h3>Bons — letzte 24 Stunden (${bons.letzte24h?.gesamt ?? 0})</h3>
               ${Object.entries(bons.letzte24h?.status || {}).map(([k, v]) => `<div class="zeile"><span>${esc(STATUS[k] || k)}</span><span>${v}</span></div>`).join('') || '<div class="leer">keine</div>'}

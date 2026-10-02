@@ -16,16 +16,23 @@
  *  - Gesperrte Konten (`cashback_sperren/{uid}`, Entscheidung Patrick
  *    02.10.2026) gibt die Konsole NIE frei, auch nicht mit force. Die Sperre
  *    wird in der Freigabe-Transaktion gelesen; scheitert das Lesen, wird nicht
- *    freigegeben.
+ *    freigegeben. Die Morgenrunde lässt diese Fälle stumm liegen; in der
+ *    Warteschlange stehen sie am Ende.
  *  - Batch = pro ID eigene Transaktion + Ergebnis pro ID. Kein „alles oder nichts".
  *  - reviewNote immer positiv formuliert (Copy-Ton-Regel, CLAUDE.md).
  *
- * Ausroll-Reihenfolge seit 26.09.2026 (effektive Werte aus src/werte.js):
- *  1. firestore.rules — sperrt die Namer-/Nachlese-Felder beim Anlegen. Vorher
- *     vertraute die Konsole fälschbaren *RescueOcr-Werten.
+ * Ausroll-Reihenfolge seit 26.09.2026 (effektive Werte aus src/werte.js),
+ * ergänzt 02.10.2026 (Wochen-Sperre, Barcode-Foto, Kontosperre):
+ *  1. firestore.rules — sperrt die Namer-/Nachlese-Felder und `eanFotoOcr`
+ *     beim Anlegen. Vorher vertraute die Konsole fälschbaren Werten; ginge
+ *     diese Codebase zuerst live, könnte ein Client `eanFotoOcr` mit der
+ *     gespeicherten Nummer vorbelegen.
  *  2. diese Codebase SOLO (Multi-Codebase-Deploys flaken, CLAUDE.md).
  *  3. hosting:md-receipt-admin — pruefen.html fällt zwar auf die Rohfelder
  *     zurück, zeigt nachgelesene Werte aber erst mit dieser Codebase.
+ *  4. Gutschrift-Seite der Kontosperre (cashback-pipeline, crowd-upload-reward,
+ *     survey-reward; Zweig claude/reward-sperre).
+ *  5. ERST DANN `cashback_sperren/{uid}` anlegen.
  */
 
 const admin = require('firebase-admin');
@@ -36,8 +43,9 @@ const { REASON, dupZumSpeichern, ms, appGrund } = require('./src/duplicatePolicy
 const { SPERREN, ladeSperren, kontoSperreVon, sperreAusDaten } = require('./src/kontoSperre');
 const {
   INDEX_FELDER, safeStatus, rowOf, stripPolicy, precheckOf, precheckFuerFall,
-  nachbarnAus, gruppiereNachEan, eanIndex, baueFotoListe,
+  nachbarnAus, nachbarnVon, gruppiereNachEan, eanIndex, baueFotoListe,
 } = require('./src/einreichung');
+const { eanVarianten } = require('./src/werte');
 const { ortVonEinreichung, ortVonBon, ortsverzeichnisAusBons } = require('./src/ort');
 const { pruefeOrtsanforderung } = require('./src/locationGate');
 const { kachelUrl, pruefeKachelAnfrage, MIN_SCHLUESSEL } = require('./src/kachel');
@@ -69,8 +77,6 @@ function noteFor(reason, ctx = {}) {
     case REASON.SAME_USER_WEEK:
     case REASON.SAME_USER:
       return `Dieses Produkt hast du diese Woche schon erfasst — danke! Derselbe Artikel zählt wieder ab ${until || 'nächster Woche'}.`;
-    case 'konto_gesperrt':
-      return 'Für dieses Konto ist die Teilnahme an den Aktionen pausiert.';
     case REASON.OTHER_USER:
       return `Dieses Produkt ist bei uns schon frisch erfasst — danke fürs Mitmachen! Ab ${until || 'in 30 Tagen'} zählt es wieder, oder sofort mit neuem Preis oder anderem Hersteller.`;
     case REASON.PENDING_OLDER:
@@ -97,11 +103,13 @@ function noteFor(reason, ctx = {}) {
 /**
  * Alle Einreichungen zu einer EAN-Menge (Chunks à 30 für `in`-Queries), über
  * BEIDE EAN-Felder: eine nur nachgelesene EAN (`eanRescueOcr`) ist genauso
- * Nachbar wie eine gescannte — die Runde gruppiert über eanOf. Ergebnis je
- * effektiver EAN (`row.anzeigeEan`).
+ * Nachbar wie eine gescannte — die Runde gruppiert über eanOf. Abgefragt wird
+ * jede Schreibweise derselben GTIN (werte.eanVarianten: „0" + EAN-13 ist
+ * derselbe Artikel, Prüfrunde 02.10.2026). Ergebnis je GTIN — nachschlagen
+ * mit nachbarnVon(byEan, ean).
  */
 async function loadByEans(eans) {
-  const list = [...new Set(eans.filter(Boolean))];
+  const list = [...new Set(eans.filter(Boolean).flatMap(eanVarianten))];
   const docs = [];
   for (let i = 0; i < list.length; i += 30) {
     const chunk = list.slice(i, i + 30);
@@ -121,8 +129,9 @@ async function loadByEans(eans) {
  * Transaktions-Reads bringen bei zwei Abfragen nichts.
  */
 async function nachbarnInTx(tx, ean, ohneId) {
-  const gescannt = await tx.get(db.collection(COL).where('ean', '==', ean));
-  const nachgelesen = await tx.get(db.collection(COL).where('eanRescueOcr', '==', ean));
+  const varianten = eanVarianten(ean); // höchstens 8 — `in` erlaubt 30
+  const gescannt = await tx.get(db.collection(COL).where('ean', 'in', varianten));
+  const nachgelesen = await tx.get(db.collection(COL).where('eanRescueOcr', 'in', varianten));
   return nachbarnAus([...gescannt.docs, ...nachgelesen.docs], ean, ohneId);
 }
 
@@ -137,7 +146,7 @@ async function fallOptionen(row) {
     row.userId
       ? db.collection(SPERREN).doc(row.userId).get().then((d) => sperreAusDaten(d.data())).catch(() => 'unbekannt')
       : null,
-    fotoEan ? loadByEans([fotoEan]).then((m) => m.get(fotoEan) || []) : null,
+    fotoEan ? loadByEans([fotoEan]).then((m) => nachbarnVon(m, fotoEan)) : null,
   ]);
   return { kontoSperre: sperre, fotoEanRows };
 }
@@ -210,12 +219,12 @@ exports.reviewListUploads = onCall({ region: REGION, memory: '512MiB', timeoutSe
     allPending.length ? loadByEans([...allPending.map((r) => r.anzeigeEan), ...allPending.map(fotoEan)]) : new Map(),
     ladeSperren(db),
   ]);
-  const opts = (r) => ({ kontoSperre: kontoSperreVon(sperren, r.userId), fotoEanRows: fotoEan(r) ? byEan.get(fotoEan(r)) || [] : null });
-  const preById = new Map(allPending.map((r) => [r.id, precheckOf(r, byEan.get(r.anzeigeEan) || [], opts(r))]));
+  const opts = (r) => ({ kontoSperre: kontoSperreVon(sperren, r.userId), fotoEanRows: fotoEan(r) ? nachbarnVon(byEan, fotoEan(r)) : null });
+  const preById = new Map(allPending.map((r) => [r.id, precheckOf(r, nachbarnVon(byEan, r.anzeigeEan), opts(r))]));
   let lockedPendingCount = 0;
   for (const pre of preById.values()) if (pre.verdict === 'locked') lockedPendingCount++;
   for (const r of rows) {
-    r.precheck = r.status === 'pending' ? preById.get(r.id) ?? precheckOf(r, byEan.get(r.anzeigeEan) || [], opts(r)) : r.review?.precheck ?? null;
+    r.precheck = r.status === 'pending' ? preById.get(r.id) ?? precheckOf(r, nachbarnVon(byEan, r.anzeigeEan), opts(r)) : r.review?.precheck ?? null;
   }
   if (p.precheck && p.precheck !== 'all') rows = rows.filter((r) => r.precheck && r.precheck.verdict === p.precheck);
 
@@ -248,11 +257,12 @@ exports.reviewGetUpload = onCall({ region: REGION }, async (req) => {
   const d = await db.collection(COL).doc(id).get();
   if (!d.exists) throw new HttpsError('not-found', 'Einreichung nicht gefunden.');
   const row = rowOf(d);
-  // Nachbarn über BEIDE EAN-Felder, gezählt nach effektiver EAN — dasselbe
-  // Urteil wie reviewCases und die Runde.
+  // Nachbarn über BEIDE EAN-Felder und jede Schreibweise, gezählt nach
+  // effektiver EAN — dasselbe Urteil wie reviewCases und die Runde.
+  const varianten = eanVarianten(row.anzeigeEan);
   const [gescannt, nachgelesen, sameUserSnap] = await Promise.all([
-    row.anzeigeEan ? db.collection(COL).where('ean', '==', row.anzeigeEan).get() : null,
-    row.anzeigeEan ? db.collection(COL).where('eanRescueOcr', '==', row.anzeigeEan).get() : null,
+    row.anzeigeEan ? db.collection(COL).where('ean', 'in', varianten).get() : null,
+    row.anzeigeEan ? db.collection(COL).where('eanRescueOcr', 'in', varianten).get() : null,
     row.userId ? db.collection(COL).where('userId', '==', row.userId).get() : null,
   ]);
   const sameEan = row.anzeigeEan ? nachbarnAus([...gescannt.docs, ...nachgelesen.docs], row.anzeigeEan, id) : [];
@@ -788,8 +798,8 @@ exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
   const [byEan, sperren] = await Promise.all([eans.length ? loadByEans(eans) : new Map(), ladeSperren(db)]);
   const cases = await Promise.all(present.map(async (s, i) => {
     const row = rows[i];
-    const nachbarn = row.anzeigeEan ? byEan.get(row.anzeigeEan) || [] : [];
-    const pre = precheckFuerFall(row, nachbarn, { kontoSperre: kontoSperreVon(sperren, row.userId), fotoEanRows: fotoEan(row) ? byEan.get(fotoEan(row)) || [] : null });
+    const nachbarn = nachbarnVon(byEan, row.anzeigeEan);
+    const pre = precheckFuerFall(row, nachbarn, { kontoSperre: kontoSperreVon(sperren, row.userId), fotoEanRows: fotoEan(row) ? nachbarnVon(byEan, fotoEan(row)) : null });
     const defekt = new Set(row.bildDefekt.map((b) => b.slot));
     const bilder = await Promise.all(REQUIRED_STEPS_ORDER.map(async (step) => {
       const path = row.images && row.images[step];

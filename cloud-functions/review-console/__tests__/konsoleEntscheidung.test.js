@@ -11,6 +11,7 @@
  */
 const mockStore = new Map();
 const mockLage = { sperreFehler: false };
+const mockCreate = new Map(); // Dokumentpfad → Server-Zeitpunkt (createTime)
 const mockSentinel = { __feld: 'serverTimestamp' };
 const mockDelete = { __feld: 'delete' };
 
@@ -21,7 +22,8 @@ function kopie(v) {
 }
 function snapshot(pfad, daten) {
   const d = daten === undefined ? undefined : kopie(daten);
-  return { id: pfad.split('/').pop(), exists: d !== undefined, data: () => (d === undefined ? undefined : kopie(d)), get: (f) => (d === undefined ? undefined : kopie(d[f])) };
+  const createTime = mockCreate.has(pfad) ? { toMillis: () => mockCreate.get(pfad) } : undefined;
+  return { id: pfad.split('/').pop(), exists: d !== undefined, createTime, data: () => (d === undefined ? undefined : kopie(d)), get: (f) => (d === undefined ? undefined : kopie(d[f])) };
 }
 function docRef(pfad) {
   return {
@@ -102,7 +104,7 @@ const admin = { auth: { uid: 'patrick', token: { admin: true } } };
 const entscheide = (data) => konsole.reviewDecideUploads({ ...admin, data });
 const doc = (id) => mockStore.get(`crowd_uploads/${id}`);
 
-beforeEach(() => { mockStore.clear(); mockLage.sperreFehler = false; });
+beforeEach(() => { mockStore.clear(); mockCreate.clear(); mockLage.sperreFehler = false; });
 
 describe('Freigabe in der Prüfkonsole', () => {
   it('sauberer Fall → freigegeben', async () => {
@@ -151,6 +153,32 @@ describe('Freigabe in der Prüfkonsole', () => {
     const r = await entscheide({ ids: ['k'], decision: 'approve' });
     expect(r.results[0]).toMatchObject({ outcome: 'blocked', reason: 'ean_abweichend' });
   });
+
+  it('zwei Lesungen der Runde uneinig → blockiert als ean_unsicher', async () => {
+    lege('k', { eanFotoOcr: { ean: ANDERE, befund: 'unsicher', zweit: null } });
+    const r = await entscheide({ ids: ['k'], decision: 'approve' });
+    expect(r.results[0]).toMatchObject({ outcome: 'blocked', reason: 'ean_unsicher' });
+  });
+
+  it('Wochen-Sperre über eine andere Schreibweise derselben GTIN („0" + EAN-13) → blockiert (Prüfrunde 02.10.)', async () => {
+    lege('alt', { status: 'approved', createdAt: ts(T0 - 2 * TAG_MS) });
+    lege('k', { ean: '0' + EAN });
+    const r = await entscheide({ ids: ['k'], decision: 'approve' });
+    expect(r.results[0]).toMatchObject({ outcome: 'blocked', reason: 'sperre_woche_gleicher_nutzer' });
+    // und umgekehrt, auch über die nachgelesene EAN
+    mockStore.clear();
+    lege('alt', { status: 'approved', createdAt: ts(T0 - 2 * TAG_MS), ean: null, eanRescueOcr: '0' + EAN });
+    lege('k');
+    expect((await entscheide({ ids: ['k'], decision: 'approve' })).results[0]).toMatchObject({ outcome: 'blocked', reason: 'sperre_woche_gleicher_nutzer' });
+  });
+
+  it('verschobenes createdAt hebt die Wochen-Sperre nicht auf: es gilt der Server-Zeitpunkt (Prüfrunde 02.10.)', async () => {
+    lege('alt', { status: 'approved', createdAt: ts(T0 - 2 * TAG_MS) });
+    lege('k', { createdAt: ts(T0 - 40 * TAG_MS) });
+    mockCreate.set('crowd_uploads/k', T0);
+    const r = await entscheide({ ids: ['k'], decision: 'approve' });
+    expect(r.results[0]).toMatchObject({ outcome: 'blocked', reason: 'sperre_woche_gleicher_nutzer' });
+  });
 });
 
 describe('Ablehnung in der Prüfkonsole: Code am Dokument für die App', () => {
@@ -176,13 +204,25 @@ describe('Ablehnung in der Prüfkonsole: Code am Dokument für die App', () => {
 });
 
 describe('Warteschlange', () => {
-  it('zeigt gesperrte Konten als gesperrt, unabhängig vom EAN-Zwischenspeicher', async () => {
+  it('zeigt gesperrte Konten als gesperrt (am Ende), unabhängig vom EAN-Zwischenspeicher', async () => {
     lege('k');
-    lege('j', { userId: 'u2', ean: ANDERE });
+    lege('j', { userId: 'u2', ean: ANDERE, createdAt: ts(T0 + 1000) });
     mockStore.set('cashback_sperren/u1', { gesperrt: true });
     const r = await konsole.reviewQueue({ ...admin, data: { type: 'photos' } });
-    const k = r.rows.find((x) => x.id === 'k');
-    expect(k).toMatchObject({ verdict: 'locked', reasons: ['konto_gesperrt'] });
-    expect(r.rows.find((x) => x.id === 'j').verdict).toBe('ok');
+    expect(r.rows.map((x) => x.id)).toEqual(['j', 'k']);
+    expect(r.rows[1]).toMatchObject({ id: 'k', verdict: 'locked', reasons: ['konto_gesperrt'], gesperrt: true });
+    expect(r.rows[0].verdict).toBe('ok');
+    expect(r.counts.gesperrt).toBe(1);
+  });
+});
+
+describe('Fallansicht (reviewGetUpload): Nachbarn in jeder Schreibweise', () => {
+  it('Freigabe unter „0" + EAN-13 ist Nachbar und Referenz der Wochen-Sperre', async () => {
+    lege('alt', { status: 'approved', createdAt: ts(T0 - 2 * TAG_MS), ean: '0' + EAN });
+    lege('k');
+    const r = await konsole.reviewGetUpload({ ...admin, data: { id: 'k' } });
+    expect(r.sameEan.map((x) => x.id)).toEqual(['alt']);
+    expect(r.precheck).toMatchObject({ verdict: 'locked', dup: { priorId: 'alt' } });
+    expect(r.prior.id).toBe('alt');
   });
 });

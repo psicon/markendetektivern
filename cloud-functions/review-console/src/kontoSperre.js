@@ -5,7 +5,9 @@
  * Anlass: zwei Konten mit Fotos von zu Hause, einem Produkt für alle Märkte und
  * falschen EANs (vermutlich eine Person). Ab der Sperre gibt es für sie keine
  * neuen Gutschriften und keine Auszahlung; offene Produktfotos geben weder die
- * Morgenrunde noch die Prüfkonsole frei. Bereits Gebuchtes wird NICHT
+ * Morgenrunde noch die Prüfkonsole frei. Die Morgenrunde lässt sie STUMM
+ * liegen (keine Ablehnung — die wäre endgültig und für den Nutzer sichtbar,
+ * siehe fotoRundeRegeln.entscheideFall). Bereits Gebuchtes wird NICHT
  * zurückgebucht.
  *
  * Quelle der Wahrheit ist `cashback_sperren/{uid}` = { gesperrt: true, seit,

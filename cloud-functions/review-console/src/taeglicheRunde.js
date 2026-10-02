@@ -19,8 +19,10 @@
  *   Freigaben und Ablehnungen, nach `fotoRundeRegeln.entscheideFall`.
  * WAS ER LIEGEN LÄSST (`wartetAufDich` im Bericht)
  *   Alles, was an unserer Technik hängt: Storage nicht lesbar, Bildprüfung
- *   oder Nachlesen am Google-Limit gescheitert, beschädigte Datei — und alles,
- *   was die Notbremse zurückhält.
+ *   oder Nachlesen am Google-Limit gescheitert, beschädigte Datei — alles,
+ *   was die Notbremse zurückhält, und jede Abweichung der Barcode-Nummer.
+ *   Einreichungen gesperrter Konten liegen STUMM (eigener Zähler im Bericht,
+ *   nicht in `wartetAufDich`).
  * WAS ER NIE TUT
  *   Geld buchen. Eine Freigabe setzt nur den Status; buchen tut
  *   `crowd-upload-reward`, wie bei jeder anderen Freigabe.
@@ -39,11 +41,11 @@ const logger = require('firebase-functions/logger');
 const { GoogleGenAI } = require('@google/genai');
 const { evaluateDuplicate, completenessCheck, dupZumSpeichern, appGrund, REASON } = require('./duplicatePolicy');
 const {
-  entscheideFall, bildBefund, notbremse, nameAusLesungen, eanAusLesungen, rettungNichtGeschafft,
+  entscheideFall, bildBefund, belegeVon, notbremse, nameAusLesungen, eanAusLesungen, rettungNichtGeschafft,
   BILD_GRUENDE, AUSSER_GESAMTQUOTE, KONTO_GESPERRT,
 } = require('./fotoRundeRegeln');
 // Werte-Helfer gemeinsam mit der Prüfkonsole (index.js/einreichung.js) — eine Quelle.
-const { eanOf, nameOf, preisOf, policyOf, pruefzifferOk, vollstaendigkeitOf, preisHinweisOf, eanFotoBefund, eanFotoBestaetigen, gtin14, PREIS_ARTEN } = require('./werte');
+const { eanOf, nameOf, preisOf, policyOf, einreichZeit, pruefzifferOk, vollstaendigkeitOf, preisHinweisOf, eanFotoBefund, eanFotoBestaetigen, eanSchluessel, PREIS_ARTEN } = require('./werte');
 const { SPERREN, ladeSperren, kontoSperreVon, sperreAusDaten } = require('./kontoSperre');
 const { auffaelligkeiten } = require('./ort');
 const { bildDefektOf } = require('./einreichung');
@@ -81,7 +83,6 @@ function noteFor(reason, ctx = {}) {
   const until = fmtDate(ctx.lockUntil);
   switch (reason) {
     case REASON.SAME_USER_WEEK: return `Dieses Produkt hast du diese Woche schon eingereicht — die erste Einreichung zählt. Ab ${until || 'nächster Woche'} zählt derselbe Artikel wieder.`;
-    case KONTO_GESPERRT: return 'Für dieses Konto ist die Teilnahme an den Aktionen pausiert.';
     case 'unvollstaendig': return `Es fehlen Fotos (${(ctx.missing || []).join(', ') || 'siehe Liste'}). Mit allen sieben Ansichten klappt es beim nächsten Mal.`;
     case 'ean_fehlt': return 'Der Barcode (EAN, 8–14 Ziffern) ordnet das Produkt eindeutig zu — beim nächsten Mal bitte scannen oder eintippen.';
     case 'kein_produktname': return 'Der Produktname war nicht erkennbar — Vorderseite gut ausgeleuchtet und ohne Spiegelung, dann passt es.';
@@ -399,7 +400,9 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   const lauf = `${tag}_${berlinZeit(start)}${dryRun ? '_trocken' : ''}`;
 
   const [alleSnap, sperren] = await Promise.all([db.collection(COL).get(), ladeSperren(db)]);
-  const alle = alleSnap.docs.map((d) => ({ id: d.id, ref: d.ref, x: d.data() }));
+  // `zeit`: Server-Zeitpunkt des Dokuments (createTime) — die Regeln rechnen
+  // damit, nicht mit dem vom Client geschriebenen `createdAt` (werte.einreichZeit).
+  const alle = alleSnap.docs.map((d) => ({ id: d.id, ref: d.ref, x: d.data(), zeit: einreichZeit(d.data(), d.createTime) }));
   if (vergleich) {
     const ids = new Set(vergleich);
     // Die Entscheidung von damals ausblenden: Status wieder offen, Entscheidungs-
@@ -414,10 +417,10 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   }
   const pending = alle
     .filter((d) => d.x.status === 'pending' && (!vergleich || d.vorher))
-    .sort((a, b) => (ms(a.x.createdAt) ?? 0) - (ms(b.x.createdAt) ?? 0));
+    .sort((a, b) => (a.zeit ?? 0) - (b.zeit ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
   // 0) Gesperrte Konten (Entscheidung Patrick 02.10.2026). Für sie wird nichts
-  //    nachgelesen und nichts angesehen — die Entscheidung hängt nicht daran.
+  //    nachgelesen und nichts angesehen — sie bleiben ohnehin liegen.
   const kontoVon = new Map(pending.map((d) => [d.id, kontoSperreVon(sperren, d.x.userId)]));
   const zuBearbeiten = pending.filter((d) => kontoVon.get(d.id) !== 'gesperrt');
 
@@ -501,9 +504,10 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   // 4b) Nummer vom Barcode-Foto gegen die gespeicherte (Entscheidung Patrick
   //     02.10.2026). Gelesen im Aufruf der Bildprüfung — kein Zusatzaufruf.
   //     NUR bei einer Abweichung (gemessen ~3 %) eine zweite Lesung allein des
-  //     Barcode-Fotos; sie muss dieselbe Nummer liefern (eanFotoBestaetigen).
-  //     Scheitert sie an unserer Technik, bleibt die Abweichung stehen — der
-  //     Fall wird dann gehalten, nicht freigegeben (fail-closed für die Freigabe).
+  //     Barcode-Fotos (eanFotoBestaetigen): dieselbe Nummer → Abweichung
+  //     bestätigt; die gespeicherte → gleich; sonst → unsicher (ebenfalls
+  //     halten). Scheitert sie an unserer Technik, bleibt die Abweichung
+  //     stehen — gehalten, nicht freigegeben (fail-closed für die Freigabe).
   //     Am Dokument abgelegt (`eanFotoOcr`), damit die Prüfkonsole dasselbe sieht.
   const eanFoto = new Map();
   for (const d of zuPruefen) {
@@ -524,7 +528,12 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       const d = pending.find((p) => p.id === id);
       const b = eanFoto.get(id);
       try {
-        await d.ref.set({ eanFotoOcr: { ean: b.gelesen, befund: b.art, ...(b.grund ? { grund: b.grund } : {}), ...(b.art === 'abweichend' ? { bestaetigt: b.bestaetigt === true } : {}), at: FieldValue.serverTimestamp(), quelle: `${MODELL}/vertex, Bildprüfung der Morgenrunde`, lauf } }, { merge: true });
+        await d.ref.set({ eanFotoOcr: {
+          ean: b.gelesen, befund: b.art, ...(b.grund ? { grund: b.grund } : {}),
+          ...(b.art === 'abweichend' ? { bestaetigt: b.bestaetigt === true } : {}),
+          ...(b.art === 'unsicher' ? { zweit: b.zweit || null } : {}),
+          at: FieldValue.serverTimestamp(), quelle: `${MODELL}/vertex, Bildprüfung der Morgenrunde`, lauf,
+        } }, { merge: true });
       } catch (e) {
         // Nur Anzeige in der Konsole — die Entscheidung der Runde hängt nicht daran.
         logger.warn('eanFotoOcr nicht gespeichert', { id, fehler: String(e.message).slice(0, 160) });
@@ -534,40 +543,41 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
 
   // 5) Chronologisch entscheiden — eine im selben Lauf entschiedene Einreichung
   //    ist für die nächste derselben EAN Referenz bzw. kein offener Vorgänger mehr.
+  //    Gruppiert nach GTIN in jeder Schreibweise (eanSchluessel): „0" + EAN-13
+  //    darf die Wochen-Sperre nicht umgehen (Prüfrunde 02.10.2026).
   const byEan = new Map();
-  const nachGtin = new Map();
-  const merkeEan = (map, key, v) => { if (!map.has(key)) map.set(key, []); map.get(key).push(v); };
+  const merkeEan = (key, v) => { if (!byEan.has(key)) byEan.set(key, []); byEan.get(key).push(v); };
   alle.forEach((d) => {
     const e = eanOf(d.x);
-    if (!e) return;
-    const p = policyOf(d.id, d.x);
-    merkeEan(byEan, e, p);
-    merkeEan(nachGtin, gtin14(e), p);
+    if (e) merkeEan(eanSchluessel(e), policyOf(d.id, d.x, d.zeit));
   });
   const statusJetzt = new Map(alle.map((d) => [d.id, d.x.status]));
-  const infoVon = new Map(alle.map((d) => [d.id, { userId: d.x.userId ?? null, createdAt: ms(d.x.createdAt) }]));
-  const info = (id) => (infoVon.has(id) ? { ...infoVon.get(id), status: statusJetzt.get(id) } : null);
+  const nachbarn = (ean, ohneId) => (byEan.get(eanSchluessel(ean)) || []).filter((o) => o.id !== ohneId).map((o) => ({ ...o, status: statusJetzt.get(o.id) || o.status }));
+  // Ablehngrund je Einreichung (intern, sonst der Code am Dokument) — für
+  // bildBefund: Fotos einer als Doppel abgelehnten Einreichung zählen als wiederverwendet.
+  const grundJetzt = new Map(alle.map((d) => [d.id, (d.x.review && d.x.review.reason) || d.x.rejectReason || null]));
+  const infoVon = new Map(alle.map((d) => [d.id, { userId: d.x.userId ?? null, createdAt: d.zeit }]));
+  const info = (id) => (infoVon.has(id) ? { ...infoVon.get(id), status: statusJetzt.get(id), grund: grundJetzt.get(id) } : null);
   const datumVon = (id) => { const t = infoVon.get(id) && infoVon.get(id).createdAt; return t ? fmtDate(t) : '?'; };
   const plan = [];
   for (const d of pending) {
     const kontoSperre = kontoVon.get(d.id);
     if (kontoSperre === 'gesperrt') {
+      // Stumm liegen lassen (fotoRundeRegeln.entscheideFall) — der Status bleibt pending.
       const e = entscheideFall({ kontoSperre });
       plan.push({ ...d, ...e, comp: { ok: true, problems: [], missing: [] }, dup: { verdict: 'ok', reason: null, lockUntil: null }, audit: null, eingabe: { kontoSperre } });
-      statusJetzt.set(d.id, 'rejected');
       continue;
     }
     const v = vor.get(d.id);
-    const andere = (byEan.get(eanOf(d.x)) || []).filter((o) => o.id !== d.id).map((o) => ({ ...o, status: statusJetzt.get(o.id) || o.status }));
-    const dup = eanOf(d.x) ? evaluateDuplicate(policyOf(d.id, d.x), andere) : { verdict: 'ok', reason: null, lockUntil: null };
+    const andere = nachbarn(eanOf(d.x), d.id);
+    const dup = eanOf(d.x) ? evaluateDuplicate(policyOf(d.id, d.x, d.zeit), andere) : { verdict: 'ok', reason: null, lockUntil: null };
     // Die Doppel-Prüfung zusätzlich unter der Nummer vom Barcode-Foto — eine
     // falsch getippte EAN soll die Wochen-Sperre nicht umgehen. Weicht die
     // Nummer ab, bleibt der Fall ohnehin liegen; der Befund steht im Hinweis.
     const ef = eanFoto.get(d.id) || null;
     let eanFotoHinweis = null;
     if (ef && ef.art === 'abweichend') {
-      const unterFoto = (nachGtin.get(gtin14(ef.gelesen)) || []).filter((o) => o.id !== d.id).map((o) => ({ ...o, status: statusJetzt.get(o.id) || o.status }));
-      const dupFoto = evaluateDuplicate({ ...policyOf(d.id, d.x), ean: ef.gelesen }, unterFoto);
+      const dupFoto = evaluateDuplicate({ ...policyOf(d.id, d.x, d.zeit), ean: ef.gelesen }, nachbarn(ef.gelesen, d.id));
       eanFotoHinweis = `Barcode-Foto zeigt ${ef.gelesen}, gespeichert ist ${ef.gespeichert}`
         + (ef.bestaetigt === false ? ' (zweite Lesung gescheitert)' : '')
         + (dupFoto.verdict === 'locked' ? ` — unter der Foto-Nummer gibt es eine eigene Freigabe vom ${datumVon(dupFoto.priorId)} (Wochen-Sperre)`
@@ -597,7 +607,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     const e = entscheideFall(eingabe);
     plan.push({ ...d, ...e, comp: v.comp, dup, audit: audit.get(d.id) || null, eingabe });
     if (e.entscheidung === 'freigeben') statusJetzt.set(d.id, 'approved');
-    else if (e.entscheidung === 'ablehnen') statusJetzt.set(d.id, 'rejected');
+    else if (e.entscheidung === 'ablehnen') { statusJetzt.set(d.id, 'rejected'); grundJetzt.set(d.id, e.grund); }
   }
 
   // 6) Notbremse
@@ -614,15 +624,28 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
         audit: p.audit || null, auditFehler: auditFehler.get(p.id) || null,
         // Eingaben inkl. der (nur im Speicher) nachgelesenen Werte — damit sich
         // ein Lauf nach alter Regel daneben rechnen lässt.
-        eingabe: p.eingabe, policy: policyOf(p.id, p.x), vorher: p.vorher,
+        eingabe: p.eingabe, policy: policyOf(p.id, p.x, p.zeit), vorher: p.vorher,
       })),
     };
   }
 
-  // 7) Schreiben
+  // 7) Schreiben — chronologisch, also jede Referenz vor dem Fall, der sich auf sie stützt.
+  //    `geschrieben`: was in diesem Lauf tatsächlich gespeichert wurde.
+  const imPlan = new Set(plan.map((p) => p.id));
+  const geschrieben = new Set();
   if (!dryRun) {
     for (const p of plan) {
       if (p.entscheidung === 'offen') continue;
+      // Eine Ablehnung, die eine andere Einreichung als Beleg nimmt, nur mit
+      // mindestens einem feststehenden Beleg (fotoRundeRegeln.belegeVon).
+      const belege = belegeVon(p);
+      if (belege && !belege.some((id) => !imPlan.has(id) || geschrieben.has(id))) {
+        p.zurueckgehaltenGrund = p.grund;
+        p.entscheidung = 'offen';
+        p.grund = 'beleg_nicht_geschrieben';
+        p.ctx = { ...(p.ctx || {}), hinweis: `Stützt sich auf ${belege.slice(0, 3).join(', ')} — dort wurde heute nichts gespeichert` };
+        continue;
+      }
       // Mit Doppel-Befund (Referenz, „Anders"): ohne ihn fehlt in der Prüfkonsole
       // genau bei den Sperr-Ablehnungen die Grundlage fürs Zurückholen.
       const precheck = {
@@ -642,12 +665,11 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
           // — nicht ablehnen, morgen neu entscheiden (Gegenprüfung 26.09.).
           if (p.grund === 'preis_fehlt' && (preisOf(s.data()) || preisHinweisOf(s.data()))) return 'uebersprungen';
           // Kontosperre im Moment des Schreibens nachlesen: eine Freigabe nur
-          // ohne Sperre, eine Sperr-Ablehnung nur mit. Lesefehler → Wurf → offen.
-          if (p.entscheidung === 'freigeben' || p.grund === KONTO_GESPERRT) {
+          // ohne Sperre. Lesefehler → Wurf → offen (schreib_fehler).
+          if (p.entscheidung === 'freigeben') {
             const uid = s.data().userId;
             const sperre = uid ? sperreAusDaten((await tx.get(db.collection(SPERREN).doc(uid))).data()) : null;
-            if (p.entscheidung === 'freigeben' && sperre) return sperre === 'gesperrt' ? 'konto_gesperrt_im_lauf' : 'kontosperre_unbekannt';
-            if (p.grund === KONTO_GESPERRT && sperre !== 'gesperrt') return 'uebersprungen';
+            if (sperre) return sperre === 'gesperrt' ? 'konto_gesperrt_im_lauf' : 'kontosperre_unbekannt';
           }
           if (p.entscheidung === 'freigeben') {
             tx.update(p.ref, {
@@ -673,8 +695,9 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
           }
           return 'geschrieben';
         });
-        if (ausgang === 'uebersprungen') p.uebersprungen = true;
-        else if (ausgang !== 'geschrieben') {
+        if (ausgang === 'geschrieben') geschrieben.add(p.id);
+        else if (ausgang === 'uebersprungen') p.uebersprungen = true;
+        else {
           p.zurueckgehaltenGrund = p.grund;
           p.entscheidung = 'offen';
           p.grund = ausgang;
@@ -743,7 +766,11 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   const version = regelVersion();
   const zaehle = (liste, feld) => liste.reduce((a, p) => { const k = p[feld] || '?'; a[k] = (a[k] || 0) + 1; return a; }, {});
   const abgelehnt = plan.filter((p) => p.entscheidung === 'ablehnen' && !p.uebersprungen);
-  const offen = plan.filter((p) => p.entscheidung === 'offen');
+  // Gesperrte Konten liegen stumm und dauerhaft — sie warten NICHT auf eine
+  // Entscheidung und zählen deshalb getrennt (sonst füllten sie „wartet auf
+  // dich" und die Warnung „wartet seit X Tagen" jeden Morgen).
+  const gesperrtOffen = plan.filter((p) => p.entscheidung === 'offen' && p.grund === KONTO_GESPERRT);
+  const offen = plan.filter((p) => p.entscheidung === 'offen' && p.grund !== KONTO_GESPERRT);
   const runde = {
     geprueft: pending.length, offen: offen.length,
     auditVersucht: zuPruefen.length - nichtGeprueft.length, auditFehler: [...auditFehler.values()].filter((f) => f !== 'zeit_abgelaufen').length,
@@ -784,13 +811,13 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     bildpruefung: { versucht: runde.auditVersucht, gescheitert: runde.auditFehler, unpassend: plan.filter((p) => BILD_GRUENDE.has(p.grund) || BILD_GRUENDE.has(p.zurueckgehaltenGrund)).length },
     nichtGeschafft: runde.nichtGeschafft,
     schreibFehler: runde.schreibFehler,
-    notbremse: { bild: bremse.bild, gesamt: bremse.gesamt, preis: bremse.preis, woche: bremse.woche, konto: bremse.konto },
+    notbremse: { bild: bremse.bild, gesamt: bremse.gesamt, preis: bremse.preis, woche: bremse.woche },
     // Neu 02.10.2026 (Entscheidungen Patrick): Nummer vom Barcode-Foto, Abgleich
     // gegen alle früheren Fotos, gesperrte Konten — nur Zahlen, die Fälle stehen
     // in wartetAufDich bzw. abgelehntListe.
     eanFoto: zaehle([...eanFoto.values()], 'art'),
     fotoAbgleich: { dateien: liste ? liste.size : null, gescheitert: liste == null },
-    kontoSperren: { aktiv: sperren ? [...sperren.values()].filter((x) => x.gesperrt === true).length : null, unlesbar: sperren == null },
+    kontoSperren: { aktiv: sperren ? [...sperren.values()].filter((x) => x.gesperrt === true).length : null, unlesbar: sperren == null, offenEinreichungen: gesperrtOffen.length },
     wartetAufDich: offen.slice(0, 100).map(fall),
     abgelehntListe: abgelehnt.slice(0, 100).map(fall),
     bons: lage.bons,
