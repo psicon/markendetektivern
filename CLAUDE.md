@@ -3206,6 +3206,49 @@ vorzulegen. Regel: **Eine Prüfregel, die eine Vorgabe von Patrick abschwächt
 oder weglässt, wird nie still festgeschrieben** — vorher fragen, und im Code
 die Quelle der Regel nennen (Entscheidung Patrick vom … / eigene Annahme).
 
+## Produktentscheidungen 02.10.2026: Dubletten einmal pro Woche, Kontosperre
+
+Patrick, 02.10.: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche",
+„Super-Vorschlag umsetzen", „Ja, dann sperr die Konten", „Nein, halb so wild"
+(keine Rückforderung). Umgesetzt in `claude/dubletten-woche` +
+`claude/reward-sperre` (gemergt 03.10.); Details und Grenzen in
+`cloud-functions/review-console/WISSEN-FOTORUNDE.md`. Nicht neu aufmachen:
+- **Gleiche Person + gleiches Produkt: höchstens einmal in 7 Tagen bezahlt**
+  (168 h rollierend, gegen die eigene jüngste Freigabe derselben EAN in jeder
+  Schreibweise, Zeitpunkt = Firestore-`createTime`). KEINE Ausnahme mehr für
+  anders gelesenen Preis, Hersteller oder Markt (Markt wählt der Nutzer frei).
+  Fremde Einreichungen sperren weiterhin nicht (20.09.). Am Dokument steht der
+  Code `doppelt_eingereicht`, weil der App-Text von `sperre_30_tage_gleicher_
+  nutzer` in allen ausgelieferten Versionen „ab dem nächsten Tag zählt es
+  wieder" verspricht.
+- **Barcode-Nummer gegen das Barcode-Foto:** weicht sie ab, bleibt die
+  Einreichung liegen, ein Mensch entscheidet (Konsole nur mit force + Notiz);
+  ein einmal angehaltener Fall wird nie automatisch aufgehoben. Offen bei
+  Patrick (WISSEN „Offen für Patrick" (d)): darf am ersten Tag eine zweite
+  Lesung der gespeicherten Nummer weitergeben? Bis zur Antwort: liegen lassen.
+- **Foto-Abgleich (md5) gegen ALLE früheren Einreichungen**, Preisfoto
+  ausgenommen; eine Kopie bleibt immer freigabefähig. Die Gründe, mit denen die
+  Runde einen Fall liegen lässt, stehen in `review.rundeOffen` (nur Server).
+- **Kontosperre = `cashback_sperren/{uid}`** (server-only, kein Rules-Block,
+  finale deny-all). Leser: processCashback/syncLedgerForReceipt, resolveCash-
+  backReview, requestPayout/processPayout, onCrowdUploadApproved,
+  onPollResponseCreated, Morgenrunde, Konsole. Wirkung: keine neue Gutschrift,
+  keine Auszahlung, Produktfotos bleiben STUMM liegen (keine sichtbare
+  Ablehnung — sonst weicht die Person auf ein neues Konto aus). Gebuchtes
+  bleibt. Aufheben: `gesperrt: false`. Gesperrt (nach Deploy anzulegen):
+  7onx0TmhFzYG4EttySlO14F73ZB3, tU89tZHxvcOOPLHvOFXna0sZREv1.
+- **Umfrage-Lücke (gefunden 02.10.):** `poll_responses` darf jeder angemeldete
+  Nutzer mit beliebiger pollId anlegen; der live laufende survey-reward
+  (Stand 13.06.) zahlte auch für Entwürfe und abgelaufene Umfragen (~14 € je
+  Konto möglich, nie ausgenutzt). Fix: nur `status === 'active'` + 7d8e91b.
+  Regel: Eine Vergütung, die an einem client-wählbaren Verweis hängt (pollId,
+  campaignId …), prüft serverseitig, ob das Ziel gerade bezahlbar ist.
+- **Zwei Werkzeug-Fallen dieser Runde:** (1) `git add -A` in einem Worktree mit
+  symlinkten `node_modules` committet die Symlinks — `node_modules/` in
+  .gitignore trifft nur Verzeichnisse. Dort nur explizite Pfade adden.
+  (2) zsh wendet in `"$b:receipt…"` den Modifier `:r` auf `$b` an —
+  `git show "$b:pfad"` liefert dann Unsinn; `"${b}"':pfad'` schreiben.
+
 ## Produktentscheidung 20.09.2026: lose Ware wird angenommen
 
 Frische/lose Ware (Kräuterbund, Obst, Frischetheke) trägt keinen echten
