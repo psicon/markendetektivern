@@ -136,14 +136,35 @@ describe('Nummer vom Barcode-Foto (Entscheidung Patrick 02.10.2026)', () => {
     expect(eanFotoBefund(GUELTIG, FALSCHE_PRUEFZIFFER)).toMatchObject({ art: 'kein_urteil', grund: 'pruefziffer' });
     expect(eanFotoBefund(GUELTIG, '')).toMatchObject({ art: 'kein_urteil', grund: 'nicht_lesbar' });
     expect(eanFotoBefund(GUELTIG, null)).toMatchObject({ art: 'kein_urteil' });
-    expect(eanFotoBefund(GUELTIG, '40614648')).toMatchObject({ art: 'kein_urteil' }); // 8 Ziffern, Prüfziffer falsch
   });
-  it('Händler-/Waagen-Code gelesen (lose Ware, 20.09.) → kein Urteil', () => {
+  it('falsche Prüfziffer, aber höchstens 2 von 14 Stellen anders → kein Urteil (Lesefehler derselben Nummer)', () => {
+    // Fälle aus den Trockenläufen 02.10.2026
+    expect(eanFotoBefund('4311501450956', '4311501430956')).toMatchObject({ art: 'kein_urteil', grund: 'pruefziffer' }); // 1 Ziffer
+    expect(eanFotoBefund('3153126826003', '353126826003')).toMatchObject({ art: 'kein_urteil', grund: 'pruefziffer' }); // eine Ziffer verloren → 2 Stellen
+    expect(eanFotoBefund('20003166', '20002166')).toMatchObject({ art: 'kein_urteil' });
+  });
+  it('falsche Prüfziffer und mehr als 2 Stellen anders → zweifelhaft, Rohziffern bleiben sichtbar (Prüfrunde 2, Kfs5…)', () => {
+    const { stellenAbstand, MAX_LESEFEHLER_STELLEN } = require('../src/werte');
+    expect(MAX_LESEFEHLER_STELLEN).toBe(2);
+    expect(eanFotoBefund('4250231136474', '4013602313647')).toEqual({
+      art: 'zweifelhaft', gelesen: null, roh: '4013602313647', gespeichert: '4250231136474', grund: 'pruefziffer_weit_weg', abstand: 12,
+    });
+    expect(eanFotoBefund(GUELTIG, '40614648')).toMatchObject({ art: 'zweifelhaft', roh: '40614648' }); // 8 Ziffern, Prüfziffer falsch, ganz andere Stellen
+    expect(eanFotoBefund('4068706503566', '5303612').art).toBe('zweifelhaft'); // abgeschnittene Lesung
+    // genau 3 Stellen → zweifelhaft, 2 → nicht
+    expect(stellenAbstand('4061464833821', '4061464833000')).toBe(3);
+    expect(eanFotoBefund('4061464833821', '4061464833000').art).toBe('zweifelhaft');
+    expect(stellenAbstand('012345678905', '0012345678905')).toBe(0);
+    // ohne gespeicherte Nummer gibt es nichts zu vergleichen
+    expect(eanFotoBefund(null, '4013602313647')).toMatchObject({ art: 'kein_urteil', grund: 'pruefziffer' });
+  });
+  it('Händler-/Waagen-Code auf BEIDEN Seiten (lose Ware, 20.09.) → kein Urteil', () => {
     // 2112345000008: Präfix 21, gültige Prüfziffer
     const waage = '2112345000008';
     expect(pruefzifferOk(waage)).toBe(true);
     expect(istHandelsCode(waage)).toBe(true);
-    expect(eanFotoBefund(GUELTIG, waage)).toMatchObject({ art: 'kein_urteil', grund: 'handelscode' });
+    expect(eanFotoBefund('2112345001500', waage)).toMatchObject({ art: 'kein_urteil', grund: 'handelscode' });
+    expect(eanFotoBefund(null, waage)).toMatchObject({ art: 'kein_urteil', grund: 'handelscode' });
     expect(istHandelsCode('0212345678909')).toBe(true);
     expect(istHandelsCode('0412345678904')).toBe(true);
     expect(istHandelsCode('412345678903')).toBe(true); // UPC-A, Zahlsystem 4 (Ladennummer)
@@ -164,6 +185,9 @@ describe('Nummer vom Barcode-Foto (Entscheidung Patrick 02.10.2026)', () => {
   it('gespeichert ist ein Waagen-Code, das Foto zeigt eine echte EAN → abweichend (ein Mensch sieht hin)', () => {
     expect(eanFotoBefund('2112345000008', GUELTIG).art).toBe('abweichend');
   });
+  it('gespeichert ist ein Hersteller-Barcode, das Foto zeigt einen Waagen-Code → abweichend (Prüfrunde 2: vorher kein Urteil)', () => {
+    expect(eanFotoBefund(GUELTIG, '2112345000008')).toEqual({ art: 'abweichend', gelesen: '2112345000008', gespeichert: GUELTIG });
+  });
   it('nichts gespeichert → kein Urteil', () => {
     expect(eanFotoBefund(null, GUELTIG)).toMatchObject({ art: 'kein_urteil', grund: 'nichts_gespeichert' });
   });
@@ -182,6 +206,30 @@ describe('Nummer vom Barcode-Foto (Entscheidung Patrick 02.10.2026)', () => {
     expect(eanFotoBestaetigen(ab, null).art).toBe('unsicher');
     // nichts zu bestätigen
     expect(eanFotoBestaetigen(eanFotoBefund(GUELTIG, GUELTIG), '')).toMatchObject({ art: 'gleich' });
+    expect(eanFotoBestaetigen(eanFotoBefund(GUELTIG, ''), GUELTIG)).toMatchObject({ art: 'kein_urteil' });
+  });
+  it('zweite Lesung nach zweifelhafter Lesung: die gespeicherte → gleich; alles andere → unsicher (Prüfrunde 2)', () => {
+    const { eanFotoBestaetigen } = require('../src/werte');
+    const zw = eanFotoBefund('4250231136474', '4013602313647');
+    expect(eanFotoBestaetigen(zw, '4250231136474')).toEqual({ art: 'gleich', gelesen: '4250231136474', gespeichert: '4250231136474', grund: 'zweite_lesung' });
+    // eine andere gültige Nummer bestätigt nichts — die erste Lesung war keine gültige
+    expect(eanFotoBestaetigen(zw, '4013602136424')).toEqual({ art: 'unsicher', gelesen: null, roh: '4013602313647', gespeichert: '4250231136474', zweit: '4013602136424', grund: 'lesungen_uneinig' });
+    expect(eanFotoBestaetigen(zw, '4013602313647')).toMatchObject({ art: 'unsicher', zweit: null, grund: 'zweite_lesung_leer' });
+    expect(eanFotoBestaetigen(zw, null).art).toBe('unsicher');
+  });
+  it('zweite Lesung bei „gleich" gegen einen alten Halte-Befund: bestätigt nur mit der gespeicherten Nummer', () => {
+    const { eanFotoBestaetigen } = require('../src/werte');
+    const gl = eanFotoBefund(GUELTIG, GUELTIG);
+    expect(eanFotoBestaetigen(gl, GUELTIG)).toMatchObject({ art: 'gleich', bestaetigt: true });
+    expect(eanFotoBestaetigen(gl, ANDERE)).toMatchObject({ art: 'gleich', bestaetigt: false, zweit: ANDERE });
+    expect(eanFotoBestaetigen(gl, '')).toMatchObject({ art: 'gleich', bestaetigt: false, zweit: null });
+  });
+  it('zweite Lesung kam nicht zustande (Technik, Zeit) → nie Freigabe: Abweichung bleibt, zweifelhaft wird unsicher', () => {
+    const { eanFotoOhneZweitlesung } = require('../src/werte');
+    expect(eanFotoOhneZweitlesung(eanFotoBefund(GUELTIG, ANDERE), 'zeit_abgelaufen')).toMatchObject({ art: 'abweichend', bestaetigt: false, fehler: 'zeit_abgelaufen' });
+    expect(eanFotoOhneZweitlesung(eanFotoBefund('4250231136474', '4013602313647'), '429')).toMatchObject({ art: 'unsicher', roh: '4013602313647', grund: 'zweite_lesung_gescheitert' });
+    expect(eanFotoOhneZweitlesung(eanFotoBefund(GUELTIG, GUELTIG), 'x')).toMatchObject({ art: 'gleich', bestaetigt: false });
+    expect(eanFotoOhneZweitlesung(eanFotoBefund(GUELTIG, ''), 'x')).toMatchObject({ art: 'kein_urteil' });
   });
   it('eanFotoOf liest nur gültige Nummern aus eanFotoOcr', () => {
     expect(eanFotoOf({ eanFotoOcr: { ean: GUELTIG } })).toBe(GUELTIG);
@@ -246,5 +294,83 @@ describe('Einreich-Zeitpunkt: Server-Zeit statt Client-Feld (Prüfrunde 02.10.20
     expect(einreichZeit({ createdAt: { toMillis: () => 7 } })).toBe(7);
     expect(policyOf('a', { createdAt: 7 }).createdAt).toBe(7);
     expect(einreichZeit({})).toBeNull();
+  });
+});
+
+describe('Halte-Befund früherer Läufe (Prüfrunde 2, 02.10.2026)', () => {
+  const { eanFotoBefund, eanFotoBestaetigen, eanFotoVorbefund, eanFotoMitVorbefund, eanFotoEintrag } = require('../src/werte');
+  const ANDERE = '4000417025005';
+  const KFS = { ean: '4250231136474' };
+
+  it('eanFotoVorbefund: nur abweichend/unsicher halten; Quelle eanFotoOcr', () => {
+    expect(eanFotoVorbefund({ ...KFS, eanFotoOcr: { ean: '4013602136424', befund: 'abweichend', bestaetigt: true, lauf: '2026-10-02_080000' } }))
+      .toEqual({ befund: 'abweichend', gelesen: '4013602136424', gespeichert: '4250231136474', bestaetigt: true, zweit: null, lauf: '2026-10-02_080000', quelle: 'eanFotoOcr' });
+    expect(eanFotoVorbefund({ ...KFS, eanFotoOcr: { ean: ANDERE, befund: 'unsicher', zweit: '4001382088125' } })).toMatchObject({ befund: 'unsicher', zweit: '4001382088125' });
+    for (const befund of ['gleich', 'kein_urteil', 'zweifelhaft', undefined]) expect(eanFotoVorbefund({ ...KFS, eanFotoOcr: { ean: ANDERE, befund } })).toBeNull();
+    expect(eanFotoVorbefund(KFS)).toBeNull();
+    expect(eanFotoVorbefund(null)).toBeNull();
+  });
+  it('… Rückfall review.rundeOffen.eanFoto, wenn eanFotoOcr nicht gespeichert wurde; der jüngere Lauf gilt', () => {
+    const ro = { review: { rundeOffen: { lauf: '2026-10-03_080000', eanFoto: { befund: 'abweichend', ean: ANDERE, bestaetigt: false } } } };
+    expect(eanFotoVorbefund({ ...KFS, ...ro })).toMatchObject({ befund: 'abweichend', gelesen: ANDERE, quelle: 'rundeOffen', lauf: '2026-10-03_080000' });
+    // eanFotoOcr vom selben oder einem jüngeren Lauf geht vor (z. B. aufgehoben)
+    expect(eanFotoVorbefund({ ...KFS, ...ro, eanFotoOcr: { ean: KFS.ean, befund: 'gleich', grund: 'vorbefund_aufgehoben', lauf: '2026-10-03_080000' } })).toBeNull();
+    // älteres eanFotoOcr „gleich", jüngerer Rückfall hält → hält
+    expect(eanFotoVorbefund({ ...KFS, ...ro, eanFotoOcr: { ean: KFS.ean, befund: 'gleich', lauf: '2026-10-02_080000' } })).toMatchObject({ quelle: 'rundeOffen' });
+  });
+
+  const vorher = (b = {}) => ({ befund: 'abweichend', gelesen: '4013602136424', gespeichert: '4250231136474', bestaetigt: false, zweit: null, lauf: '2026-10-02_080000', quelle: 'eanFotoOcr', ...b });
+
+  it('ohne alten Befund → der heutige', () => {
+    const h = eanFotoBefund(KFS.ean, KFS.ean);
+    expect(eanFotoMitVorbefund(h, null)).toBe(h);
+  });
+  it('Kfs5jFA6qqOF8gD9iTEk: heute falsche Prüfziffer (kein Urteil) oder keine Bildprüfung → der alte Befund hält weiter', () => {
+    const heute = eanFotoBefund(KFS.ean, '4250231136470'); // eine Ziffer daneben → kein Urteil
+    expect(heute.art).toBe('kein_urteil');
+    expect(eanFotoMitVorbefund(heute, vorher())).toMatchObject({
+      art: 'abweichend', gelesen: '4013602136424', gespeichert: '4250231136474', bestaetigt: false,
+      vorbefund: { lauf: '2026-10-02_080000', quelle: 'eanFotoOcr' }, heute: { art: 'kein_urteil', gelesen: null },
+    });
+    expect(eanFotoMitVorbefund(null, vorher({ befund: 'unsicher', zweit: '4001382088125' }))).toMatchObject({ art: 'unsicher', zweit: '4001382088125', heute: null });
+  });
+  it('heute zwei Lesungen der gespeicherten Nummer → aufgehoben (unbestätigte Abweichung oder unsicher)', () => {
+    const gl = eanFotoBestaetigen(eanFotoBefund(KFS.ean, KFS.ean), KFS.ean);
+    for (const v of [vorher(), vorher({ befund: 'unsicher' })]) {
+      expect(eanFotoMitVorbefund(gl, v)).toEqual({
+        art: 'gleich', gelesen: KFS.ean, gespeichert: KFS.ean, bestaetigt: true, grund: 'vorbefund_aufgehoben',
+        vorher: { befund: v.befund, ean: '4013602136424', lauf: '2026-10-02_080000' },
+      });
+    }
+  });
+  it('… aber NICHT gegen eine schon bestätigte Abweichung (zwei gegen zwei Lesungen → ein Mensch entscheidet)', () => {
+    const gl = eanFotoBestaetigen(eanFotoBefund(KFS.ean, KFS.ean), KFS.ean);
+    expect(eanFotoMitVorbefund(gl, vorher({ bestaetigt: true }))).toMatchObject({ art: 'abweichend', bestaetigt: true, vorbefund: expect.any(Object) });
+  });
+  it('… und nicht mit nur EINER Lesung der gespeicherten Nummer', () => {
+    const nurEine = eanFotoBestaetigen(eanFotoBefund(KFS.ean, KFS.ean), '');
+    expect(eanFotoMitVorbefund(nurEine, vorher()).art).toBe('abweichend');
+    const einfach = eanFotoBefund(KFS.ean, KFS.ean); // ohne zweite Lesung
+    expect(eanFotoMitVorbefund(einfach, vorher()).art).toBe('abweichend');
+    // erste Lesung abweichend, zweite gespeichert (am ersten Tag reicht das) — gegen einen alten Befund nicht
+    const zweiteGleich = eanFotoBestaetigen(eanFotoBefund(KFS.ean, ANDERE), KFS.ean);
+    expect(zweiteGleich.art).toBe('gleich');
+    expect(eanFotoMitVorbefund(zweiteGleich, vorher()).art).toBe('abweichend');
+  });
+  it('heute eine BESTÄTIGTE Abweichung → ersetzt den alten Befund (stärkerer Beleg)', () => {
+    const ab = eanFotoBestaetigen(eanFotoBefund(KFS.ean, ANDERE), ANDERE);
+    expect(eanFotoMitVorbefund(ab, vorher({ befund: 'unsicher' }))).toBe(ab);
+    // eine unbestätigte heutige ersetzt ihn nicht
+    const unb = eanFotoBestaetigen(eanFotoBefund(KFS.ean, ANDERE), '');
+    expect(eanFotoMitVorbefund(unb, vorher())).toMatchObject({ art: 'abweichend', gelesen: '4013602136424', vorbefund: expect.any(Object) });
+  });
+  it('eanFotoEintrag: was am Dokument landet — ganze Form, ohne Reste', () => {
+    expect(eanFotoEintrag(eanFotoBefund(KFS.ean, KFS.ean))).toEqual({ ean: KFS.ean, befund: 'gleich' });
+    expect(eanFotoEintrag(eanFotoBestaetigen(eanFotoBefund(KFS.ean, ANDERE), ANDERE))).toEqual({ ean: ANDERE, befund: 'abweichend', bestaetigt: true });
+    expect(eanFotoEintrag(eanFotoBestaetigen(eanFotoBefund(KFS.ean, '4013602313647'), ''))).toEqual({ ean: '4013602313647', befund: 'unsicher', grund: 'zweite_lesung_leer', zweit: null });
+    expect(eanFotoEintrag({ art: 'zweifelhaft', roh: '123', gespeichert: KFS.ean })).toMatchObject({ befund: 'unsicher', ean: '123' });
+    const auf = eanFotoMitVorbefund(eanFotoBestaetigen(eanFotoBefund(KFS.ean, KFS.ean), KFS.ean), vorher());
+    expect(eanFotoEintrag(auf)).toEqual({ ean: KFS.ean, befund: 'gleich', grund: 'vorbefund_aufgehoben', bestaetigt: true, vorher: { befund: 'abweichend', ean: '4013602136424', lauf: '2026-10-02_080000' } });
+    expect(eanFotoEintrag(eanFotoBefund(KFS.ean, ''))).toEqual({ ean: null, befund: 'kein_urteil', grund: 'nicht_lesbar' });
   });
 });

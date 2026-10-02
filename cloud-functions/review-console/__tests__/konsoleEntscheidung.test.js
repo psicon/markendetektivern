@@ -124,10 +124,10 @@ describe('Freigabe in der Prüfkonsole', () => {
     expect(doc('k').status).toBe('pending');
   });
 
-  it('unklarer Sperr-Eintrag → verweigert (kontosperre_unbekannt)', async () => {
+  it('unklarer Sperr-Eintrag (ohne gesperrt-Feld) → gesperrt wie auf der Gutschrift-Seite, verweigert auch mit force (Prüfrunde 2)', async () => {
     mockStore.set('cashback_sperren/u1', { grund: 'ohne gesperrt-Feld' });
     lege('k');
-    expect((await entscheide({ ids: ['k'], decision: 'approve', force: true, note: 'x x x' })).results[0]).toMatchObject({ outcome: 'refused', reason: 'kontosperre_unbekannt' });
+    expect((await entscheide({ ids: ['k'], decision: 'approve', force: true, note: 'x x x' })).results[0]).toMatchObject({ outcome: 'refused', reason: 'konto_gesperrt' });
   });
 
   it('Sperre nicht lesbar → keine Freigabe (Fehler statt Freigabe)', async () => {
@@ -224,5 +224,66 @@ describe('Fallansicht (reviewGetUpload): Nachbarn in jeder Schreibweise', () => 
     expect(r.sameEan.map((x) => x.id)).toEqual(['alt']);
     expect(r.precheck).toMatchObject({ verdict: 'locked', dup: { priorId: 'alt' } });
     expect(r.prior.id).toBe('alt');
+  });
+});
+
+describe('Befunde der Morgenrunde (review.rundeOffen, Prüfrunde 2, 02.10.2026)', () => {
+  const rundeOffen = (code, extra = {}) => ({ review: { rundeOffen: { grund: code, hinweis: 'Gleiches Foto bei anderem Konto: x', sperrend: [code], lauf: '2026-10-02_080000', trocken: false, ...extra } } });
+
+  it('Foto eines anderen Kontos: ohne force blockiert — mit force + Notiz freigegeben, der Eintrag geht mit', async () => {
+    lege('k', rundeOffen('foto_fremdes_konto'));
+    const r = await entscheide({ ids: ['k'], decision: 'approve' });
+    expect(r.results[0]).toMatchObject({ outcome: 'blocked', reason: 'foto_fremdes_konto' });
+    expect(doc('k').status).toBe('pending');
+    // force ohne Notiz lehnt der Server ab
+    await expect(entscheide({ ids: ['k'], decision: 'approve', force: true })).rejects.toThrow(/Notiz/);
+    const f = await entscheide({ ids: ['k'], decision: 'approve', force: true, note: 'Familienkonto, gleiches Foto geteilt' });
+    expect(f.results[0].outcome).toBe('approved');
+    expect(doc('k').review).toMatchObject({ forced: true, forcedNote: 'Familienkonto, gleiches Foto geteilt', precheck: { verdict: 'hold', reasons: ['foto_fremdes_konto'] } });
+    expect(doc('k').review.rundeOffen).toBeUndefined();
+  });
+
+  it('jeder sperrende Befund blockiert ohne force', async () => {
+    for (const code of ['foto_aeltere_offen', 'bilder_wiederverwendet', 'ean_abweichend', 'ean_unsicher']) {
+      mockStore.clear();
+      lege('k', rundeOffen(code));
+      expect((await entscheide({ ids: ['k'], decision: 'approve' })).results[0]).toMatchObject({ outcome: 'blocked', reason: code });
+    }
+  });
+
+  it('Barcode-Befund nur in rundeOffen (eanFotoOcr nicht gespeichert) → trotzdem blockiert', async () => {
+    lege('k', rundeOffen('ean_abweichend', { eanFoto: { befund: 'abweichend', ean: ANDERE, bestaetigt: true } }));
+    expect(doc('k').eanFotoOcr).toBeUndefined();
+    expect((await entscheide({ ids: ['k'], decision: 'approve' })).results[0]).toMatchObject({ outcome: 'blocked', reason: 'ean_abweichend' });
+  });
+
+  it('gespeicherter Barcode-Befund mit ungültiger erster Lesung → blockiert als ean_unsicher', async () => {
+    lege('k', { eanFotoOcr: { ean: '4013602313647', befund: 'unsicher', zweit: null } });
+    expect((await entscheide({ ids: ['k'], decision: 'approve' })).results[0]).toMatchObject({ outcome: 'blocked', reason: 'ean_unsicher' });
+  });
+
+  it('nur Information (z. B. Bildprüfung gescheitert) → Freigabe ohne force möglich', async () => {
+    lege('k', rundeOffen('bild_audit_gescheitert', { sperrend: [] }));
+    expect((await entscheide({ ids: ['k'], decision: 'approve' })).results[0].outcome).toBe('approved');
+  });
+
+  it('Ablehnung nimmt den Eintrag mit; „Zurückstellen" (hold) lässt ihn stehen', async () => {
+    lege('a', rundeOffen('foto_fremdes_konto'));
+    lege('h', rundeOffen('foto_fremdes_konto'));
+    await entscheide({ ids: ['a'], decision: 'reject', reason: 'bilder_wiederverwendet' });
+    expect(doc('a').review.rundeOffen).toBeUndefined();
+    await entscheide({ ids: ['h'], decision: 'hold', reason: 'nachfragen' });
+    expect(doc('h').review.rundeOffen).toMatchObject({ sperrend: ['foto_fremdes_konto'] });
+  });
+
+  it('Warteschlange und Fallansicht zeigen „zurückhalten" mit dem Grund der Runde', async () => {
+    lege('k', rundeOffen('foto_fremdes_konto'));
+    const q = await konsole.reviewQueue({ ...admin, data: { type: 'photos' } });
+    expect(q.rows[0]).toMatchObject({ id: 'k', verdict: 'hold', reasons: ['foto_fremdes_konto'] });
+    const c = await konsole.reviewCases({ ...admin, data: { type: 'photos', ids: ['k'] } });
+    expect(c.cases[0].precheck).toMatchObject({ verdict: 'hold', reasons: ['foto_fremdes_konto'], quelle: 'frisch' });
+    expect(c.cases[0].row.rundeOffen).toMatchObject({ grund: 'foto_fremdes_konto', hinweis: 'Gleiches Foto bei anderem Konto: x', sperrend: ['foto_fremdes_konto'] });
+    const g = await konsole.reviewGetUpload({ ...admin, data: { id: 'k' } });
+    expect(g.precheck).toMatchObject({ verdict: 'hold', reasons: ['foto_fremdes_konto'] });
   });
 });

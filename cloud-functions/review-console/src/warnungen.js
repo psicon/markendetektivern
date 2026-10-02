@@ -23,7 +23,7 @@ const TAG_MS = 24 * 60 * 60 * 1000;
  * @param {Array<{id:string, kind:string, active:boolean, startAt:number, endAt:number, budgetRemainingCents?:number, budgetTotalCents?:number}>} k.aktionen
  * @param {{eingeschaltet:boolean, laeufeLetzte48h:number}} k.zweitpruefung
  * @param {{inPruefung:number, aeltesteTage:number|null, letzte24h:{gesamt:number, ohneAktion:number}}} k.bons
- * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number, aeltesteOffenTage?:number|null, fotoAbgleichGescheitert?:boolean, kontoSperrenUnlesbar?:boolean}} k.runde
+ * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number, aeltesteOffenTage?:number|null, fotoAbgleichGescheitert?:boolean, kontoSperrenUnlesbar?:boolean, eanHaltenNeu?:number, haltBefundNichtGespeichert?:number, eanFotoNichtGespeichert?:number}} k.runde
  * @param {{bild:boolean, gesamt:boolean, text:string[]}} k.notbremse
  * @param {{alt:string|null, neu:string}} k.regelVersion
  * @param {{scharf:boolean, bericht:object|null, abgebrochen?:boolean, laeuftNoch?:boolean, unbekannt?:boolean}} [k.bonRunde]
@@ -90,6 +90,22 @@ function warnungen(k) {
     }
     if (r.auditVersucht >= 8 && r.auditFehler / r.auditVersucht > 0.25) {
       rot('bildpruefung_gestoert', `Die Bildprüfung ist bei ${r.auditFehler} von ${r.auditVersucht} Einreichungen gescheitert (meist Google-Limit). Diese Fälle bleiben offen.`);
+    }
+    // Barcode-Nummer (Prüfrunde 2, 02.10.2026): normal ~3 % der geprüften
+    // Fälle. Ändert sich das Modell (wie beim thinkingBudget am 22.09.),
+    // blieben sonst massenhaft Fälle still liegen — aufgefallen wäre es erst
+    // nach drei Tagen über „Produktfotos warten".
+    const eanNeu = Number(r.eanHaltenNeu) || 0;
+    if (r.auditVersucht > 0 && eanNeu >= 8 && eanNeu / r.auditVersucht > 0.1) {
+      (eanNeu / r.auditVersucht > 0.25 ? rot : gelb)('barcode_haelt_viele', `${eanNeu} von ${r.auditVersucht} geprüften Einreichungen hält die Runde wegen der Barcode-Nummer an (normal etwa 3 %) — Lesung des Modells prüfen.`);
+    }
+    // Ohne diese Einträge sieht die Prüfkonsole nicht, warum die Runde einen
+    // Fall liegen ließ, und gibt ihn ohne Warnung frei (Prüfrunde 2).
+    if (r.haltBefundNichtGespeichert > 0) {
+      rot('befund_nicht_gespeichert', `Bei ${r.haltBefundNichtGespeichert} offenen Fällen konnte der Halte-Grund (gleiches Foto, Barcode-Nummer) nicht gespeichert werden — die Prüfkonsole zeigt sie als unauffällig. Vor einer Freigabe die Fälle im Bericht ansehen.`);
+    }
+    if (r.eanFotoNichtGespeichert > 0) {
+      gelb('barcode_befund_nicht_gespeichert', `Bei ${r.eanFotoNichtGespeichert} Fällen konnte der Barcode-Befund (eanFotoOcr) nicht gespeichert werden; er steht ersatzweise am Halte-Grund der Runde.`);
     }
   }
   for (const t of (k.notbremse?.text || [])) rot('notbremse', `Notbremse: ${t}`);

@@ -14,7 +14,7 @@
 // ── In-Memory-Firestore ────────────────────────────────────────────────
 const mockStore = new Map();
 const mockWrites = [];
-const mockLage = { sperrenFehler: false, listeFehler: false, auditAufrufe: [], auditTexte: [], zweitLesungen: [] };
+const mockLage = { sperrenFehler: false, listeFehler: false, auditAufrufe: [], auditTexte: [], zweitLesungen: [], updateFehler: () => false, txUpdateFehler: () => false };
 const mockSentinel = { __feld: 'serverTimestamp' };
 const mockDelete = { __feld: 'delete' };
 const mockListe = new Map(); // Pfad → { md5, size }
@@ -32,13 +32,22 @@ function snapshot(pfad, daten) {
   const createTime = mockCreate.has(pfad) ? { toMillis: () => mockCreate.get(pfad) } : undefined;
   return { id: pfad.split('/').pop(), ref: docRef(pfad), exists: d !== undefined, createTime, data: () => (d === undefined ? undefined : kopie(d)), get: (f) => (d === undefined ? undefined : kopie(d[f])) };
 }
+/** Feldpfad wie Firestore-update („review.rundeOffen") — Zwischenebenen werden kopiert, nie verändert. */
+function setzePfad(obj, pfad, v) {
+  const teile = pfad.split('.');
+  let o = obj;
+  for (const t of teile.slice(0, -1)) {
+    o[t] = o[t] && typeof o[t] === 'object' ? { ...o[t] } : {};
+    o = o[t];
+  }
+  const letztes = teile[teile.length - 1];
+  if (v && v.__feld === 'delete') delete o[letztes];
+  else o[letztes] = v;
+}
 function anwenden(pfad, daten, merge) {
   const vorher = merge ? mockStore.get(pfad) || {} : {};
   const neu = { ...vorher };
-  for (const [k, v] of Object.entries(kopie(daten))) {
-    if (v && v.__feld === 'delete') delete neu[k];
-    else neu[k] = v;
-  }
+  for (const [k, v] of Object.entries(kopie(daten))) setzePfad(neu, k, v);
   // Wie crowd-upload-reward: eine Freigabe wird gebucht (sonst wartete die
   // Runde bis zu 5 Minuten auf die Buchung).
   if (pfad.startsWith('crowd_uploads/') && daten.status === 'approved') Object.assign(neu, { rewardResult: 'credited', rewardCents: 15 });
@@ -49,6 +58,12 @@ function docRef(pfad) {
     path: pfad, id: pfad.split('/').pop(),
     get: async () => snapshot(pfad, mockStore.get(pfad)),
     set: async (daten, opts) => { mockWrites.push({ path: pfad, art: 'set', data: kopie(daten) }); anwenden(pfad, daten, opts && opts.merge); },
+    update: async (daten) => {
+      if (mockLage.updateFehler(pfad, daten)) throw new Error('UNAVAILABLE update');
+      if (!mockStore.has(pfad)) throw new Error('NOT_FOUND');
+      mockWrites.push({ path: pfad, art: 'update', data: kopie(daten) });
+      anwenden(pfad, daten, true);
+    },
   };
 }
 const ms = (v) => (v && typeof v.toMillis === 'function' ? v.toMillis() : v);
@@ -75,6 +90,7 @@ const mockDb = {
     const ops = [];
     const tx = { get: (ref) => ref.get(), update: (ref, daten) => ops.push([ref.path, daten]) };
     const r = await fn(tx);
+    if (ops.some(([p, daten]) => mockLage.txUpdateFehler(p, daten))) throw new Error('ABORTED tx');
     for (const [p, daten] of ops) { mockWrites.push({ path: p, art: 'update', data: kopie(daten) }); anwenden(p, daten, true); }
     return r;
   },
@@ -119,6 +135,8 @@ jest.mock('@google/genai', () => ({
           mockLage.auditTexte.push(text);
           const eanPfad = pfade.find((p) => p.includes('/ean'));
           const eanFoto = mockAudit.has(eanPfad) ? mockAudit.get(eanPfad) : (eanPfad || '').split('/')[1];
+          if (eanFoto === 'AUDIT_FEHLER') throw new Error('INVALID_ARGUMENT Bild nicht lesbar');
+          if (mockLage.nachAudit) mockLage.nachAudit();
           return { text: JSON.stringify({ echt: true, loseWare: false, traegtAngaben: true, gleicheAnsicht: false, preisSichtbar: true, eanFoto, grund: 'ok' }) };
         },
       },
@@ -160,6 +178,9 @@ beforeEach(() => {
   mockLage.auditAufrufe = [];
   mockLage.auditTexte = [];
   mockLage.zweitLesungen = [];
+  mockLage.updateFehler = () => false;
+  mockLage.txUpdateFehler = () => false;
+  mockLage.nachAudit = null;
   mockZweit.clear();
   mockCreate.clear();
   dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => T0);
@@ -302,9 +323,9 @@ describe('Morgenrunde — Entscheidungen Patrick 02.10.2026', () => {
     expect(b.wartetAufDich[0].hinweis).toMatch(/zweite Lesung gescheitert/);
   });
 
-  it('Barcode-Foto nicht lesbar oder Waagen-Code → kein Urteil, normal freigegeben', async () => {
+  it('Barcode-Foto nicht lesbar oder Waagen-Code auf beiden Seiten → kein Urteil, normal freigegeben', async () => {
     einreichung('a');
-    einreichung('c', { uid: 'u3', ean: ANDERE });
+    einreichung('c', { uid: 'u3', ean: '2112345001500' });
     mockAudit.set(doc('a').images.ean, '');
     mockAudit.set(doc('c').images.ean, '2112345000008');
     const b = await scharf();
@@ -442,5 +463,188 @@ describe('Morgenrunde — Entscheidungen Patrick 02.10.2026', () => {
     await scharf();
     expect(doc('a').status).toBe('approved');
     expect(doc('b')).toMatchObject({ status: 'rejected', review: { reason: 'sperre_woche_gleicher_nutzer' } });
+  });
+});
+
+describe('Prüfrunde 2 (02.10.2026): Barcode-Befund hält über Tage, Konsole erfährt den Halte-Grund', () => {
+  const GESTERN = '2026-10-02_080000';
+  const KFS = '4250231136474';
+  const FOTO_GESTERN = '4013602136424';
+  const rundeOffen = (id) => (doc(id).review || {}).rundeOffen;
+  const eanFotoWrites = (id) => mockWrites.filter((w) => w.path === `crowd_uploads/${id}` && w.data.eanFotoOcr);
+
+  it('Kfs5jFA6qqOF8gD9iTEk: gestern abweichend, heute falsche Prüfziffer nah an der gespeicherten (kein Urteil) → bleibt liegen, Befund unverändert', async () => {
+    einreichung('k', { ean: KFS, eanFotoOcr: { ean: FOTO_GESTERN, befund: 'abweichend', bestaetigt: true, lauf: GESTERN } });
+    mockAudit.set(doc('k').images.ean, '4250231136470'); // eine Ziffer daneben → kein Urteil
+    const b = await scharf();
+    expect(doc('k').status).toBe('pending');
+    const f = b.wartetAufDich.find((x) => x.id === 'k');
+    expect(f).toMatchObject({ grund: 'ean_abweichend' });
+    expect(f.hinweis).toMatch(/Befund vom 2026-10-02_080000/);
+    expect(f.hinweis).toMatch(/heute kein Urteil/);
+    expect(eanFotoWrites('k')).toEqual([]); // der alte Befund bleibt, wie er war
+    expect(doc('k').eanFotoOcr).toMatchObject({ ean: FOTO_GESTERN, befund: 'abweichend', lauf: GESTERN });
+    expect(b.eanFotoVorbefund).toEqual({ haelt: 1, aufgehoben: 0 });
+    expect(rundeOffen('k')).toMatchObject({ grund: 'ean_abweichend', sperrend: ['ean_abweichend'], eanFoto: { befund: 'abweichend', ean: FOTO_GESTERN, bestaetigt: true } });
+  });
+
+  it('… dieselbe Lesung wie im zweiten Trockenlauf (4013602313647: Prüfziffer falsch, 12 Stellen anders) → zweite Lesung, ohne gestrigen Befund ebenfalls liegen', async () => {
+    einreichung('k', { ean: KFS });
+    mockAudit.set(doc('k').images.ean, '4013602313647');
+    mockZweit.set(doc('k').images.ean, '');
+    const b = await scharf();
+    expect(doc('k').status).toBe('pending');
+    expect(mockLage.zweitLesungen).toHaveLength(1);
+    expect(doc('k').eanFotoOcr).toMatchObject({ ean: '4013602313647', befund: 'unsicher', grund: 'zweite_lesung_leer' });
+    expect(b.wartetAufDich[0]).toMatchObject({ id: 'k', grund: 'ean_unsicher' });
+  });
+
+  it('falsche Prüfziffer weit weg, die zweite Lesung liefert die gespeicherte Nummer → freigegeben', async () => {
+    einreichung('k', { ean: KFS });
+    mockAudit.set(doc('k').images.ean, '4013602313647');
+    mockZweit.set(doc('k').images.ean, KFS);
+    await scharf();
+    expect(doc('k').status).toBe('approved');
+    expect(doc('k').eanFotoOcr).toMatchObject({ ean: KFS, befund: 'gleich', grund: 'zweite_lesung' });
+  });
+
+  it('gestern unsicher, heute zwei Lesungen der gespeicherten Nummer → Befund aufgehoben, freigegeben, nachvollziehbar am Dokument', async () => {
+    einreichung('k', { ean: KFS, eanFotoOcr: { ean: FOTO_GESTERN, befund: 'unsicher', zweit: null, grund: 'zweite_lesung_leer', lauf: GESTERN } });
+    mockZweit.set(doc('k').images.ean, KFS);
+    const b = await scharf(); // Bildprüfung und zweite Lesung lesen die gespeicherte Nummer
+    expect(mockLage.zweitLesungen).toEqual([[doc('k').images.ean]]);
+    expect(doc('k').status).toBe('approved');
+    expect(doc('k').eanFotoOcr).toEqual(expect.objectContaining({
+      ean: KFS, befund: 'gleich', grund: 'vorbefund_aufgehoben', bestaetigt: true, vorher: { befund: 'unsicher', ean: FOTO_GESTERN, lauf: GESTERN },
+    }));
+    expect(doc('k').eanFotoOcr.zweit).toBeUndefined(); // als Ganzes ersetzt, keine Reste des alten Befunds
+    expect(b.eanFotoVorbefund).toEqual({ haelt: 0, aufgehoben: 1 });
+  });
+
+  it('… nur EINE Lesung der gespeicherten Nummer (zweite liest etwas anderes) → bleibt liegen', async () => {
+    einreichung('k', { ean: KFS, eanFotoOcr: { ean: FOTO_GESTERN, befund: 'unsicher', zweit: null, lauf: GESTERN } });
+    mockZweit.set(doc('k').images.ean, '');
+    await scharf();
+    expect(doc('k').status).toBe('pending');
+    expect(doc('k').eanFotoOcr).toMatchObject({ befund: 'unsicher', ean: FOTO_GESTERN, lauf: GESTERN });
+  });
+
+  it('… gegen eine schon BESTÄTIGTE Abweichung hebt auch das nichts auf (ein Mensch entscheidet)', async () => {
+    einreichung('k', { ean: KFS, eanFotoOcr: { ean: FOTO_GESTERN, befund: 'abweichend', bestaetigt: true, lauf: GESTERN } });
+    const b = await scharf();
+    expect(mockLage.zweitLesungen).toEqual([]); // aufheben ginge ohnehin nicht — keine zweite Lesung bezahlen
+    expect(doc('k').status).toBe('pending');
+    expect(b.wartetAufDich[0]).toMatchObject({ id: 'k', grund: 'ean_abweichend' });
+    expect(b.wartetAufDich[0].hinweis).toMatch(/heute gleich/);
+  });
+
+  it('heute keine Bildprüfung (Fehler) → der alte Befund steht trotzdem als sperrend am Dokument', async () => {
+    einreichung('k', { ean: KFS, eanFotoOcr: { ean: FOTO_GESTERN, befund: 'abweichend', bestaetigt: false, lauf: GESTERN } });
+    mockAudit.set(doc('k').images.ean, 'AUDIT_FEHLER');
+    const b = await scharf();
+    expect(doc('k').status).toBe('pending');
+    expect(b.wartetAufDich[0]).toMatchObject({ id: 'k', grund: 'ean_abweichend' });
+    expect(rundeOffen('k')).toMatchObject({ sperrend: ['ean_abweichend'] });
+  });
+
+  it('zweite Lesung bekommt keine Zeit mehr (Arbeitszeit vorbei) → Abweichung bleibt unbestätigt stehen, nie freigegeben', async () => {
+    einreichung('k');
+    mockAudit.set(doc('k').images.ean, ANDERE);
+    mockLage.nachAudit = () => dateSpy.mockImplementation(() => T0 + 19 * 60 * 1000);
+    await scharf();
+    expect(mockLage.zweitLesungen).toEqual([]);
+    expect(doc('k').status).toBe('pending');
+    expect(doc('k').eanFotoOcr).toMatchObject({ ean: ANDERE, befund: 'abweichend', bestaetigt: false, fehler: 'zeit_abgelaufen' });
+  });
+
+  it('eanFotoOcr nicht speicherbar → Halte-Befund steht in review.rundeOffen; der nächste Lauf hält damit und repariert eanFotoOcr', async () => {
+    einreichung('k', { ean: KFS });
+    mockAudit.set(doc('k').images.ean, ANDERE);
+    mockLage.updateFehler = (pfad, daten) => !!daten.eanFotoOcr;
+    const b = await scharf();
+    expect(doc('k').eanFotoOcr).toBeUndefined();
+    expect(b.eanFotoNichtGespeichert).toBe(1);
+    expect(b.warnungen.map((w) => w.code)).toContain('barcode_befund_nicht_gespeichert');
+    expect(rundeOffen('k')).toMatchObject({ sperrend: ['ean_abweichend'], eanFoto: { befund: 'abweichend', ean: ANDERE, bestaetigt: true } });
+    // nächster Morgen: das Foto ist heute unlesbar — gehalten wird trotzdem
+    mockLage.updateFehler = () => false;
+    mockAudit.set(doc('k').images.ean, '');
+    mockWrites.length = 0;
+    const b2 = await scharf();
+    expect(doc('k').status).toBe('pending');
+    expect(b2.wartetAufDich[0]).toMatchObject({ id: 'k', grund: 'ean_abweichend' });
+    expect(doc('k').eanFotoOcr).toMatchObject({ ean: ANDERE, befund: 'abweichend', bestaetigt: true });
+  });
+
+  it('Foto eines FREMDEN Kontos → review.rundeOffen mit Grund, Hinweis und sperrendem Befund (die Konsole hält damit an); NICHT holdReasons', async () => {
+    einreichung('fremd', { uid: 'u9', status: 'approved', createdAt: T0 - 40 * TAG_MS, ean: ANDERE });
+    einreichung('neu', { md5: { front: 'md5_fremd_front' } });
+    const b = await scharf();
+    expect(doc('neu').status).toBe('pending');
+    expect(rundeOffen('neu')).toEqual({
+      grund: 'foto_fremdes_konto', hinweis: 'Gleiches Foto bei 1 Einreichung eines anderen Kontos — welche, steht im Tagesbericht', zurueckgehalten: null,
+      sperrend: ['foto_fremdes_konto'], eanFoto: null, lauf: b.lauf, trocken: false, at: mockSentinel,
+    });
+    // die ID der fremden Einreichung steht nur im Bericht (Admins), nicht am Dokument des Einreichers
+    expect(b.wartetAufDich.find((x) => x.id === 'neu').hinweis).toMatch(/fremd/);
+    expect(JSON.stringify(doc('neu').review)).not.toMatch(/"fremd"|: fremd/);
+    expect(doc('neu').holdReasons).toBeUndefined();
+    expect(b.rundeOffen).toMatchObject({ geschrieben: 1, fehler: 0 });
+  });
+
+  it('… am nächsten Morgen nicht mehr betroffen: Trockenlauf würde freigeben → Eintrag entfernt; Bildprüfung gescheitert → Eintrag aktualisiert', async () => {
+    einreichung('fremd', { uid: 'u9', status: 'approved', createdAt: T0 - 40 * TAG_MS, ean: ANDERE });
+    einreichung('neu', { md5: { front: 'md5_fremd_front' } });
+    await scharf();
+    expect(rundeOffen('neu').sperrend).toEqual(['foto_fremdes_konto']);
+    // das fremde Foto ist weg (z. B. gelöscht) und die Bildprüfung scheitert heute
+    mockListe.set(doc('neu').images.front, { md5: 'md5_neu_front_eigen', size: 1234 });
+    mockAudit.set(doc('neu').images.ean, 'AUDIT_FEHLER');
+    await scharf();
+    expect(rundeOffen('neu')).toMatchObject({ grund: 'bild_audit_gescheitert', sperrend: [] });
+    // Trockenlauf mit funktionierender Bildprüfung: würde freigeben → Eintrag weg
+    mockAudit.delete(doc('neu').images.ean);
+    const b = await taeglicheRunde({ dryRun: true, projekt: 'p', bucketName: 'b', ausloeser: 'manuell' });
+    expect(doc('neu').status).toBe('pending');
+    expect(doc('neu').review).toEqual({});
+    expect(b.rundeOffen).toMatchObject({ entfernt: 1 });
+  });
+
+  it('Trockenlauf: geplante Ablehnung wegen wiederverwendeter Fotos landet mit `geplant` am Dokument (die Konsole hält an)', async () => {
+    einreichung('alt', { status: 'approved', createdAt: T0 - 40 * TAG_MS, ean: ANDERE });
+    einreichung('neu', { md5: { zutaten: 'md5_alt_zutaten' } });
+    await taeglicheRunde({ dryRun: true, projekt: 'p', bucketName: 'b', ausloeser: 'manuell' });
+    expect(doc('neu').status).toBe('pending');
+    expect(rundeOffen('neu')).toMatchObject({ grund: 'bilder_wiederverwendet', geplant: 'ablehnen', sperrend: ['bilder_wiederverwendet'], trocken: true });
+  });
+
+  it('Halte-Grund nicht speicherbar → rote Warnung (die Konsole sähe den Fall als unauffällig)', async () => {
+    einreichung('fremd', { uid: 'u9', status: 'approved', createdAt: T0 - 40 * TAG_MS, ean: ANDERE });
+    einreichung('neu', { md5: { front: 'md5_fremd_front' } });
+    mockLage.txUpdateFehler = (pfad, daten) => Object.keys(daten).includes('review.rundeOffen');
+    const b = await scharf();
+    expect(b.rundeOffen).toMatchObject({ fehler: 1, fehlerSperrend: 1 });
+    expect(b.warnungen.find((w) => w.code === 'befund_nicht_gespeichert')).toMatchObject({ stufe: 'rot' });
+  });
+
+  it('entschiedene Fälle bekommen keinen Eintrag; ein Eintrag vom Vortag verschwindet mit der Entscheidung', async () => {
+    einreichung('frei', { review: { rundeOffen: { grund: 'bild_audit_gescheitert', sperrend: [], lauf: GESTERN } } });
+    await scharf();
+    expect(doc('frei').status).toBe('approved');
+    expect(doc('frei').review.rundeOffen).toBeUndefined();
+  });
+
+  it('Kopien, von denen keine je bezahlt wurde: Fotos einer als Doppel abgelehnten Einreichung sind KEIN Beleg (Vorfall 10.09., Prüfrunde 2)', async () => {
+    einreichung('b', { status: 'rejected', createdAt: T0 - 9 * TAG_MS, rejectReason: 'doppelt_eingereicht' });
+    einreichung('c', { createdAt: T0 - TAG_MS, ean: ANDERE, md5: { front: 'md5_b_front' } });
+    await scharf();
+    expect(doc('c').status).toBe('approved');
+  });
+
+  it('gestern gehaltene Einreichung eines inzwischen gesperrten Kontos → nichts geschrieben (liegt stumm)', async () => {
+    mockStore.set('cashback_sperren/u1', { gesperrt: true });
+    einreichung('k', { ean: KFS, eanFotoOcr: { ean: FOTO_GESTERN, befund: 'abweichend', lauf: GESTERN } });
+    await scharf();
+    expect(mockWrites.filter((w) => w.path === 'crowd_uploads/k')).toEqual([]);
   });
 });

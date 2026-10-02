@@ -11,7 +11,8 @@
  * gegen Doppel geprüft.
  */
 const { evaluateDuplicate, completenessCheck, ms } = require('./duplicatePolicy');
-const { eanOf, nameOf, preisOf, policyOf, herstellerAnzeige, vollstaendigkeitOf, herkunftOf, eanFotoBefund, eanSchluessel } = require('./werte');
+const { eanOf, nameOf, preisOf, policyOf, herstellerAnzeige, vollstaendigkeitOf, herkunftOf, eanFotoBefund, eanSchluessel, EAN_HALTEN } = require('./werte');
+const { RUNDE_SPERREND } = require('./fotoRundeRegeln');
 
 const REQUIRED_STEPS = ['front', 'rueckseite', 'hersteller', 'ean', 'naehrwerte', 'zutaten', 'preis'];
 const SLOTS = new Set(REQUIRED_STEPS);
@@ -39,21 +40,58 @@ function bildDefektOf(x) {
 
 /**
  * Nummer vom Barcode-Foto (Morgenrunde, `eanFotoOcr`) gegen die gespeicherte —
- * dieselbe Rechnung wie in der Runde (werte.eanFotoBefund), nicht deren
- * gespeichertes Ergebnis. Einzige Ausnahme: hat die zweite Lesung der Runde
- * die Abweichung weder bestätigt noch widerlegt (`befund: 'unsicher'`), steht
- * das so da — aus der ersten Lesung allein sähe es wie eine bestätigte
- * Abweichung aus. `eanFotoOcr` schreibt nur der Server (firestore.rules).
+ * dieselbe Rechnung wie in der Runde (werte.eanFotoBefund), dazu der
+ * gespeicherte Befund, wo er strenger ist. `eanFotoOcr` schreibt nur der
+ * Server (firestore.rules).
+ *
+ *  - Gespeichert `abweichend`/`unsicher` → hält, egal was die Neuberechnung
+ *    ergibt (Prüfrunde 2, 02.10.2026): der Befund gilt, bis ein Mensch
+ *    entscheidet — `unsicher` steht als solcher da (aus der ersten Lesung
+ *    allein sähe er wie eine bestätigte Abweichung aus), eine gespeicherte
+ *    Abweichung, die sich heute nicht mehr nachrechnen lässt, als `unsicher`.
+ *  - Ergibt die Neuberechnung `zweifelhaft` (falsche Prüfziffer, weit weg von
+ *    der gespeicherten Nummer), kann die Konsole keine zweite Lesung machen →
+ *    `unsicher` (fail-closed).
+ *  - `vorher`: der Befund, den die Runde mit zwei Lesungen der gespeicherten
+ *    Nummer aufgehoben hat (nur Anzeige).
  */
 function eanFotoZeile(x) {
   const o = x.eanFotoOcr;
   if (!o || typeof o !== 'object') return null;
   const b = eanFotoBefund(x.ean, o.ean);
-  const unsicher = o.befund === 'unsicher' && b.art === 'abweichend';
+  let art = b.art;
+  if (EAN_HALTEN.has(o.befund)) art = o.befund === 'abweichend' && b.art === 'abweichend' ? 'abweichend' : 'unsicher';
+  else if (b.art === 'zweifelhaft') art = 'unsicher';
+  const zweit = typeof o.zweit === 'string' ? o.zweit.replace(/\D/g, '').slice(0, 14) || null : null;
   return {
-    ...b, ...(unsicher ? { art: 'unsicher', zweit: typeof o.zweit === 'string' ? o.zweit.slice(0, 14) : null } : {}),
+    ...b, art,
+    ...(art === 'unsicher' ? { gelesen: b.gelesen, roh: String(o.ean ?? '').replace(/\D/g, '').slice(0, 14) || null, zweit } : {}),
     ...(typeof o.bestaetigt === 'boolean' ? { bestaetigt: o.bestaetigt } : {}),
+    ...(o.vorher && typeof o.vorher === 'object' ? { vorher: { befund: String(o.vorher.befund || '').slice(0, 20), ean: String(o.vorher.ean || '').replace(/\D/g, '').slice(0, 14) || null } } : {}),
     at: ms(o.at),
+  };
+}
+
+const SPERREND = new Set(RUNDE_SPERREND);
+const kurz = (v, n) => (typeof v === 'string' && v ? v.slice(0, n) : null);
+
+/**
+ * Was die Morgenrunde an einer offenen Einreichung hinterlassen hat
+ * (`review.rundeOffen`, fotoRundeRegeln.rundeOffenEintrag) — bereinigt, denn
+ * die Werte landen in der Oberfläche. `sperrend` nur aus der bekannten Menge.
+ */
+function rundeOffenOf(x) {
+  const r = x.review && typeof x.review === 'object' ? x.review.rundeOffen : null;
+  if (!r || typeof r !== 'object') return null;
+  return {
+    grund: kurz(r.grund, 60),
+    geplant: r.geplant === 'freigeben' || r.geplant === 'ablehnen' ? r.geplant : null,
+    hinweis: kurz(r.hinweis, 300),
+    zurueckgehalten: kurz(r.zurueckgehalten, 60),
+    sperrend: Array.isArray(r.sperrend) ? [...new Set(r.sperrend.filter((c) => SPERREND.has(c)))] : [],
+    lauf: kurz(r.lauf, 40),
+    trocken: r.trocken === true,
+    at: ms(r.at),
   };
 }
 
@@ -122,6 +160,8 @@ function rowOf(d) {
       ? { merchant: x.priceReceipt.merchant ?? null, street: x.priceReceipt.street ?? null, zip: x.priceReceipt.zip ?? null, city: x.priceReceipt.city ?? null, bonDate: x.priceReceipt.bonDate ?? null, complete: !!x.priceReceipt.complete }
       : null,
     review: x.review ?? null,
+    // Warum die Morgenrunde den Fall liegen ließ (Prüfrunde 2, 02.10.2026).
+    rundeOffen: rundeOffenOf(x),
     // Intern (vor der Auslieferung entfernt, stripPolicy): Eingaben der Regeln —
     // mit dem Server-Zeitpunkt des Dokuments (werte.einreichZeit).
     _policy: policyOf(d.id, x, d.createTime),
@@ -155,6 +195,13 @@ const OHNE_DOPPEL = { verdict: 'ok', reason: null, priorId: null, priorUserId: n
  *    Doppel-Regel auch dort gerechnet (`dupFoto`) — eine falsch getippte EAN
  *    soll die Wochen-Sperre nicht umgehen. Bestätigte die zweite Lesung der
  *    Runde weder die eine noch die andere Nummer → `ean_unsicher`, ebenfalls `hold`.
+ *  - Was die Morgenrunde bei einer OFFENEN Einreichung gefunden hat und die
+ *    Konsole selbst nicht prüfen kann (`row.rundeOffen.sperrend`: gleiches
+ *    Foto bei einem anderen Konto oder in einer älteren offenen/bezahlten
+ *    Einreichung, abweichende oder unsichere Barcode-Nummer) → `hold`
+ *    (Prüfrunde 2, 02.10.2026). Freigabe dann nur mit force + Notiz. Der
+ *    nächste Lauf aktualisiert oder entfernt den Eintrag; jede Entscheidung
+ *    ersetzt `review` und nimmt ihn mit.
  */
 function precheckOf(row, sameEanRows, { kontoSperre = null, fotoEanRows = null } = {}) {
   const completeness = completenessCheck(row._komplett, REQUIRED_STEPS);
@@ -176,6 +223,11 @@ function precheckOf(row, sameEanRows, { kontoSperre = null, fotoEanRows = null }
       dupFoto = evaluateDuplicate({ ...row._policy, ean: ef.gelesen }, fotoEanRows.filter((r) => r.id !== row.id).map((r) => r._policy));
       if (dupFoto.verdict === 'locked') reasons.push('foto_nummer_doppelt');
     }
+    if (verdict === 'ok') verdict = 'hold';
+  }
+  const runde = row.status === 'pending' && row.rundeOffen ? row.rundeOffen : null;
+  for (const code of (runde ? runde.sperrend : [])) {
+    if (!reasons.includes(code)) reasons.push(code);
     if (verdict === 'ok') verdict = 'hold';
   }
   if (kontoSperre === 'gesperrt') { reasons.unshift('konto_gesperrt'); verdict = 'locked'; }
@@ -307,5 +359,5 @@ function baueFotoListe(openDocs, byEan, p, q, kontoSperre = () => null) {
 
 module.exports = {
   REQUIRED_STEPS, INDEX_FELDER, safeStatus, rowOf, stripPolicy, precheckOf, precheckFuerFall,
-  nachbarnAus, nachbarnVon, gruppiereNachEan, eanIndex, baueFotoListe, bildDefektOf, eanFotoZeile,
+  nachbarnAus, nachbarnVon, gruppiereNachEan, eanIndex, baueFotoListe, bildDefektOf, eanFotoZeile, rundeOffenOf,
 };

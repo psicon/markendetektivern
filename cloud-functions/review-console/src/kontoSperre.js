@@ -15,25 +15,34 @@
  * deny-all-Regel in firestore.rules sperrt Clients aus. Geschrieben wird es
  * per Admin-SDK; die Gutschrift-/Auszahlungsseite liest dieselbe Collection.
  *
- * Semantik (gleich für Runde und Konsole):
+ * Semantik (gleich für Runde und Konsole — und seit Prüfrunde 2, 02.10.2026,
+ * auch gleich mit der Gutschrift-Seite, cashback-pipeline/lib/kontoSperre.js
+ * `istGesperrt`):
  *  - kein Dokument, oder `gesperrt === false` → nicht gesperrt (aufgehoben),
- *  - `gesperrt === true` → gesperrt,
- *  - jeder andere Inhalt → `unbekannt`,
+ *  - jedes andere vorhandene Dokument → gesperrt (auch ohne Feld oder mit
+ *    `gesperrt: 'ja'`): wer ein Sperr-Dokument anlegt, meint eine Sperre.
+ *    Bis zur Prüfrunde 2 hieß ein unklarer Eintrag hier `unbekannt` (Fall
+ *    wurde angesehen und konnte sichtbar abgelehnt werden), auf der
+ *    Gutschrift-Seite „gesperrt" — dieselbe Eingabe mit zwei Bedeutungen.
  *  - Lesefehler → `unbekannt`.
  * `unbekannt` heißt: keine Freigabe (fail-closed für die Freigabe), aber auch
- * keine Ablehnung — ein Infrastrukturfehler oder ein unklarer Eintrag ist nie
- * ein Urteil über die Einreichung. Der Fall bleibt liegen.
+ * keine Ablehnung — ein Infrastrukturfehler ist nie ein Urteil über die
+ * Einreichung. Der Fall bleibt liegen.
  */
 const logger = require('firebase-functions/logger');
 
 const SPERREN = 'cashback_sperren';
 
-/** @returns {'gesperrt'|'unbekannt'|null} */
+/**
+ * Urteil aus einem gelesenen Dokument (`data()`); undefined/null = kein Dokument.
+ * Liefert nie 'unbekannt' — das gibt es nur bei einem Lesefehler (kontoSperreVon,
+ * bzw. der Aufrufer fängt den Fehler).
+ * @returns {'gesperrt'|null}
+ */
 function sperreAusDaten(daten) {
   if (daten === undefined || daten === null) return null;
-  if (daten.gesperrt === true) return 'gesperrt';
-  if (daten.gesperrt === false) return null;
-  return 'unbekannt';
+  if (typeof daten === 'object' && daten.gesperrt === false) return null;
+  return 'gesperrt';
 }
 
 /**

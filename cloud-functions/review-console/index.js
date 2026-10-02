@@ -18,6 +18,12 @@
  *    wird in der Freigabe-Transaktion gelesen; scheitert das Lesen, wird nicht
  *    freigegeben. Die Morgenrunde lässt diese Fälle stumm liegen; in der
  *    Warteschlange stehen sie am Ende.
+ *  - Was die Morgenrunde bei einem offenen Fall gefunden hat und die Konsole
+ *    selbst nicht prüfen kann (gleiches Foto bei einem anderen Konto oder in
+ *    einer älteren Einreichung, abweichende/unsichere Barcode-Nummer), steht
+ *    in `review.rundeOffen` (Prüfrunde 2, 02.10.2026). precheckOf macht daraus
+ *    `hold` — Freigabe nur mit force + Notiz. Jede Entscheidung hier ersetzt
+ *    `review` und nimmt den Eintrag mit; sonst aktualisiert ihn der nächste Lauf.
  *  - Batch = pro ID eigene Transaktion + Ergebnis pro ID. Kein „alles oder nichts".
  *  - reviewNote immer positiv formuliert (Copy-Ton-Regel, CLAUDE.md).
  *
@@ -334,6 +340,7 @@ exports.reviewDecideUploads = onCall({ region: REGION, timeoutSeconds: 120 }, as
           const others = row.anzeigeEan ? await nachbarnInTx(tx, row.anzeigeEan, id) : [];
           const fotoEan = row.eanFoto && row.eanFoto.art === 'abweichend' ? row.eanFoto.gelesen : null;
           const fotoEanRows = fotoEan ? await nachbarnInTx(tx, fotoEan, id) : null;
+          // `row` aus der Transaktion trägt `rundeOffen` (Befunde der Morgenrunde) — precheckOf hält damit an.
           const precheck = precheckOf(row, others, { fotoEanRows });
           if (precheck.verdict !== 'ok' && !force) {
             return { id, outcome: 'blocked', reason: precheck.reasons[0] || precheck.verdict, precheck };

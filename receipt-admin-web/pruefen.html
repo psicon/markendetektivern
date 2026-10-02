@@ -241,7 +241,28 @@
         ['foto_fremdes_konto', 'Gleiches Foto bei einem anderen Konto'],
         ['foto_aeltere_offen', 'Gleiches Foto in älterer, offener Einreichung'],
         ['foto_abgleich_gescheitert', 'Foto-Abgleich gescheitert (Technik)'],
+        // Weitere Gründe, mit denen die Morgenrunde einen Fall liegen lässt
+        // (review.rundeOffen, Prüfrunde 2, 02.10.2026) — nur Anzeige.
+        ['sperre_woche_gleicher_nutzer', 'Doppelt (selbe Person, binnen 7 Tagen)'],
+        ['konto_gesperrt_im_lauf', 'Konto während der Runde gesperrt'],
+        ['beleg_nicht_geschrieben', 'Doppel-Beleg in der Runde nicht gespeichert'],
+        ['notbremse_wochensperre', 'Notbremse (Wochen-Sperre)'],
+        ['notbremse_bildpruefung', 'Notbremse Bildprüfung'],
+        ['notbremse_quote', 'Notbremse Ablehnungsquote'],
+        ['notbremse_preis', 'Notbremse (Preis)'],
+        ['bild_nicht_lesbar_infrastruktur', 'Datei nicht abrufbar (Technik)'],
+        ['nachlesen_gescheitert', 'Nachlesen gescheitert (Technik)'],
+        ['bild_audit_gescheitert', 'Bildprüfung gescheitert (Technik)'],
+        ['kein_bild_audit', 'Nicht geprüft (Zeit)'],
+        ['schreib_fehler', 'Speichern gescheitert (Technik)'],
+        ['lesung_unsicher', 'Name/Barcode unsicher gelesen'],
+        ['preis_unbeurteilt', 'Preis nicht beurteilt (Bildprüfung)'],
+        ['preis_unsicher', 'Preis unsicher — auf dem Preisfoto nachsehen'],
+        ['ort_auffaellig', 'Aufnahmeort passt nicht zum Markt'],
+        ['namer_laeuft_noch', 'Wird noch nachgelesen'],
       ]]);
+      /** Was die Barcode-Lesung der Morgenrunde ergab (row.eanFoto, src/einreichung.js eanFotoZeile). */
+      const EANFOTO_DE = { abweichend: 'zeigt andere Nummer', unsicher: 'Lesungen uneinig', gleich: 'bestätigt', kein_urteil: 'nicht lesbar' };
 
       /**
        * Wer entschieden hat — aus `review.decidedBy`. Vorher hieß alles außer
@@ -572,6 +593,7 @@
               ${(p.reasons || []).length ? `<small>${esc((p.reasons || []).map((x) => REASON_DE[x] || x).join(' · '))}</small>` : `<small>Vollständig, kein Doppel${ohnePreis ? ' · ohne Preis im Foto: ablehnen mit A, dann 8' : ''}</small>`}
               ${urteilHerkunft}</div>
             ${entschieden}
+            ${rundeZeile(r)}
             <div class="folge ${c.folge && c.folge.buchtCent > 0 ? 'zahlt' : 'zahlt-nicht'}">
               ${c.folge && c.folge.buchtCent > 0
                 ? `Freigabe bucht <b>${euro(c.folge.buchtCent)}</b>`
@@ -579,7 +601,7 @@
             </div>
             ${nutzerZeile(c.nutzer)}
             <div class="kv">
-              <div class="k">Barcode</div><div class="v">${esc(ean || '—')}${h.eanNachgelesen ? nl() : ''}</div>
+              <div class="k">Barcode</div><div class="v">${esc(ean || '—')}${h.eanNachgelesen ? nl() : ''}${eanFotoZeile(r.eanFoto)}</div>
               <div class="k">Markt</div><div class="v">${esc(r.marketName || r.marketId || '—')}</div>
               <div class="k">Preis</div><div class="v">${euro(r.priceCents)} <span style="color:var(--fg3)">${esc(PREISBILD_DE[preisBild] || 'Herkunft unklar')}</span>${h.preisNachgelesen ? nl() : ''}</div>
               <div class="k">Hersteller</div><div class="v">${esc(r.manufacturer || '—')}${h.herstellerNachgelesen ? nl('nachgelesen · zählt nicht für die Doppel-Prüfung') : ''}</div>
@@ -595,6 +617,34 @@
             ${dup}
           </div>
         </div>`;
+      }
+
+      /**
+       * Warum die Morgenrunde den Fall liegen ließ (review.rundeOffen, Prüfrunde 2,
+       * 02.10.2026). Vorher stand ein Fall, den die Runde wegen eines Fotos eines
+       * anderen Kontos anhielt, hier als „Vorprüfung ok" — ohne jeden Hinweis.
+       * Sperrende Befunde stehen zusätzlich in der Vorprüfung (Freigabe nur mit
+       * Begründung); hier der Zusammenhang: Grund, Hinweis, Lauf.
+       */
+      function rundeZeile(r) {
+        const ro = r.status === 'pending' ? r.rundeOffen : null;
+        if (!ro || !ro.grund) return '';
+        const was = ro.geplant === 'ablehnen' ? 'würde ablehnen' : ro.geplant === 'freigeben' ? 'würde freigeben' : 'ließ liegen';
+        const wer = ro.trocken ? 'Morgenrunde (Trockenlauf)' : 'Morgenrunde';
+        const wann = ro.at ? ` · ${esc(fmtDateTime(ro.at))}` : '';
+        const zurueck = ro.zurueckgehalten ? ` · zurückgehalten: ${esc(REASON_DE[ro.zurueckgehalten] || ro.zurueckgehalten)}` : '';
+        return `<div class="folge zahlt-nicht">${wer} ${was}: <b>${esc(REASON_DE[ro.grund] || ro.grund)}</b>${zurueck}${wann}
+          ${ro.hinweis ? `<br><small>${esc(ro.hinweis)}</small>` : ''}</div>`;
+      }
+
+      /** Nummer vom Barcode-Foto, wo sie etwas zu sagen hat. */
+      function eanFotoZeile(ef) {
+        if (!ef || ef.art === 'kein_urteil' || (ef.art === 'gleich' && !ef.vorher)) return '';
+        const nummer = ef.gelesen || ef.roh;
+        const text = `Foto: ${nummer ? esc(nummer) + ' — ' : ''}${esc(EANFOTO_DE[ef.art] || ef.art)}${ef.zweit ? ` (zweite Lesung ${esc(ef.zweit)})` : ''}`;
+        const frueher = ef.vorher && ef.vorher.befund ? `<br><small style="color:var(--fg3)">früher ${esc(EANFOTO_DE[ef.vorher.befund] || ef.vorher.befund)}${ef.vorher.ean ? ' ' + esc(ef.vorher.ean) : ''}, mit zwei Lesungen der gespeicherten Nummer aufgehoben</small>` : '';
+        const farbe = ef.art === 'gleich' ? 'var(--fg3)' : 'var(--no)';
+        return `<br><small style="color:${farbe}">${text}</small>${frueher}`;
       }
 
       function renderReceipt(c) {

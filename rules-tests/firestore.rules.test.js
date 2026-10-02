@@ -491,6 +491,17 @@ describe('Ratings, Feedback, Telemetrie, Push-Tokens', () => {
     }
   });
 
+  test('ANGRIFF: Halte-Grund der Morgenrunde (review.rundeOffen) beim Anlegen vorbelegen scheitert — auch ohne andere review-Felder', async () => {
+    // Prüfrunde 2 (02.10.2026): die Prüfkonsole hält Fälle mit sperrenden
+    // Befunden in review.rundeOffen an; wer ihn leer vorbelegt, gäbe vor, es
+    // gebe nichts zu beanstanden. Ändern kann der Client das Dokument nie.
+    await assertFails(setDoc(doc(alice(), 'crowd_uploads/angriff_rundeOffen'), {
+      ...appAnlage(), review: { rundeOffen: { grund: null, sperrend: [], lauf: '2099-01-01_000000' } },
+    }));
+    await assertSucceeds(setDoc(doc(alice(), 'crowd_uploads/ohne_rundeOffen'), appAnlage()));
+    await assertFails(updateDoc(doc(alice(), 'crowd_uploads/ohne_rundeOffen'), { 'review.rundeOffen': { sperrend: [] } }));
+  });
+
   test('Gegenprobe: die App-Anlage trägt keines der gesperrten Felder', () => {
     const app = Object.keys(appAnlage());
     expect(app.filter((k) => SERVER_FELDER.includes(k))).toEqual([]);

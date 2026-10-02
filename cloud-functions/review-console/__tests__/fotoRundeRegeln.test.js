@@ -3,7 +3,7 @@
  * Regeln der Morgenrunde. Jeder Fall hier ist einer, der in den Handrunden
  * 09.–24.09.2026 vorkam und dort von Hand entschieden werden musste.
  */
-const { entscheideFall, notbremse, bildBefund, belegeVon, AUSSER_GESAMTQUOTE, DOPPEL_GRUENDE } = require('../src/fotoRundeRegeln');
+const { entscheideFall, notbremse, bildBefund, belegeVon, rundeOffenEintrag, rundeBefunde, AUSSER_GESAMTQUOTE, DOPPEL_GRUENDE, RUNDE_SPERREND } = require('../src/fotoRundeRegeln');
 const WOCHE = 'sperre_woche_gleicher_nutzer';
 
 const ok = { ok: true, problems: [], missing: [] };
@@ -363,14 +363,24 @@ describe('Foto-Abgleich gegen alle früheren Einreichungen (Entscheidung Patrick
       expect(bildBefund('b', ['a'], info)).toBeNull();
     }
   });
-  it('ältere eigene als DOPPEL abgelehnt → wiederverwendet (Fotos einer Woche später erneut einreichen ist kein neuer Einkauf, Prüfrunde 02.10.)', () => {
+  it('ältere eigene als DOPPEL abgelehnt, das Produkt ist für diese Person bezahlt → wiederverwendet (Fotos einer Woche später erneut einreichen ist kein neuer Einkauf, Prüfrunde 02.10.)', () => {
+    const bezahlt = (uid, ean) => uid === 'u1' && ean === 'E1';
     for (const grund of ['sperre_woche_gleicher_nutzer', 'doppelt_eingereicht', 'sperre_30_tage_gleicher_nutzer', 'bilder_wiederverwendet', 'produkt_bereits_verguetet']) {
       expect(DOPPEL_GRUENDE.has(grund)).toBe(true);
-      const info = welt({ a: { userId: 'u1', createdAt: T, status: 'rejected', grund }, b: { userId: 'u1', createdAt: T + 8 * 86400000, status: 'pending' } });
-      expect(bildBefund('b', ['a'], info)).toEqual({ art: 'wiederverwendet', mit: ['a'] });
+      const info = welt({ a: { userId: 'u1', createdAt: T, status: 'rejected', grund, ean: 'E1' }, b: { userId: 'u1', createdAt: T + 8 * 86400000, status: 'pending' } });
+      expect(bildBefund('b', ['a'], info, bezahlt)).toEqual({ art: 'wiederverwendet', mit: ['a'] });
     }
     // fremde Doppel-Sperre (Altbestand bis 20.09.) belegt keine eigene Zahlung
     expect(DOPPEL_GRUENDE.has('sperre_30_tage_anderer_nutzer')).toBe(false);
+  });
+  it('… aber NICHT, wenn keine Kopie je bezahlt wurde (Vorfall 10.09.: alle Kopien abgelehnt) — eine Kopie muss übrig bleiben (Prüfrunde 2)', () => {
+    const info = welt({ a: { userId: 'u1', createdAt: T, status: 'rejected', grund: 'doppelt_eingereicht', ean: 'E1' }, b: { userId: 'u1', createdAt: T + 8 * 86400000, status: 'pending' } });
+    expect(bildBefund('b', ['a'], info, () => false)).toBeNull();
+    // ohne Auskunft über Freigaben zählt eine Doppel-Ablehnung nie als Beleg
+    expect(bildBefund('b', ['a'], info)).toBeNull();
+    // eine ältere FREIGEGEBENE Kopie in der Gruppe belegt dagegen immer
+    const mitFrei = welt({ ...{ a: { userId: 'u1', createdAt: T, status: 'rejected', grund: 'doppelt_eingereicht', ean: 'E1' } }, f: { userId: 'u1', createdAt: T - 1, status: 'approved' }, b: { userId: 'u1', createdAt: T + 8 * 86400000, status: 'pending' } });
+    expect(bildBefund('b', ['a', 'f'], mitFrei, () => false)).toEqual({ art: 'wiederverwendet', mit: ['f'] });
   });
   it('fremdes Konto mit identischem Foto → halten für den Menschen, egal welcher Status', () => {
     for (const status of ['approved', 'rejected', 'pending']) {
@@ -443,5 +453,57 @@ describe('Belege einer Ablehnung (Prüfrunde 02.10.2026)', () => {
     expect(belegeVon({ entscheidung: 'ablehnen', grund: 'unvollstaendig' })).toBeNull();
     expect(belegeVon({ entscheidung: 'freigeben', grund: null })).toBeNull();
     expect(belegeVon({ entscheidung: 'offen', grund: WOCHE, dup: { priorId: 'a' } })).toBeNull();
+  });
+});
+
+describe('Halte-Grund für die Prüfkonsole (review.rundeOffen, Prüfrunde 2, 02.10.2026)', () => {
+  const plan = (eingabe, extra = {}) => ({ ...entscheideFall(fall(eingabe)), eingabe: fall(eingabe), ...extra });
+
+  it('fremdes Konto → Eintrag mit Grund und sperrendem Befund — OHNE die IDs des fremden Kontos (das Dokument liest der Einreicher)', () => {
+    const p = plan({ bild: { art: 'fremdes_konto', mit: ['fremdUid123_s1_0', 'fremdUid123_s2_0'] } });
+    expect(p.ctx.hinweis).toMatch(/fremdUid123/); // der Bericht (nur Admins) nennt sie
+    const e = rundeOffenEintrag(p, { lauf: 'L' });
+    expect(e).toEqual({
+      grund: 'foto_fremdes_konto', hinweis: 'Gleiches Foto bei 2 Einreichungen eines anderen Kontos — welche, steht im Tagesbericht', zurueckgehalten: null,
+      sperrend: ['foto_fremdes_konto'], eanFoto: null, lauf: 'L', trocken: false,
+    });
+    expect(JSON.stringify(e)).not.toMatch(/fremdUid123/);
+    expect(rundeOffenEintrag(plan({ bild: { art: 'fremdes_konto', mit: ['x'] } }), {}).hinweis).toBe('Gleiches Foto bei 1 Einreichung eines anderen Kontos — welche, steht im Tagesbericht');
+  });
+  it('JEDER Befund wird gemeldet, nicht nur der erste Grund (Barcode geht dem Foto vor, die ältere offene derselben EAN beiden)', () => {
+    const ab = { art: 'abweichend', gelesen: '4000417025005', gespeichert: '4061464833821', bestaetigt: true };
+    const e = rundeOffenEintrag(plan({ eanFoto: ab, bild: { art: 'aeltere_offen', mit: ['x'] }, dup: { verdict: 'hold', reason: 'doppelt_eingereicht', lockUntil: null } }), { lauf: 'L' });
+    expect(e).toMatchObject({ grund: 'ean_abweichend', sperrend: ['foto_aeltere_offen', 'ean_abweichend'], eanFoto: { befund: 'abweichend', ean: '4000417025005', bestaetigt: true } });
+  });
+  it('unsicher (auch zweifelhaft) → ean_unsicher mit Rückfall-Befund für die nächste Runde', () => {
+    expect(rundeBefunde({ eanFoto: { art: 'zweifelhaft' } })).toEqual(['ean_unsicher']);
+    const e = rundeOffenEintrag(plan({ eanFoto: { art: 'unsicher', gelesen: null, roh: '123', zweit: '4001382088125', gespeichert: '4061464833821' } }), {});
+    expect(e).toMatchObject({ grund: 'ean_unsicher', sperrend: ['ean_unsicher'], eanFoto: { befund: 'unsicher', ean: '123', zweit: '4001382088125' } });
+  });
+  it('ohne sperrenden Befund: nur Information (Bildprüfung gescheitert, zurückgehalten …)', () => {
+    expect(rundeOffenEintrag(plan({ audit: null, auditFehler: '429' }), { lauf: 'L' })).toMatchObject({ grund: 'bild_audit_gescheitert', hinweis: '429', sperrend: [] });
+    const zurueck = { entscheidung: 'offen', grund: 'notbremse_quote', zurueckgehaltenGrund: 'fotos_unpassend', ctx: {}, eingabe: fall({}) };
+    expect(rundeOffenEintrag(zurueck, {})).toMatchObject({ grund: 'notbremse_quote', zurueckgehalten: 'fotos_unpassend', sperrend: [] });
+  });
+  it('… eine wegen Notbremse zurückgehaltene Ablehnung wegen wiederverwendeter Fotos bleibt sperrend', () => {
+    const p = plan({ bild: { art: 'wiederverwendet', mit: ['a'] } });
+    notbremse([p, ...Array.from({ length: 12 }, () => ({ entscheidung: 'ablehnen', grund: 'unvollstaendig' }))], { schnittQuote: 0.02 });
+    expect(p).toMatchObject({ entscheidung: 'offen', grund: 'notbremse_quote' });
+    expect(rundeOffenEintrag(p, {})).toMatchObject({ zurueckgehalten: 'bilder_wiederverwendet', sperrend: ['bilder_wiederverwendet'] });
+  });
+  it('Trockenlauf: geplanter Entscheid steht als `geplant`; eine geplante Freigabe ohne Befund hinterlässt nichts', () => {
+    expect(rundeOffenEintrag(plan({ bild: { art: 'wiederverwendet', mit: ['a'] } }), { trocken: true })).toMatchObject({ grund: 'bilder_wiederverwendet', geplant: 'ablehnen', trocken: true });
+    expect(rundeOffenEintrag(plan({}), { trocken: true })).toBeNull();
+  });
+  it('gesperrtes Konto → nichts (liegt stumm, die Konsole liest die Sperre selbst)', () => {
+    expect(rundeOffenEintrag(plan({ kontoSperre: 'gesperrt', bild: { art: 'fremdes_konto', mit: ['a'] } }), {})).toBeNull();
+    expect(rundeOffenEintrag(null, {})).toBeNull();
+  });
+  it('RUNDE_SPERREND: genau die Befunde, die die Konsole nicht selbst prüfen kann', () => {
+    expect([...RUNDE_SPERREND].sort()).toEqual(['bilder_wiederverwendet', 'ean_abweichend', 'ean_unsicher', 'foto_aeltere_offen', 'foto_fremdes_konto']);
+  });
+  it('entscheideFall: zweifelhaft (sollte nach der zweiten Lesung nie ankommen) hält wie unsicher', () => {
+    expect(entscheideFall(fall({ eanFoto: { art: 'zweifelhaft', roh: '4013602313647', gelesen: null, gespeichert: '4250231136474' } })))
+      .toMatchObject({ entscheidung: 'offen', grund: 'ean_unsicher' });
   });
 });

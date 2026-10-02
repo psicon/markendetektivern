@@ -5,7 +5,7 @@
  * denselben Fall dasselbe sagen (Befund 26.09.2026).
  */
 const {
-  rowOf, stripPolicy, precheckOf, precheckFuerFall, nachbarnAus, nachbarnVon, gruppiereNachEan, eanIndex, baueFotoListe, bildDefektOf, safeStatus,
+  rowOf, stripPolicy, precheckOf, precheckFuerFall, nachbarnAus, nachbarnVon, gruppiereNachEan, eanIndex, baueFotoListe, bildDefektOf, safeStatus, rundeOffenOf,
 } = require('../src/einreichung');
 const { eanSchluessel } = require('../src/werte');
 
@@ -273,5 +273,69 @@ describe('bildDefektOf', () => {
     const x = { productNameOcrBildDefekt: [{ slot: 'hersteller', groesse: 1048576, grund: 'kein_bildende' }, { slot: '<img>', grund: 'x' }, 'preis', { slot: 'hersteller' }] };
     expect(bildDefektOf(x)).toEqual([{ slot: 'hersteller', grund: 'kein_bildende' }, { slot: 'preis', grund: null }]);
     expect(bildDefektOf({})).toEqual([]);
+  });
+});
+
+describe('Befunde der Morgenrunde in der Konsole (Prüfrunde 2, 02.10.2026)', () => {
+  const sauber = (extra = {}) => rowOf(doc('k', basis({ ean: GUELTIG, productNameOcr: 'Skyr', priceOcr: { priceCents: 129 }, ...extra })));
+  const runde = (ro) => ({ review: { rundeOffen: { grund: ro.sperrend && ro.sperrend[0], lauf: '2026-10-02_080000', at: { toMillis: () => T0 }, ...ro } } });
+
+  it('Foto eines anderen Kontos / ältere offene Einreichung mit gleichem Foto → hold (vorher: „ok" mit Freigabe-Taste)', () => {
+    for (const code of ['foto_fremdes_konto', 'foto_aeltere_offen', 'bilder_wiederverwendet', 'ean_abweichend', 'ean_unsicher']) {
+      expect(precheckOf(sauber(runde({ sperrend: [code] })), [])).toMatchObject({ verdict: 'hold', reasons: [code] });
+    }
+  });
+  it('mehrere Befunde, jeder einmal; zusammen mit dem eigenen Barcode-Befund der Konsole nicht doppelt', () => {
+    const r = sauber({ ...runde({ sperrend: ['ean_abweichend', 'foto_fremdes_konto', 'ean_abweichend'] }), eanFotoOcr: { ean: ANDERE, befund: 'abweichend' } });
+    expect(precheckOf(r, [])).toMatchObject({ verdict: 'hold', reasons: ['ean_abweichend', 'foto_fremdes_konto'] });
+  });
+  it('ein strengeres Urteil bleibt (locked, incomplete); gesperrtes Konto geht vor', () => {
+    const ref = rowOf(doc('ref', basis({ ean: GUELTIG, productNameOcr: 'Skyr', status: 'approved', createdAt: T0 - STUNDE })));
+    expect(precheckOf(sauber(runde({ sperrend: ['foto_fremdes_konto'] })), [ref])).toMatchObject({ verdict: 'locked', reasons: ['sperre_woche_gleicher_nutzer', 'foto_fremdes_konto'] });
+    expect(precheckOf(sauber({ ...runde({ sperrend: ['foto_fremdes_konto'] }), images: { front: 'a' } }), []).verdict).toBe('incomplete');
+    expect(precheckOf(sauber(runde({ sperrend: ['foto_fremdes_konto'] })), [], { kontoSperre: 'gesperrt' })).toMatchObject({ verdict: 'locked', reasons: ['konto_gesperrt', 'foto_fremdes_konto'] });
+  });
+  it('nur Information (Bildprüfung gescheitert, Ort auffällig …) oder unbekannte Codes → blockiert nicht', () => {
+    expect(precheckOf(sauber(runde({ grund: 'bild_audit_gescheitert', sperrend: [] })), [])).toMatchObject({ verdict: 'ok', reasons: [] });
+    expect(precheckOf(sauber(runde({ grund: 'x', sperrend: ['erfunden', 42, null] })), [])).toMatchObject({ verdict: 'ok', reasons: [] });
+  });
+  it('gilt nur für offene Einreichungen', () => {
+    expect(precheckOf(sauber({ ...runde({ sperrend: ['foto_fremdes_konto'] }), status: 'approved' }), []).verdict).toBe('ok');
+  });
+  it('rundeOffenOf: bereinigt (Werte landen in der Oberfläche)', () => {
+    expect(rundeOffenOf({})).toBeNull();
+    expect(rundeOffenOf({ review: { precheck: {} } })).toBeNull();
+    expect(rundeOffenOf({ review: { rundeOffen: { grund: 'foto_fremdes_konto', hinweis: 'h'.repeat(400), sperrend: ['foto_fremdes_konto', '<img>'], geplant: 'boese', lauf: 'L', trocken: 'ja', at: { toMillis: () => 5 } } } }))
+      .toEqual({ grund: 'foto_fremdes_konto', geplant: null, hinweis: 'h'.repeat(300), zurueckgehalten: null, sperrend: ['foto_fremdes_konto'], lauf: 'L', trocken: false, at: 5 });
+    expect(sauber(runde({ sperrend: ['ean_unsicher'] })).rundeOffen).toMatchObject({ sperrend: ['ean_unsicher'], lauf: '2026-10-02_080000' });
+  });
+  it('Warteschlange: der Fall steht als „zurückhalten" mit Grund da', () => {
+    const l = baueFotoListe([doc('k', basis({ ean: GUELTIG, productNameOcr: 'Skyr', ...runde({ sperrend: ['foto_fremdes_konto'] }) }))], new Map(), {}, '');
+    expect(l.rows[0]).toMatchObject({ verdict: 'hold', reasons: ['foto_fremdes_konto'] });
+  });
+});
+
+describe('Barcode-Befund der Runde hält in der Konsole (Prüfrunde 2, 02.10.2026)', () => {
+  const sauber = (extra = {}) => rowOf(doc('k', basis({ ean: GUELTIG, productNameOcr: 'Skyr', priceOcr: { priceCents: 129 }, ...extra })));
+  it('gespeichert unsicher mit ungültiger erster Lesung (zweifelhaft) → ean_unsicher, Rohziffern sichtbar', () => {
+    const r = sauber({ eanFotoOcr: { ean: '4013602313647', befund: 'unsicher', zweit: null } });
+    expect(r.eanFoto).toMatchObject({ art: 'unsicher', gelesen: null, roh: '4013602313647' });
+    expect(precheckOf(r, [])).toMatchObject({ verdict: 'hold', reasons: ['ean_unsicher'] });
+  });
+  it('gespeichert abweichend, heute nicht mehr nachrechenbar → hält trotzdem (als unsicher)', () => {
+    // z. B. eine Regeländerung: gespeichert bleibt der Befund, bis ein Mensch entscheidet
+    const r = sauber({ eanFotoOcr: { ean: '2112345000008', befund: 'abweichend' }, ean: '2112345001500' });
+    expect(r.eanFoto.art).toBe('unsicher');
+    expect(precheckOf(r, []).verdict).toBe('hold');
+  });
+  it('ohne gespeicherten Befund: ungültige Lesung weit weg von der gespeicherten → unsicher (die Konsole kann nicht nachlesen)', () => {
+    expect(precheckOf(sauber({ eanFotoOcr: { ean: '40614648' } }), [])).toMatchObject({ verdict: 'hold', reasons: ['ean_unsicher'] });
+    // nah dran (eine Ziffer) → kein Urteil
+    expect(precheckOf(sauber({ eanFotoOcr: { ean: '4061464833828' } }), []).verdict).toBe('ok');
+  });
+  it('mit zwei Lesungen aufgehoben → ok, alter Befund sichtbar', () => {
+    const r = sauber({ eanFotoOcr: { ean: GUELTIG, befund: 'gleich', grund: 'vorbefund_aufgehoben', bestaetigt: true, vorher: { befund: 'unsicher', ean: ANDERE, lauf: 'L' } } });
+    expect(r.eanFoto).toMatchObject({ art: 'gleich', vorher: { befund: 'unsicher', ean: ANDERE } });
+    expect(precheckOf(r, []).verdict).toBe('ok');
   });
 });

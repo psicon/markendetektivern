@@ -116,8 +116,10 @@ function entscheideFall(f) {
   if (f.eanFoto && f.eanFoto.art === 'abweichend') {
     return offen('ean_abweichend', { hinweis: f.eanFotoHinweis || `Barcode-Foto zeigt ${f.eanFoto.gelesen}, gespeichert ist ${f.eanFoto.gespeichert}` });
   }
-  if (f.eanFoto && f.eanFoto.art === 'unsicher') {
-    return offen('ean_unsicher', { hinweis: f.eanFotoHinweis || `Barcode-Foto: erste Lesung ${f.eanFoto.gelesen}, zweite ${f.eanFoto.zweit || 'nicht lesbar'}, gespeichert ist ${f.eanFoto.gespeichert}` });
+  // `zweifelhaft` (falsche Prüfziffer, weit weg) kommt nach der zweiten Lesung
+  // nicht mehr vor — falls doch, hält es wie `unsicher` (fail-closed).
+  if (f.eanFoto && (f.eanFoto.art === 'unsicher' || f.eanFoto.art === 'zweifelhaft')) {
+    return offen('ean_unsicher', { hinweis: f.eanFotoHinweis || `Barcode-Foto: erste Lesung ${f.eanFoto.gelesen || f.eanFoto.roh || 'ungültig'}, zweite ${f.eanFoto.zweit || 'nicht lesbar'}, gespeichert ist ${f.eanFoto.gespeichert}` });
   }
 
   // Doppel-Regel (Konsolen-Regel, gleiche Datei wie dort). Seit der
@@ -191,6 +193,14 @@ function entscheideFall(f) {
  *    nur (z. B. EAN nachgetragen) und wird normal geprüft. Fotos einer als
  *    Doppel abgelehnten Einreichung eine Woche später noch einmal einzureichen
  *    ist dagegen kein neuer Einkauf (Prüfrunde 02.10.2026).
+ *  - Eine als Doppel abgelehnte ältere zählt nur, wenn das Produkt für diese
+ *    Person WIRKLICH bezahlt ist: `freigabeVon(uid, ean)` meldet eine
+ *    freigegebene Einreichung derselben Person und EAN (Prüfrunde 2,
+ *    02.10.2026). `doppelt_eingereicht` wurde auch schon vergeben, ohne dass
+ *    je eine Kopie freigegeben war (Vorfall 10.09.: alle Kopien abgelehnt) —
+ *    dann lehnte der Befund auch die nächste Einreichung mit diesen Fotos ab,
+ *    und keine bliebe bezahlt. Ohne `freigabeVon` zählt keine (im Bestand
+ *    02.10.: 0 von 21 Befunden stützten sich allein darauf).
  *
  * Der Status kommt vom Aufrufer und ist im Lauf nachgezogen (statusJetzt) —
  * eine im selben Lauf abgelehnte ältere Einreichung zählt also als abgelehnt
@@ -198,11 +208,12 @@ function entscheideFall(f) {
  *
  * @param {string} id
  * @param {Iterable<string>} partner  IDs mit mindestens einem identischen Identitätsfoto (ohne id selbst)
- * @param {(id:string)=>{userId:string|null, createdAt:number|null, status:string, grund?:string|null}|null} info
+ * @param {(id:string)=>{userId:string|null, createdAt:number|null, status:string, grund?:string|null, ean?:string|null}|null} info
  *   `grund`: Ablehngrund einer abgelehnten Einreichung (intern, sonst der Code am Dokument)
+ * @param {(uid:string|null, ean:string|null)=>boolean} [freigabeVon]  gibt es eine freigegebene Einreichung dieser Person mit dieser EAN?
  * @returns {{art:'wiederverwendet'|'aeltere_offen'|'fremdes_konto', mit:string[]}|null}
  */
-function bildBefund(id, partner, info) {
+function bildBefund(id, partner, info, freigabeVon = null) {
   const ich = info(id);
   if (!ich) return null;
   const frueher = (a, b) => ((a.createdAt ?? 0) - (b.createdAt ?? 0)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -216,7 +227,8 @@ function bildBefund(id, partner, info) {
   if (!aeltere.length) return null;
   const fremd = aeltere.filter((a) => a.userId !== ich.userId);
   if (fremd.length) return { art: 'fremdes_konto', mit: fremd.map((a) => a.id) };
-  const frei = aeltere.filter((a) => a.status === 'approved' || (a.status === 'rejected' && DOPPEL_GRUENDE.has(a.grund)));
+  const bezahlt = (a) => !!(freigabeVon && a.ean && freigabeVon(a.userId, a.ean));
+  const frei = aeltere.filter((a) => a.status === 'approved' || (a.status === 'rejected' && DOPPEL_GRUENDE.has(a.grund) && bezahlt(a)));
   if (frei.length) return { art: 'wiederverwendet', mit: frei.map((a) => a.id) };
   const offenAelter = aeltere.filter((a) => a.status === 'pending');
   if (offenAelter.length) return { art: 'aeltere_offen', mit: offenAelter.map((a) => a.id) };
@@ -328,6 +340,84 @@ function belegeVon(fall) {
   return null;
 }
 
+/**
+ * Befunde der Runde, die die Prüfkonsole ohne Übersteuerung (force + Notiz)
+ * NICHT freigeben lässt (Prüfrunde 2, 02.10.2026). Die Konsole selbst kennt
+ * weder den Foto-Abgleich (md5 gegen alle früheren Einreichungen) noch die
+ * zweite Barcode-Lesung — ohne diesen Weg stand ein Fall, den die Runde wegen
+ * eines Fotos eines ANDEREN Kontos liegen ließ, in der Konsole als „ok" mit
+ * Freigabe-Taste da.
+ */
+const RUNDE_SPERREND = Object.freeze(['foto_fremdes_konto', 'foto_aeltere_offen', 'bilder_wiederverwendet', 'ean_abweichend', 'ean_unsicher']);
+const BILD_CODE = { fremdes_konto: 'foto_fremdes_konto', aeltere_offen: 'foto_aeltere_offen', wiederverwendet: 'bilder_wiederverwendet' };
+
+/**
+ * Sperrende Befunde aus den Eingaben eines Falls — aus den TATSACHEN, nicht
+ * aus dem gewählten Grund: entscheideFall nennt nur den ersten Grund (eine
+ * Barcode-Abweichung geht dem Foto-Befund vor, eine ältere offene Einreichung
+ * derselben EAN beiden), die Konsole soll aber jeden sehen.
+ */
+function rundeBefunde(eingabe) {
+  const e = eingabe || {};
+  const out = [];
+  if (e.bild && BILD_CODE[e.bild.art]) out.push(BILD_CODE[e.bild.art]);
+  const ef = e.eanFoto;
+  if (ef && ef.art === 'abweichend') out.push('ean_abweichend');
+  else if (ef && (ef.art === 'unsicher' || ef.art === 'zweifelhaft')) out.push('ean_unsicher');
+  return out;
+}
+
+/**
+ * Was die Runde an einer Einreichung hinterlässt, die NACH dem Lauf offen ist
+ * (`review.rundeOffen`, nur vom Server geschrieben — `review` steht in der
+ * Sperrliste von firestore.rules; die App liest das Feld nicht). Bewusst NICHT
+ * `holdReasons`: die zeigt die App bei offenen Fällen als „Zurückgestellt".
+ *
+ *  - `grund`/`hinweis`/`zurueckgehalten`: warum die Runde nicht entschieden
+ *    hat — Anzeige in der Konsole.
+ *  - `sperrend`: Befunde aus RUNDE_SPERREND — daraus leitet die Konsole das
+ *    Urteil `hold` ab (Freigabe nur mit force + Notiz).
+ *  - `eanFoto`: Halte-Befund der Barcode-Nummer als Rückfall für die nächste
+ *    Runde, falls `eanFotoOcr` nicht gespeichert werden konnte (eanFotoVorbefund).
+ *  - Im Trockenlauf (`trocken`) bleibt auch ein geplanter Entscheid offen —
+ *    `geplant` sagt, was die Runde getan hätte. Eine geplante Freigabe ohne
+ *    sperrenden Befund hinterlässt nichts.
+ * Gesperrte Konten bekommen nichts (sie liegen stumm, die Konsole liest die
+ * Sperre selbst). null = nichts zu hinterlassen (ein alter Eintrag wird entfernt).
+ *
+ * DATENSCHUTZ: das Dokument darf der Einreicher selbst lesen (firestore.rules,
+ * `crowd_uploads` read für den Eigentümer). Die IDs der Einreichungen eines
+ * ANDEREN Kontos (sie beginnen mit dessen uid) stehen deshalb NICHT hier,
+ * sondern nur im Tagesbericht (`wartetAufDich`, nur für Admins) — sonst
+ * erführe jemand die Kennung eines fremden Kontos und zugleich, dass wir
+ * Fotos kontenübergreifend vergleichen (vgl. kontoSperre: eine Sperre, die der
+ * Betroffene sieht, lädt zum Ausweichen ein).
+ */
+function rundeOffenEintrag(p, { lauf, trocken = false } = {}) {
+  if (!p || p.grund === KONTO_GESPERRT) return null;
+  const sperrend = rundeBefunde(p.eingabe);
+  if (p.entscheidung === 'freigeben' && !sperrend.length) return null;
+  const ef = p.eingabe && p.eingabe.eanFoto;
+  const eanHalt = ef && (ef.art === 'abweichend' || ef.art === 'unsicher' || ef.art === 'zweifelhaft');
+  const fremd = p.grund === 'foto_fremdes_konto' ? ((p.eingabe && p.eingabe.bild && p.eingabe.bild.mit) || []).length : 0;
+  const hinweis = p.grund === 'foto_fremdes_konto'
+    ? `Gleiches Foto bei ${fremd || 'einer'} Einreichung${fremd === 1 || !fremd ? '' : 'en'} eines anderen Kontos — welche, steht im Tagesbericht`
+    : (p.ctx && p.ctx.hinweis) ? String(p.ctx.hinweis).slice(0, 300) : null;
+  return {
+    grund: p.grund || null,
+    ...(p.entscheidung !== 'offen' ? { geplant: p.entscheidung } : {}),
+    hinweis,
+    zurueckgehalten: p.zurueckgehaltenGrund || null,
+    sperrend,
+    eanFoto: eanHalt ? {
+      befund: ef.art === 'abweichend' ? 'abweichend' : 'unsicher', ean: ef.gelesen || ef.roh || null,
+      ...(ef.art === 'abweichend' ? { bestaetigt: ef.bestaetigt === true } : { zweit: ef.zweit || null }),
+    } : null,
+    lauf: lauf || null,
+    trocken: !!trocken,
+  };
+}
+
 function ablehnen(grund, ctx = {}) { return { entscheidung: 'ablehnen', grund, ctx }; }
 function offen(grund, ctx = {}) { return { entscheidung: 'offen', grund, ctx }; }
 
@@ -389,5 +479,6 @@ function notbremse(plan, { schnittQuote = null, bildMaxAnteil = 0.1, bildMin = 5
 
 module.exports = {
   entscheideFall, bildBefund, belegeVon, notbremse, nameAusLesungen, eanAusLesungen, rettungNichtGeschafft,
-  BILD_GRUENDE, EIGENE_BREMSEN, AUSSER_GESAMTQUOTE, KONTO_GESPERRT, DOPPEL_GRUENDE,
+  rundeBefunde, rundeOffenEintrag,
+  BILD_GRUENDE, EIGENE_BREMSEN, AUSSER_GESAMTQUOTE, KONTO_GESPERRT, DOPPEL_GRUENDE, RUNDE_SPERREND,
 };
