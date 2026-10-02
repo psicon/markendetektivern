@@ -18,6 +18,10 @@
  * Rules-Test „Kontosperre" hält das fest. Bewusst NICHT unter users/{uid}/…:
  * dort dürfte der Nutzer über den Subcollection-Fallback mitlesen — und eine
  * Sperre, die der Betroffene sieht, lädt zum Ausweichen auf ein neues Konto ein.
+ * Der Grund-Code `konto_gesperrt` steht zwar an eigenen, für den Nutzer
+ * lesbaren Dokumenten (Bon-Spiegel, Einreichung, Auszahlung); die App zeigt
+ * ihn aber nirgends an (Bon: „gespeichert", Auszahlung: „fehlgeschlagen —
+ * zurückgebucht"). Grund und Quelle der Sperre bleiben server-only.
  *
  * ═══ Wann ist ein Konto gesperrt? ═══
  *
