@@ -4133,7 +4133,10 @@ dann nur die Anfrage, nicht den Code: Läufe schrieben bis 37 min später —
 nachdem der Lauf-Anspruch (10 min) verfallen war und der Kehrlauf den Bon schon
 neu zugestellt hatte. Regeln (umgesetzt in `cashback-pipeline`, Zweig
 `claude/bon-zeitlimit`):
-- **Jeder Gemini-Aufruf bekommt `timeoutMs`** (dort Promise.race + AbortSignal).
+- **Jede Lesung der OCR-Leiter bekommt `timeoutMs`** (dort Promise.race +
+  AbortSignal). NICHT abgedeckt, beide heute aus: die DocAI-Eskalation und die
+  Rückfall-Engine cv-hybrid — wer eine davon einschaltet, gibt ihr vorher ein
+  Zeitlimit und prüft die Restzeit des Laufs.
   Wert an der Arbeit messen, nicht raten: erfolgreiche Lesungen über 170 s waren
   alle Warteschlange (erzeugte Token ÷ 221 Token/s < 150 s).
 - **Ein Abbruch durch das eigene Zeitlimit ist kein Urteil** — er darf weder den
@@ -4211,8 +4214,11 @@ behandelt transient (Retry), nach MAX_PROCESS_ATTEMPTS → Status **'review'**
 (reviewReason 'ocr_unavailable'), NIE 'rejected'. Regel: ein Infrastruktur-
 fehler darf nie als inhaltliche Aussage über User-Daten enden. Reprocessing
 abgelehnter Bons: `ocr`-Feld LÖSCHEN (sonst re-used der Retry den kaputten
-Cache), Status auf 'ocr_pending', Message mit `{cashbackId, uid}` (BEIDE
-Pflicht) auf Topic `cashback-ocr-jobs` republishen.
+Cache), seit 03.10.2026 ebenso `ocrZwischenstand` + `ocrFortsetzungen`
+(sonst erbt der Bon die alte Laufgrenze) und `attempts` (sonst landet er
+beim ersten Infrastrukturfehler sofort wieder in 'review'), Status auf
+'ocr_pending', Message mit `{cashbackId, uid}` (BEIDE Pflicht) auf Topic
+`cashback-ocr-jobs` republishen. Muster: `.repair-429.js`.
 
 ## Sim-Testing: NUR wenn's wirklich nötig ist (User-Vorgabe 2026-06-12)
 

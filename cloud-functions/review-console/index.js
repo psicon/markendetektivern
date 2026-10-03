@@ -172,6 +172,10 @@ const BON_URTEIL = {
   duplicate_content_cross_user: 'locked',
   bon_date_future: 'hold',
   ocr_unavailable: 'hold',
+  // Lauf zu langsam (03.10.2026, cashback-pipeline laufzeitPruefen) —
+  // technischer Ausfall wie ocr_unavailable, keine Aussage über den Bon.
+  lauf_zeitgrenze: 'hold',
+  ocr_zeitbudget: 'hold',
   ocr_confidence_none: 'hold',
   mensch_hat_entschieden: 'hold',
 };

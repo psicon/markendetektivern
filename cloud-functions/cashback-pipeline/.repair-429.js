@@ -56,6 +56,10 @@ async function lauf() {
     if (DRY) continue;
     await d.ref.update({
       ocr: admin.firestore.FieldValue.delete(),
+      // Seit 03.10.2026: eine verteilte Leiter hinterlässt Zwischenstand und
+      // Zähler — sonst erbt die Wiederaufbereitung die alte Laufgrenze.
+      ocrZwischenstand: admin.firestore.FieldValue.delete(),
+      ocrFortsetzungen: admin.firestore.FieldValue.delete(),
       status: 'ocr_pending',
       rejectReason: admin.firestore.FieldValue.delete(),
       attempts: admin.firestore.FieldValue.delete(),

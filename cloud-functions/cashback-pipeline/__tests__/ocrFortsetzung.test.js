@@ -330,6 +330,7 @@ describe('processCashback: Laufbudget und Fortsetzung', () => {
     expect(bon.ocr.refereeRequest).toMatchObject({ reason: 'reconciliation_delta' });
     expect(bon.ocr.robust).toMatchObject({ confidence: 'none', laeufe: 2 });
     expect(bon.ocrZwischenstand).toBeUndefined();
+    expect(bon.ocrFortsetzungen).toBeUndefined();
     expect(global.__published.map((m) => m.json.fortsetzung ?? 'zweitpruefung')).toEqual([1, 'zweitpruefung']);
   });
 

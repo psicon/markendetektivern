@@ -2431,9 +2431,15 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
         // Durchlauf gäbe es sonst nichts mehr zu korrigieren und der Vermerk
         // ginge verloren. Ohne .catch: schlägt das Ablegen fehl, greift der
         // normale Retry — lieber noch einmal als eine Anfrage ohne Spur.
+        // Zwischenstand + Fortsetzungs-Zähler einer verteilten Leiter sind mit
+        // der fertigen Lesung erledigt — auch dann, wenn das frühe Speichern
+        // oben scheiterte (sonst übersprang Durchlauf 2 den Bon als
+        // 'fortsetzung_laeuft', bis der Kehrlauf kam; Gegenprüfung 03.10.).
         const anfrageGeschrieben = await writeOcrIfNoReferee(docRef, {
           ocr: buildOcrField(ocr, recon, escalation),
           ...(bonDateCorrection ? { bonDateCorrection } : {}),
+          ocrZwischenstand: admin.firestore.FieldValue.delete(),
+          ocrFortsetzungen: admin.firestore.FieldValue.delete(),
           updatedAt: now,
         });
         if (anfrageGeschrieben === 'ueberholt') {
