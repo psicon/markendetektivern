@@ -103,7 +103,7 @@ cashback_config/v1
   - throttleHours: 24
   - minItemsForPayout: 4
   - eligibleMerchants: ['aldi', 'lidl', 'edeka', 'rewe', 'kaufland', 'penny', 'netto', ...]
-  - ocrModel: 'gemini-2.5-flash'
+  - ocrModel: 'gemini-3.5-flash'   // Server-Standard, cashback-pipeline/lib/geminiModelle.js
   - ocrPromptVersion: 'v1.0'
   - manualReviewThreshold: 0.65   // trust score below this → review queue
   - autoApproveThreshold: 0.85

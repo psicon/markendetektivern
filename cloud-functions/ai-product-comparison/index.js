@@ -15,7 +15,7 @@
  *   {
  *     score: 1..5,
  *     reasoning: "Kurzer Text",
- *     model: "gemini-2.5-flash",
+ *     model: "gemini-3.5-flash",
  *     promptVersion: "v1",
  *     inputHash: "abc123...",  // sha256 von Inputs, kappt 16 chars
  *     updatedAt: Timestamp,

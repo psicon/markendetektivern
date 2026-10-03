@@ -2,7 +2,8 @@
 //
 // Vergleicht zwei generative LLMs für Produkt-BG-Removal:
 //   1. OpenAI gpt-image-1 (images.edit, background:'transparent')
-//   2. Google Gemini 2.5 Flash Image ("Nano Banana")
+//   2. Google Gemini 3.1 Flash Image ("Nano Banana 2"; bis 03.10.2026
+//      gemini-2.5-flash-image — auf der Gemini API seit 02.10.2026 abgeschaltet)
 //
 // Beide bekommen den exakt gleichen Prompt, der explizit
 // Halluzinieren verbietet. Output landet als Original / GPT / Gemini
@@ -25,12 +26,12 @@
 // ── KOSTEN ─────────────────────────────────────────────────────────
 //   Pro Sample:
 //     gpt-image-1 (1024×1024, transparent):  ~$0,04
-//     gemini-2.5-flash-image (1024×1024):    ~$0,039
+//     gemini-3.1-flash-image (1K):           ~$0,067
 //     ──────────────────────────────────────────────
-//     ~$0,08 pro Vergleich
+//     ~$0,11 pro Vergleich
 //
-//   12 Samples × $0,08 = ~$1
-//   30 Samples × $0,08 = ~$2,40
+//   12 Samples × $0,11 = ~$1,30
+//   30 Samples × $0,11 = ~$3,30
 //
 // ── OUTPUT ─────────────────────────────────────────────────────────
 //   tmp/bg-llm-test/<id>_original.jpg
@@ -81,9 +82,10 @@ const openai = HAS_OPENAI
   : null;
 
 // ── Gemini (REST) ──────────────────────────────────────────────────
-// Public name as of late 2025 — was "Nano Banana" in preview phase.
+// GA-Bildmodell; gemini-2.5-flash-image ist auf der Gemini API seit
+// 02.10.2026 abgeschaltet (Produktionswahl: cloud-functions/image-cleanup/geminiModelle.js).
 const GEMINI_MODEL =
-  process.env.GEMINI_MODEL || 'gemini-2.5-flash-image';
+  process.env.GEMINI_MODEL || 'gemini-3.1-flash-image';
 const GEMINI_URL = (model) =>
   `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
 
@@ -623,13 +625,13 @@ async function main() {
   const gptOk = results.filter((r) => r.gptOk).length;
   const gemOk = results.filter((r) => r.gemOk).length;
   const gptCost = gptOk * 0.04;
-  const gemCost = gemOk * 0.039;
+  const gemCost = gemOk * 0.067;
   console.log('\n────────────────────────────────────────');
   console.log(`✅ Fertig in ${elapsed}s`);
   if (HAS_OPENAI) {
     console.log(`   GPT-4o ok:        ${gptOk}/${results.length}   (~$${gptCost.toFixed(2)})`);
   }
-  console.log(`   Gemini 2.5 ok:    ${gemOk}/${results.length}   (~$${gemCost.toFixed(2)})`);
+  console.log(`   Gemini ok:        ${gemOk}/${results.length}   (~$${gemCost.toFixed(2)})`);
   console.log(`   Preview: open ${path.join(OUT_DIR, 'preview.html')}`);
   console.log('────────────────────────────────────────');
   process.exit(0);

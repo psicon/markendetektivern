@@ -9,15 +9,14 @@
  *     reasoning: string,    // 1-2 Sätze, max ~220 Zeichen, DE
  *   }
  *
- * Modell: per Default `gemini-2.5-flash` (text variant — bereits im
- * Projekt eingesetzt, billig + schnell). Per ENV-Var GEMINI_MODEL
- * überschreibbar, z.B. auf `gemini-3-flash` wenn das verfügbar ist.
+ * Modell: per Default `gemini-3.5-flash` (DEFAULT_MODEL unten), per
+ * ENV-Var GEMINI_MODEL überschreibbar. Keine Kurzläufer (3.6/3.7/3.8)
+ * und keine 2.5er — die schaltet Vertex am 20.10.2026 ab.
  *
  * Cost-Profil:
- *   Pro Comparison ~600 input + ~150 output tokens.
- *   Bei Gemini 2.5 Flash: ~$0.000075/input/1k + $0.0003/output/1k.
- *   Pro Call: ca. $0.0001 (0.01 ¢).
- *   50k Produkte initial: ~$5 für komplettes Backfill.
+ *   Pro Comparison ~600 input + ~150 output tokens (+ Denk-Token).
+ *   Die Werte von früher (~$0.0001 pro Call, ~$5 für 50k Produkte)
+ *   stammen aus der gemini-2.5-flash-Zeit und sind nicht neu gemessen.
  */
 
 const { Type } = require('@google/genai');
