@@ -77,7 +77,12 @@ const { VERSION: PROMPT_VERSION } = require('./prompt');
 // mit dem allgemeinen Lese-Zeitlimit, damit auch er das Laufbudget einhält).
 const ESKALATION = eskalationsOptionen();
 const PRO_MODEL = ESKALATION.model;
-const MAX_FLASH = Number(process.env.CASHBACK_OCR_MAX_FLASH || 3);
+// Ungültige Werte (Tippfehler, 0, Kommazahl) gelten als Standard 3. Mit NaN
+// verwürfe zwischenstandLaden jeden Zwischenstand ('max_flash', NaN !== NaN).
+const MAX_FLASH = (() => {
+  const n = Number(process.env.CASHBACK_OCR_MAX_FLASH || 3);
+  return Number.isInteger(n) && n >= 1 && n <= 7 ? n : 3;
+})();
 
 // ═══ Zeit (Begründung im Kopf der Datei) ═══
 const LESE_ZEITLIMIT_MS_STANDARD = 170_000;
@@ -256,7 +261,11 @@ function zwischenstandLaden(roh, { model, eskModel, maxFlash, jetzt }) {
     || !ganzzahlIn(roh.ersatz, 0, ERSATZ_MAX) || !ganzzahlIn(roh.laeufe, 1, 1000)) return nein('zaehler');
   if (!Array.isArray(roh.reads) || !Array.isArray(roh.failed)) return nein('form');
   if (roh.reads.length > roh.flash + roh.enh + roh.esk) return nein('zaehler');
-  if (!roh.reads.every((s) => s && typeof s === 'object' && s.parsed && typeof s.parsed === 'object'
+  // `parsed: null` kommt auch im ungestörten Lauf vor (Antwort ohne
+  // verwertbares JSON) — die Leiter führt solche Lesungen mit. Sie beim Laden
+  // zu verwerfen hieße: jede Fortsetzung beginnt neu (Review 03.10.2026).
+  if (!roh.reads.every((s) => s && typeof s === 'object'
+    && (s.parsed === null || (typeof s.parsed === 'object' && !Array.isArray(s.parsed)))
     && ['flash', 'enh', 'pro'].includes(s.stufe))) return nein('form');
   return {
     grund: null,
@@ -339,6 +348,12 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
   const geladen = zwischenstandLaden(opts.zwischenstand, { model, eskModel: esk.model, maxFlash, jetzt: clock() });
   if (geladen.grund) console.warn('ocr-zwischenstand-verworfen', { grund: geladen.grund });
   const st = geladen.stand || neuerStand();
+  // Auch ein verworfener Stand zählt als Lauf — sonst begänne die Zählung bei
+  // jedem Verwerfen wieder bei 1 (Review 03.10.2026). Die harte Grenze hängt
+  // zusätzlich am Bon selbst (index.js, ocrFortsetzungen).
+  if (geladen.grund && opts.zwischenstand && ganzzahlIn(opts.zwischenstand.laeufe, 1, 1000)) {
+    st.laeufe = opts.zwischenstand.laeufe + 1;
+  }
 
   // Incident 19.08.2026: geworfene Versuche wurden hier still verschluckt.
   // Bei Totalausfall (z.B. 429 Spending-Cap) blieb `reads` leer → Phase 4
@@ -362,14 +377,17 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
 
   /**
    * Verbraucht der Versuch seinen Lese-Platz? Eine Lesung ja; ein Abbruch durch
-   * das eigene Zeitlimit nicht, solange Ersatzversuche übrig sind; jeder andere
-   * Fehlversuch ja (wie bisher).
+   * das eigene Zeitlimit bei Basis- und Bildverbesserungs-Lesungen nicht,
+   * solange Ersatzversuche übrig sind; jeder andere Fehlversuch ja (wie bisher).
+   * Bei der Eskalation verbraucht auch der Zeitabbruch den Platz: dort fängt das
+   * 150-s-Limit die Denk-Ausreißer der hohen Denkstufe ab, und der nächste
+   * Versuch liest mit der Ausweich-Stufe (lib/geminiModelle.js, 01.10.2026).
    */
-  const verbraucht = (e) => {
+  const verbraucht = (e, { eskalation = false } = {}) => {
     if (e.r) return true;
     if (e.zeit) {
       st.zeitAbbrueche++;
-      if (st.ersatz < ERSATZ_MAX) {
+      if (!eskalation && st.ersatz < ERSATZ_MAX) {
         st.ersatz++;
         return false;
       }
@@ -510,7 +528,7 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
       // Hartes Zeitlimit je Lesung (lib/geminiModelle.js), nie über das Budget.
       timeoutMs: eskLimit,
     });
-    if (verbraucht(e)) st.esk++;
+    if (verbraucht(e, { eskalation: true })) st.esk++;
     if (!e.r) {
       st.eskalationGescheitert = true;
       continue;
@@ -556,5 +574,6 @@ module.exports = {
   ESKALATION,
   ZEIT,
   ERSATZ_MAX,
+  MAX_FLASH,
   ZWISCHENSTAND_VERSION,
 };

@@ -199,12 +199,14 @@ describe('Zeitabbruch verbraucht den Lese-Platz nicht', () => {
     expect(extract.aufrufe).toHaveLength(7 + robust.ERSATZ_MAX);
   });
 
-  test('Zeitabbruch der Eskalation: Ersatzversuch liest mit der Ausweich-Denkstufe LOW', async () => {
+  test('Zeitabbruch der Eskalation verbraucht den Platz (wie seit 01.10.): danach EINE Lesung mit LOW', async () => {
+    // Dort fängt das 150-s-Limit die Denk-Ausreißer der hohen Denkstufe ab —
+    // ein Ersatzversuch mit derselben Stufe liefe vermutlich wieder hinein.
     const extract = fakeMitUhr([A, B, C, D].map((x) => ant(lesung(x, 368)))
       .concat([ant(lesung(C, 999)), ant(zeitAbbruch(150000)), ant(lesung(X, 368)), ant(lesung(Y, 368))]));
     const out = await robust.extractReceiptRobust(Buffer.from('x'), 'image/jpeg', { extract, enhance });
-    expect(extract.aufrufe.slice(5).map((a) => a.thinkingConfig)).toEqual([{ thinkingLevel: 'HIGH' }, { thinkingLevel: 'LOW' }, { thinkingLevel: 'LOW' }]);
-    expect(out.robust).toMatchObject({ proAttempts: 2, failedAttempts: 1, zeitAbbrueche: 1, escalationFallbackThinking: 'LOW' });
+    expect(extract.aufrufe.slice(5).map((a) => a.thinkingConfig)).toEqual([{ thinkingLevel: 'HIGH' }, { thinkingLevel: 'LOW' }]);
+    expect(out.robust).toMatchObject({ failedAttempts: 1, zeitAbbrueche: 1, escalationFallbackThinking: 'LOW' });
   });
 });
 
@@ -344,8 +346,32 @@ describe('Zwischenstand prüfen', () => {
       extract, enhance, zwischenstand: stand, clock: () => 20,
     });
     expect(extract.aufrufe).toHaveLength(2);
-    expect(out.robust).toMatchObject({ laeufe: 1, attempts: 2, method: 'flash-agreement' });
+    // Auch ein verworfener Stand zählt als Lauf (sonst begänne die Zählung neu).
+    expect(out.robust).toMatchObject({ laeufe: stand.laeufe + 1, attempts: 2, method: 'flash-agreement' });
     expect(console.warn).toHaveBeenCalledWith('ocr-zwischenstand-verworfen', { grund });
+  });
+
+  test('Lesung ohne verwertbares JSON (parsed: null) wird mitgeführt, nicht verworfen', async () => {
+    const stand = await standNachEinemLauf();
+    stand.reads.push({ ...stand.reads[0], parsed: null });
+    stand.flash += 1;
+    const geladen = robust.zwischenstandLaden(wieFirestore(stand), {
+      model: stand.model, eskModel: stand.eskModel, maxFlash: stand.maxFlash, jetzt: stand.gespeichertMs,
+    });
+    expect(geladen.grund).toBeNull();
+    expect(geladen.stand.reads).toHaveLength(3);
+    expect(geladen.stand.reads[2].parsed).toBeNull();
+  });
+
+  test('vertippte Zahl Basis-Lesungen (CASHBACK_OCR_MAX_FLASH) gilt als Standard 3, nie als NaN', () => {
+    for (const wert of ['3x', '0', '2.5', '']) {
+      process.env.CASHBACK_OCR_MAX_FLASH = wert;
+      laden();
+      expect(robust.MAX_FLASH).toBe(3);
+    }
+    process.env.CASHBACK_OCR_MAX_FLASH = '4';
+    laden();
+    expect(robust.MAX_FLASH).toBe(4);
   });
 
   test('passender Zwischenstand wird übernommen (Lesungen werden nicht wiederholt)', async () => {

@@ -4143,6 +4143,13 @@ neu zugestellt hatte. Regeln (umgesetzt in `cashback-pipeline`, Zweig
   Abbruch zu laufen: Zwischenstand am Dokument, Anspruch in derselben
   Transaktion abgeben, neu zustellen. Nach der Laufzeitgrenze (480 s) schreibt
   ein Lauf keine Entscheidung mehr.
+- **Eine Obergrenze hängt nie an dem Zustand, der verworfen werden kann.** Die
+  Grenze von 8 Läufen stand zuerst im Zwischenstand selbst; wurde der beim Laden
+  verworfen, begann der Zähler neu → simuliert 30 Läufe, 135 bezahlte Aufrufe,
+  kein Ende (Gegenprüfung 03.10.). Jetzt zählt der Bon selbst
+  (`ocrFortsetzungen`, in derselben Transaktion), gelöscht nur zusammen mit dem
+  Zwischenstand. Ein Zeitabbruch der Eskalation verbraucht dagegen weiter seinen
+  Platz — dort fängt das 150-s-Limit die Denk-Ausreißer (geminiModelle.js).
 - Wer Function-Timeout, OCR-Budget oder Laufzeitgrenze ändert, zieht
   `LAUF_MAX_MS` (`lib/laufAnspruch.js`) mit — der Anspruch muss länger leben als
   jeder Lauf, der noch schreiben kann.

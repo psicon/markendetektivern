@@ -428,23 +428,35 @@ const pubsub = new PubSub();
  * Zwischenstand bleibt, falls er schon abgelegt war).
  */
 async function ocrFortsetzen({ docRef, cashbackId, uid, eventId, stand }) {
-  if (!(stand.laeufe < OCR_LAEUFE_MAX)) {
-    const err = new Error(`ocr_unavailable: Leiter nach ${stand.laeufe} Läufen nicht fertig (${stand.failed.length} Fehlversuche)`);
+  const grenze = (laeufe) => {
+    const err = new Error(`ocr_unavailable: Leiter nach ${laeufe} Läufen nicht fertig (${stand.failed.length} Fehlversuche)`);
     err.code = 'ocr_unavailable';
-    throw err;
-  }
+    return err;
+  };
+  if (!(stand.laeufe < OCR_LAEUFE_MAX)) throw grenze(stand.laeufe);
+  // Die Grenze hängt zusätzlich am Bon (`ocrFortsetzungen`), nicht nur am
+  // Zwischenstand: wird der beim Laden verworfen, begänne sein Zähler neu, und
+  // ein Bon könnte ohne Ende neu gelesen werden — jede Runde mit bezahlten
+  // Modell-Aufrufen, ohne dass attempts oder sweepCount steigen (Review
+  // 03.10.2026). Gelöscht wird der Zähler zusammen mit dem Zwischenstand.
+  let bisher = 0;
   const ergebnis = await db.runTransaction(async (tx) => {
     const snap = await tx.get(docRef);
     if (!snap.exists) return 'weg';
-    const o = snap.data().ocr;
+    const d = snap.data();
+    const o = d.ocr;
     if (o && o.parsed) return 'ueberholt';
+    bisher = Number.isInteger(d.ocrFortsetzungen) ? d.ocrFortsetzungen : 0;
+    if (bisher + 1 >= OCR_LAEUFE_MAX) return 'grenze';
     tx.update(docRef, {
       ocrZwischenstand: stand,
+      ocrFortsetzungen: bisher + 1,
       ...(eventId ? { [`verarbeitung.${laufFeld(eventId)}`]: admin.firestore.FieldValue.delete() } : {}),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
     return 'ok';
   });
+  if (ergebnis === 'grenze') throw grenze(bisher + 1);
   if (ergebnis !== 'ok') {
     logger.warn('ocr-fortsetzung-ueberholt', { cashbackId, ergebnis });
     return;
@@ -1705,12 +1717,16 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
         const fruehPersist = await writeOcrIfNoReferee(docRef, {
           ocr: buildOcrField(ocr, recon, escalation),
           ocrZwischenstand: admin.firestore.FieldValue.delete(),
+          ocrFortsetzungen: admin.firestore.FieldValue.delete(),
           updatedAt: now,
         }).catch(() => 'fehler');
         if (fruehPersist === 'ueberholt') {
           logger.warn('ocr-ueberholt-von-zweitpruefung', { cashbackId });
           if (receipt.ocrZwischenstand) {
-            await docRef.update({ ocrZwischenstand: admin.firestore.FieldValue.delete() }).catch(() => {});
+            await docRef.update({
+              ocrZwischenstand: admin.firestore.FieldValue.delete(),
+              ocrFortsetzungen: admin.firestore.FieldValue.delete(),
+            }).catch(() => {});
           }
           return;
         }
@@ -2704,7 +2720,9 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
         ocrFieldAgreement,
         ocr: buildOcrField(ocr, recon, escalation),
         // Falls das frühe Speichern oben scheiterte, steht er noch da.
-        ...(receipt.ocrZwischenstand ? { ocrZwischenstand: admin.firestore.FieldValue.delete() } : {}),
+        ...(receipt.ocrZwischenstand || receipt.ocrFortsetzungen != null
+          ? { ocrZwischenstand: admin.firestore.FieldValue.delete(), ocrFortsetzungen: admin.firestore.FieldValue.delete() }
+          : {}),
         merchant: merchantInfo
           ? {
               id: merchantInfo.id,
@@ -2845,8 +2863,11 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
       logger.error('process-failed', { cashbackId, err: err.message, attempts, code: err?.code ?? null });
       // Ist die OCR-Leiter ohne eine einzige Lesung zu Ende gegangen, ist ein
       // abgelegter Zwischenstand verbraucht — der nächste Versuch liest frisch.
-      const zwischenstandWeg = err && err.code === 'ocr_unavailable' && !err.zwischenstandBehalten && receipt.ocrZwischenstand
-        ? { ocrZwischenstand: admin.firestore.FieldValue.delete() }
+      // Mit ihm geht der Fortsetzungs-Zähler — die nächste Leiter ist eine neue,
+      // und attempts (hier hochgezählt) begrenzt die Zahl der Leitern.
+      const zwischenstandWeg = err && err.code === 'ocr_unavailable' && !err.zwischenstandBehalten
+        && (receipt.ocrZwischenstand || receipt.ocrFortsetzungen != null)
+        ? { ocrZwischenstand: admin.firestore.FieldValue.delete(), ocrFortsetzungen: admin.firestore.FieldValue.delete() }
         : {};
       if (attempts >= MAX_PROCESS_ATTEMPTS) {
         // Incident 19.08.2026: War die OCR-Infrastruktur down (ocr_unavailable —

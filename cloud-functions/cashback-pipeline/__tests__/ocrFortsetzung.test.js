@@ -166,6 +166,7 @@ describe('processCashback: Laufbudget und Fortsetzung', () => {
     expect(bon.attempts).toBeUndefined();
     expect(bon.ocrZwischenstand).toMatchObject({ laeufe: 1, flash: 1, ersatz: 3, zeitAbbrueche: 3 });
     expect(bon.ocrZwischenstand.reads).toHaveLength(1);
+    expect(bon.ocrFortsetzungen).toBe(1);
     // Kein offener Lauf-Anspruch: der Kehrlauf darf später übernehmen.
     expect(Object.keys(bon.verarbeitung || {})).toHaveLength(0);
     expect(global.__published).toEqual([
@@ -192,6 +193,7 @@ describe('processCashback: Laufbudget und Fortsetzung', () => {
     expect(bon).toMatchObject({ status: 'approved', cashbackCents: 8 });
     expect(bon.ocr.robust).toMatchObject({ confidence: 'high', laeufe: 2, zeitAbbrueche: 3, failedAttempts: 3, attempts: 2 });
     expect(bon.ocrZwischenstand).toBeUndefined();
+    expect(bon.ocrFortsetzungen).toBeUndefined();
     expect(bon.attempts).toBeUndefined();
     expect(ledger()).toEqual([expect.objectContaining({ type: 'earn', cents: 8, receiptId: 'b1' })]);
     expect(global.__pushes).toHaveLength(1);
@@ -240,6 +242,25 @@ describe('processCashback: Laufbudget und Fortsetzung', () => {
     expect(fake.store.get('receipts/b1')).toMatchObject({ status: 'approved', cashbackCents: 8 });
     expect(fake.store.get('receipts/b1').ocr.robust).toMatchObject({ laeufe: 1, zeitAbbrueche: 0 });
     expect(global.__published).toHaveLength(0);
+  });
+
+  test('Grenze hängt am Bon: nach 7 Fortsetzungen keine weitere, auch wenn der Zwischenstand neu beginnt', async () => {
+    // Review 03.10.2026: wird ein Zwischenstand beim Laden verworfen, begann
+    // sein eigener Zähler neu — ohne Grenze am Bon ein endloses Neu-Lesen.
+    bonAnlegen('b1', { ocrFortsetzungen: 7 });
+    antworten = [
+      { a: haenger(), dauer: 170000 }, { a: haenger(), dauer: 170000 },
+      { a: haenger(), dauer: 170000 }, { a: lesung(), dauer: 170000 },
+    ];
+    await expect(verarbeiten()).rejects.toMatchObject({ code: 'ocr_unavailable' });
+
+    const bon = fake.store.get('receipts/b1');
+    expect(global.__published).toHaveLength(0);
+    expect(bon.status).toBe('ocr_pending');
+    expect(bon.attempts).toBe(1); // die nächste Leiter zählt als neuer Versuch
+    expect(bon.ocrZwischenstand).toBeUndefined();
+    expect(bon.ocrFortsetzungen).toBeUndefined();
+    expect(ledger()).toHaveLength(0);
   });
 
   test('Fortsetzung nicht zustellbar → Infrastruktur (Wiederholung), Zwischenstand bleibt', async () => {
