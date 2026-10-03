@@ -97,6 +97,17 @@ describe('Urteile (rein)', () => {
     expect(laufUrteil({ verarbeitung: { e7: ts(T0 - 5000) } }, '8', T0)).toBe('frei');
   });
 
+  it('über mehrere Läufe verteilte OCR (Zwischenstand): nur EIN Lauf zur Zeit, auch mit anderer Nachricht', () => {
+    const stand = { v: 1, gespeichertMs: T0 - 1000 };
+    expect(laufUrteil({ ocrZwischenstand: stand, verarbeitung: { e7: ts(T0 - 5000) } }, '8', T0)).toBe('fortsetzung_laeuft');
+    // Niemand rechnet (Vorgänger hat beim Ablegen abgegeben) → der Nachfolger darf.
+    expect(laufUrteil({ ocrZwischenstand: stand, verarbeitung: {} }, '8', T0)).toBe('frei');
+    // Abgelaufener Anspruch hält nicht auf.
+    expect(laufUrteil({ ocrZwischenstand: stand, verarbeitung: { e7: ts(T0 - LAUF_MAX_MS - 1) } }, '8', T0)).toBe('frei');
+    // Dieselbe Nachricht bleibt 'doppelt'.
+    expect(laufUrteil({ ocrZwischenstand: stand, verarbeitung: { e7: ts(T0 - 5000) } }, '7', T0)).toBe('doppelt');
+  });
+
   it('laufende Entscheidung der Konsole → Pipeline wartet nicht, sondern lässt aus', () => {
     expect(laufUrteil({ entscheidungLaeuft: { decision: 'approve', seit: ts(T0 - 1000) } }, '8', T0)).toBe('entscheidung_laeuft');
     expect(laufUrteil({ entscheidungLaeuft: { decision: 'approve', seit: ts(T0 - ENTSCHEIDUNG_MAX_MS - 1) } }, '8', T0)).toBe('frei');

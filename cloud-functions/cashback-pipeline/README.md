@@ -47,6 +47,15 @@ Alle Aufrufe laufen über Vertex AI. Standard ohne Env-Eintrag:
 Warum Eskalation und Rückfall unter `eu` statt `global` laufen (zweiter
 Kapazitätspool): lib/geminiModelle.js.
 
+**Zeit (seit 03.10.2026, lib/ocr_robust.js):** jede Primär- und
+Bildverbesserungs-Lesung hat ein Zeitlimit (`CASHBACK_OCR_READ_TIMEOUT_MS`,
+Standard 170000), die ganze Leiter ein Laufbudget je Lauf
+(`CASHBACK_OCR_RUN_BUDGET_MS`, Standard 400000, erlaubt 200000–450000).
+Reicht das Budget nicht, liegt der Zwischenstand in `receipts/*.ocrZwischenstand`
+und der Bon wird sofort neu zugestellt (Log `ocr-fortsetzung`); nach 480 s
+schreibt ein Lauf keine Entscheidung mehr (`lauf_zeitgrenze`). Wer diese Werte
+ändert, prüft `LAUF_MAX_MS` in lib/laufAnspruch.js.
+
 ### Project-local config (via `.env` file, gitignored)
 
 The function loads `cloud-functions/cashback-pipeline/.env` at deploy

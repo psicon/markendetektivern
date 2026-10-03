@@ -65,11 +65,13 @@ test('Standard-Eskalation: gemini-3.5-flash, HIGH, Standort eu — auf dem verbe
   const esk = extract.aufrufe.slice(5);
   expect(esk).toHaveLength(1);
   expect(esk[0]).toMatchObject({ model: 'gemini-3.5-flash', thinkingConfig: { thinkingLevel: 'HIGH' }, location: 'eu', mime: 'image/jpeg', timeoutMs: 150000 });
-  // Primär- und verbesserte Lesungen bleiben unverändert (kein Standort, keine Denkstufe).
+  // Primär- und verbesserte Lesungen: kein Standort, keine Denkstufe — aber
+  // seit 03.10.2026 ein eigenes Zeitlimit (vorher hingen sie bis zum 300-s-
+  // Limit von Node-fetch).
   for (const a of extract.aufrufe.slice(0, 5)) {
     expect(a.location).toBeUndefined();
     expect(a.thinkingConfig).toBeUndefined();
-    expect(a.timeoutMs).toBeUndefined();
+    expect(a.timeoutMs).toBe(170000);
   }
   // Einigkeit mit einer Flash-Lesung → wie bisher 'high' (gewählt wird die Flash-Lesung).
   expect(out.robust).toMatchObject({ confidence: 'high', method: 'pro-agreement', proAttempts: 1, escalationModel: 'gemini-3.5-flash' });
@@ -109,13 +111,15 @@ test('erster Eskalationsversuch gelingt → zweiter bleibt auf HIGH', async () =
   expect(out.robust.escalationFallbackThinking).toBeUndefined();
 });
 
-test('Rückweg per Env: CASHBACK_OCR_PRO_MODEL=gemini-2.5-pro → exakt der alte Aufruf (nur model)', async () => {
+test('Rückweg per Env: CASHBACK_OCR_PRO_MODEL=gemini-2.5-pro → der alte Aufruf, nur mit dem allgemeinen Lese-Zeitlimit', async () => {
   process.env.CASHBACK_OCR_PRO_MODEL = 'gemini-2.5-pro';
   laden();
   const extract = fakeExtract([lesung(A, 368), lesung(B, 368), lesung(C, 368), lesung(D, 368), lesung(C, 999), lesung(A, 368)]);
   const out = await robust.extractReceiptRobust(Buffer.from('x'), 'image/jpeg', { extract, enhance });
   const esk = extract.aufrufe[5];
-  expect(esk).toEqual({ mime: 'image/jpeg', model: 'gemini-2.5-pro' });
+  // Keine Denk-Konfiguration, kein Standort (Modell-Standard europe-west4) —
+  // aber ein Zeitlimit, damit auch der Rückweg das Laufbudget einhält.
+  expect(esk).toEqual({ mime: 'image/jpeg', model: 'gemini-2.5-pro', timeoutMs: 170000 });
   expect(out.robust.escalationModel).toBe('gemini-2.5-pro');
 });
 

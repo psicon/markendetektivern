@@ -22,6 +22,39 @@
  * compensating errors that Σ==total alone cannot. The returned shape matches
  * extractReceipt() so the downstream pipeline is unchanged; `robust` carries
  * the confidence/method/attempts for observability + an optional approval gate.
+ *
+ * ═══ Zeit (03.10.2026): Zeitlimit je Lesung, Laufbudget, Fortsetzung ═══
+ * Vom 28.09. bis 02.10. lieferte Vertex (global, gemini-3.5-flash) einzelne
+ * Antworten minutenlang gar nicht. Die Basis- und Bildverbesserungs-Lesungen
+ * hatten kein eigenes Zeitlimit; jede hängende Lesung wartete bis zum festen
+ * 300-s-Limit von Node-fetch („fetch failed"). Zwei solche Hänger reichten für
+ * die 540 s von processCashback — 304 Läufe in zehn Tagen. Danach rechnete der
+ * Code im Hintergrund weiter (bis 37 min), während der Kehrlauf den Bon schon
+ * ein zweites Mal zustellte. Seitdem:
+ *
+ *   • Jede Lesung hat ein Zeitlimit (Standard 170 s). Gemessen an 3.600
+ *     erfolgreichen gewählten Lesungen vom 21.09.–03.10.: ALLE 100 Lesungen
+ *     über 170 s waren Warteschlange bei Google, nicht Arbeit (erzeugte Token
+ *     / Median-Rate 221 Token/s ergibt bei allen < 150 s, Median 12 s). Eine
+ *     Lesung, die das Ausgabelimit von 32.768 Token voll nutzt, braucht bei
+ *     Median-Rate ~148 s; die ruhigen Tage 25.–27.09. hatten als längste
+ *     erfolgreiche Lesung 158 s.
+ *   • Ein Abbruch durch DIESES Zeitlimit ist keine Aussage über den Bon. Er
+ *     verbraucht den Lese-Platz nicht; bis zu ERSATZ_MAX-mal je Bon wird der
+ *     Platz neu gelesen. So entscheidet die Leiter mit so vielen Lesungen wie
+ *     ohne Störung — nicht mit weniger, weil Google gerade langsam war.
+ *     Alle anderen Fehlversuche (429, MAX_TOKENS, Netz) zählen wie bisher.
+ *   • Die ersten beiden Basis-Lesungen laufen gleichzeitig. Kostet nichts
+ *     extra (für eine Einigung sind ohnehin zwei Lesungen nötig) und halbiert
+ *     die Wartezeit im Normalfall; die Reihenfolge in `reads` bleibt die
+ *     Aufruf-Reihenfolge, Einigung und Auswahl sind dieselben wie nacheinander.
+ *   • Laufbudget (Standard 400 s ab Start des Laufs, `opts.laufStart`): eine
+ *     Lesung beginnt nur, wenn ihr volles Zeitlimit noch ins Budget passt.
+ *     Sonst wirft die Funktion `ocr_zeitbudget` mit dem Zwischenstand —
+ *     OHNE Ergebnis, also ohne Entscheidung. index.js legt den Zwischenstand
+ *     am Bon ab und stellt sofort neu zu; der nächste Lauf setzt genau dort
+ *     fort (`opts.zwischenstand`). Eine unterbrochene Leiter liefert bei
+ *     gleichen Lesungen exakt dasselbe Ergebnis wie eine durchgelaufene.
  */
 
 'use strict';
@@ -29,6 +62,7 @@
 const { extractReceipt: extractReceiptDefault, reconcile, countEligibleItems, DEFAULT_MODEL } = require('./ocr');
 const { enhanceForOcr: enhanceForOcrDefault } = require('./imageEnhance');
 const { eskalationsOptionen } = require('./geminiModelle');
+const { VERSION: PROMPT_VERSION } = require('./prompt');
 
 // ═══ Eskalationsstufe (01.10.2026): gemini-3.5-flash HIGH statt gemini-2.5-pro ═══
 // gemini-2.5-pro wird auf Vertex am 20.10.2026 abgeschaltet; eine GA-Pro-
@@ -39,10 +73,48 @@ const { eskalationsOptionen } = require('./geminiModelle');
 // sie; nach einem Fehlversuch liest sie mit LOW (Denk-Ausreißer). Messung an
 // 38 echten Bons, Standort `eu` und Begründung: lib/geminiModelle.js.
 // Rückweg bis 20.10. ohne Codeänderung: CASHBACK_OCR_PRO_MODEL=gemini-2.5-pro
-// in der .env (dann exakt der alte Aufruf, Standort europe-west4).
+// in der .env (dann der alte Aufruf, Standort europe-west4 — seit 03.10.2026
+// mit dem allgemeinen Lese-Zeitlimit, damit auch er das Laufbudget einhält).
 const ESKALATION = eskalationsOptionen();
 const PRO_MODEL = ESKALATION.model;
 const MAX_FLASH = Number(process.env.CASHBACK_OCR_MAX_FLASH || 3);
+
+// ═══ Zeit (Begründung im Kopf der Datei) ═══
+const LESE_ZEITLIMIT_MS_STANDARD = 170_000;
+const LESE_ZEITLIMIT_MS_MIN = 30_000;
+const LAUF_BUDGET_MS_STANDARD = 400_000;
+// Unter 200 s passen keine zwei vollen Lese-Fenster mehr in einen Lauf; über
+// 450 s bliebe nach der OCR zu wenig Zeit bis zur Laufzeitgrenze in index.js
+// (480 s) und dem harten Ende der Function (540 s).
+const LAUF_BUDGET_MS_MIN = 200_000;
+const LAUF_BUDGET_MS_MAX = 450_000;
+// Ein Lese-Fenster muss immer ins Budget passen, sonst gäbe es Läufe ohne
+// jeden Fortschritt (Fortsetzung ohne Ende).
+const BUDGET_RESERVE_MS = 30_000;
+/** So oft je Bon ersetzt ein Zeitabbruch den Lese-Platz, statt ihn zu verbrauchen. */
+const ERSATZ_MAX = 3;
+
+const ZWISCHENSTAND_VERSION = 1;
+/** Älter ist er nicht verwertbar (z. B. Nachverarbeitung Tage später) → frisch lesen. */
+const ZWISCHENSTAND_MAX_ALTER_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Zeitlimit je Lesung und Laufbudget aus der Env. Ungültige Werte gelten als
+ * Standard, nie als „kein Limit".
+ *   CASHBACK_OCR_READ_TIMEOUT_MS  Zeitlimit je Basis-/Bildverbesserungs-Lesung
+ *   CASHBACK_OCR_RUN_BUDGET_MS    Laufbudget der ganzen Leiter je Lauf
+ */
+function zeitOptionen(env = process.env) {
+  const b = Number(env.CASHBACK_OCR_RUN_BUDGET_MS);
+  const budgetMs = Number.isFinite(b) && b >= LAUF_BUDGET_MS_MIN && b <= LAUF_BUDGET_MS_MAX ? b : LAUF_BUDGET_MS_STANDARD;
+  const l = Number(env.CASHBACK_OCR_READ_TIMEOUT_MS);
+  const leseLimitMs = Math.min(
+    Number.isFinite(l) && l >= LESE_ZEITLIMIT_MS_MIN ? l : LESE_ZEITLIMIT_MS_STANDARD,
+    budgetMs - BUDGET_RESERVE_MS,
+  );
+  return { budgetMs, leseLimitMs, reserveMs: BUDGET_RESERVE_MS };
+}
+const ZEIT = zeitOptionen();
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const sigOf = (items) => (items || []).map((i) => `${norm(i.name)}#${i.priceCents}`).join('|');
@@ -127,12 +199,114 @@ function pack(chosen, confidence, method, reads, failedAttempts = 0) {
   return out;
 }
 
+// ─── Zwischenstand (Fortsetzung über mehrere Läufe) ─────────────────────────
+
+const zahlOderNull = (v) => (Number.isFinite(v) ? v : null);
+
+/** Eine Lesung Firestore-tauglich: ohne `raw` (doppelt zu `parsed`), ohne undefined. */
+function lesungSichern(r) {
+  return {
+    stufe: r.__pro ? 'pro' : r.__enh ? 'enh' : 'flash',
+    parsed: r.parsed,
+    model: r.model ?? null,
+    promptVersion: r.promptVersion ?? null,
+    latencyMs: zahlOderNull(r.latencyMs),
+    finishReason: r.finishReason ?? null,
+    inputTokens: zahlOderNull(r.inputTokens),
+    outputTokens: zahlOderNull(r.outputTokens),
+    thoughtsTokens: zahlOderNull(r.thoughtsTokens),
+  };
+}
+
+function lesungLaden(s) {
+  const r = {
+    parsed: s.parsed,
+    model: s.model ?? null,
+    promptVersion: s.promptVersion ?? null,
+    latencyMs: s.latencyMs ?? null,
+    finishReason: s.finishReason ?? null,
+    inputTokens: s.inputTokens ?? null,
+    outputTokens: s.outputTokens ?? null,
+    thoughtsTokens: s.thoughtsTokens ?? null,
+  };
+  if (s.stufe === 'pro') r.__pro = true;
+  if (s.stufe === 'enh') r.__enh = true;
+  return r;
+}
+
+const ganzzahlIn = (v, min, max) => Number.isInteger(v) && v >= min && v <= max;
+
+/**
+ * Prüft einen am Bon abgelegten Zwischenstand. Verwertbar nur, wenn er zu
+ * DIESER Leiter passt (gleiches Modell, gleiche Eskalation, gleicher Prompt,
+ * gleiche Zahl an Basis-Lesungen) und frisch ist. Sonst: frisch lesen — ein
+ * verworfener Zwischenstand kostet Lesungen, nie eine falsche Entscheidung.
+ *
+ * @returns {{stand: object|null, grund: string|null}}
+ */
+function zwischenstandLaden(roh, { model, eskModel, maxFlash, jetzt }) {
+  if (!roh || typeof roh !== 'object') return { stand: null, grund: null };
+  const nein = (grund) => ({ stand: null, grund });
+  if (roh.v !== ZWISCHENSTAND_VERSION) return nein('version');
+  if (roh.model !== model || roh.eskModel !== eskModel) return nein('modell');
+  if (roh.promptVersion !== PROMPT_VERSION) return nein('prompt');
+  if (roh.maxFlash !== maxFlash) return nein('max_flash');
+  if (!Number.isFinite(roh.gespeichertMs) || jetzt - roh.gespeichertMs > ZWISCHENSTAND_MAX_ALTER_MS) return nein('alter');
+  if (!ganzzahlIn(roh.flash, 0, maxFlash) || !ganzzahlIn(roh.enh, 0, 2) || !ganzzahlIn(roh.esk, 0, 2)
+    || !ganzzahlIn(roh.ersatz, 0, ERSATZ_MAX) || !ganzzahlIn(roh.laeufe, 1, 1000)) return nein('zaehler');
+  if (!Array.isArray(roh.reads) || !Array.isArray(roh.failed)) return nein('form');
+  if (roh.reads.length > roh.flash + roh.enh + roh.esk) return nein('zaehler');
+  if (!roh.reads.every((s) => s && typeof s === 'object' && s.parsed && typeof s.parsed === 'object'
+    && ['flash', 'enh', 'pro'].includes(s.stufe))) return nein('form');
+  return {
+    grund: null,
+    stand: {
+      reads: roh.reads.map(lesungLaden),
+      failed: roh.failed.map((f) => String(f)),
+      flash: roh.flash,
+      enh: roh.enh,
+      esk: roh.esk,
+      ersatz: roh.ersatz,
+      zeitAbbrueche: Number.isInteger(roh.zeitAbbrueche) ? roh.zeitAbbrueche : 0,
+      nachFlashGeprueft: roh.nachFlashGeprueft === true,
+      nachEnhGeprueft: roh.nachEnhGeprueft === true,
+      eskalationGescheitert: roh.eskalationGescheitert === true,
+      ausweichGenutzt: typeof roh.ausweichGenutzt === 'string' ? roh.ausweichGenutzt : null,
+      // Dieser Lauf ist ein weiterer.
+      laeufe: roh.laeufe + 1,
+    },
+  };
+}
+
+function neuerStand() {
+  return {
+    reads: [],
+    failed: [],
+    flash: 0, // verbrauchte Basis-Plätze
+    enh: 0, // verbrauchte Bildverbesserungs-Plätze
+    esk: 0, // verbrauchte Eskalations-Plätze
+    ersatz: 0, // genutzte Ersatzversuche nach Zeitabbruch
+    zeitAbbrueche: 0,
+    nachFlashGeprueft: false, // Eskalations-Deckel nach Phase 1 schon gefragt
+    nachEnhGeprueft: false, // … und nach den Bildverbesserungs-Lesungen
+    eskalationGescheitert: false,
+    ausweichGenutzt: null,
+    laeufe: 1,
+  };
+}
+
 /**
  * @param {Buffer} imageBytes
  * @param {string} mimeType
- * @param {object} [opts] {model, proModel, maxFlash, escalationGate, extract, enhance}
+ * @param {object} [opts] {model, proModel, maxFlash, escalationGate, extract, enhance,
+ *                         laufStart, zwischenstand, zeit, clock}
  *   proModel: anderes Eskalationsmodell (Optionen dann wie per Env bestimmt).
  *   extract / enhance: Testnähte; Standard extractReceipt / enhanceForOcr.
+ *   laufStart: Start des Function-Laufs (ms). Ohne Angabe kein Laufbudget —
+ *     nur das Zeitlimit je Lesung (Skripte, Messungen).
+ *   zwischenstand: am Bon abgelegter Stand eines früheren Laufs (roh, wie aus
+ *     Firestore) — wird geprüft; unpassend → frisch lesen.
+ *   zeit / clock: Testnähte; Standard zeitOptionen() / Date.now.
  *   escalationGate: optionale async Funktion (reads) => string|null.
  *   Eskalations-Deckel (Kosten, 86cb-Nachtrag 19.08.2026): Liefert sie einen
  *   Grund (z.B. 'bon_too_old'), wird die TEURE Leiter (Enhance-Lesungen +
@@ -142,6 +316,8 @@ function pack(chosen, confidence, method, reads, failedAttempts = 0) {
  *   Gate-Block in index.js (gleiche Resolver/Berechnungen, kein Drift).
  *   Gate-Fehler führen NIE zum Kappen (fail-open zu voller Qualität).
  * @returns extractReceipt()-shaped result + `robust` metadata.
+ * @throws code 'ocr_zeitbudget' (+ `zwischenstand`) — Budget erreicht, KEIN Ergebnis;
+ *         code 'ocr_unavailable' — keine einzige Lesung kam zurück.
  */
 async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
   const model = opts.model || DEFAULT_MODEL;
@@ -151,30 +327,108 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
   const extractReceipt = opts.extract || extractReceiptDefault;
   const enhanceForOcr = opts.enhance || enhanceForOcrDefault;
   const maxFlash = opts.maxFlash || MAX_FLASH;
-  const reads = [];
+  const zeit = opts.zeit || ZEIT;
+  const clock = opts.clock || Date.now;
+  const frist = Number.isFinite(opts.laufStart) ? opts.laufStart + zeit.budgetMs : null;
+  const leseLimit = zeit.leseLimitMs;
+  // Eskalation: ihr eigenes Limit (geminiModelle.js, 150 s); ein Modell ohne
+  // eigenes (2.5-pro-Rückweg) bekommt das allgemeine. Nie größer als ein
+  // Fenster im Budget.
+  const eskLimit = Math.min(esk.timeoutMs > 0 ? esk.timeoutMs : leseLimit, zeit.budgetMs - zeit.reserveMs);
+
+  const geladen = zwischenstandLaden(opts.zwischenstand, { model, eskModel: esk.model, maxFlash, jetzt: clock() });
+  if (geladen.grund) console.warn('ocr-zwischenstand-verworfen', { grund: geladen.grund });
+  const st = geladen.stand || neuerStand();
+
   // Incident 19.08.2026: geworfene Versuche wurden hier still verschluckt.
   // Bei Totalausfall (z.B. 429 Spending-Cap) blieb `reads` leer → Phase 4
   // lieferte den isReceipt:false-Stub → Nutzer sah fälschlich „kein
   // Kassenbon". Jetzt: jeden Fehlversuch loggen + sammeln; bleibt ALLES
   // leer, ist das ein Infrastrukturfehler → werfen (Retry/Review), nie Stub.
-  const failed = [];
   const noteFailure = (phase, e) => {
-    failed.push(`${phase}: ${String(e && e.message ? e.message : e).slice(0, 160)}`);
+    st.failed.push(`${phase}: ${String(e && e.message ? e.message : e).slice(0, 160)}`);
     console.warn('ocr-attempt-failed', { phase, err: String(e && e.message ? e.message : e).slice(0, 300) });
   };
 
-  // Phase 1 — flash self-consistency with early stop on agreement.
-  for (let i = 0; i < maxFlash; i++) {
-    let r;
+  /** Ein Lese-Versuch; wirft nie. */
+  const versuch = async (phase, bytes, mime, callOpts) => {
     try {
-      r = await extractReceipt(imageBytes, mimeType, { model });
+      return { r: await extractReceipt(bytes, mime, callOpts) };
     } catch (e) {
-      noteFailure(`flash-${i + 1}`, e);
-      continue;
+      noteFailure(phase, e);
+      return { r: null, zeit: !!e && e.code === 'ocr_timeout' };
     }
-    reads.push(r);
-    const agreed = findAgreement(reads);
-    if (agreed) return pack(agreed, 'high', 'flash-agreement', reads, failed.length);
+  };
+
+  /**
+   * Verbraucht der Versuch seinen Lese-Platz? Eine Lesung ja; ein Abbruch durch
+   * das eigene Zeitlimit nicht, solange Ersatzversuche übrig sind; jeder andere
+   * Fehlversuch ja (wie bisher).
+   */
+  const verbraucht = (e) => {
+    if (e.r) return true;
+    if (e.zeit) {
+      st.zeitAbbrueche++;
+      if (st.ersatz < ERSATZ_MAX) {
+        st.ersatz++;
+        return false;
+      }
+    }
+    return true;
+  };
+
+  /** Passt ein volles Lese-Fenster noch ins Laufbudget? */
+  const fensterFrei = (limit) => frist == null || frist - clock() >= limit;
+
+  /** Budget erreicht: Zwischenstand mitgeben, kein Ergebnis — also keine Entscheidung. */
+  const anhalten = () => {
+    const err = new Error(`ocr_zeitbudget: Laufbudget erreicht nach ${st.reads.length} Lesungen (${st.failed.length} Fehlversuche, Lauf ${st.laeufe})`);
+    err.code = 'ocr_zeitbudget';
+    err.zwischenstand = {
+      v: ZWISCHENSTAND_VERSION,
+      model,
+      eskModel: esk.model,
+      promptVersion: PROMPT_VERSION,
+      maxFlash,
+      gespeichertMs: clock(),
+      laeufe: st.laeufe,
+      flash: st.flash,
+      enh: st.enh,
+      esk: st.esk,
+      ersatz: st.ersatz,
+      zeitAbbrueche: st.zeitAbbrueche,
+      nachFlashGeprueft: st.nachFlashGeprueft,
+      nachEnhGeprueft: st.nachEnhGeprueft,
+      eskalationGescheitert: st.eskalationGescheitert,
+      ausweichGenutzt: st.ausweichGenutzt,
+      failed: st.failed.slice(),
+      reads: st.reads.map(lesungSichern),
+    };
+    throw err;
+  };
+
+  const fertig = (out) => {
+    out.robust.laeufe = st.laeufe;
+    out.robust.zeitAbbrueche = st.zeitAbbrueche;
+    if (st.ausweichGenutzt) out.robust.escalationFallbackThinking = st.ausweichGenutzt;
+    return out;
+  };
+
+  // Phase 1 — flash self-consistency with early stop on agreement. Solange
+  // noch keine zwei Lesungen da sind, laufen die fehlenden gleichzeitig (eine
+  // Einigung braucht ohnehin zwei); danach eine nach der anderen.
+  while (st.flash < maxFlash) {
+    if (!fensterFrei(leseLimit)) anhalten();
+    const n = Math.max(1, Math.min(2 - st.reads.length, maxFlash - st.flash));
+    const ergebnisse = await Promise.all(
+      Array.from({ length: n }, (_, k) => versuch(`flash-${st.flash + k + 1}`, imageBytes, mimeType, { model, timeoutMs: leseLimit })),
+    );
+    for (const e of ergebnisse) {
+      if (verbraucht(e)) st.flash++;
+      if (e.r) st.reads.push(e.r);
+    }
+    const agreed = findAgreement(st.reads);
+    if (agreed) return fertig(pack(agreed, 'high', 'flash-agreement', st.reads, st.failed.length));
   }
 
   // Eskalations-Deckel: Vor der teuren Leiter (Enhance + Pro) prüfen, ob der
@@ -185,25 +439,30 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
   const checkCap = async () => {
     if (typeof opts.escalationGate !== 'function') return null;
     try {
-      return await opts.escalationGate(reads);
+      return await opts.escalationGate(st.reads);
     } catch (e) {
       console.warn('escalation-gate-failed', { err: String(e && e.message ? e.message : e).slice(0, 200) });
       return null; // fail-open: volle Qualität
     }
   };
-  const capReason = await checkCap();
-  if (capReason) {
-    const best = reads.find(reconciles) || reads[0];
-    if (best) {
-      const out = pack(best, reconciles(best) ? 'low' : 'none', `escalation-capped:${capReason}`, reads, failed.length);
-      out.robust.cappedReason = capReason;
-      return out;
-    }
+  const gekappt = (capReason) => {
+    const best = st.reads.find(reconciles) || st.reads[0];
+    if (!best) return null;
+    const out = pack(best, reconciles(best) ? 'low' : 'none', `escalation-capped:${capReason}`, st.reads, st.failed.length);
+    out.robust.cappedReason = capReason;
+    return fertig(out);
+  };
+  if (!st.nachFlashGeprueft) {
+    const capReason = await checkCap();
+    const out = capReason ? gekappt(capReason) : null;
+    if (out) return out;
+    st.nachFlashGeprueft = true;
   }
 
   // Phase 1.5 — no agreement on the ORIGINAL → enhance the image (upscale +
   // sharpen + contrast) and read it again. Image quality, not reasoning, is
   // the bottleneck on creased bons. Best-effort: fall back to original bytes.
+  // In einem Folgelauf wird das Bild erneut verbessert (gleiche Umrechnung).
   let enhanced = null;
   try {
     enhanced = await enhanceForOcr(imageBytes);
@@ -212,97 +471,90 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
   }
   const escImg = enhanced || imageBytes;
   if (enhanced) {
-    for (let i = 0; i < 2; i++) {
-      let r;
-      try {
-        r = await extractReceipt(escImg, 'image/jpeg', { model });
-      } catch (e) {
-        noteFailure(`enhanced-${i + 1}`, e);
-        continue;
-      }
-      r.__enh = true;
-      reads.push(r);
-      const agreed = findAgreement(reads);
-      if (agreed) return pack(agreed, 'high', 'enhanced-agreement', reads, failed.length);
+    while (st.enh < 2) {
+      if (!fensterFrei(leseLimit)) anhalten();
+      const e = await versuch(`enhanced-${st.enh + 1}`, escImg, 'image/jpeg', { model, timeoutMs: leseLimit });
+      if (verbraucht(e)) st.enh++;
+      if (!e.r) continue;
+      e.r.__enh = true;
+      st.reads.push(e.r);
+      const agreed = findAgreement(st.reads);
+      if (agreed) return fertig(pack(agreed, 'high', 'enhanced-agreement', st.reads, st.failed.length));
     }
   }
 
   // Eskalations-Deckel, zweiter Check-Punkt: die Enhance-Lesungen können das
   // Policy-Signal erhärtet haben; die Pro-Phase ist die teuerste Stufe.
-  const capReason2 = await checkCap();
-  if (capReason2) {
-    const best = reads.find(reconciles) || reads[0];
-    if (best) {
-      const out = pack(best, reconciles(best) ? 'low' : 'none', `escalation-capped:${capReason2}`, reads, failed.length);
-      out.robust.cappedReason = capReason2;
-      return out;
-    }
+  if (!st.nachEnhGeprueft) {
+    const capReason2 = await checkCap();
+    const out = capReason2 ? gekappt(capReason2) : null;
+    if (out) return out;
+    st.nachEnhGeprueft = true;
   }
 
   // Phase 2 — escalate on the (enhanced) image; agreement incl. an
   // escalation read. Scheitert ein Versuch (Denk-Ausreißer bis MAX_TOKENS,
   // Zeitlimit, 429), liest der nächste mit der Ausweich-Denkstufe (LOW) —
   // sonst bliebe ausgerechnet auf den schwersten Bons gar keine Lesung übrig.
-  let eskalationGescheitert = false;
-  let ausweichGenutzt = null; // Denkstufe, falls eine Ausweich-Lesung gelang
-  for (let i = 0; i < 2; i++) {
-    let r;
-    const ausweichen = eskalationGescheitert && !!esk.ausweichThinkingConfig;
+  while (st.esk < 2) {
+    if (!fensterFrei(eskLimit)) anhalten();
+    const ausweichen = st.eskalationGescheitert && !!esk.ausweichThinkingConfig;
     const denken = ausweichen ? esk.ausweichThinkingConfig : esk.thinkingConfig;
-    try {
-      r = await extractReceipt(escImg, enhanced ? 'image/jpeg' : mimeType, {
-        model: esk.model,
-        // Ausdrücklich gesetzt → hat Vorrang vor CASHBACK_OCR_THINKING_BUDGET
-        // (ein `thinkingBudget` würde Gemini 3 mit 400 ablehnen).
-        ...(denken ? { thinkingConfig: denken } : {}),
-        ...(esk.standort ? { location: esk.standort } : {}),
-        ...(Number.isFinite(esk.temperature) ? { temperature: esk.temperature } : {}),
-        // Hartes Zeitlimit je Lesung (lib/geminiModelle.js) — 2.5-pro lief ohne.
-        ...(esk.timeoutMs > 0 ? { timeoutMs: esk.timeoutMs } : {}),
-      });
-    } catch (e) {
-      noteFailure(`pro-${i + 1}`, e);
-      eskalationGescheitert = true;
+    const e = await versuch(`pro-${st.esk + 1}`, escImg, enhanced ? 'image/jpeg' : mimeType, {
+      model: esk.model,
+      // Ausdrücklich gesetzt → hat Vorrang vor CASHBACK_OCR_THINKING_BUDGET
+      // (ein `thinkingBudget` würde Gemini 3 mit 400 ablehnen).
+      ...(denken ? { thinkingConfig: denken } : {}),
+      ...(esk.standort ? { location: esk.standort } : {}),
+      ...(Number.isFinite(esk.temperature) ? { temperature: esk.temperature } : {}),
+      // Hartes Zeitlimit je Lesung (lib/geminiModelle.js), nie über das Budget.
+      timeoutMs: eskLimit,
+    });
+    if (verbraucht(e)) st.esk++;
+    if (!e.r) {
+      st.eskalationGescheitert = true;
       continue;
     }
-    r.__pro = true;
-    if (ausweichen) ausweichGenutzt = denken.thinkingLevel;
-    reads.push(r);
-    const agreed = findAgreement(reads);
+    e.r.__pro = true;
+    if (ausweichen) st.ausweichGenutzt = denken.thinkingLevel;
+    st.reads.push(e.r);
+    const agreed = findAgreement(st.reads);
     if (agreed) {
       const conf = agreed.__pro ? 'medium' : 'high';
-      return mitAusweich(pack(agreed, conf, 'pro-agreement', reads, failed.length), ausweichGenutzt);
+      return fertig(pack(agreed, conf, 'pro-agreement', st.reads, st.failed.length));
     }
   }
 
   // Infrastruktur-Gate (Incident 19.08.2026): KEIN einziger Versuch hat eine
   // Antwort geliefert → das Bild wurde nie angesehen. Das ist ein Backend-
-  // Ausfall (429/Netz/Auth), NIEMALS eine Aussage über den Bon. Werfen statt
-  // Stub → index.js behandelt es als transient (Retry, danach 'review').
-  if (reads.length === 0) {
-    const err = new Error(`ocr_unavailable: all ${failed.length} read attempts failed — last: ${failed[failed.length - 1] || 'n/a'}`);
+  // Ausfall (429/Netz/Auth/Zeitlimit), NIEMALS eine Aussage über den Bon.
+  // Werfen statt Stub → index.js behandelt es als transient (Retry, danach
+  // 'review').
+  if (st.reads.length === 0) {
+    const err = new Error(`ocr_unavailable: all ${st.failed.length} read attempts failed — last: ${st.failed[st.failed.length - 1] || 'n/a'}`);
     err.code = 'ocr_unavailable';
     throw err;
   }
 
   // Phase 3 — no agreement. Prefer any reconciling read (best-effort), low conf.
-  const anyRec = reads.find(reconciles);
-  if (anyRec) return mitAusweich(pack(anyRec, 'low', 'reconcile-no-agreement', reads, failed.length), ausweichGenutzt);
+  const anyRec = st.reads.find(reconciles);
+  if (anyRec) return fertig(pack(anyRec, 'low', 'reconcile-no-agreement', st.reads, st.failed.length));
 
   // Phase 4 — nothing reconciles; hand back the first read for the recon gate.
   // `reads` ist hier garantiert nicht leer (Infrastruktur-Gate oben) — der
   // Stub-Fallback bleibt nur als Form-Sicherheit erhalten.
-  const first = reads[0] || { parsed: { isReceipt: false, items: [] }, model, promptVersion: null, latencyMs: 0 };
-  return mitAusweich(pack(first, 'none', 'no-reconcile', reads, failed.length), ausweichGenutzt);
+  const first = st.reads[0] || { parsed: { isReceipt: false, items: [] }, model, promptVersion: null, latencyMs: 0 };
+  return fertig(pack(first, 'none', 'no-reconcile', st.reads, st.failed.length));
 }
 
-/**
- * Vermerkt am Ergebnis, ob eine Eskalationslesung mit der Ausweich-Denkstufe
- * entstand (Beobachtung im Betrieb: wie oft scheitert HIGH?).
- */
-function mitAusweich(out, stufe) {
-  if (stufe) out.robust.escalationFallbackThinking = stufe;
-  return out;
-}
-
-module.exports = { extractReceiptRobust, sigOf, PRO_MODEL, ESKALATION };
+module.exports = {
+  extractReceiptRobust,
+  sigOf,
+  zeitOptionen,
+  zwischenstandLaden,
+  PRO_MODEL,
+  ESKALATION,
+  ZEIT,
+  ERSATZ_MAX,
+  ZWISCHENSTAND_VERSION,
+};
