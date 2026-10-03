@@ -44,6 +44,19 @@ service firebase.storage {
                    && (request.auth.uid == userId || request.auth.token.admin == true);
     }
 
+    // Profilbild der App (app/edit-profile.tsx: putFile auf
+    // profilePictures/{uid}). Seit 06.09.2026 verbot die Sammelregel jedes
+    // Client-Schreiben, der Upload scheiterte. Repariert 03.10.2026
+    // (Entscheidung Patrick): nur das eigene Bild, nur Bilddateien, < 5 MB.
+    // Lesen bleibt einzeln öffentlich (Sammelregel unten) — der gespeicherte
+    // Link lädt so auch, nachdem optimizeImage das Bild ohne Token neu schreibt.
+    match /profilePictures/{userId} {
+      allow create, update: if request.auth != null
+                            && request.auth.uid == userId
+                            && request.resource.size < 5 * 1024 * 1024
+                            && request.resource.contentType.matches('image/.*');
+    }
+
     // Alles andere (Katalog): einzeln abrufbar für alle, Auflisten nur
     // Admin, kein Client-Schreiben. Bons und Produktfotos sind ausgenommen —
     // für sie gelten nur die Regeln oben.
