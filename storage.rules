@@ -45,8 +45,9 @@ service firebase.storage {
     }
 
     // Profilbild der App (app/edit-profile.tsx: putFile auf
-    // profilePictures/{uid}). Seit 06.09.2026 verbot die Sammelregel jedes
-    // Client-Schreiben, der Upload scheiterte. Repariert 03.10.2026
+    // profilePictures/{uid}). Die Sammelregel verbot schon seit dem ersten
+    // Stand dieser Datei (30.04.2026) jedes Client-Schreiben, der Upload
+    // scheiterte also schon vor der Speicher-Schließung. Repariert 03.10.2026
     // (Entscheidung Patrick): nur das eigene Bild, nur Bilddateien, < 5 MB.
     // Lesen bleibt einzeln öffentlich (Sammelregel unten) — der gespeicherte
     // Link lädt so auch, nachdem optimizeImage das Bild ohne Token neu schreibt.
