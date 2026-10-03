@@ -4123,6 +4123,40 @@ Regeln:
   eine Stunden-Zeitreihe der Fehler gegen die Erfolge zeigt, ab wann Google
   umgestellt hat.
 
+## Hängende Bons: jede Gemini-Lesung braucht ein Zeitlimit, kein Lauf darf seinen Anspruch überleben (03.10.2026)
+
+Vom 28.09. bis 02.10. beantwortete Vertex einzelne Anfragen minutenlang nicht.
+Die Basis-Lesungen der Bon-OCR hatten kein eigenes Zeitlimit; ohne
+`timeoutMs` wartet `@google/genai` bis zum festen 300-s-Limit von Node-fetch
+(„fetch failed"). Zwei Hänger sprengten die 540 s (304 Läufe). Cloud Run beendet
+dann nur die Anfrage, nicht den Code: Läufe schrieben bis 37 min später —
+nachdem der Lauf-Anspruch (10 min) verfallen war und der Kehrlauf den Bon schon
+neu zugestellt hatte. Regeln (umgesetzt in `cashback-pipeline`, Zweig
+`claude/bon-zeitlimit`):
+- **Jede Lesung der OCR-Leiter bekommt `timeoutMs`** (dort Promise.race +
+  AbortSignal). NICHT abgedeckt, beide heute aus: die DocAI-Eskalation und die
+  Rückfall-Engine cv-hybrid — wer eine davon einschaltet, gibt ihr vorher ein
+  Zeitlimit und prüft die Restzeit des Laufs.
+  Wert an der Arbeit messen, nicht raten: erfolgreiche Lesungen über 170 s waren
+  alle Warteschlange (erzeugte Token ÷ 221 Token/s < 150 s).
+- **Ein Abbruch durch das eigene Zeitlimit ist kein Urteil** — er darf weder den
+  Bon ablehnen noch die Zahl der Lesungen senken, auf der entschieden wird
+  (Ersatzversuch statt verbrauchtem Platz).
+- **Ein Lauf hat ein Zeitbudget und setzt sonst fort**, statt in den Plattform-
+  Abbruch zu laufen: Zwischenstand am Dokument, Anspruch in derselben
+  Transaktion abgeben, neu zustellen. Nach der Laufzeitgrenze (480 s) schreibt
+  ein Lauf keine Entscheidung mehr.
+- **Eine Obergrenze hängt nie an dem Zustand, der verworfen werden kann.** Die
+  Grenze von 8 Läufen stand zuerst im Zwischenstand selbst; wurde der beim Laden
+  verworfen, begann der Zähler neu → simuliert 30 Läufe, 135 bezahlte Aufrufe,
+  kein Ende (Gegenprüfung 03.10.). Jetzt zählt der Bon selbst
+  (`ocrFortsetzungen`, in derselben Transaktion), gelöscht nur zusammen mit dem
+  Zwischenstand. Ein Zeitabbruch der Eskalation verbraucht dagegen weiter seinen
+  Platz — dort fängt das 150-s-Limit die Denk-Ausreißer (geminiModelle.js).
+- Wer Function-Timeout, OCR-Budget oder Laufzeitgrenze ändert, zieht
+  `LAUF_MAX_MS` (`lib/laufAnspruch.js`) mit — der Anspruch muss länger leben als
+  jeder Lauf, der noch schreiben kann.
+
 ## Gemini läuft über VERTEX AI, nicht AI Studio (Incident 19.08.2026)
 
 **Was passiert ist:** Der AI-Studio-Monatsdeckel („monthly spending cap",
@@ -4180,8 +4214,11 @@ behandelt transient (Retry), nach MAX_PROCESS_ATTEMPTS → Status **'review'**
 (reviewReason 'ocr_unavailable'), NIE 'rejected'. Regel: ein Infrastruktur-
 fehler darf nie als inhaltliche Aussage über User-Daten enden. Reprocessing
 abgelehnter Bons: `ocr`-Feld LÖSCHEN (sonst re-used der Retry den kaputten
-Cache), Status auf 'ocr_pending', Message mit `{cashbackId, uid}` (BEIDE
-Pflicht) auf Topic `cashback-ocr-jobs` republishen.
+Cache), seit 03.10.2026 ebenso `ocrZwischenstand` + `ocrFortsetzungen`
+(sonst erbt der Bon die alte Laufgrenze) und `attempts` (sonst landet er
+beim ersten Infrastrukturfehler sofort wieder in 'review'), Status auf
+'ocr_pending', Message mit `{cashbackId, uid}` (BEIDE Pflicht) auf Topic
+`cashback-ocr-jobs` republishen. Muster: `.repair-429.js`.
 
 ## Sim-Testing: NUR wenn's wirklich nötig ist (User-Vorgabe 2026-06-12)
 

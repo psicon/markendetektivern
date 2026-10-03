@@ -73,7 +73,7 @@ const { extractReceiptDocAI, isConfigured: isDocAIConfigured } = require('./lib/
 const { deriveStoreAddress } = require('./lib/storeAddress');
 const { resolveRegion, pickCampaignForRegion, matchesTargeting, targetingStamp } = require('./lib/targeting');
 const { aktionZumZeitpunkt, wirksameAktionId } = require('./lib/campaignZeit');
-const { laufBeginnen, laufBeenden, entscheidungBeanspruchen, entscheidungFreigeben, aktiveLaeufe } = require('./lib/laufAnspruch');
+const { laufBeginnen, laufBeenden, entscheidungBeanspruchen, entscheidungFreigeben, aktiveLaeufe, laufFeld, LAUF_MAX_MS } = require('./lib/laufAnspruch');
 const { resolveMerchant } = require('./lib/merchant');
 const { sendCashbackReady } = require('./lib/push');
 const { erstelleGastUebernahme, kontoPruefen, tokenPruefen } = require('./lib/gastUebernahme');
@@ -181,6 +181,40 @@ const DHASH_DEDUP_LOOKBACK_DAYS = 120;
 // fehlgeschlagenen Retries wird der Bon endgültig abgelehnt (poison message),
 // statt bis zur PubSub-TTL (~7 Tage) immer wieder (teuer) verarbeitet zu werden.
 const MAX_PROCESS_ATTEMPTS = 5;
+
+// ═══ Laufzeit eines processCashback-Laufs (03.10.2026) ═══
+// Vom 28.09. bis 02.10. überzogen 304 Läufe die 540 s, weil einzelne Gemini-
+// Lesungen minutenlang nicht beantwortet wurden. Cloud Run beendet nach 540 s
+// nur die Anfrage, nicht den Code: 260 dieser Läufe rechneten im Hintergrund
+// weiter und schrieben ihr Ergebnis 9–37 min nach Start — während der
+// Lauf-Anspruch (lib/laufAnspruch.js, 10 min) schon verfallen war und der
+// Kehrlauf denselben Bon ein zweites Mal zugestellt hatte. Seitdem:
+//   • Die OCR-Leiter hält ein Laufbudget ein (lib/ocr_robust.js, 400 s ab
+//     LAUF-Start). Reicht es nicht, legt sie den Zwischenstand am Bon ab
+//     (`ocrZwischenstand`) und dieser Lauf stellt den Bon sofort neu zu —
+//     der nächste setzt fort. Ohne Ergebnis wird nichts entschieden.
+//   • Nach LAUF_ZEITGRENZE_MS beginnt kein Lauf mehr einen Schritt, der
+//     Entscheidungen schreibt (Anforderung der Zweitprüfung, Buchung). So
+//     schreibt kein Lauf mehr nach dem Ende seines Anspruchs.
+const LAUF_ZEITGRENZE_MS = 480_000;
+// Obergrenze der Läufe, über die sich EINE OCR-Leiter verteilen darf. Die Leiter
+// hat höchstens 7 Plätze + 3 Ersatzversuche und macht in jedem Lauf Fortschritt;
+// mehr Läufe deuten auf einen Fehler — dann wie ein Ausfall behandeln.
+const OCR_LAEUFE_MAX = 8;
+
+/**
+ * Wirft, wenn der Lauf zu alt ist, um noch Entscheidungen zu schreiben. Der Bon
+ * bleibt `ocr_pending` (OCR ist schon gespeichert), der Kehrlauf stellt neu zu;
+ * nach MAX_PROCESS_ATTEMPTS landet er in 'review', nie in 'rejected'.
+ */
+function laufzeitPruefen(laufStart, schritt) {
+  const ms = Date.now() - laufStart;
+  if (ms > LAUF_ZEITGRENZE_MS) {
+    const err = new Error(`lauf_zeitgrenze: ${Math.round(ms / 1000)} s seit Laufbeginn, vor ${schritt}`);
+    err.code = 'lauf_zeitgrenze';
+    throw err;
+  }
+}
 
 /**
  * 86ca0wbg7 — Baut das `ocr`-Feld fürs Bon-Doc. Einmal definiert, damit der
@@ -377,6 +411,68 @@ async function writeOcrIfNoReferee(docRef, fields) {
 
 // In-memory PubSub publisher (re-used across invocations).
 const pubsub = new PubSub();
+
+/**
+ * OCR-Leiter hat ihr Laufbudget erreicht (lib/ocr_robust.js, code
+ * 'ocr_zeitbudget'): Zwischenstand am Bon ablegen und den Bon sofort neu
+ * zustellen — derselbe Weg wie die Anforderung der Zweitprüfung. Es wird
+ * nichts entschieden; die App zeigt weiter „Bon wird geprüft".
+ *
+ * Transaktional: hat ein anderer Lauf die OCR inzwischen fertig gespeichert,
+ * ist der Zwischenstand überholt — dann weder ablegen noch neu zustellen. In
+ * derselben Transaktion gibt dieser Lauf seinen Anspruch ab: solange ein
+ * Zwischenstand steht, lässt laufBeginnen nur EINEN Lauf zu
+ * ('fortsetzung_laeuft'), und der Nachfolger darf nicht an seinem Vorgänger
+ * hängen bleiben, falls die Zustellung schneller ist als dessen Abmeldung.
+ * Wirft bei Firestore-/PubSub-Fehlern (der normale Retry greift; der
+ * Zwischenstand bleibt, falls er schon abgelegt war).
+ */
+async function ocrFortsetzen({ docRef, cashbackId, uid, eventId, stand }) {
+  const grenze = (laeufe) => {
+    const err = new Error(`ocr_unavailable: Leiter nach ${laeufe} Läufen nicht fertig (${stand.failed.length} Fehlversuche)`);
+    err.code = 'ocr_unavailable';
+    return err;
+  };
+  if (!(stand.laeufe < OCR_LAEUFE_MAX)) throw grenze(stand.laeufe);
+  // Die Grenze hängt zusätzlich am Bon (`ocrFortsetzungen`), nicht nur am
+  // Zwischenstand: wird der beim Laden verworfen, begänne sein Zähler neu, und
+  // ein Bon könnte ohne Ende neu gelesen werden — jede Runde mit bezahlten
+  // Modell-Aufrufen, ohne dass attempts oder sweepCount steigen (Review
+  // 03.10.2026). Gelöscht wird der Zähler zusammen mit dem Zwischenstand.
+  let bisher = 0;
+  const ergebnis = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(docRef);
+    if (!snap.exists) return 'weg';
+    const d = snap.data();
+    const o = d.ocr;
+    if (o && o.parsed) return 'ueberholt';
+    bisher = Number.isInteger(d.ocrFortsetzungen) ? d.ocrFortsetzungen : 0;
+    if (bisher + 1 >= OCR_LAEUFE_MAX) return 'grenze';
+    tx.update(docRef, {
+      ocrZwischenstand: stand,
+      ocrFortsetzungen: bisher + 1,
+      ...(eventId ? { [`verarbeitung.${laufFeld(eventId)}`]: admin.firestore.FieldValue.delete() } : {}),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return 'ok';
+  });
+  if (ergebnis === 'grenze') throw grenze(bisher + 1);
+  if (ergebnis !== 'ok') {
+    logger.warn('ocr-fortsetzung-ueberholt', { cashbackId, ergebnis });
+    return;
+  }
+  await pubsub.topic(PUBSUB_TOPIC).publishMessage({
+    json: { cashbackId, uid, fortsetzung: stand.laeufe },
+    attributes: { uid, cashbackId },
+  });
+  logger.warn('ocr-fortsetzung', {
+    cashbackId,
+    lauf: stand.laeufe,
+    lesungen: stand.reads.length,
+    fehlversuche: stand.failed.length,
+    zeitAbbrueche: stand.zeitAbbrueche,
+  });
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -1385,11 +1481,16 @@ exports.processCashback = onMessagePublished(
     // robuste OCR liest bis zu 6-mal (2 Flash + 2 enhanced + 2 Pro), dazu
     // Forensik + ggf. DocAI-Eskalation. 540 s = Maximum fuer event-driven
     // Functions, gibt Luft ohne Verhaltensaenderung im Normalfall (~10-20 s).
+    // Seit 03.10.2026 hält die OCR ein eigenes Laufbudget ein und setzt bei
+    // Bedarf in einem neuen Lauf fort (LAUF_ZEITGRENZE_MS, lib/ocr_robust.js)
+    // — die 540 s sind damit nur noch die äußere Sicherung.
     timeoutSeconds: 540,
     memory: '1GiB',
     secrets: [GEMINI_API_KEY],
   },
   async (event) => {
+    // Uhr des Laufs: ab hier zählen Laufbudget der OCR und Laufzeitgrenze.
+    const laufStart = Date.now();
     // Push-Prüfung 24.09.2026 (lib/laufAnspruch.js): Pub/Sub stellt dieselbe
     // Nachricht gelegentlich doppelt zu. Laufen beide Zustellungen parallel,
     // kann die zweite mit eigener, abweichender OCR-Lesung eine schon gemeldete
@@ -1414,7 +1515,7 @@ exports.processCashback = onMessagePublished(
       logger.warn('lauf-anspruch-fehlgeschlagen', { cashbackId: payload.cashbackId, err: anspruch.fehler });
     }
     try {
-      await verarbeiteCashback(event);
+      await verarbeiteCashback(event, { laufStart });
     } finally {
       if (anspruch.angemeldet && !(await laufBeenden({ admin, docRef: anspruchRef, eventId: event.id }))) {
         // Der Anspruch verfällt nach LAUF_MAX_MS von selbst; bis dahin meldet
@@ -1430,7 +1531,7 @@ exports.processCashback = onMessagePublished(
  * Die Einrückung ist bewusst unverändert geblieben, damit parallele Zweige an
  * diesem Block ohne Konflikte zusammenfinden.
  */
-async function verarbeiteCashback(event) {
+async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
     const data = event.data.message.json || {};
     const { cashbackId, uid } = data;
     if (!cashbackId || !uid) {
@@ -1522,7 +1623,35 @@ async function verarbeiteCashback(event) {
           // flaky/creased bons that a single read would mis-read → reject.
           // Confidence (high/medium/low/none) lands in ocr.robust. Validated
           // on 42 real bons: 40/40 reconcile, 0 high-confident-but-wrong.
-          ocr = await extractReceiptRobust(bytes, mimeType, { model: config.ocrModel, escalationGate });
+          // Laufbudget + Fortsetzung (03.10.2026): reicht die Zeit dieses
+          // Laufs nicht, kommt KEIN Ergebnis zurück, sondern ein Zwischenstand
+          // — ablegen, neu zustellen, nichts entscheiden.
+          try {
+            ocr = await extractReceiptRobust(bytes, mimeType, {
+              model: config.ocrModel,
+              escalationGate,
+              laufStart,
+              zwischenstand: receipt.ocrZwischenstand || null,
+            });
+          } catch (e) {
+            if (e && e.code === 'ocr_zeitbudget' && e.zwischenstand) {
+              try {
+                await ocrFortsetzen({ docRef, cashbackId, uid, eventId: event.id, stand: e.zwischenstand });
+              } catch (f) {
+                if (f && f.code === 'ocr_unavailable') throw f;
+                // Ablegen oder Zustellen scheiterte (Firestore/PubSub): eine
+                // Infrastruktur-Störung, nie ein Urteil über den Bon — und nach
+                // dem letzten Versuch 'review', nicht 'rejected'. Ein schon
+                // abgelegter Zwischenstand bleibt für den Kehrlauf stehen.
+                const err = new Error(`ocr_unavailable: Fortsetzung nicht möglich — ${String(f && f.message ? f.message : f).slice(0, 200)}`);
+                err.code = 'ocr_unavailable';
+                err.zwischenstandBehalten = true;
+                throw err;
+              }
+              return;
+            }
+            throw e;
+          }
           ocr.cvLatencyMs = 0;
           ocr.geminiLatencyMs = ocr.latencyMs;
           ocr.ocrText = '';
@@ -1583,12 +1712,22 @@ async function verarbeiteCashback(event) {
         // Transaktional: hat ein paralleler Lauf inzwischen eine Zweitprüfung
         // angefordert oder abgelegt, gehört der Bon diesem Lauf — diese frische
         // OCR darf deren Stand nicht überschreiben (Review 14.09.).
+        // Der Zwischenstand einer über mehrere Läufe verteilten Leiter ist mit
+        // der fertigen OCR erledigt.
         const fruehPersist = await writeOcrIfNoReferee(docRef, {
           ocr: buildOcrField(ocr, recon, escalation),
+          ocrZwischenstand: admin.firestore.FieldValue.delete(),
+          ocrFortsetzungen: admin.firestore.FieldValue.delete(),
           updatedAt: now,
         }).catch(() => 'fehler');
         if (fruehPersist === 'ueberholt') {
           logger.warn('ocr-ueberholt-von-zweitpruefung', { cashbackId });
+          if (receipt.ocrZwischenstand) {
+            await docRef.update({
+              ocrZwischenstand: admin.firestore.FieldValue.delete(),
+              ocrFortsetzungen: admin.firestore.FieldValue.delete(),
+            }).catch(() => {});
+          }
           return;
         }
       }
@@ -2244,6 +2383,9 @@ async function verarbeiteCashback(event) {
         if (!rejectReason && status === 'rejected') rejectReason = receipt.rejectReason || 'manual_review_rejected';
       }
 
+      // Laufzeitgrenze (03.10.2026): ab hier schreibt der Lauf Entscheidungen.
+      laufzeitPruefen(laufStart, 'Zweitprüfung/Buchung');
+
       // 6v) Zweitprüfung anfordern, Durchlauf 1 (86cbfvwge). Würde der Bon
       // wegen eines LESE-abhängigen Grunds abgelehnt, obwohl die Mehrfach-
       // Lesung sich nicht sicher war, entscheidet vorher ein stärkeres Modell.
@@ -2289,9 +2431,15 @@ async function verarbeiteCashback(event) {
         // Durchlauf gäbe es sonst nichts mehr zu korrigieren und der Vermerk
         // ginge verloren. Ohne .catch: schlägt das Ablegen fehl, greift der
         // normale Retry — lieber noch einmal als eine Anfrage ohne Spur.
+        // Zwischenstand + Fortsetzungs-Zähler einer verteilten Leiter sind mit
+        // der fertigen Lesung erledigt — auch dann, wenn das frühe Speichern
+        // oben scheiterte (sonst übersprang Durchlauf 2 den Bon als
+        // 'fortsetzung_laeuft', bis der Kehrlauf kam; Gegenprüfung 03.10.).
         const anfrageGeschrieben = await writeOcrIfNoReferee(docRef, {
           ocr: buildOcrField(ocr, recon, escalation),
           ...(bonDateCorrection ? { bonDateCorrection } : {}),
+          ocrZwischenstand: admin.firestore.FieldValue.delete(),
+          ocrFortsetzungen: admin.firestore.FieldValue.delete(),
           updatedAt: now,
         });
         if (anfrageGeschrieben === 'ueberholt') {
@@ -2447,6 +2595,9 @@ async function verarbeiteCashback(event) {
         }
       }
 
+      // Zweite Prüfung direkt vor der Buchung (dazwischen liegen Lesevorgänge).
+      laufzeitPruefen(laufStart, 'Buchung');
+
       // 6z) Ledger + Budget ATOMAR verbuchen — VOR dem Mirror/Receipt-Write,
       // weil die Budget-Deckelung in der Transaktion den Betrag (und damit
       // den Status) noch ändern kann. Idempotent per receiptId.
@@ -2574,6 +2725,10 @@ async function verarbeiteCashback(event) {
         // greifen musste — dann entschied die Bewertung wie bisher.
         ocrFieldAgreement,
         ocr: buildOcrField(ocr, recon, escalation),
+        // Falls das frühe Speichern oben scheiterte, steht er noch da.
+        ...(receipt.ocrZwischenstand || receipt.ocrFortsetzungen != null
+          ? { ocrZwischenstand: admin.firestore.FieldValue.delete(), ocrFortsetzungen: admin.firestore.FieldValue.delete() }
+          : {}),
         merchant: merchantInfo
           ? {
               id: merchantInfo.id,
@@ -2712,6 +2867,14 @@ async function verarbeiteCashback(event) {
       const attempts = (receipt.attempts || 0) + 1;
       const lastError = String(err && err.message ? err.message : err).slice(0, 300);
       logger.error('process-failed', { cashbackId, err: err.message, attempts, code: err?.code ?? null });
+      // Ist die OCR-Leiter ohne eine einzige Lesung zu Ende gegangen, ist ein
+      // abgelegter Zwischenstand verbraucht — der nächste Versuch liest frisch.
+      // Mit ihm geht der Fortsetzungs-Zähler — die nächste Leiter ist eine neue,
+      // und attempts (hier hochgezählt) begrenzt die Zahl der Leitern.
+      const zwischenstandWeg = err && err.code === 'ocr_unavailable' && !err.zwischenstandBehalten
+        && (receipt.ocrZwischenstand || receipt.ocrFortsetzungen != null)
+        ? { ocrZwischenstand: admin.firestore.FieldValue.delete(), ocrFortsetzungen: admin.firestore.FieldValue.delete() }
+        : {};
       if (attempts >= MAX_PROCESS_ATTEMPTS) {
         // Incident 19.08.2026: War die OCR-Infrastruktur down (ocr_unavailable —
         // alle Lesungen geworfen, z.B. 429 Spending-Cap), wurde der Bon NIE
@@ -2719,13 +2882,15 @@ async function verarbeiteCashback(event) {
         // zeigt „wird geprüft", Auflösung per Reprocessing (ocr-Feld leeren +
         // republishen) oder resolveCashbackReview. Nur echte Poison-Messages
         // (Bild kaputt, Parser-Crash) enden weiterhin als 'rejected'.
+        // `lauf_zeitgrenze` (03.10.2026): der Lauf war zu langsam, um noch zu
+        // entscheiden — ebenfalls keine Aussage über den Bon.
         const infraCode =
-          err && (err.code === 'ocr_unavailable' || err.code === 'ledger_precheck_failed' || err.code === 'referee_unavailable' || err.code === 'ledger_tx_failed')
+          err && (err.code === 'ocr_unavailable' || err.code === 'ledger_precheck_failed' || err.code === 'referee_unavailable' || err.code === 'ledger_tx_failed' || err.code === 'lauf_zeitgrenze' || err.code === 'ocr_zeitbudget')
             ? err.code
             : null;
         const infra = !!infraCode;
         const finalDoc = infra
-          ? { status: 'review', reviewReason: infraCode, attempts, lastError, updatedAt: now }
+          ? { status: 'review', reviewReason: infraCode, attempts, lastError, updatedAt: now, ...zwischenstandWeg }
           : { status: 'rejected', rejectReason: 'max_retries_exceeded', attempts, lastError, updatedAt: now };
         const finalMirror = infra
           ? { status: 'review', reviewReason: infraCode, attempts, updatedAt: now }
@@ -2740,7 +2905,7 @@ async function verarbeiteCashback(event) {
       // Unter dem Limit: in-progress lassen (Mirror NICHT auf 'rejected' setzen,
       // App zeigt weiter „wird geprüft"), nur Zähler/Fehler festhalten, dann
       // werfen → PubSub-Retry.
-      await docRef.update({ attempts, lastError, updatedAt: now }).catch(() => {});
+      await docRef.update({ attempts, lastError, updatedAt: now, ...zwischenstandWeg }).catch(() => {});
       throw err;
     }
 }
@@ -3627,8 +3792,14 @@ exports.sweepStuckReceipts = onSchedule(
       // mit frischer OCR können verschieden lesen, und der zweite stornierte
       // dann die Gutschrift, die der erste schon gemeldet hatte. Der nächste
       // Kehrlauf holt den Bon, falls er danach noch hängt.
+      // Ebenso nicht, solange eine OCR-Fortsetzung frisch angefordert ist
+      // (03.10.2026): zwischen dem Ende des einen und dem Start des nächsten
+      // Laufs hält niemand einen Anspruch. Ging die Zustellung verloren, holt
+      // ein späterer Kehrlauf den Bon (der Zwischenstand bleibt verwertbar).
+      const fortsetzungFrisch = Number(x.ocrZwischenstand?.gespeichertMs) > jetzt - LAUF_MAX_MS;
       return created && created < cutoff && lastSweep < cutoff && (x.sweepCount || 0) < 5
-        && aktiveLaeufe(x.verarbeitung, jetzt).length === 0;
+        && aktiveLaeufe(x.verarbeitung, jetzt).length === 0
+        && !fortsetzungFrisch;
     }).slice(0, SWEEP_MAX_PER_RUN);
     if (!stuck.length) return;
     const topic = pubsub.topic(PUBSUB_TOPIC);

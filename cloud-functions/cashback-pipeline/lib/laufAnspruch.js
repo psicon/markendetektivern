@@ -32,7 +32,16 @@
  * testbar sind.
  */
 
-/** Länger als das Zeitlimit von processCashback (540 s). */
+/**
+ * Länger als das Zeitlimit von processCashback (540 s).
+ *
+ * Bis 03.10.2026 stimmte das nur auf dem Papier: Cloud Run beendet nach 540 s
+ * die Anfrage, nicht den Code — hängende Gemini-Lesungen ließen Läufe 9–37 min
+ * weiterrechnen und schreiben, nachdem dieser Anspruch verfallen war. Seitdem
+ * hält die OCR ein Laufbudget ein (lib/ocr_robust.js, 400 s) und index.js
+ * schreibt nach LAUF_ZEITGRENZE_MS (480 s) keine Entscheidung mehr. Wer eine
+ * dieser Grenzen anhebt, muss diese hier mitziehen.
+ */
 const LAUF_MAX_MS = 10 * 60 * 1000;
 /** Länger als das Zeitlimit von resolveCashbackReview (60 s). */
 const ENTSCHEIDUNG_MAX_MS = 2 * 60 * 1000;
@@ -56,11 +65,21 @@ function entscheidungAktiv(entscheidung, jetzt) {
 
 /**
  * Darf ein Pipeline-Lauf für diese Zustellung beginnen?
- * @returns {'frei'|'doppelt'|'entscheidung_laeuft'}
+ *
+ * `fortsetzung_laeuft` (03.10.2026): Eine OCR-Leiter, die sich über mehrere
+ * Läufe verteilt (`ocrZwischenstand`, index.js ocrFortsetzen), darf nur EIN
+ * Lauf zur Zeit fortsetzen — auch eine verspätete Zustellung oder der Kehrlauf
+ * mit anderer Event-ID startet dann nicht. Sonst lesen zwei Läufe denselben
+ * Bon parallel weiter und entscheiden womöglich verschieden. Der Lauf, der den
+ * Zwischenstand ablegt, gibt seinen Anspruch in DERSELBEN Transaktion ab;
+ * deshalb blockiert er seinen eigenen Nachfolger nicht.
+ * @returns {'frei'|'doppelt'|'fortsetzung_laeuft'|'entscheidung_laeuft'}
  */
 function laufUrteil(doc, eventId, jetzt) {
   const d = doc || {};
-  if (eventId && aktiveLaeufe(d.verarbeitung, jetzt).includes(laufFeld(eventId))) return 'doppelt';
+  const aktiv = aktiveLaeufe(d.verarbeitung, jetzt);
+  if (eventId && aktiv.includes(laufFeld(eventId))) return 'doppelt';
+  if (d.ocrZwischenstand && aktiv.length > 0) return 'fortsetzung_laeuft';
   if (entscheidungAktiv(d.entscheidungLaeuft, jetzt)) return 'entscheidung_laeuft';
   return 'frei';
 }
