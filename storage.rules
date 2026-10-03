@@ -1,19 +1,20 @@
 rules_version = '2';
 // Markendetektive — Firebase Storage rules.
 //
-// Public-read everywhere (the app shows product images without auth).
-// Only the Firebase Admin SDK / Cloud Functions can write — clients
-// cannot upload directly. This protects:
-//   • markenprodukte/         — original brand-product photos
-//   • handelsmarkenprodukte/  — original NoName-product photos
-//   • productimagesclean/     — pipeline-generated WebP variants
-//   • profilePictures/        — user avatars (admin-uploaded after
-//                                processing through Cloud Functions)
+// Katalogbilder (Produkte, Logos, Kategorien, bereinigte Varianten) sind
+// öffentlich EINZELN abrufbar (die App zeigt sie ohne Anmeldung). Auflisten
+// darf nur ein Admin. Clients schreiben nur in ihre eigenen Bon- und
+// Produktfoto-Ordner; alles andere schreibt das Admin-SDK.
 //
-// IMPORTANT: this preserves backwards compatibility with the
-// production app. The original `bild` URLs in `markenprodukte/` and
-// `handelsmarkenprodukte/` are read-only at the bucket level — the
-// image-cleanup pipeline writes only to `productimagesclean/`.
+// Bons (cashback-uploads/) und Produktfotos (crowduploads/) sind
+// personenbezogen: nur Besitzer und Admin (Custom-Claim) dürfen lesen.
+// WICHTIG (03.10.2026): Regeln werden ODER-verknüpft. Die frühere
+// Sammelregel `match /{allPaths=**} { allow read: if true }` galt auch für
+// diese beiden Ordner und hob die Besitzer-Regel auf — jeder konnte Bons und
+// Fotos ohne Anmeldung lesen UND auflisten. Eine Sammelregel muss diese
+// Ordner deshalb ausdrücklich ausnehmen und darf nie `read` (= get + list)
+// für alle erlauben. Firebase-Download-URLs MIT Token laufen unabhängig von
+// diesen Regeln weiter.
 service firebase.storage {
   match /b/{bucket}/o {
     // Cashback bon uploads — user can write + read their own bons.
@@ -43,10 +44,17 @@ service firebase.storage {
                    && (request.auth.uid == userId || request.auth.token.admin == true);
     }
 
-    // Default fallback — public-read, no client write (preserves
-    // production behaviour for markenprodukte/, productimagesclean/, …).
-    match /{allPaths=**} {
-      allow read: if true;
+    // Alles andere (Katalog): einzeln abrufbar für alle, Auflisten nur
+    // Admin, kein Client-Schreiben. Bons und Produktfotos sind ausgenommen —
+    // für sie gelten nur die Regeln oben.
+    match /{datei} {
+      allow get: if true;
+      allow list: if request.auth != null && request.auth.token.admin == true;
+      allow write: if false;
+    }
+    match /{ordner}/{rest=**} {
+      allow get: if !(ordner in ['cashback-uploads', 'crowduploads']);
+      allow list: if request.auth != null && request.auth.token.admin == true;
       allow write: if false;
     }
   }
