@@ -3283,6 +3283,27 @@ Patrick, 02.10.: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche",
 - **Testauszahlungen 30.05.–24.06.** (Tremendous-Sandbox, Konto p***@web.de)
   waren Patrick selbst — kein Kundenfall.
 - **Waagen-/Händlercodes:** so lassen, ClickUp 12487v2akqg geschlossen.
+- **Weitere Kontosperren (04.10., Patrick „ja"):** ovyboWgxlAd0dqzesPX7mrE5OXr1,
+  YRgQNBgq4oU8wLTyoum1iY34HU82, GIBMutkVOUdgAFgQt0VzHI920zB3,
+  pUYkLM5tw4MaL9hiai0Bc0rOvxG2 — derselbe Verbund wie 7onx/tU89 (gleiche
+  FCM-Tokens/App-Installationen, Wechsel im Minutentakt, dieselbe Wohnung,
+  Konten nach Erreichen der 5-€-Grenze angelegt). Skript
+  `cashback-pipeline/.konto-sperre-0410.js`. Merker für künftige Fälle:
+  geteilte FCM-Tokens unter `users/{uid}/fcmTokens` und
+  `attribution.capturedAt` sind das stärkste Mehrkonten-Signal; IP-Städte und
+  App-Version sind nur Begleitumstände.
+- **Doppelzahlungen bei Kassenbons abstellen** (Patrick „ja, abstellen"),
+  danach Bildvergleich entschärfen, Lieferanschriften nie als Filiale
+  speichern — Zweig `claude/bon-doppelzahlung`.
+- **Bildschirmfotos als Preisbeleg** erkennen (Patrick „ja, bau das"): erst
+  eine Woche Beobachtung, dann Ablehnung mit `fotos_unpassend` — Zweig
+  `claude/preisfoto-bildschirm`.
+- **Produktdaten-Suche:** Funde dauerhaft mit Zeitstempel in
+  `external_products`, Auffrischung nach 2 Monaten beim erneuten Scan,
+  Kostenbremse; danach 20 Suchen/Stunde, mehrfach gescannte zuerst; Serper-
+  Guthaben kauft Patrick nach. **Shop-Bilder (dm, Rossmann …) dürfen angezeigt
+  werden** (Patrick „ja"). Übernahme in den Hauptkatalog/Suche/Einkaufszettel:
+  zurückgestellt. Zweig `claude/produktsuche-speicherung`.
 - **Kontolöschung:** nur das löschen, was den Login ermöglicht; alles andere
   bleibt für Auswertungen. Heute löscht `konto-loeschung` (onUserDeleted)
   zusätzlich das Profil-Dokument `users/{uid}` — Umsetzung offen, rechtliche
