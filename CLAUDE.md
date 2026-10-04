@@ -3223,9 +3223,11 @@ Patrick, 02.10.: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche",
   wieder" verspricht.
 - **Barcode-Nummer gegen das Barcode-Foto:** weicht sie ab, bleibt die
   Einreichung liegen, ein Mensch entscheidet (Konsole nur mit force + Notiz);
-  ein einmal angehaltener Fall wird nie automatisch aufgehoben. Offen bei
-  Patrick (WISSEN „Offen für Patrick" (d)): darf am ersten Tag eine zweite
-  Lesung der gespeicherten Nummer weitergeben? Bis zur Antwort: liegen lassen.
+  ein einmal angehaltener Fall wird nie automatisch aufgehoben. Ausnahme nur
+  am ersten Tag (Patrick 04.10.: „ja"): liest die zweite Lesung die
+  gespeicherte Nummer, war die erste eine Fehllesung → weiter.
+- **Anderer Markt innerhalb der Woche zählt NICHT als neue Erfassung**
+  (Patrick 04.10.: „nein").
 - **Foto-Abgleich (md5) gegen ALLE früheren Einreichungen**, Preisfoto
   ausgenommen; eine Kopie bleibt immer freigabefähig. Die Gründe, mit denen die
   Runde einen Fall liegen lässt, stehen in `review.rundeOffen` (nur Server).
