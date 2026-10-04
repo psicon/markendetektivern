@@ -35,7 +35,7 @@ public class BonEdgeDetectorModule: Module {
     }
 
     View(BonScannerView.self) {
-      Events("onCapture", "onError", "onEdgesDetected", "onQuality", "onSessionStopped")
+      Events("onCaptureStarted", "onCapture", "onError", "onEdgesDetected", "onQuality", "onSessionStopped")
 
       Prop("isActive") { (view: BonScannerView, active: Bool) in
         view.setActive(active)

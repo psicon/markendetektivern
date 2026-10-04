@@ -544,12 +544,29 @@ Recent-Sessions.
   (true)}`, Shutter `disabled={capturing || !cameraReady}`, in der
   Capture-Funktion `if (!cameraReady) return;`) und `cameraReady` beim
   Remount/Teardown der CameraView (`if (!showExpoCam) setCameraReady(false)`)
-  zurücksetzen. `app/cashback/capture.tsx` macht es korrekt (Referenz);
-  `app/product-submit/wizard.tsx` tat es bis 2026-07-03 NICHT. Diagnose-Weg
+  zurücksetzen. `app/product-submit/wizard.tsx` macht es seit 2026-07-03
+  korrekt (Referenz). `app/cashback/capture.tsx` gatete bis 28.09.2026 nur
+  auf die verzögerte Montage (InteractionManager), nicht auf `onCameraReady`
+  — seitdem ebenfalls korrekt (`mountReady` ≠ `cameraReady`). Diagnose-Weg
   bei „falsche Bilder in Uploads": NICHT die Queue/Pfade verdächtigen (die
   waren sauber) — per Storage-`md5Hash` (JSON-API, ohne Download) auf
   byte-identische Objekte über Slots/Sessions scannen; identische Bytes =
   reused File/Frame, nie zwei echte Aufnahmen.
+
+- **Eine Zeitgrenze über „Tipp → fertiges Bild“ legen oder eine
+  Kamera-Unterbrechung als „gleich bereit“ melden (BonScanner, Prüfrunde
+  28.09.2026).** (1) Der langsame Teil ist die Aufbereitung (12-MP-Rendern,
+  Vision, Entzerren, JPEG). Eine knappe Grenze darüber verwirft auf alten
+  Geräten korrekte Bilder, und jeder weitere Tipp läuft wieder hinein.
+  Zweistufig begrenzen: kurz bis zur Quittung der Kamera (`willBeginCaptureFor`
+  → `onCaptureStarted`), großzügig danach. Schwere Arbeit nie im
+  Photo-Delegate: AVCapturePhotoOutput stellt ALLE Rückrufe auf einer
+  gemeinsamen Queue zu und hält damit die Quittung der nächsten Aufnahme auf.
+  (2) Während einer Unterbrechung hält die Sitzung an (`isRunning == false`).
+  `isInterrupted` deshalb ZUERST prüfen und mit Grund melden
+  (`session_interrupted`): Nebeneinander-Modus oder eine andere App geben die
+  Kamera nicht von selbst frei, „tipp nochmal“ wäre eine Schleife. Logik:
+  `modules/bon-edge-detector/src/aufnahmeZuordnung.ts`.
 
 - **Mehrere Codebases in EINEM `firebase deploy` (05.09.2026, review-console).**
   Symptom: alle Functions der einen Codebase failen mit Container-Healthcheck
