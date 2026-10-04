@@ -391,12 +391,19 @@ function letzteStelle(re, s) {
   return letzte;
 }
 
-/** Steht direkt vor der Fundstelle „EAN“/„GTIN“/„Barcode“ — und keine
- *  andere Nummernbezeichnung näher dran? */
+// Eine weitere Nummer zwischen Bezeichnung und Fundstelle: dann gehört die
+// Bezeichnung zu IHR („EAN 4012345678901 | 40123456“ — die acht Ziffern sind
+// etwas anderes). Ab 4 Ziffern; „EAN-8“, „(8-stellig)“ bleiben Bezeichnungen.
+const ZWISCHEN_NUMMER = /\d{4,}/;
+
+/** Steht direkt vor der Fundstelle „EAN“/„GTIN“/„Barcode“ — keine andere
+ *  Nummernbezeichnung näher dran und keine andere Nummer dazwischen
+ *  (Schlussprüfung 04.10.2026)? */
 function alsEanBezeichnet(text, f) {
   const davor = text.slice(Math.max(0, f.index - BEZEICHNUNG_ABSTAND), f.index);
   const ean = letzteStelle(EAN_BEZEICHNUNG, davor);
-  return ean >= 0 && ean > letzteStelle(FREMDE_BEZEICHNUNG, davor);
+  if (ean < 0 || ean <= letzteStelle(FREMDE_BEZEICHNUNG, davor)) return false;
+  return !ZWISCHEN_NUMMER.test(davor.slice(ean));
 }
 
 /** Die EAN steht im sichtbaren Text — nicht hinter „Suche/Ergebnisse“. Für

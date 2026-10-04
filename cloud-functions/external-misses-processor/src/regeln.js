@@ -346,16 +346,26 @@ function hostVon(adresse) {
 
 /**
  * Ungeprüfter Altbestand (vor dem 04.10.2026, ohne fetchedAt) einer
- * OpenFoodFacts-/OpenBeautyFacts-Seite? Kopie der Regel aus
+ * OpenFoodFacts-Seite? Kopie der Regel aus
  * external-product-lookup lib/rohablage.js istOffWebseitenAltbestand —
- * Codebases teilen keinen Code; ändert sich dort etwas, hier nachziehen.
+ * Codebases teilen keinen Code; ändert sich dort etwas, hier nachziehen
+ * (__tests__/offWebseitenKopie.test.js vergleicht beide).
+ *
+ * Der HOST entscheidet zuerst (Schlussprüfung 04.10.2026): nur
+ * openfoodfacts.org-Domains. OpenBeautyFacts & Co. tragen als sourceShop
+ * ebenfalls 'openfoodfacts', die kostenlose API kennt sie aber nicht — ihre
+ * Daten sind ein echter früherer Fund. Nur ohne erkennbaren Host zählt der
+ * Shop-Name.
  */
 function istOffWebseitenAltbestand(scrapeDaten) {
   const d = scrapeDaten || {};
   if (!(d.scrapedSource || d.scrapedAt) || d.fetchedAt != null) return false;
-  const shop = typeof d.sourceShop === 'string' ? d.sourceShop.trim().toLowerCase() : '';
-  const host = hostVon(d.scrapedUrl) || hostVon(d.sourceUrl) || (shop.includes('.') ? hostVon(shop) : null);
-  if (host && /(^|\.)open(food|beauty|petfood|products)facts\.org$/.test(host)) return true;
+  // String(…) wie quelleAusShop dort — auch ein Nicht-Text wird gleich gelesen.
+  const shop = String(d.sourceShop ?? '').trim().toLowerCase();
+  // Erste nicht leere Adresse (scrapedUrl vor sourceUrl), wie quellHost dort.
+  const adresse = [d.scrapedUrl, d.sourceUrl].find((a) => typeof a === 'string' && a.trim());
+  const host = hostVon(adresse) || (typeof d.sourceShop === 'string' && shop.includes('.') ? hostVon(shop) : null);
+  if (host) return /(^|\.)openfoodfacts\.org$/.test(host);
   // sourceShop als Name ('openfoodfacts'): wie quelleAusShop + quellenGruppe dort.
   if (/(^|[.-])(rewe|metro)([.-]|$)/.test(shop) || shop.includes('globus')) return false;
   return (shop.split('.')[0] || '').includes('openfood');

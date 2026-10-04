@@ -53,7 +53,19 @@
  *  • Shopbilder (`neu.shopBilder === false`, Schalter _meta/produktsuche):
  *    ein gespeichertes Bild von einer Shopseite (bildVonShop) wird bei jedem
  *    Schreiben entfernt — Ausschalten wirkt so auch rückwirkend; Dokumente,
- *    die niemand schreibt, räumt scripts/shopbilder-entfernen.js.
+ *    die niemand schreibt, räumt scripts/shopbilder-entfernen.js. NUR ein
+ *    ausdrückliches false: war die Konfiguration nicht lesbar, ist der
+ *    Schalter unbekannt, und ein Lesefehler löscht keine Bilder
+ *    (Schlussprüfung 04.10.2026).
+ *  • Textfelder (TEXT_FELDER inkl. imageUrl, packSize) nur als Text: neue Werte getrimmt
+ *    und nicht leer, alles andere (Liste, Zahl, true, Objekt) wird verworfen —
+ *    nicht durch einen Platzhalter ersetzt. Gespeicherte Werte mit falschem
+ *    Typ fallen beim nächsten Schreiben weg. Grund: alle App-Versionen
+ *    6.0.13–6.0.21 rufen `.trim()` auf productName und manufacturerName
+ *    (app/external-product/[ean].tsx:188/243) und zeigen die übrigen in
+ *    <Text> — ein Objekt oder eine Liste dort lässt die Seite abstürzen
+ *    (Schlussprüfung 04.10.2026; die KI des Scrapers darf für jedes Feld
+ *    auch Zahl, Wahrheitswert oder Liste liefern).
  *  • Preis vom neuesten Datenstand (priceFetchedAt); ein Abruf ohne Preis
  *    löscht keinen Preis; ein Preis mit Datum schlägt einen ohne.
  *  • `raw` wird nicht mehr gemischt, sondern als Ganzes von der Quelle
@@ -80,7 +92,8 @@
 
 const { echterName, quellenRang, quellenGruppe, normaliseOpenFood } = require('./normalizers');
 const { zuMs } = require('./zeit');
-const { rohdatenAusSuche, ersetzeQuelleAus } = require('./rohablage');
+const { rohdatenAusSuche, ersetzeQuelleAus, quelleAusShop, quellHost, hostAus } = require('./rohablage');
+const { istOpenFoodFactsHost } = require('./gtin');
 
 /** Marker im Patch: Feld löschen. Die Schreibschicht macht daraus FieldValue.delete(). */
 const LOESCHEN = Symbol.for('produktsuche.loeschen');
@@ -106,9 +119,64 @@ const zahl = (v) => typeof v === 'number' && Number.isFinite(v);
 const text = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 const gueltigerPreis = (p) => zahl(p) && p > 0;
 
-/** Wertgleichheit für Felder (Objekte per JSON, ohne bei Zyklen zu werfen). */
+// Felder, die die App als Text behandelt (Kopfkommentar „Textfelder").
+// attr_hersteller: Feldname der Rohablage — falls er je mitgeschrieben wird.
+// imageUrl: <Image source={{uri}}> und der Scanverlauf (productImage); die
+// Bildgruppe nimmt neue Werte ohnehin nur als Text, hier fallen auch
+// gespeicherte Nicht-Texte weg.
+const TEXT_FELDER = [
+  'productName',
+  'brandName',
+  'manufacturerName',
+  'attr_hersteller',
+  'category',
+  'productDescription',
+  'attr_ingredientStatement',
+  'imageUrl',
+];
+const typOk = (feld, v) => typeof v === 'string' || (feld === 'packSize' && zahl(v));
+
+/**
+ * Neue Werte einer Quelle: Textfelder nur als nicht leerer Text (getrimmt),
+ * packSize als Text oder Zahl. Alles andere fällt weg — kein Platzhalter.
+ */
+function bereinigeTextfelder(daten) {
+  if (!daten || typeof daten !== 'object') return {};
+  const out = { ...daten };
+  for (const f of [...TEXT_FELDER, 'packSize']) {
+    if (!(f in out)) continue;
+    const v = out[f];
+    if (f === 'packSize' && zahl(v)) continue;
+    const t = text(v);
+    if (t === null) delete out[f];
+    else out[f] = t;
+  }
+  return out;
+}
+
+/**
+ * Gespeichertes Dokument (oder die Antwort an die App): Werte mit falschem
+ * Typ entfernen. Texte bleiben, wie sie sind (auch ungetrimmt) — ein
+ * Schreiben soll nicht nur Leerzeichen ändern.
+ */
+function ohneFalscheTypen(doc) {
+  if (!doc || typeof doc !== 'object') return doc;
+  const out = { ...doc };
+  for (const f of [...TEXT_FELDER, 'packSize']) {
+    if (out[f] !== undefined && out[f] !== null && !typOk(f, out[f])) delete out[f];
+  }
+  return out;
+}
+
+/** Wertgleichheit für Felder (Objekte per JSON, ohne bei Zyklen zu werfen).
+ *  Texte gelten ohne führende/folgende Leerzeichen als gleich: neue Werte
+ *  speichert der Schreibweg getrimmt (bereinigeTextfelder), ältere Dokumente
+ *  und die Rohablage tragen sie teils ungetrimmt — sonst fände das Entfernen
+ *  einer Quelle ihre Werte nicht wieder, und jedes Schreiben änderte nur
+ *  Leerzeichen. */
 function gleich(a, b) {
   if (a === b) return true;
+  if (typeof a === 'string' && typeof b === 'string') return a.trim() === b.trim();
   if (a == null || b == null || typeof a !== 'object' || typeof b !== 'object') return false;
   try {
     return JSON.stringify(a) === JSON.stringify(b);
@@ -304,15 +372,40 @@ function bisherigeQuellen(doc) {
 }
 
 /**
+ * Host, von dem die Werte einer Quelle stammen — nur, wenn er sich am Dokument
+ * belegen lässt: die mitkopierte Rohablage der Suche gehört zu genau dieser
+ * Quelle, oder die Quell-Adresse, solange die Quelle `source` ist. Sonst null.
+ */
+function hostDerQuelle(doc, q) {
+  const raw = doc.raw;
+  if (rohdatenAusSuche(raw) && quelleAusShop(raw.sourceShop) === q) {
+    const h = quellHost(raw);
+    if (h) return h;
+  }
+  return text(doc.source) === q ? hostAus(doc.sourceUrl) : null;
+}
+
+/**
  * Quelle der Gruppen, die von der OpenFoodFacts-WEBSEITE stammen (Altbestand
  * der bezahlten Suche, `source` bzw. feldQuellen 'openfoodfacts'), oder null.
  * Diese Daten prüft die Abfrage einmal kostenlos gegen die OFF-API
  * (lib/abrufPlan.js openfoodAuffrischenFaellig, index.js tryOpenFood).
+ *
+ * Schlussprüfung 04.10.2026: Daten von OpenBeautyFacts & Co. stehen unter
+ * demselben Namen 'openfoodfacts'. Ist ihr Host belegt und keine
+ * openfoodfacts.org-Domain, sind sie KEINE OFF-Webseiten-Daten — die API
+ * kennt diese Datenbanken nicht und darf sie nicht widerlegen (wie
+ * lib/rohablage.js istOffWebseitenAltbestand). Sonst entfernte ein schlichtes
+ * 404 sie, und der nächste Scan legte sie aus nutritionscrape neu an — die
+ * Schleife aus Prüfrunde 3, jedes Mal mit einer KI-Bewertung.
  */
 function offWebseitenQuelle(doc) {
   if (!doc) return null;
   for (const q of Object.values(bisherigeQuellen(doc))) {
-    if (q && q !== 'openfood' && quellenGruppe(q) === 'openfood') return q;
+    if (!q || q === 'openfood' || quellenGruppe(q) !== 'openfood') continue;
+    const host = hostDerQuelle(doc, q);
+    if (host && !istOpenFoodFactsHost(host)) continue;
+    return q;
   }
   return null;
 }
@@ -347,7 +440,9 @@ function besteQuelle(quellen, bevorzugt) {
  *                       was diese Quelle geliefert hat, vorher entfernen
  *                       (Kopfkommentar, entferneQuelle)
  *   ungeprueft          true → nur in ein Dokument ohne Daten anderer Quellen
- *   shopBilder          false → gespeichertes Shopbild entfernen
+ *   shopBilder          false → gespeichertes Shopbild entfernen; true oder
+ *                       unbekannt (undefined/null, Lesefehler der Konfiguration)
+ *                       → stehen lassen. Nur ein ausdrückliches false entfernt.
  * @param {number} jetztMs
  * @returns {{aktion:'anlegen'|'aktualisieren'|'loeschen'|'nichts', grund?:string,
  *   patch:object, ansicht:object|null, genommen:string[], preisGenommen:boolean,
@@ -355,13 +450,17 @@ function besteQuelle(quellen, bevorzugt) {
  */
 function fuehreZusammen(alt, neu, jetztMs) {
   const altDoc = alt || {};
-  const neuDaten = (neu && neu.daten) || {};
+  // Textfelder nur als Text (Kopfkommentar) — neue Werte geprüft und getrimmt,
+  // gespeicherte mit falschem Typ fallen weg (der Patch löscht sie).
+  const neuDaten = bereinigeTextfelder(neu && neu.daten);
   const neuQuelle = text(neu && neu.quelle) || 'scraper';
   const neuRang = quellenRang(neuQuelle);
   const jetzt = new Date(jetztMs);
 
-  const erg = { ...altDoc };
-  const quellen = bisherigeQuellen(altDoc);
+  const erg = ohneFalscheTypen(altDoc);
+  // Herkunft aus dem bereinigten Stand: eine Gruppe, deren Wert nur einen
+  // falschen Typ hatte, ist leer und behält keinen Herkunftseintrag.
+  const quellen = bisherigeQuellen(erg);
 
   // Altbestand: Platzhalter gilt als leer; ein echter OFF-Name unter raw
   // wird gerettet, BEVOR raw ersetzt werden kann. Ohne Rettung bleibt ein
@@ -706,11 +805,13 @@ async function stempeleExternesProdukt(fs, ean, feld) {
 //     der Platzhalter nie. Ein Kennzeichen „Name fehlt" gibt es bewusst
 //     nicht, solange keine App-Version es liest (Prüfrunde 04.10.2026).
 //   • `raw` geht nicht über die Leitung (Debug, ggf. DocumentReferences).
+//   • Textfelder mit falschem Typ (Liste, Zahl, true …) gehen nicht hinaus:
+//     .trim()/<Text> in der App stürzten daran ab (Kopfkommentar „Textfelder").
 const ANZEIGENAME_OHNE_NAMEN = 'Produkt';
 
 function fuerAntwort(doc) {
   if (!doc) return null;
-  const { raw: _raw, ...rest } = doc;
+  const { raw: _raw, ...rest } = ohneFalscheTypen(doc);
   return { ...rest, productName: anzeigeName(doc) ?? ANZEIGENAME_OHNE_NAMEN };
 }
 
@@ -728,6 +829,9 @@ function shopBildEntfernen(doc, jetztMs) {
 module.exports = {
   LOESCHEN,
   ANZEIGENAME_OHNE_NAMEN,
+  TEXT_FELDER,
+  bereinigeTextfelder,
+  ohneFalscheTypen,
   bisherigeQuellen,
   offWebseitenQuelle,
   nameAusRohdaten,

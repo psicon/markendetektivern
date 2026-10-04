@@ -43,7 +43,7 @@ sofort (jede Beanspruchung liest sie in ihrer Transaktion neu).
 | `aktiv` | `true` | `false` (oder jeder andere Wert außer `true`) hält jede bezahlte Suche an |
 | `proLauf` | `1` | bezahlte Suchen je Lauf (0 = Pause), höchstens 20 |
 | `tagesDeckel` | `120` | bezahlte Suchen je Kalendertag (Europe/Berlin), höchstens 5.000 |
-| `auffrischenNachTagen` | `60` | liest external-product-lookup (Wiederöffnen alter Fälle) |
+| `auffrischenNachTagen` | `60` | liest external-product-lookup (Wiederöffnen alter Fälle, kostenlose OFF-Auffrischung) |
 | `serperMindestGuthaben` | `1000` | darunter wird nichts mehr bezahlt |
 | `shopBilder` | `false` | liest external-product-lookup (Bilder von Shopseiten) |
 
@@ -55,6 +55,14 @@ Halt `konfig_ungueltig`, rot im Tagesbericht —, statt still auf den höheren
 Standard zu fallen (Prüfrunde 2). Ein ungültiges `auffrischenNachTagen` fällt
 auf 60. Standard = 6 Läufe/h × 1 = bis 120 am Tag, also ungefähr das alte
 Tempo (5/h).
+
+Ist das Dokument NICHT LESBAR (Infrastrukturfehler — etwas anderes als „fehlt"),
+hält dieser Prozessor an (`konfig_unlesbar`). Die Abfrage
+(external-product-lookup) antwortet dem Nutzer weiter, behandelt aber
+`shopBilder` und `auffrischenNachTagen` als unbekannt: kein Shopbild wird
+übernommen oder entfernt, nichts wird wegen seines Alters neu geöffnet oder
+aufgefrischt (Schlussprüfung 04.10.2026 — vorher löschte der Standard `false`
+gespeicherte Shopbilder und ganze Dokumente).
 
 **Hochdrehen** (Beispiel 60/h): `proLauf: 10`, `tagesDeckel: 1500`. Vorher
 Serper-Guthaben prüfen — bei 1.440 Suchen am Tag reichen 12.000 Credits
@@ -173,8 +181,16 @@ Fehlt der Index, läuft der Prozessor nach `hitCount` weiter und meldet
 
 ## Deploy — Reihenfolge ist Pflicht
 
-1. Index `status + rang` anlegen, READY abwarten.
-2. `nutrition-scraper` mit den neuen Parametern (`ohneOpenFoodFacts`,
+Stand Schlussprüfung 04.10.2026. Vor JEDEM einzelnen Deploy den deployten
+Stand mit dem Zweig vergleichen (Drift-Check, CLAUDE.md).
+
+1. Index `status + rang` anlegen (REST, siehe oben), READY abwarten.
+2. **Schritte 2–4 in einer Sitzung**, ohne Pause dazwischen: Zwischen 2 und 4
+   ruft der alte Prozessor (stündlich, 5 Barcodes) schon den neuen, strengeren
+   Scraper auf. Mehr Ergebnisse lauten dann `all_failed`, der alte Code setzt
+   sie auf `no-data` — solche Fälle öffnen erst nach 60 Tagen wieder.
+
+   `nutrition-scraper` mit den neuen Parametern (`ohneOpenFoodFacts`,
    `nurDomains`, `bevorzugteUrl`, `auffrischen`). Ein alter scrapeEan
    ignoriert sie still: RCN-8 würde dann bei beliebigen Shops gesucht und
    OpenFoodFacts-Seiten bezahlt gelesen.
@@ -182,27 +198,58 @@ Fehlt der Index, läuft der Prozessor nach `hitCount` weiter und meldet
    (`external-product-lookup/scripts/nachpflege-2026-10.js`, erst Trockenlauf,
    dann `SCHREIBEN=1 NUR=misses`): `rang`/`scanTage` für alle offenen Fälle.
 4. Diese Funktion (Befehl unten). Fälle OHNE `rang` (die der alte
-   Abfrage-Code zwischen Schritt 3 und 5 anlegt, ~200 am Tag) erreicht sie
+   Abfrage-Code zwischen Schritt 3 und 6 anlegt, ~200 am Tag) erreicht sie
    NICHT: Nach der Nachpflege tragen alle offenen Fälle einen `rang`, die
    Abfrage danach liefert immer genug, und die Ersatz-Abfrage nach `hitCount`
    läuft nur, wenn sie scheitert (Index fehlt) oder zu wenig liefert — und
    fände Fälle mit hitCount 1 unter 19.000 offenen ohnehin nicht. Erreicht
-   werden sie erst durch Schritt 6 (`NEU=1`) oder einen erneuten Scan nach
-   Schritt 5 (die neue Abfrage setzt `rang` bei jedem Scan).
-5. `external-product-lookup` — ERST JETZT: Ab diesem Deploy öffnet jeder Scan
+   werden sie erst durch Schritt 7 (`NEU=1`) oder einen erneuten Scan nach
+   Schritt 6 (die neue Abfrage setzt `rang` bei jedem Scan).
+5. `_meta/produktsuche` anlegen mit `shopBilder: true` als **echtem Boolean**
+   (in der Console Typ „boolean“, nicht Text — Patricks „ja“ vom 04.10.2026).
+   `proLauf` und `tagesDeckel` noch weglassen (Standardwerte). VOR Schritt 6:
+   ohne das Dokument legen Abfrage und Trigger neue Funde ohne Shopbild an,
+   und ein Bild erscheint je Dokument erst beim nächsten Schreiben — bis zu
+   4 Wochen (Scan) bzw. 60 Tage (Auffrischung) später.
+6. `external-product-lookup` — ERST JETZT: Ab diesem Deploy öffnet jeder Scan
    abgeschlossene Fälle älter als 60 Tage wieder (`grund: 'auffrischen'`).
    Der alte Prozessor kennt keinen früheren Fund und würde solche Fälle bei
    einer erfolglosen Auffrischung von `resolved` auf `no-data` setzen; der neue
    behält sie `resolved` und hält den Tagesdeckel ein.
-6. Nachpflege-Skript für `external_products` (`SCHREIBEN=1 NUR=produkte`) —
-   erst nach Schritt 5, sonst schreibt der alte Abfrage-Code den Platzhalter
+7. Nachpflege-Skript für `external_products` (`SCHREIBEN=1 NUR=produkte`) —
+   erst nach Schritt 6, sonst schreibt der alte Abfrage-Code den Platzhalter
    'Produkt' wieder über reparierte Namen. Danach **Pflicht, direkt im
    Anschluss**: einmal `SCHREIBEN=1 NEU=1` (füllt nur, was zwischen Schritt 3
-   und 5 ohne `rang` entstand — sonst bearbeitet der Prozessor diese Fälle erst
+   und 6 ohne `rang` entstand — sonst bearbeitet der Prozessor diese Fälle erst
    beim nächsten Scan des Barcodes). Der Laufbericht zählt `ohneRang` nur unter
    den gelesenen Kandidaten; liegengebliebene Fälle zeigt er nicht.
-7. `review-console` (Zeile im Tagesbericht) jederzeit; fehlende Zähler zeigt
-   der Bericht als „nicht gelaufen".
+8. `review-console` und `hosting:md-receipt-admin` (Zeile „Produktsuche“ im
+   Tagesbericht) **NICHT jederzeit**, sondern erst, wenn dieser Zweig mit
+   `claude/preisfoto-bildschirm` und `claude/bon-doppelzahlung` zusammengeführt
+   ist (oder diese darauf aufsetzen). Beide ändern dieselben Dateien
+   (`src/taeglicheRunde.js` mit Konflikt, `src/warnungen.js`, `index.js`,
+   `src/bonRunde.js`, `tagesbericht.html`, `pruefen.html`). Ein Deploy ersetzt
+   die ganze Codebase bzw. die ganze Site: wer zuletzt aus einem ungemergten
+   Stand ausrollt, nimmt dem anderen still seine Änderungen weg. Direkt davor
+   den Drift-Check wiederholen. Bis dahin zeigt der Tagesbericht die
+   Produktsuche nicht — die Schritte 1–7 hängen nicht daran (der Prozessor hält
+   bei Serper-Guthaben unter `serperMindestGuthaben` selbst an).
+9. `nutrition-backfill` **zurückgestellt**: Es hat heute praktisch keinen
+   Nutzen (in 30 Tagen kein neues `attr_preisUpdatedAt` im Katalog, kein
+   nutritionscrape-Schreibvorgang mit `productPath`), und seine Schlüssel
+   laufen noch über `functions.config()`. Ein Redeploy verschluckt dort Fehler
+   beim Lesen der Laufzeit-Konfiguration und rollt dann still ohne Schlüssel
+   aus. Zusammen mit der ohnehin nötigen Ablösung durch `defineSecret`
+   ausrollen (Runtime Config wird im März 2027 abgeschaltet). Der neue Scraper
+   verträgt den alten Backfill (GET mit `?key`, gleiche Feldnamen).
+
+Nach dem Ausrollen: am ersten Tag die Standardwerte lassen (höchstens 120
+bezahlte Suchen, ~1,90 $; am Deploy-Tag kommen die Suchen des alten Prozessors
+dazu, die der neue Tageszähler nicht mitzählt). Tempo (`proLauf: 3`,
+`tagesDeckel: 450`) erst nach Tagesbericht und einer Stichprobe Name gegen
+Seite — vorher das Serper-Guthaben frisch lesen. Die Scheduler-Jobs
+`scrape-produkte-chain` und `scrape-marken-chain` (scrapeBatch, ungedeckelt)
+pausiert lassen.
 
 Jede Codebase einzeln ausrollen, vorher den deployten Stand mit dem Zweig
 vergleichen (CLAUDE.md):

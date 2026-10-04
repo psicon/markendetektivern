@@ -16,6 +16,19 @@
  * Die übrigen Felder steuert der external-misses-processor; sie stehen hier,
  * damit beide Codebases dieselben Standardwerte kennen. Bei Änderungen die
  * Kopie dort nachziehen (Codebases teilen keinen Code).
+ *
+ * Lesefehler ≠ fehlendes Dokument (Schlussprüfung 04.10.2026): Ist das
+ * Dokument nicht lesbar, sind die beiden Felder, nach denen diese Codebase
+ * Daten ÄNDERT, unbekannt (null) — nicht der Standard:
+ *   • shopBilder null → kein neues Shopbild übernehmen, aber auch keins
+ *     entfernen (der Standard false hätte bei jedem Schreiben in dieser
+ *     Anfrage gespeicherte Shopbilder gelöscht und Dokumente, die nur über
+ *     ihr Bild anzeigbar sind, ganz).
+ *   • auffrischenNachTagen null → nichts wegen seines ALTERS neu öffnen oder
+ *     auffrischen (der Standard 60 hätte bei einer bewusst längeren Frist
+ *     abgeschlossene Fälle in die bezahlte Suche geschickt); lib/abrufPlan.js
+ *     handelt dann nur, wo das Ergebnis von der Frist nicht abhängt.
+ * Ein Infrastrukturfehler ist keine Aussage über Daten (CLAUDE.md).
  */
 
 'use strict';
@@ -67,7 +80,8 @@ function ganzeZahl(feld, roh) {
  *   • Zahlen: ganze Zahlen (auch als Ziffern-Text) ≥ Minimum, über der Grenze
  *     gekappt; ungültig → Halte-Wert bei den Geld-Grenzen, Standard bei
  *     auffrischenNachTagen (0,5 hieße „jeder Scan öffnet neu" — Standard 60)
- *   • shopBilder: nur ein ausdrückliches true schaltet frei
+ *   • shopBilder: nur ein ausdrückliches true schaltet frei, nur false
+ *     schaltet ab; ein ungültiger Wert gilt als unbekannt (null)
  */
 function mitStandard(daten) {
   const d = daten && typeof daten === 'object' ? daten : {};
@@ -77,17 +91,40 @@ function mitStandard(daten) {
     tagesDeckel: ganzeZahl('tagesDeckel', d.tagesDeckel),
     auffrischenNachTagen: ganzeZahl('auffrischenNachTagen', d.auffrischenNachTagen),
     serperMindestGuthaben: ganzeZahl('serperMindestGuthaben', d.serperMindestGuthaben),
-    shopBilder: d.shopBilder === true,
+    // Ungültiger Wert (z. B. Text 'true') = unbekannt (null): nichts übernehmen,
+    // nichts entfernen — ein Tippfehler darf keine Shopbilder löschen.
+    shopBilder: typeof d.shopBilder === 'boolean' ? d.shopBilder
+      : d.shopBilder === undefined ? STANDARD.shopBilder : null,
   };
+}
+
+/**
+ * Shopbild-Schalter für den Schreibweg (lib/speichern.js, lib/rohablage.js):
+ * true / false wie gelesen, sonst undefined (unbekannt — nichts übernehmen,
+ * nichts entfernen). Nie `=== true` daraus machen: das wandelt „unbekannt"
+ * in „aus" und löscht gespeicherte Shopbilder.
+ */
+function shopBildSchalter(konfig) {
+  const v = konfig && konfig.shopBilder;
+  return v === true || v === false ? v : undefined;
 }
 
 const CACHE_MS = 5 * 60 * 1000;
 let zwischenspeicher = null; // { wert, bisMs }
 
 /**
+ * Wert nach einem Lesefehler: Standardwerte für das, was nur gelesen wird,
+ * null (unbekannt) für shopBilder und auffrischenNachTagen (Kopfkommentar).
+ */
+function beiLesefehler() {
+  return { ...mitStandard(null), shopBilder: null, auffrischenNachTagen: null };
+}
+
+/**
  * Liest _meta/produktsuche, je Instanz höchstens alle 5 Minuten. Ein
- * Lesefehler fällt auf die Standardwerte zurück (die Abfrage soll dem Nutzer
- * trotzdem antworten) und wird nicht zwischengespeichert.
+ * Lesefehler gibt beiLesefehler() zurück (die Abfrage soll dem Nutzer
+ * trotzdem antworten, aber nichts auf eine Vermutung hin ändern) und wird
+ * nicht zwischengespeichert.
  */
 async function ladeKonfiguration(db, jetztMs, warnen) {
   if (zwischenspeicher && zwischenspeicher.bisMs > jetztMs) return zwischenspeicher.wert;
@@ -98,7 +135,7 @@ async function ladeKonfiguration(db, jetztMs, warnen) {
     return wert;
   } catch (e) {
     if (typeof warnen === 'function') warnen(e);
-    return mitStandard(null);
+    return beiLesefehler();
   }
 }
 
@@ -107,4 +144,4 @@ function _zuruecksetzen() {
   zwischenspeicher = null;
 }
 
-module.exports = { STANDARD, mitStandard, ladeKonfiguration, _zuruecksetzen };
+module.exports = { STANDARD, mitStandard, beiLesefehler, shopBildSchalter, ladeKonfiguration, _zuruecksetzen };

@@ -7,7 +7,7 @@
 'use strict';
 
 const { eanVarianten, abfrageWerte, istImKatalog, EINZELFELDER, LISTENFELDER } = require('../lib/katalog');
-const { STANDARD, mitStandard, ladeKonfiguration, _zuruecksetzen } = require('../lib/konfiguration');
+const { STANDARD, mitStandard, ladeKonfiguration, shopBildSchalter, _zuruecksetzen } = require('../lib/konfiguration');
 
 describe('eanVarianten', () => {
   test('EAN-13 → auch 14-stellig mit führender Null', () => {
@@ -104,7 +104,7 @@ describe('Konfiguration', () => {
     expect(k.proLauf).toBe(0); // ungültig → Halt (wie der Prozessor), nie der höhere Standard
     // Ein gesetzter Schalter, der nicht genau true ist, hält an (Prozessor: ebenso).
     expect(k.aktiv).toBe(false);
-    expect(k.shopBilder).toBe(false); // nur ein echtes true schaltet frei
+    expect(k.shopBilder).toBeNull(); // ungültig = unbekannt: weder frei noch aus
     expect(mitStandard({ shopBilder: true }).shopBilder).toBe(true);
     expect(mitStandard({ proLauf: 0 }).proLauf).toBe(0); // 0 = Pause, gültig
   });
@@ -119,7 +119,7 @@ describe('Konfiguration', () => {
     expect(mitStandard({ tagesDeckel: 1e9 }).tagesDeckel).toBe(5000);
   });
 
-  test('ladeKonfiguration: liest, speichert 5 Minuten zwischen, fällt bei Fehler auf Standard zurück', async () => {
+  test('ladeKonfiguration: liest, speichert 5 Minuten zwischen; Lesefehler → Schalter und Frist unbekannt', async () => {
     _zuruecksetzen();
     let lesungen = 0;
     const db = { doc: () => ({ get: async () => { lesungen += 1; return { exists: true, data: () => ({ auffrischenNachTagen: 45 }) }; } }) };
@@ -132,8 +132,26 @@ describe('Konfiguration', () => {
     _zuruecksetzen();
     const warnungen = [];
     const kaputt = { doc: () => ({ get: async () => { throw new Error('weg'); } }) };
-    expect(await ladeKonfiguration(kaputt, 0, (e) => warnungen.push(e.message))).toEqual(STANDARD);
+    // Schlussprüfung 04.10.2026: ein Lesefehler ist kein „aus" — shopBilder
+    // false hätte gespeicherte Shopbilder gelöscht, die Frist 60 bei einer
+    // längeren eingestellten Frist Fälle in die bezahlte Suche geschickt.
+    expect(await ladeKonfiguration(kaputt, 0, (e) => warnungen.push(e.message))).toEqual({
+      ...STANDARD,
+      shopBilder: null,
+      auffrischenNachTagen: null,
+    });
     expect(warnungen).toEqual(['weg']);
+    // nicht zwischengespeichert: der nächste Aufruf liest wieder
+    expect((await ladeKonfiguration(db, 1000)).auffrischenNachTagen).toBe(45);
     _zuruecksetzen();
+  });
+
+  test('shopBildSchalter: dreiwertig, nie „unbekannt" → „aus"', () => {
+    expect(shopBildSchalter({ shopBilder: true })).toBe(true);
+    expect(shopBildSchalter({ shopBilder: false })).toBe(false);
+    expect(shopBildSchalter({ shopBilder: null })).toBeUndefined();
+    expect(shopBildSchalter({})).toBeUndefined();
+    expect(shopBildSchalter(null)).toBeUndefined();
+    expect(shopBildSchalter({ shopBilder: 'true' })).toBeUndefined();
   });
 });

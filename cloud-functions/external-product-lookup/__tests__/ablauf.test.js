@@ -731,3 +731,401 @@ describe('Trigger onNutritionScrapeFuerExterne', () => {
     }
   });
 });
+
+// Schlussprüfung 04.10.2026 (Blocker): Ein Lesefehler von _meta/produktsuche
+// fiel auf die Standardwerte zurück, also shopBilder:false — jeder
+// Schreibvorgang derselben Anfrage entfernte dann gespeicherte Shopbilder,
+// und ein nur über sein Bild anzeigbares Dokument wurde gelöscht. Jetzt ist
+// der Schalter nach einem Lesefehler unbekannt: nichts übernehmen, nichts
+// entfernen. Dasselbe für die Frist auffrischenNachTagen.
+describe('Konfiguration nicht lesbar (Lesefehler ≠ Standardwert)', () => {
+  const EAN = '4337256123456';
+  const SHOPBILD = 'https://media.rossmann.de/x.jpg';
+
+  /** Lässt db.doc('_meta/produktsuche').get() scheitern; gibt das Rückgängig zurück. */
+  function konfigNichtLesbar() {
+    const original = Object.getPrototypeOf(db).doc;
+    db.doc = function (pfad) {
+      const ref = original.call(this, pfad);
+      if (pfad === '_meta/produktsuche') ref.get = async () => { throw new Error('UNAVAILABLE'); };
+      return ref;
+    };
+    return () => { delete db.doc; };
+  }
+
+  const rohFund = (over = {}) => ({
+    gtin: EAN,
+    productPath: null,
+    sourceShop: 'rossmann',
+    scrapedUrl: `https://www.rossmann.de/p/${EAN}`,
+    productName: 'Isana Duschgel Kokos',
+    shopBildUrl: SHOPBILD,
+    eanBeleg: 'jsonld_gtin',
+    attr_preis: 0.95,
+    priceCurrency: 'EUR',
+    priceShop: 'rossmann',
+    priceFetchedAt: ts(JETZT - 1000),
+    fetchedAt: ts(JETZT - 1000),
+    scrapedAt: ts(JETZT - 1000),
+    attr_ingredientStatement: 'Aqua',
+    ...over,
+  });
+  const ereignis = (vorher, nachher) => ({
+    params: { ean: EAN },
+    time: new Date(JETZT).toISOString(),
+    data: {
+      before: { exists: !!vorher, data: () => vorher },
+      after: { exists: !!nachher, data: () => nachher },
+    },
+  });
+  const loeschungen = () => db.schreibvorgaenge.filter(([art, pfad]) => art === 'delete' && pfad === `external_products/${EAN}`);
+
+  test('Scan schreibt (Kopien älter als 4 Wochen neu gelesen): gespeichertes Shopbild bleibt', async () => {
+    db.lege(`external_products/${EAN}`, {
+      ean: EAN,
+      source: 'rossmann',
+      productName: 'Isana Duschgel Kokos',
+      imageUrl: SHOPBILD,
+      bildVonShop: true,
+      feldQuellen: { name: 'rossmann', bild: 'rossmann' },
+      fetchedAt: ts(JETZT - 40 * TAG),
+      fetchedAtQuelle: 'nutritionscrape',
+      cachedAt: ts(JETZT - 40 * TAG),
+      storedAt: ts(JETZT - 40 * TAG),
+    });
+    db.lege(`nutritionscrape/${EAN}`, rohFund());
+    const zurueck = konfigNichtLesbar();
+    try {
+      const res = await rufe(EAN);
+      expect(res.body.product.imageUrl).toBe(SHOPBILD);
+    } finally {
+      zurueck();
+    }
+    const d = ext(EAN);
+    expect(d.cachedAt.toMillis()).toBe(JETZT); // geschrieben wurde wirklich
+    expect(d.attr_ingredientStatement).toBe('Aqua');
+    expect(d).toMatchObject({ imageUrl: SHOPBILD, bildVonShop: true });
+    expect(d.feldQuellen.bild).toBe('rossmann');
+    expect(loeschungen()).toEqual([]);
+  });
+
+  test('Scan bei unbekanntem Schalter übernimmt auch kein NEUES Shopbild', async () => {
+    db.lege(`nutritionscrape/${EAN}`, rohFund());
+    const zurueck = konfigNichtLesbar();
+    try {
+      const res = await rufe(EAN);
+      expect(res.body.product.productName).toBe('Isana Duschgel Kokos');
+    } finally {
+      zurueck();
+    }
+    expect(ext(EAN).imageUrl).toBeUndefined();
+    expect(ext(EAN).bildVonShop).toBeUndefined();
+  });
+
+  test('Trigger: neuer Abruf bei Lesefehler → Shopbild bleibt', async () => {
+    db.lege('_meta/produktsuche', { shopBilder: true });
+    await onNutritionScrapeFuerExterne(ereignis(null, rohFund()));
+    expect(ext(EAN)).toMatchObject({ imageUrl: SHOPBILD, bildVonShop: true });
+
+    _zuruecksetzen();
+    jest.setSystemTime(JETZT + 10 * 60 * 1000);
+    const zurueck = konfigNichtLesbar();
+    try {
+      await onNutritionScrapeFuerExterne(ereignis(rohFund(), rohFund({ fetchedAt: ts(JETZT + 5000), attr_ingredientStatement: 'Aqua, Glycerin' })));
+    } finally {
+      zurueck();
+    }
+    const d = ext(EAN);
+    expect(d.attr_ingredientStatement).toBe('Aqua, Glycerin'); // geschrieben
+    expect(d).toMatchObject({ imageUrl: SHOPBILD, bildVonShop: true });
+    expect(loeschungen()).toEqual([]);
+  });
+
+  test('Trigger: Dokument nur über sein Shopbild anzeigbar → bei Lesefehler NICHT gelöscht', async () => {
+    db.lege(`external_products/${EAN}`, {
+      ean: EAN,
+      source: 'rossmann',
+      imageUrl: SHOPBILD,
+      bildVonShop: true,
+      feldQuellen: { bild: 'rossmann' },
+      fetchedAt: ts(JETZT - 5 * TAG),
+      fetchedAtQuelle: 'nutritionscrape',
+      cachedAt: ts(JETZT - 5 * TAG),
+      storedAt: ts(JETZT - 5 * TAG),
+      aiAssessment: { healthScore: 3 },
+    });
+    // Neuer Abruf liefert nur einen Preis (allein nicht anzeigbar).
+    const nurPreis = rohFund({ productName: undefined, attr_ingredientStatement: undefined, eanBeleg: 'jsonld_gtin' });
+    const zurueck = konfigNichtLesbar();
+    try {
+      await onNutritionScrapeFuerExterne(ereignis(rohFund({ fetchedAt: ts(JETZT - 5 * TAG) }), nurPreis));
+    } finally {
+      zurueck();
+    }
+    expect(loeschungen()).toEqual([]);
+    expect(ext(EAN)).toMatchObject({ imageUrl: SHOPBILD, bildVonShop: true, price: 0.95, aiAssessment: { healthScore: 3 } });
+  });
+
+  test('Gegenprobe: lesbar und ausdrücklich false → Shopbild weg, nur-Bild-Dokument gelöscht', async () => {
+    db.lege('_meta/produktsuche', { shopBilder: false });
+    db.lege(`external_products/${EAN}`, {
+      ean: EAN,
+      source: 'rossmann',
+      imageUrl: SHOPBILD,
+      bildVonShop: true,
+      feldQuellen: { bild: 'rossmann' },
+      cachedAt: ts(JETZT - 5 * TAG),
+    });
+    const nurPreis = rohFund({ productName: undefined, attr_ingredientStatement: undefined });
+    await onNutritionScrapeFuerExterne(ereignis(rohFund({ fetchedAt: ts(JETZT - 5 * TAG) }), nurPreis));
+    expect(loeschungen()).toEqual([['delete', `external_products/${EAN}`]]);
+  });
+
+  test('Frist unbekannt: abgeschlossener Fall älter als 60 Tage wird NICHT wegen seines Alters neu geöffnet', async () => {
+    db.lege('external_products/777', {
+      ean: '777',
+      source: 'rossmann',
+      productName: 'Isana Duschgel',
+      fetchedAt: ts(JETZT - 80 * TAG),
+      fetchedAtQuelle: 'nutritionscrape',
+      cachedAt: ts(JETZT - TAG),
+    });
+    db.lege('external_lookup_misses/777', {
+      ean: '777', status: 'resolved', hitCount: 3,
+      lastSeenAt: ts(JETZT - 80 * TAG), processedAt: ts(JETZT - 80 * TAG),
+    });
+    const zurueck = konfigNichtLesbar();
+    try {
+      await rufe('777');
+    } finally {
+      zurueck();
+    }
+    expect(miss('777')).toMatchObject({ status: 'resolved', hitCount: 4 });
+    expect(miss('777').wiedergeoeffnetAm).toBeUndefined();
+  });
+
+  test('Frist unbekannt: OFF-Daten älter als 60 Tage werden nicht aufgefrischt; neuer Barcode kommt trotzdem in die Warteschlange', async () => {
+    db.lege('external_products/20003180', {
+      ean: '20003180',
+      source: 'openfood',
+      productName: 'Golden Puffs alt',
+      fetchedAt: ts(JETZT - 70 * TAG),
+      fetchedAtQuelle: 'openfood_api',
+      cachedAt: ts(JETZT - 70 * TAG),
+      lastUpgradeAttemptAt: ts(JETZT - TAG),
+    });
+    offAntwort('20003180', 200, OFF_GOLDEN);
+    const zurueck = konfigNichtLesbar();
+    try {
+      await rufe('20003180');
+      expect(offAufrufe).toEqual([]);
+      expect(ext('20003180').productName).toBe('Golden Puffs alt');
+      await rufe('4001234567890');
+    } finally {
+      zurueck();
+    }
+    expect(miss('4001234567890')).toMatchObject({ status: 'pending', grund: 'neu' });
+  });
+});
+
+// Schlussprüfung 04.10.2026: OpenFoodFacts antwortet für Produkte aus
+// OpenBeautyFacts & Co. mit HTTP 404 und „product found with a different
+// product type". Das galt als „gibt es nicht": echte Daten (Balea Bodylotion,
+// Dontodent …) wurden versteckt und der Fall für die bezahlte Suche geöffnet.
+describe('OpenFoodFacts: „anderer Produkttyp" ist kein „nicht vorhanden"', () => {
+  const EAN = '4066447870237';
+  const OBF_URL = `https://world.openbeautyfacts.org/product/${EAN}/balea-bodylotion`;
+  const obfRohablage = {
+    gtin: EAN,
+    scrapedSource: 'scraper',
+    sourceShop: 'openfoodfacts', // so stehen OBF-Funde im Altbestand
+    scrapedAt: ts(JETZT - 90 * TAG),
+    scrapedUrl: OBF_URL,
+    productName: 'Balea Bodylotion Soft',
+    attr_ingredientStatement: 'Aqua, Glycerin, Paraffinum Liquidum',
+  };
+  const anderTyp = () => {
+    offAntworten[EAN] = { status: 404, body: { status: 0, status_verbose: 'product found with a different product type: beauty' } };
+  };
+  const loeschungen = () => db.schreibvorgaenge.filter(([art, pfad]) => art === 'delete' && pfad === `external_products/${EAN}`);
+
+  test('OBF-Rohablage + API-404 „different product type": Daten sichtbar, nichts gelöscht, Fall nicht wieder geöffnet', async () => {
+    anderTyp();
+    db.lege(`nutritionscrape/${EAN}`, obfRohablage);
+    db.lege(`external_lookup_misses/${EAN}`, {
+      ean: EAN, status: 'resolved', processedSource: 'openfoodfacts', processedResult: 'ok',
+      processedAt: ts(JETZT - 5 * TAG), lastSeenAt: ts(JETZT - 5 * TAG), hitCount: 11,
+    });
+
+    for (let i = 0; i < 4; i += 1) {
+      jest.setSystemTime(JETZT + i * 10 * 60 * 1000);
+      const res = await rufe(EAN);
+      expect(res.body.product.productName).toBe('Balea Bodylotion Soft');
+      expect(res.body.product.attr_ingredientStatement).toMatch(/^Aqua/);
+    }
+    expect(loeschungen()).toEqual([]);
+    expect(ext(EAN)).toMatchObject({ productName: 'Balea Bodylotion Soft' });
+    // Die kostenlose Prüfung lief, entschied nichts und wird vermerkt (höchstens einmal je Frist).
+    expect(offAufrufe).toEqual([EAN]);
+    expect(ext(EAN).openfoodVersuchtAm).toBeDefined();
+    const m = miss(EAN);
+    expect(m.status).toBe('resolved');
+    expect(m.processedSource).toBe('openfoodfacts');
+    expect(m.altbestandVerworfenAm).toBeUndefined();
+    expect(m.wiedergeoeffnetAm).toBeUndefined();
+  });
+
+  test('Daten einer OFF-Seite, Produkt inzwischen in OpenBeautyFacts: API-404 „different product type" entfernt nichts', async () => {
+    anderTyp();
+    db.lege(`external_products/${EAN}`, {
+      ean: EAN,
+      source: 'openfoodfacts',
+      productName: 'Balea Bodylotion Soft',
+      attr_ingredientStatement: 'Aqua, Glycerin, Paraffinum Liquidum',
+      cachedAt: ts(JETZT - TAG),
+      lastUpgradeAttemptAt: ts(JETZT - TAG),
+      raw: { ...obfRohablage, scrapedUrl: `https://de.openfoodfacts.org/produkt/${EAN}/balea` },
+    });
+    const res = await rufe(EAN);
+    expect(offAufrufe).toEqual([EAN]); // OFF-Webseite → einmal gegen die API geprüft
+    expect(res.body.product.attr_ingredientStatement).toMatch(/^Aqua/);
+    expect(ext(EAN).attr_ingredientStatement).toMatch(/^Aqua/);
+    expect(ext(EAN).openfoodVersuchtAm.toMillis()).toBe(JETZT);
+    expect(loeschungen()).toEqual([]);
+    // Nicht als fremder Altbestand verworfen (das wäre grund 'neu' mit
+    // altbestandVerworfenAm); eingeplant wie jedes Dokument mit Daten nur aus
+    // der OpenFoodFacts-Gruppe.
+    expect(miss(EAN)).toMatchObject({ status: 'pending', grund: 'nur_openfood' });
+    expect(miss(EAN).altbestandVerworfenAm).toBeUndefined();
+    // Versuch vermerkt → der nächste Scan fragt nicht wieder.
+    jest.setSystemTime(JETZT + TAG);
+    await rufe(EAN);
+    expect(offAufrufe).toEqual([EAN]);
+  });
+
+  test('OBF-Daten im Dokument: kein sofortiger Webseiten-Abgleich; nach der Frist geprüft, „anderer Produkttyp" ändert nichts', async () => {
+    anderTyp();
+    db.lege(`external_products/${EAN}`, {
+      ean: EAN,
+      source: 'openfoodfacts',
+      productName: 'Balea Bodylotion Soft',
+      attr_ingredientStatement: 'Aqua, Glycerin, Paraffinum Liquidum',
+      fetchedAt: ts(JETZT - 90 * TAG),
+      fetchedAtQuelle: 'nutritionscrape',
+      fetchedAtGeschaetzt: true,
+      cachedAt: ts(JETZT - TAG),
+      lastUpgradeAttemptAt: ts(JETZT - TAG),
+      raw: obfRohablage,
+    });
+    await rufe(EAN);
+    expect(offAufrufe).toEqual([EAN]); // Frist (Stand 90 Tage) — nicht der Webseiten-Abgleich
+    expect(ext(EAN).attr_ingredientStatement).toMatch(/^Aqua/);
+    expect(ext(EAN).openfoodVersuchtAm.toMillis()).toBe(JETZT);
+    expect(loeschungen()).toEqual([]);
+  });
+
+  test('Gegenprobe: echte OFF-Webseite, API 404 ohne Hinweis → wie bisher entfernt', async () => {
+    db.lege(`external_products/${EAN}`, {
+      ean: EAN,
+      source: 'openfoodfacts',
+      attr_ingredientStatement: 'Weizenmehl',
+      cachedAt: ts(JETZT - TAG),
+      lastUpgradeAttemptAt: ts(JETZT - TAG),
+      raw: { ...obfRohablage, scrapedUrl: `https://de.openfoodfacts.org/produkt/${EAN}/x` },
+    });
+    expect((await rufe(EAN)).body).toEqual({ product: null });
+    expect(loeschungen()).toEqual([['delete', `external_products/${EAN}`]]);
+  });
+});
+
+// Schlussprüfung 04.10.2026 (Härtung): ein nicht-textueller Hersteller aus
+// der KI des Scrapers ließ die Detailseite aller Alt-Versionen abstürzen
+// (`manufacturerName.trim()`). Der Trigger übernimmt jeden Fund sofort.
+describe('Textfelder: nur Text erreicht external_products und die App', () => {
+  const EAN = '4337256123456';
+  const ereignis = (vorher, nachher) => ({
+    params: { ean: EAN },
+    time: new Date(JETZT).toISOString(),
+    data: {
+      before: { exists: !!vorher, data: () => vorher },
+      after: { exists: !!nachher, data: () => nachher },
+    },
+  });
+  const fund = (over = {}) => ({
+    gtin: EAN,
+    productPath: null,
+    sourceShop: 'rossmann',
+    scrapedUrl: `https://www.rossmann.de/p/${EAN}`,
+    productName: 'Isana Duschgel Kokos',
+    eanBeleg: 'jsonld_gtin',
+    fetchedAt: ts(JETZT - 1000),
+    scrapedAt: ts(JETZT - 1000),
+    attr_ingredientStatement: 'Aqua',
+    ...over,
+  });
+
+  test.each([
+    ['Liste', ['Rossmann', 'Dirk Rossmann GmbH']],
+    ['Zahl', 42],
+    ['true', true],
+  ])('Trigger: attr_hersteller als %s → kein manufacturerName, Rest gespeichert', async (_name, wert) => {
+    await onNutritionScrapeFuerExterne(ereignis(null, fund({ attr_hersteller: wert })));
+    const d = ext(EAN);
+    expect(d).toMatchObject({ productName: 'Isana Duschgel Kokos', attr_ingredientStatement: 'Aqua' });
+    expect(d).not.toHaveProperty('manufacturerName');
+    const res = await rufe(EAN);
+    expect(res.body.product).not.toHaveProperty('manufacturerName');
+  });
+
+  test('gespeicherter falscher Typ: Antwort ohne ihn, beim nächsten Schreiben entfernt', async () => {
+    db.lege(`external_products/${EAN}`, {
+      ean: EAN,
+      source: 'rossmann',
+      productName: 'Isana Duschgel Kokos',
+      manufacturerName: ['Rossmann'],
+      brandName: 7,
+      packSize: 250,
+      cachedAt: ts(JETZT - TAG),
+      storedAt: ts(JETZT - TAG),
+    });
+    const res = await rufe(EAN);
+    expect(res.body.product).not.toHaveProperty('manufacturerName');
+    expect(res.body.product).not.toHaveProperty('brandName');
+    expect(res.body.product.packSize).toBe(250);
+
+    await onNutritionScrapeFuerExterne(ereignis(null, fund({ attr_hersteller: 'Dirk Rossmann GmbH ' })));
+    expect(ext(EAN)).toMatchObject({ manufacturerName: 'Dirk Rossmann GmbH', packSize: 250 });
+    expect(ext(EAN)).not.toHaveProperty('brandName');
+  });
+});
+
+// Folge der Host-Regel: OBF-Daten im Dokument sind keine OFF-Webseiten-Daten.
+// Ein schlichtes 404 (ohne Typ-Hinweis) darf sie nicht entfernen — sonst legte
+// der nächste Scan sie aus nutritionscrape neu an (Schleife aus Prüfrunde 3,
+// jede Neuanlage mit KI-Bewertung).
+describe('OpenBeautyFacts-Daten: auch ein schlichtes 404 löscht nichts (keine Schleife)', () => {
+  const EAN = '4069365468968';
+  const obfRohablage = {
+    gtin: EAN,
+    scrapedSource: 'scraper',
+    sourceShop: 'openfoodfacts',
+    scrapedAt: ts(JETZT - 90 * TAG),
+    scrapedUrl: `https://world.openbeautyfacts.org/product/${EAN}/dontodent`,
+    productName: 'Dontodent Zahncreme',
+    attr_ingredientStatement: 'Aqua, Sorbitol',
+  };
+
+  test('fünf Scans: Dokument einmal angelegt, nie gelöscht, OFF höchstens einmal je Frist gefragt', async () => {
+    db.lege(`nutritionscrape/${EAN}`, obfRohablage);
+    for (let i = 0; i < 5; i += 1) {
+      jest.setSystemTime(JETZT + i * 10 * 60 * 1000);
+      const res = await rufe(EAN);
+      expect(res.body.product.productName).toBe('Dontodent Zahncreme');
+    }
+    const anExt = db.schreibvorgaenge.filter(([, pfad]) => pfad === `external_products/${EAN}`).map(([art]) => art);
+    expect(anExt).not.toContain('delete');
+    expect(anExt.filter((a) => a === 'set')).toHaveLength(1); // genau eine Neuanlage
+    expect(offAufrufe.length).toBeLessThanOrEqual(1);
+    expect(miss(EAN).altbestandVerworfenAm).toBeUndefined();
+  });
+});

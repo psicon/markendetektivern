@@ -43,6 +43,12 @@
  *     dahin wurde ein solches Dokument abwechselnd gelöscht (API kennt die EAN
  *     nicht) und beim nächsten Scan neu angelegt, jedes Mal mit einer
  *     bezahlten KI-Bewertung.
+ *   • Schlussprüfung (04.10.2026): Ein Lesefehler von _meta/produktsuche
+ *     macht shopBilder und auffrischenNachTagen UNBEKANNT, nicht zum
+ *     Standard — vorher löschte shopBilder:false gespeicherte Shopbilder
+ *     (lib/konfiguration.js). OpenFoodFacts' „anderer Produkttyp"
+ *     (OpenBeautyFacts & Co.) entscheidet nichts (openFoodGetProductByEAN).
+ *     Textfelder erreichen external_products nur als Text (lib/speichern.js).
  *
  * ──────────────────────────────────────────────────────────────────────
  * SERVER-SEITIGE BESONDERHEITEN
@@ -121,7 +127,7 @@ const {
   istOffWebseitenAltbestand,
 } = require('./lib/rohablage');
 const { istImKatalog } = require('./lib/katalog');
-const { ladeKonfiguration } = require('./lib/konfiguration');
+const { ladeKonfiguration, shopBildSchalter } = require('./lib/konfiguration');
 
 // ─── Firestore helpers ──────────────────────────────────────────────────
 
@@ -139,7 +145,9 @@ function fsWerkzeug() {
 }
 
 function konfigWarnung(e) {
-  logger.warn('_meta/produktsuche nicht lesbar → Standardwerte', { err: e && e.message });
+  logger.warn('_meta/produktsuche nicht lesbar → Shopbild-Schalter und Frist unbekannt (nichts übernehmen, nichts entfernen)', {
+    err: e && e.message,
+  });
 }
 
 /**
@@ -166,8 +174,10 @@ async function getCached(norm) {
  */
 async function speichere(norm, neuOhneSchalter, ctx) {
   // Shopbild-Schalter bei JEDEM Schreiben mitgeben: ausgeschaltet entfernt
-  // der Schreibweg ein gespeichertes Shopbild (lib/speichern.js).
-  const neu = { shopBilder: ctx.konfig.shopBilder === true, ...neuOhneSchalter };
+  // der Schreibweg ein gespeichertes Shopbild (lib/speichern.js). Dreiwertig:
+  // nach einem Lesefehler von _meta/produktsuche ist er unbekannt (undefined)
+  // — dann wird weder ein Bild übernommen noch eins entfernt.
+  const neu = { shopBilder: shopBildSchalter(ctx.konfig), ...neuOhneSchalter };
   try {
     const r = await speichereExternesProdukt(fsWerkzeug(), norm, neu, ctx.jetztMs);
     if (r.aktion === 'loeschen') {
@@ -294,12 +304,26 @@ async function writeOpenFoodRateLimit(untilMs, grund) {
 }
 
 /**
+ * „product found with a different product type: beauty" — OpenFoodFacts kennt
+ * die EAN, aber in einer Schwester-Datenbank (OpenBeautyFacts,
+ * OpenPetFoodFacts, Open Products Facts). Live geprüft 04.10.2026
+ * (4066447870237: HTTP 404 mit genau diesem status_verbose).
+ */
+function istAndererProdukttyp(body) {
+  const v = body && typeof body === 'object' ? body.status_verbose : null;
+  return typeof v === 'string' && /different product type/i.test(v);
+}
+
+/**
  * Lädt ein Produkt von der OpenFoodFacts-API.
  * @returns {Promise<{status:'gefunden', product:object} | {status:'nicht_vorhanden'}
- *   | {status:'nicht_erreichbar', grund:string}>}
+ *   | {status:'anderer_typ'} | {status:'nicht_erreichbar', grund:string}>}
  * 'nicht_erreichbar' (Pause aktiv, 429, 5xx, Zeitlimit, Netz) ist KEINE
  * Aussage über das Produkt — Vorfall-Regel aus CLAUDE.md: ein Fremddienst-
  * Fehler wird nie als „nichts gefunden" weitergegeben.
+ * 'anderer_typ' (Schlussprüfung 04.10.2026): die EAN gibt es, nur nicht als
+ * Lebensmittel — das ist kein „nicht vorhanden". Bis dahin galten so echte
+ * OpenBeautyFacts-Daten (Balea Bodylotion, Dontodent …) als widerlegt.
  */
 async function openFoodGetProductByEAN(ean) {
   const pauseBisMs = await readOpenFoodRateLimitUntilMs();
@@ -328,6 +352,16 @@ async function openFoodGetProductByEAN(ean) {
   // 400 — 429, 5xx, aber auch 401/403 (wir sind gesperrt) oder 408 — sagt
   // nichts über das Produkt: nicht erreichbar, kurze Pause.
   if (response.status === 404 || response.status === 400 || response.status === 410) {
+    let body = null;
+    try {
+      body = await response.json();
+    } catch {
+      // kein JSON — wie bisher „nicht vorhanden"
+    }
+    if (istAndererProdukttyp(body)) {
+      logger.info('OpenFood: EAN in einer anderen Open-Facts-Datenbank', { ean, status: response.status, verbose: body.status_verbose });
+      return { status: 'anderer_typ' };
+    }
     logger.info('OpenFood: EAN nicht vorhanden', { ean, status: response.status });
     return { status: 'nicht_vorhanden' };
   }
@@ -346,6 +380,10 @@ async function openFoodGetProductByEAN(ean) {
     return { status: 'nicht_erreichbar', grund: 'antwort_unlesbar' };
   }
   if (result.status !== 1 || !result.product) {
+    if (istAndererProdukttyp(result)) {
+      logger.info('OpenFood: EAN in einer anderen Open-Facts-Datenbank (body status)', { ean, verbose: result.status_verbose });
+      return { status: 'anderer_typ' };
+    }
     logger.info('OpenFood: EAN nicht vorhanden (body status)', { ean, status: result.status });
     return { status: 'nicht_vorhanden' };
   }
@@ -379,7 +417,9 @@ async function openFoodGetProductByEAN(ean) {
 //
 // Jede Quelle liefert { status: 'gefunden' | 'nicht_vorhanden' | 'fehler',
 // produkt? } — 'fehler' heißt „konnte nicht nachsehen" und macht aus einem
-// leeren Ergebnis die Lage 'unbekannt' statt 'keine'.
+// leeren Ergebnis die Lage 'unbekannt' statt 'keine'. tryOpenFood kennt
+// zusätzlich 'anderer_typ' (EAN nur in einer Schwester-Datenbank): keine
+// Daten, aber auch kein Beleg gegen gespeicherte Daten.
 
 async function tryReweapify(norm, ctx) {
   let docData = null;
@@ -495,10 +535,19 @@ async function tryGlobus() {
  * nächste Scan das Dokument neu an. Widerlegte Webseiten-Daten (im Dokument
  * oder in der Rohablage) meldet die Abfrage der Warteschlange wie fremden
  * Altbestand: der frühere „Fund" zählt nicht (lib/abrufPlan.js).
+ *
+ * „Anderer Produkttyp" (die EAN steht in OpenBeautyFacts & Co.) entscheidet
+ * nichts: nichts entfernen, kein fremder Altbestand — nur den Versuch
+ * vermerken, damit die kostenlose Prüfung höchstens einmal je Frist läuft
+ * (Schlussprüfung 04.10.2026).
  */
 async function tryOpenFood(norm, ctx, { stempeln = false } = {}) {
   const off = await openFoodGetProductByEAN(norm);
   if (off.status === 'nicht_erreichbar') return { status: 'fehler' };
+  if (off.status === 'anderer_typ') {
+    if (stempeln) await stempele(norm, 'openfoodVersuchtAm');
+    return { status: 'anderer_typ' };
+  }
   if (off.status === 'nicht_vorhanden') {
     const webseite = stempeln ? offWebseitenQuelle(ctx.aktuell) : null;
     if (webseite || ctx.offWebseitenAltbestand === true) ctx.altbestandAbgelehnt = true;
@@ -783,7 +832,7 @@ exports.onNutritionScrapeFuerExterne = onDocumentWritten(
         return;
       }
       const neu = {
-        ...(basis || { quelle: entscheidung.ersetzeQuelle.quelle, daten: {}, shopBilder: konfig.shopBilder === true }),
+        ...(basis || { quelle: entscheidung.ersetzeQuelle.quelle, daten: {}, shopBilder: shopBildSchalter(konfig) }),
         ersetzeQuelle: entscheidung.ersetzeQuelle,
       };
       const r = await speichereExternesProdukt(fsWerkzeug(), norm, neu, jetztMs);

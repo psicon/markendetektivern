@@ -62,6 +62,12 @@
  *     OpenFoodFacts, ein offener Eintrag ist keine negative Speicherung —
  *     und ohne ihn nähme die Suche während eines OFF-Ausfalls still keine
  *     neuen Barcodes an, obwohl die App „wir nehmen es auf" verspricht.
+ *   • Frist unbekannt (auffrischenNachTagen null: _meta/produktsuche war
+ *     nicht lesbar, lib/konfiguration.js): nichts wird wegen seines ALTERS
+ *     geöffnet oder aufgefrischt — nur, was bei JEDER Frist gälte (neu,
+ *     nur_openfood, fremder Altbestand, nie versucht, 'error' in Folge).
+ *     Der Standard 60 hätte bei einer bewusst längeren Frist abgeschlossene
+ *     Fälle in die bezahlte Suche geschickt (Schlussprüfung 04.10.2026).
  *
  * Rein: kein Firestore, keine Uhr. Zeitpunkte als Date hinaus, LOESCHEN
  * für zu entfernende Felder (die Schreibschicht macht FieldValue.delete()).
@@ -87,6 +93,16 @@ const ZYKLUS_FELDER = ['errorCount', 'fehlerInFolge', 'abrufGesperrtInFolge', 'n
 const ABGESCHLOSSEN = new Set(['resolved', 'no-data', 'error', 'uebersprungen']);
 // Diese Gründe ändern sich nicht mit der Zeit — nie wieder öffnen.
 const NIE_WIEDER_OEFFNEN = new Set(['im_katalog', 'ungueltige_ean']);
+
+/**
+ * Frist in ms; Infinity, wenn sie unbekannt ist (null nach einem Lesefehler,
+ * oder kein gültiger Wert) — dann ist nichts „älter als die Frist".
+ */
+function fristMs(auffrischenNachTagen) {
+  return typeof auffrischenNachTagen === 'number' && Number.isFinite(auffrischenNachTagen) && auffrischenNachTagen > 0
+    ? auffrischenNachTagen * TAG_MS
+    : Infinity;
+}
 
 /** Reihenfolge-Schlüssel des Prozessors (orderBy rang desc). */
 function rangFuer(scanTage, lastSeenMs) {
@@ -131,11 +147,11 @@ function letzterVersuchMs(alt, lage) {
  *   erzwingen        true nur bei Admin-force: sofort auffrischen
  *   altbestandAbgelehnt true: diese Abfrage hat fremden Altbestand erkannt
  * @param {number} p.jetztMs
- * @param {number} p.auffrischenNachTagen
+ * @param {number|null} p.auffrischenNachTagen  null = unbekannt (Kopfkommentar)
  * @returns {{aktion:'nichts'|'anlegen'|'aktualisieren', felder:object, uebergang:string|null}}
  */
 function planeAbruf({ ean, alt, lage, jetztMs, auffrischenNachTagen }) {
-  const frist = auffrischenNachTagen * TAG_MS;
+  const frist = fristMs(auffrischenNachTagen);
   const jetzt = new Date(jetztMs);
   const heute = berlinTag(jetztMs);
   const erzwingen = lage.erzwingen === true;
@@ -303,7 +319,9 @@ function openfoodAuffrischenFaellig(doc, jetztMs, auffrischenNachTagen) {
   const versuch = zuMs(doc.openfoodVersuchtAm);
   if (versuch === null && offWebseitenQuelle(doc)) return true;
   if (quellenGruppe(doc.source) !== 'openfood') return false;
-  const frist = auffrischenNachTagen * TAG_MS;
+  // Frist unbekannt (null) → Infinity: dann nur, wenn noch nie ein Stand und
+  // nie ein Versuch vermerkt ist (das gälte bei jeder Frist).
+  const frist = fristMs(auffrischenNachTagen);
   const stand = zuMs(doc.fetchedAt) ?? zuMs(doc.cachedAt) ?? zuMs(doc.storedAt);
   const standAlt = stand === null || jetztMs - stand > frist;
   const versuchAlt = versuch === null || jetztMs - versuch > frist;
@@ -312,6 +330,7 @@ function openfoodAuffrischenFaellig(doc, jetztMs, auffrischenNachTagen) {
 
 module.exports = {
   DOPPEL_SPERRE_MS,
+  fristMs,
   RANG_FAKTOR,
   FEHLER_FRIST_TAGEN,
   FEHLER_AM_BARCODE,

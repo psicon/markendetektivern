@@ -39,13 +39,14 @@
 
 const { normaliseReweapify, quellenGruppe } = require('./normalizers');
 const { zuMs } = require('./zeit');
+const { shopBildSchalter } = require('./konfiguration');
 const {
   istGueltigeGtin,
   istLadencode,
   istRcn8,
   RCN8_DOMAINS,
   hostGehoertZu,
-  istOpenFactsHost,
+  istOpenFoodFactsHost,
   fremdeGtinInAdressen,
 } = require('./gtin');
 
@@ -108,10 +109,22 @@ function quellHost(data) {
  * wenn die API die EAN nicht kannte — und der nächste Scan übernahm sie
  * wieder aus nutritionscrape: das Dokument wurde abwechselnd gelöscht und neu
  * angelegt, jede Neuanlage kostete eine KI-Bewertung (ai-product-comparison).
+ *
+ * Der HOST entscheidet zuerst (Schlussprüfung 04.10.2026): nur
+ * openfoodfacts.org-Domains. Seiten von OpenBeautyFacts, OpenPetFoodFacts und
+ * Open Products Facts tragen als sourceShop ebenfalls 'openfoodfacts', aber
+ * die API, die hier entscheiden soll, kennt nur die Lebensmittel-Datenbank —
+ * sie antwortet dort „anderer Produkttyp", und richtige Daten (Balea
+ * Bodylotion …) galten als widerlegt. Nur ohne erkennbaren Host zählt der
+ * Shop-Name.
+ * Kopie: external-misses-processor/src/regeln.js istOffWebseitenAltbestand —
+ * beide gleich halten (Test vergleicht sie).
  */
 function istOffWebseitenAltbestand(data) {
   if (!istAltbestand(data)) return false;
-  return istOpenFactsHost(quellHost(data)) || quellenGruppe(quelleAusShop(data.sourceShop)) === 'openfood';
+  const host = quellHost(data);
+  if (host) return istOpenFoodFactsHost(host);
+  return quellenGruppe(quelleAusShop(data.sourceShop)) === 'openfood';
 }
 
 /**
@@ -240,7 +253,8 @@ function abgelehnterAltbestandIm(doc, ean) {
 /**
  * Eingabe für fuehreZusammen aus einem nutritionscrape-Dokument.
  * @param {object} data   nutritionscrape-Dokument
- * @param {{shopBilder:boolean}} konfig  _meta/produktsuche
+ * @param {{shopBilder:boolean|null}} konfig  _meta/produktsuche (shopBilder
+ *   null = nach einem Lesefehler unbekannt, lib/konfiguration.js)
  * @param {string} [ean]  normalisierte EAN — ohne sie keine Ablehnungsprüfung
  * @returns {object|null} null: nichts zu übernehmen (auch: abgelehnter
  *   Altbestand und ungeprüfter Altbestand von OpenFoodFacts-Seiten)
@@ -255,8 +269,11 @@ function ausRohablage(data, konfig, ean) {
   // shopBilder. Andere Bildfelder kennt die Rohablage nicht (die KI las bis
   // 04.10.2026 kein Bild aus: 0 von 7.636 Einträgen). bildVonShop markiert
   // das Bild, damit Ausschalten es wieder entfernt (lib/speichern.js).
-  const shopBilder = !!konfig && konfig.shopBilder === true;
-  daten.imageUrl = shopBilder ? text(data.shopBildUrl) ?? undefined : undefined;
+  // Der Schalter geht dreiwertig weiter: true übernimmt ein neues Bild,
+  // false entfernt ein gespeichertes, unbekannt (Lesefehler) tut beides
+  // nicht — ein Infrastrukturfehler ist keine Aussage (Schlussprüfung).
+  const shopBilder = shopBildSchalter(konfig);
+  daten.imageUrl = shopBilder === true ? text(data.shopBildUrl) ?? undefined : undefined;
   daten.bildVonShop = daten.imageUrl ? true : undefined;
   const preis = preisAusRohablage(data);
   daten.price = preis ? preis.wert : undefined;
@@ -306,6 +323,7 @@ function uebernahmeNoetig(vorher, nachher) {
 module.exports = {
   quelleAusShop,
   hostAus,
+  quellHost,
   istAuslandsDomain,
   istAltbestand,
   istOffWebseitenAltbestand,

@@ -322,7 +322,12 @@ describe('ordneErgebnisZu', () => {
     const off = { scrapedSource: 'scraper', scrapedAt: 1, sourceShop: 'openfoodfacts', scrapedUrl: 'https://de.openfoodfacts.org/produkt/4000540031874/x' };
     expect(r.rohdatenVorhanden(off)).toBe(false);
     expect(r.rohdatenVorhanden({ ...off, scrapedUrl: undefined })).toBe(false); // nur der Shop-Name
-    expect(r.rohdatenVorhanden({ ...off, sourceShop: 'world.openbeautyfacts.org', scrapedUrl: undefined })).toBe(false);
+    // Schlussprüfung 04.10.2026: der Host entscheidet zuerst — OpenBeautyFacts
+    // & Co. kennt die kostenlose API nicht, deren Daten sind ein echter Fund
+    // (auch wenn sourceShop 'openfoodfacts' sagt).
+    expect(r.rohdatenVorhanden({ ...off, sourceShop: 'world.openbeautyfacts.org', scrapedUrl: undefined })).toBe(true);
+    expect(r.rohdatenVorhanden({ ...off, scrapedUrl: 'https://world.openbeautyfacts.org/product/4066447870237/balea' })).toBe(true);
+    expect(r.rohdatenVorhanden({ ...off, scrapedUrl: 'https://world.openpetfoodfacts.org/product/1/x' })).toBe(true);
     // Belegter Fund (fetchedAt) bleibt ein Fund, ebenso Altbestand eines Shops.
     expect(r.rohdatenVorhanden({ ...off, fetchedAt: 2 })).toBe(true);
     expect(r.rohdatenVorhanden({ scrapedSource: 'scraper', scrapedAt: 1, sourceShop: 'globus', scrapedUrl: 'https://www.globus.de/p/1' })).toBe(true);

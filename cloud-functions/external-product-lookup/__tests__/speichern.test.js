@@ -17,6 +17,8 @@ const {
   speichereExternesProdukt,
   stempeleExternesProdukt,
   fuerAntwort,
+  bereinigeTextfelder,
+  ohneFalscheTypen,
 } = require('../lib/speichern');
 const { normaliseOpenFood, normaliseReweapify } = require('../lib/normalizers');
 
@@ -791,6 +793,22 @@ describe('Prüfrunde 2: ungeprüfter Altbestand überschreibt nichts', () => {
 
 describe('Prüfrunde 2: Daten der OpenFoodFacts-Webseite', () => {
   const { offWebseitenQuelle } = require('../lib/speichern');
+  // Schlussprüfung 04.10.2026: belegter Host einer Schwester-Datenbank
+  // (OpenBeautyFacts & Co.) → keine OFF-Webseiten-Daten, auch unter dem Namen 'openfoodfacts'.
+  test('offWebseitenQuelle: Host der Quelle entscheidet zuerst', () => {
+    const roh = (url) => ({ scrapedSource: 'scraper', sourceShop: 'openfoodfacts', scrapedAt: ts(1), scrapedUrl: url });
+    const doc = (over) => ({ source: 'openfoodfacts', attr_ingredientStatement: 'X', ...over });
+    expect(offWebseitenQuelle(doc({ raw: roh('https://world.openbeautyfacts.org/product/1/x') }))).toBeNull();
+    expect(offWebseitenQuelle(doc({ sourceUrl: 'https://world.openpetfoodfacts.org/product/1/x' }))).toBeNull();
+    expect(offWebseitenQuelle(doc({ raw: roh('https://de.openfoodfacts.org/produkt/1/x') }))).toBe('openfoodfacts');
+    expect(offWebseitenQuelle(doc({}))).toBe('openfoodfacts'); // ohne belegten Host wie bisher
+    // Rohablage einer ANDEREN Quelle sagt über 'openfoodfacts' nichts
+    expect(offWebseitenQuelle(doc({
+      source: 'rossmann', feldQuellen: { zutaten: 'openfoodfacts', name: 'rossmann' }, productName: 'A',
+      raw: { ...roh('https://www.rossmann.de/p/1'), sourceShop: 'rossmann' },
+    }))).toBe('openfoodfacts');
+  });
+
   test('offWebseitenQuelle erkennt Webseiten-Gruppen, nicht die API', () => {
     expect(offWebseitenQuelle({ source: 'openfoodfacts', attr_ingredientStatement: 'X' })).toBe('openfoodfacts');
     expect(offWebseitenQuelle({ source: 'openfood', attr_ingredientStatement: 'X' })).toBeNull();
@@ -805,5 +823,81 @@ describe('Prüfrunde 2: Daten der OpenFoodFacts-Webseite', () => {
     expect(r.ansicht.attr_ingredientStatement).toBeUndefined();
     expect(r.ansicht.imageUrl).toBe('https://images.openfoodfacts.org/a.jpg');
     expect(r.ansicht.source).toBe('openfood');
+  });
+});
+
+// Schlussprüfung 04.10.2026 (Härtung): alle App-Versionen 6.0.13–6.0.21 rufen
+// `.trim()` auf productName und manufacturerName und zeigen die übrigen
+// Textfelder in <Text>. Eine KI-Antwort mit einer Liste, Zahl oder true als
+// Hersteller ließ die Detailseite abstürzen — jetzt nimmt der Schreibweg nur
+// Text (getrimmt, nicht leer); packSize darf auch eine Zahl sein.
+describe('Textfelder nur als Text', () => {
+  test.each([
+    ['Liste', ['dennree', 'Dennree GmbH']],
+    ['Zahl', 42],
+    ['true', true],
+    ['Objekt', { name: 'dennree' }],
+    ['leerer Text', '   '],
+  ])('attr_hersteller als %s → kein Hersteller, kein Platzhalter; der Rest kommt an', (_name, wert) => {
+    const roh = { ...nsRoh, attr_hersteller: wert, attr_productName: 'Knusper Mix' };
+    const r = fuehreZusammen(null, { ...neuScrape(), daten: normaliseReweapify(roh), raw: roh }, JETZT);
+    expect(r.aktion).toBe('anlegen');
+    expect(r.ansicht).not.toHaveProperty('manufacturerName');
+    expect(r.patch).not.toHaveProperty('manufacturerName');
+    expect(r.ansicht.attr_ingredientStatement).toBe('Vollkornweizen, Zucker, Honig');
+    expect(r.ansicht.productName).toBe('Knusper Mix');
+  });
+
+  test('ein ungültiger Wert verdrängt keinen gültigen niedrigeren Rangs (Liste blockiert die Gruppe nicht)', () => {
+    const alt = { ean: '20003180', source: 'rossmann', productName: 'Knusper', manufacturerName: ['dennree'], feldQuellen: { marke: 'rossmann' }, cachedAt: ts(JETZT - TAG) };
+    const r = fuehreZusammen(alt, neuOff(), JETZT);
+    expect(r.ansicht.brandName).toBe('Crownfield');
+    expect(r.ansicht).not.toHaveProperty('manufacturerName');
+    expect(r.patch.manufacturerName).toBe(LOESCHEN); // gespeicherter falscher Typ fällt weg
+    expect(r.ansicht.feldQuellen.marke).toBe('openfood');
+  });
+
+  test('alle Textfelder: neue Werte getrimmt, falsche Typen verworfen; packSize Text oder Zahl', () => {
+    const d = bereinigeTextfelder({
+      productName: '  Milch  ',
+      brandName: ['A', 'B'],
+      manufacturerName: 7,
+      attr_hersteller: true,
+      category: { a: 1 },
+      productDescription: '',
+      attr_ingredientStatement: ' Milch ',
+      packSize: 500,
+      imageUrl: 'https://x',
+      nutr_Energie_val: 64,
+    });
+    expect(d).toEqual({ productName: 'Milch', attr_ingredientStatement: 'Milch', packSize: 500, imageUrl: 'https://x', nutr_Energie_val: 64 });
+    expect(bereinigeTextfelder({ packSize: ' 1 l ' }).packSize).toBe('1 l');
+    expect(bereinigeTextfelder({ packSize: ['1 l'] })).not.toHaveProperty('packSize');
+    expect(bereinigeTextfelder({ packSize: NaN })).not.toHaveProperty('packSize');
+  });
+
+  test('gespeicherte Texte bleiben unverändert (nur falsche Typen fallen weg) — kein Schreiben nur für Leerzeichen', () => {
+    expect(ohneFalscheTypen({ productName: 'Milch ', brandName: 3, packSize: 9 })).toEqual({ productName: 'Milch ', packSize: 9 });
+    const alt = { ean: '20003180', source: 'openfood', productName: 'Golden Puffs ', brandName: 'Crownfield', cachedAt: ts(JETZT - TAG) };
+    const r = fuehreZusammen(alt, neuOff(), JETZT);
+    expect(r.patch).not.toHaveProperty('productName');
+    expect(r.patch).not.toHaveProperty('brandName');
+  });
+
+  test('ein Altfund mit ungetrimmtem Wert wird beim Ersetzen trotzdem gefunden', () => {
+    const altRoh = { ...nsRoh, scrapedSource: 'scraper', scrapedAt: ts(JETZT - 90 * TAG), attr_hersteller: 'dennree ' };
+    const alt = {
+      ean: '20003180', source: 'rossmann', manufacturerName: 'dennree', attr_ingredientStatement: 'Vollkornweizen, Zucker, Honig',
+      raw: altRoh, feldQuellen: { marke: 'rossmann', zutaten: 'rossmann' }, cachedAt: ts(JETZT - TAG),
+    };
+    const { ersetzeQuelleAus } = require('../lib/rohablage');
+    const r = fuehreZusammen(alt, { ...neuOff(), ersetzeQuelle: ersetzeQuelleAus(altRoh) }, JETZT);
+    expect(r.ansicht.manufacturerName).toBeUndefined();
+    expect(r.entfernt).toContain('marke');
+  });
+
+  test('Antwort an die App: falsche Typen gehen nicht hinaus (auch imageUrl)', () => {
+    const a = fuerAntwort({ ean: '1', productName: 'Milch', manufacturerName: ['x'], brandName: true, packSize: 1, imageUrl: { uri: 'x' }, raw: {} });
+    expect(a).toEqual({ ean: '1', productName: 'Milch', packSize: 1 });
   });
 });

@@ -286,6 +286,23 @@ describe('kurze Codes: nur echte GTIN-Angaben belegen', () => {
     expect(analysiereSeite({ inhalt: `<p>${t}</p>`, ean: '20003180' }).eanImSeitentext).toBe(erwartet);
   });
 
+  // Schlussprüfung 04.10.2026: die Bezeichnung gehört zur ERSTEN Nummer,
+  // wenn zwischen ihr und der kurzen Fundstelle eine weitere Nummer steht.
+  test.each([
+    ['EAN 4012345678901 | 40123456', false],
+    ['EAN: 4012345678901, 40123456', false],
+    ['GTIN 1234 40123456', false],
+    ['EAN: 40123456', true],
+    ['EAN-8: 40123456', true],
+    ['EAN (8-stellig): 40123456', true],
+    ['EAN-13 4012345678901, EAN-8 40123456', true], // die eigene Bezeichnung steht direkt davor
+  ])('kurze Fundstelle „%s“ → Beleg %s', (t, erwartet) => {
+    const a = analysiereSeite({ inhalt: `<p>${t}</p>`, ean: '40123456' });
+    expect(a.eanImSeitentext).toBe(erwartet);
+    expect(a.fundstelle).toBe(erwartet ? 'seitentext' : null);
+    expect(a.kiDarf).toBe(erwartet);
+  });
+
   test('13-stellige EAN unverändert: sku und Text ohne Bezeichnung belegen (globus)', () => {
     expect(analysiereSeite({ inhalt: ld({ '@type': 'Product', name: 'X', sku: '4006040000000' }), ean: '4006040000000' }).fundstelle).toBe('jsonld_gtin');
     expect(analysiereSeite({ inhalt: '<p>Art.-Nr. 4006040000000</p>', ean: '4006040000000' }).eanImSeitentext).toBe(true);

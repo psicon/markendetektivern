@@ -15,6 +15,7 @@ const {
   planeAbruf,
   lageAusProdukt,
   openfoodAuffrischenFaellig,
+  fristMs,
 } = require('../lib/abrufPlan');
 const { LOESCHEN } = require('../lib/speichern');
 
@@ -440,5 +441,47 @@ describe('openfoodAuffrischenFaellig', () => {
     expect(openfoodAuffrischenFaellig(web({ openfoodVersuchtAm: ts(JETZT - TAG) }), JETZT, 60)).toBe(false);
     // auch unter einer Shop-Quelle, wenn eine Gruppe von der Webseite stammt
     expect(openfoodAuffrischenFaellig({ source: 'globus', attr_ingredientStatement: 'X', feldQuellen: { zutaten: 'openfoodfacts' } }, JETZT, 60)).toBe(true);
+  });
+});
+
+// Schlussprüfung 04.10.2026: nach einem Lesefehler von _meta/produktsuche ist
+// die Frist unbekannt (null) — nichts wird wegen seines Alters geöffnet oder
+// aufgefrischt, nur was bei JEDER Frist gälte.
+describe('Frist unbekannt (Konfiguration nicht lesbar)', () => {
+  const planeOhneFrist = (alt, l) =>
+    planeAbruf({ ean: '4001234567890', alt, lage: l, jetztMs: JETZT, auffrischenNachTagen: null });
+
+  test('abgeschlossen und alt → bleibt abgeschlossen (nur gezählt)', () => {
+    for (const status of ['resolved', 'no-data', 'uebersprungen']) {
+      const p = planeOhneFrist(abgeschlossen({ status, processedAt: ts(JETZT - 3000 * TAG) }), lage({ daten: 'vorhanden' }));
+      expect(p.felder.status).toBeUndefined();
+      expect(p.felder.hitCount).toBe(5);
+    }
+  });
+
+  test('bezahlter Stand alt, noch kein Eintrag → nichts angelegt', () => {
+    expect(planeOhneFrist(null, lage({ daten: 'vorhanden', bezahlterStandMs: JETZT - 3000 * TAG })).aktion).toBe('nichts');
+  });
+
+  test('was nicht von der Frist abhängt, läuft weiter', () => {
+    expect(planeOhneFrist(null, lage()).felder).toMatchObject({ status: 'pending', grund: 'neu' });
+    expect(planeOhneFrist(null, lage({ daten: 'nur_openfood' })).felder.grund).toBe('nur_openfood');
+    // 'error' in Folge hat eine eigene, feste Frist
+    expect(planeOhneFrist(abgeschlossen({ status: 'error', processedAt: ts(JETZT - 10 * TAG) }), lage()).felder.status).toBe('pending');
+    // fremder Altbestand
+    expect(planeOhneFrist(abgeschlossen({ processedAt: ts(JETZT - TAG) }), lage({ daten: 'keine', altbestandAbgelehnt: true })).felder.status).toBe('pending');
+    // Admin-force
+    expect(planeOhneFrist(abgeschlossen({ processedAt: ts(JETZT - TAG) }), lage({ daten: 'vorhanden', erzwingen: true })).felder.status).toBe('pending');
+  });
+
+  test('OpenFoodFacts: keine Auffrischung nach Alter; Webseiten-Prüfung bleibt', () => {
+    const off = { source: 'openfood', productName: 'A', fetchedAt: ts(JETZT - 3000 * TAG) };
+    expect(openfoodAuffrischenFaellig(off, JETZT, null)).toBe(false);
+    expect(openfoodAuffrischenFaellig({ source: 'openfoodfacts', attr_ingredientStatement: 'X' }, JETZT, null)).toBe(true);
+  });
+
+  test('fristMs: nur positive Zahlen', () => {
+    expect(fristMs(60)).toBe(60 * TAG);
+    for (const v of [null, undefined, 0, -1, NaN, '60']) expect(fristMs(v)).toBe(Infinity);
   });
 });

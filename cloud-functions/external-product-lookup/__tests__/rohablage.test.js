@@ -275,11 +275,28 @@ describe('ausRohablage: Altbestand von OpenFoodFacts-Seiten wird nie übernommen
   test.each([
     ['Adresse', offAlt],
     ['nur Shop-Name', { ...offAlt, scrapedUrl: undefined }],
-    ['OpenBeautyFacts als Shop mit Domain', { ...offAlt, scrapedUrl: undefined, sourceShop: 'world.openbeautyfacts.org' }],
+    ['OpenFoodFacts als Shop mit Domain', { ...offAlt, scrapedUrl: undefined, sourceShop: 'de.openfoodfacts.org' }],
   ])('%s → null (auch ohne EAN)', (_name, d) => {
     expect(istOffWebseitenAltbestand(d)).toBe(true);
     expect(ausRohablage(d, {}, '4005500084136')).toBeNull();
     expect(ausRohablage(d, {})).toBeNull();
+  });
+
+  // Schlussprüfung 04.10.2026: der Host entscheidet zuerst. OpenBeautyFacts,
+  // OpenPetFoodFacts und Open Products Facts stehen ebenfalls unter sourceShop
+  // 'openfoodfacts', die kostenlose API (nur Lebensmittel) kann über sie
+  // nicht entscheiden — ihre Daten werden wie Shop-Altbestand übernommen.
+  test.each([
+    ['OpenBeautyFacts-Adresse', { ...offAlt, gtin: '4066447870237', scrapedUrl: 'https://world.openbeautyfacts.org/product/4066447870237/balea' }],
+    ['OpenPetFoodFacts-Adresse', { ...offAlt, gtin: '4066447870237', scrapedUrl: 'https://de.openpetfoodfacts.org/produkt/4066447870237/x' }],
+    ['Open Products Facts-Adresse', { ...offAlt, gtin: '4066447870237', scrapedUrl: 'https://world.openproductsfacts.org/product/4066447870237/x' }],
+    ['OpenBeautyFacts als Shop mit Domain', { ...offAlt, gtin: '4066447870237', scrapedUrl: undefined, sourceShop: 'world.openbeautyfacts.org' }],
+  ])('%s → kein OFF-Webseiten-Altbestand, wird übernommen', (_name, d) => {
+    expect(istOffWebseitenAltbestand(d)).toBe(false);
+    const neu = ausRohablage(d, {}, '4066447870237');
+    expect(neu).not.toBeNull();
+    expect(neu.ungeprueft).toBe(true);
+    expect(neu.daten.attr_ingredientStatement).toBe('Hafer, Zucker');
   });
 
   test('belegter Fund (fetchedAt) und Altbestand eines Shops bleiben übernehmbar', () => {

@@ -81,6 +81,13 @@ function istOpenFactsHost(host) {
   return typeof host === 'string' && /(^|\.)open(food|beauty|petfood|products)facts\.org$/i.test(host);
 }
 
+/** Nur OpenFoodFacts selbst (jede Sprachdomain) — die Datenbank, die die
+ *  kostenlose API (world.openfoodfacts.org) liefert. Schwester-Datenbanken
+ *  (OpenBeautyFacts & Co.) fragt die Abfrage nicht ab. */
+function istOpenFoodFactsHost(host) {
+  return typeof host === 'string' && /(^|\.)openfoodfacts\.org$/i.test(host);
+}
+
 /**
  * Gleicher Artikel, andere Verpackungsebene: eine GTIN-14 mit
  * Packungsindikator 1–8 (Karton, Tray) trägt dieselbe Artikelnummer wie die
@@ -143,5 +150,6 @@ module.exports = {
   RCN8_DOMAINS,
   hostGehoertZu,
   istOpenFactsHost,
+  istOpenFoodFactsHost,
   fremdeGtinInAdressen,
 };
