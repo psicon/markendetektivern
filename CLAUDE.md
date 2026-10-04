@@ -3268,6 +3268,27 @@ Patrick, 02.10.: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche",
   (2) zsh wendet in `"$b:receipt…"` den Modifier `:r` auf `$b` an —
   `git show "$b:pfad"` liefert dann Unsinn; `"${b}"':pfad'` schreiben.
 
+## Entscheidungen Patrick 04.10.2026 (nicht erneut fragen)
+
+- **Bezahlte Umfragen:** Dass keine läuft, ist GEWOLLT — eine Umfrage geht erst
+  online, wenn ein Kunde sie bucht. Nicht mehr als offenen Punkt melden.
+- **Bons: nur Kassenbons.** Rechnungen von Online-SUPERMÄRKTEN sollen
+  funktionieren, allgemeine Online-Shop-Rechnungen sind nicht vorgesehen.
+  Jede Änderung an der Dubletten-Erkennung erst nach sauberer Betrugsanalyse
+  (ClickUp 12487v2dezk) — eine Lücke dort ist direkt Geld.
+- **Kontolöschung:** nur das löschen, was den Login ermöglicht; alles andere
+  bleibt für Auswertungen. Heute löscht `konto-loeschung` (onUserDeleted)
+  zusätzlich das Profil-Dokument `users/{uid}` — Umsetzung offen, rechtliche
+  Seite (Datenschutzerklärung, Art. 17) vorher klären.
+- **Speicher:** RevealyIQ-Dienstkonten dürfen Bons und Produktfotos lesen
+  (gewollt). Ordner `bilder/` und die übrigen öffentlichen Buckets bleiben, wie
+  sie sind. Am Haupt-Bucket nur prüfen und berichten, nichts umbauen.
+- **Bewertungsbitte nach Auszahlung:** Zeitpunkt bleibt wie gebaut.
+- **Kamera iPhone Duo:** zurückgestellt (kein Testgerät), gesondert angehen.
+- **Lassen (vorerst):** BigQuery-Update, öffentliche Buttons/alte Bild-
+  Schnittstelle, Rotation des Admin-Schlüssels, Löschen der zwei alten
+  Media-Ingestor-Reste in us-central1.
+
 ## Produktentscheidung 20.09.2026: lose Ware wird angenommen
 
 Frische/lose Ware (Kräuterbund, Obst, Frischetheke) trägt keinen echten
