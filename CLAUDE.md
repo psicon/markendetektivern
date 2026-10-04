@@ -3272,17 +3272,26 @@ Patrick, 02.10.: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche",
 
 - **Bezahlte Umfragen:** Dass keine läuft, ist GEWOLLT — eine Umfrage geht erst
   online, wenn ein Kunde sie bucht. Nicht mehr als offenen Punkt melden.
-- **Bons: nur Kassenbons.** Rechnungen von Online-SUPERMÄRKTEN sollen
-  funktionieren, allgemeine Online-Shop-Rechnungen sind nicht vorgesehen.
+- **Bons: nur Kassenbons.** Screenshots eines Kassenbons aus Händler-Apps
+  (Lidl Plus, Netto …) nach einem Ladeneinkauf zählen als Kassenbon.
+  **Online-Bestellungen zählen genau dann, wenn der Händler einer UNSERER
+  Märkte ist** (Collection `discounter`): dm- und Rossmann-Online ja, Amazon
+  nein; Picnic/Knuspr nur, wenn sie als Markt aufgenommen werden.
   Jede Änderung an der Dubletten-Erkennung erst nach sauberer Betrugsanalyse
   (ClickUp 12487v2dezk) — eine Lücke dort ist direkt Geld.
+- **Mindestversions-Sperre:** vorerst nicht einbauen.
+- **Testauszahlungen 30.05.–24.06.** (Tremendous-Sandbox, Konto p***@web.de)
+  waren Patrick selbst — kein Kundenfall.
+- **Waagen-/Händlercodes:** so lassen, ClickUp 12487v2akqg geschlossen.
 - **Kontolöschung:** nur das löschen, was den Login ermöglicht; alles andere
   bleibt für Auswertungen. Heute löscht `konto-loeschung` (onUserDeleted)
   zusätzlich das Profil-Dokument `users/{uid}` — Umsetzung offen, rechtliche
   Seite (Datenschutzerklärung, Art. 17) vorher klären.
 - **Speicher:** RevealyIQ-Dienstkonten dürfen Bons und Produktfotos lesen
   (gewollt). Ordner `bilder/` und die übrigen öffentlichen Buckets bleiben, wie
-  sie sind. Am Haupt-Bucket nur prüfen und berichten, nichts umbauen.
+  sie sind. Am Haupt-Bucket nur prüfen und berichten, nichts umbauen — auch
+  den „sicheren Weg" (Katalogbilder einzeln öffentlich, Rest nur mit Login)
+  vorerst lassen.
 - **Bewertungsbitte nach Auszahlung:** Zeitpunkt bleibt wie gebaut.
 - **Kamera iPhone Duo:** zurückgestellt (kein Testgerät), gesondert angehen.
 - **Lassen (vorerst):** BigQuery-Update, öffentliche Buttons/alte Bild-
