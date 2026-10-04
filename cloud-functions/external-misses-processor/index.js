@@ -1,354 +1,129 @@
 /**
- * external-misses-processor — scheduled CF, processed pending Misses
- * aus der `external_lookup_misses`-Collection.
+ * external-misses-processor — Hintergrundsuche für gescannte, uns unbekannte
+ * Barcodes (Collection `external_lookup_misses`).
  *
  * ─── Was das tut ─────────────────────────────────────────────────────
  *
- * Wenn der Client (mobile App) eine EAN scant für die unsere Cascade
- * keine guten Daten findet, schreibt er ein Doc nach
- * `external_lookup_misses/{ean}` mit `status: 'pending'`.
+ * Findet die App für einen gescannten Barcode keine guten Daten, legt die
+ * Abfrage (external-product-lookup, `planeAbruf`) den Fall
+ * `external_lookup_misses/{ean}` an bzw. öffnet ihn wieder:
+ *   status 'pending', grund 'neu' | 'nur_openfood' | 'auffrischen',
+ *   rang = scanTage · 1e13 + lastSeenAt (höher = früher dran).
  *
- * Diese CF läuft scheduled (jede Stunde) und bearbeitet pending
- * Misses:
+ * Diese Funktion läuft alle 10 Minuten und sucht für bis zu `proLauf` Fälle
+ * über scrapeEan (nutrition-scraper) im Netz — NUR per EAN, nie per Name.
+ * Funde landen in `nutritionscrape/{ean}`; von dort übernimmt sie
+ * external-product-lookup (Trigger) in `external_products/{ean}`.
  *
- *   1. Picke bis zu BATCH_LIMIT pending Misses (sortiert nach
- *      hitCount desc → populärste EANs zuerst).
- *   2. Setze status → 'processing' (Lock, damit kein zweiter Run
- *      dieselben EANs parallel bearbeitet).
- *   3. HTTP-Call an `scrapeEan`-CF (nutrition-scraper). Die CF
- *      versucht alle whitelisted Shops (Globus, Kaufland, Rewe,
- *      Lidl, Atundo, … 30+ Domains), schreibt bei Erfolg in
- *      `nutritionscrape/{ean}`.
- *   4. Setze status → 'resolved' (bei OK) oder 'no-data' (bei
- *      all_failed/no_urls).
- *
- * Beim nächsten Mal wenn ein User die EAN scant, hat
- * `tryNutritionScrape` einen Treffer und der External-Detail-
- * Screen zeigt die echten Shop-Daten (inkl. Preis, Bild,
- * Hersteller, etc.).
- *
- * ─── Warum scheduled statt direkt vom Client ─────────────────────────
- *
- * - scrapeEan ist authentifiziert via shared secret. Wir können den
- *   nicht im Client embedden (anyone könnte teure Scrapes triggern).
- *   Server-to-server ist die einzige sichere Variante.
- * - scrapeEan ist langsam (30-180s pro EAN: Serper-Search + bis zu
- *   ~10 HTML-Fetches + Claude-Extract). Wir wollen das nicht
- *   inline im UI-Flow.
- *
- * ─── Was diese CF NICHT macht ────────────────────────────────────────
- *
- * - Keine Lookups (das macht der Client).
- * - Keinen direkten Scrape (delegiert an scrapeEan).
- * - Keine Rate-Limit-Logik pro User (ist sowieso auth'd).
+ * Steuerung ohne Deploy über `_meta/produktsuche` (src/konfig.js):
+ * aktiv, proLauf, tagesDeckel, serperMindestGuthaben. Zähler je Tag unter
+ * `_meta/produktsuche_tage/tage/{YYYY-MM-DD}` (Tagesbericht der review-console).
  *
  * ─── Status-Übergänge ─────────────────────────────────────────────────
  *
- *   pending   → processing → resolved
- *                          → no-data  (NUR wenn scrapeEan inhaltlich nichts fand)
- *                          → pending  (bei Fehler — nächste Stunde wieder)
- *                          → error    (nach MAX_ERRORS Fehlern in Folge; nicht
- *                                      „no-data“, damit man sie gezielt wieder
- *                                      öffnen kann)
- *   skipped   ← manuelle Markierung in Admin-UI
+ *   pending → uebersprungen   ungültige Nummer, Ladencode (Waage/Laden),
+ *                             steht schon im Katalog — ohne bezahlte Suche
+ *   pending → processing      Beanspruchung (Transaktion, Tagesdeckel)
+ *   pending → resolved        Fund nach abgebrochenem Aufruf (ohne Suche)
+ *   processing → resolved     Fund; oder Auffrischung ohne Fund bei einem
+ *                             früheren Fund (alte Daten bleiben)
+ *            → no-data        die Suche lief und fand nichts (inhaltlich),
+ *                             oder die Quellseite widerlegte die alten Daten
+ *            → pending        Fehler (503, Netz, Zeitlimit) — mit
+ *                             wachsender Wartezeit später erneut
+ *            → error          nach MAX_ERRORS Fehlern am Barcode in Folge
+ *                             (dienstweite Fehler zählen nicht, src/regeln.js)
  *
- * Vorfall 18.08.–01.10.2026: scrapeEan meldete bei leerem Anthropic-Guthaben
- * „all_failed“ statt eines Fehlers → ~5.400 EANs fälschlich „no-data“. Seit
- * 02.10. antwortet scrapeEan bei einem KI-Ausfall mit 503
- * (extract_unavailable); das landet hier im Fehlerzweig. `processedResult`
- * hält fest, WARUM eine EAN abgeschlossen wurde (no_urls / all_failed).
+ * Ein Fremddienst-Fehler ist nie „nichts gefunden" (Vorfall
+ * 18.08.–01.10.2026: ~5.400 EANs fälschlich 'no-data'). Die Regeln stehen
+ * als reine Funktionen in src/regeln.js, der Ablauf in src/lauf.js.
  */
 
 const functions = require('firebase-functions/v2');
 const params = require('firebase-functions/params');
 const admin = require('firebase-admin');
+const crypto = require('crypto');
+
+const { erstelleProzessor } = require('./src/lauf');
 
 if (!admin.apps.length) admin.initializeApp();
-const db = admin.firestore();
 
 const REGION = 'europe-west1';
-const MISSES_COLLECTION = 'external_lookup_misses';
 
-// scrapeEan-Aufruf braucht denselben Secret wie nutrition-scraper.
-// Im Deploy: firebase functions:secrets:set NUTRITION_SCRAPER_TRIGGER_KEY
+// scrapeEan verlangt denselben Schlüssel wie der nutrition-scraper.
 const TRIGGER_KEY = params.defineSecret('NUTRITION_SCRAPER_TRIGGER_KEY');
+// Nur zum LESEN des Serper-Guthabens (Prepaid, CLAUDE.md: Überwachung
+// Pflicht). Gesucht wird ausschließlich in scrapeEan.
+const SERPER_API_KEY = params.defineSecret('SERPER_API_KEY');
 
-const SCRAPE_EAN_URL =
-  'https://europe-west1-markendetektive-895f7.cloudfunctions.net/scrapeEan';
+const LAUF_OPTIONEN = {
+  region: REGION,
+  timeoutSeconds: 540,
+  memory: '256MiB',
+  // Ein Lauf zur Zeit genügt; die Beanspruchung ist trotzdem transaktional
+  // (Zeitplan und Handaufruf können gleichzeitig laufen).
+  maxInstances: 1,
+  secrets: [TRIGGER_KEY, SERPER_API_KEY],
+};
 
-// Pro Run-Limit. Konservativ wählen — eine scrapeEan-Iteration kann
-// 30-180s dauern, CF-Timeout ist 540s (Gen 2 default). 5 EANs ≈ max
-// 15min worst-case, passt in 540s wenn die meisten EANs early-out'en.
-// Wenn der Backlog wächst, lieber häufiger schedulen als BATCH_LIMIT
-// hochziehen (CF-Timeout-Risiko).
-const BATCH_LIMIT = 5;
-
-// Maximal-Alter eines 'processing'-Locks bevor wir ihn als verloren
-// betrachten und zurück auf 'pending' setzen. Schützt vor Worker-
-// Crashes die das Lock-Feld nie freigeben.
-const LOCK_STALE_MS = 30 * 60 * 1000; // 30 min
-
-// Nach so vielen Fehlern in Folge (scrapeEan nicht erreichbar, KI-Ausfall,
-// Zeitlimit) wird die EAN auf 'error' gestellt statt endlos jede Stunde
-// erneut Serper/Apify zu bezahlen. 'error' ist bewusst NICHT 'no-data'.
-const MAX_ERRORS = 5;
-
-// Keine neue EAN mehr anfangen, wenn der Lauf schon so lange dauert: der
-// Aufruf an scrapeEan darf bis 240 s brauchen, die Funktion endet nach 540 s.
-// Sonst würde die Funktion mitten in einer EAN beendet, und die EAN bliebe
-// auf 'processing' hängen.
-const NEUE_EAN_BIS_MS = 280_000;
+const prozessor = erstelleProzessor({
+  db: admin.firestore(),
+  FieldValue: admin.firestore.FieldValue,
+  Timestamp: admin.firestore.Timestamp,
+});
 
 // ════════════════════════════════════════════════════════════════════
-// Endpoint 1 — scheduled (production)
+// Zeitplan — alle 10 Minuten
 // ════════════════════════════════════════════════════════════════════
 
 exports.processExternalMisses = functions.scheduler.onSchedule(
-  {
-    region: REGION,
-    schedule: 'every 60 minutes',
-    timeoutSeconds: 540,
-    memory: '256MiB',
-    secrets: [TRIGGER_KEY],
-  },
+  { ...LAUF_OPTIONEN, schedule: 'every 10 minutes' },
   async () => {
-    await runProcessor(TRIGGER_KEY.value());
+    await prozessor.lauf({
+      triggerKey: TRIGGER_KEY.value(),
+      serperKey: SERPER_API_KEY.value(),
+      quelle: 'zeitplan',
+    });
   },
 );
 
 // ════════════════════════════════════════════════════════════════════
-// Endpoint 2 — manual trigger (testing)
+// Handaufruf — derselbe Lauf, dieselbe Beanspruchung, derselbe Deckel
 // ════════════════════════════════════════════════════════════════════
 //
-// Aufruf:
-//   curl 'https://europe-west1-markendetektive-895f7.cloudfunctions.net/processExternalMissesManual?key=<TRIGGER_KEY>'
+//   curl -X POST -H 'Content-Type: application/json' \
+//     -d "{\"key\":\"$TRIGGER_KEY\"}" \
+//     https://europe-west1-markendetektive-895f7.cloudfunctions.net/processExternalMissesManual
+//
+// Der Schlüssel geht nur im Body: Adressen stehen im Klartext in den
+// Zugriffsprotokollen (Befund Funktionsinventar 01.10.2026).
 
-exports.processExternalMissesManual = functions.https.onRequest(
-  {
-    region: REGION,
-    timeoutSeconds: 540,
-    memory: '256MiB',
-    secrets: [TRIGGER_KEY],
-  },
-  async (req, res) => {
-    const triggerKey = TRIGGER_KEY.value();
-    const provided = req.query?.key || req.body?.key;
-    if (!triggerKey || provided !== triggerKey) {
-      res.status(401).send('Unauthorized');
-      return;
-    }
-    try {
-      const summary = await runProcessor(triggerKey);
-      res.status(200).json(summary);
-    } catch (e) {
-      console.error('processExternalMissesManual error:', e);
-      res.status(500).send(String(e?.message || e));
-    }
-  },
-);
-
-// ════════════════════════════════════════════════════════════════════
-// Core
-// ════════════════════════════════════════════════════════════════════
-
-async function runProcessor(triggerKey) {
-  console.log('[misses-processor] start');
-
-  // 1. Stale 'processing'-Locks aufräumen (Worker-Crash-Recovery).
-  await unstickStaleLocks();
-
-  // 2. Pending Misses picken (populärste zuerst).
-  const pending = await pickPendingMisses(BATCH_LIMIT);
-  console.log(`[misses-processor] picked ${pending.length} pending misses`);
-
-  if (pending.length === 0) {
-    return { picked: 0, resolved: 0, noData: 0, errored: 0 };
-  }
-
-  let resolved = 0;
-  let noData = 0;
-  let errored = 0;
-
-  const laufStart = Date.now();
-  let ausgelassen = 0;
-  for (const miss of pending) {
-    if (Date.now() - laufStart > NEUE_EAN_BIS_MS) {
-      // Bleibt 'pending' (noch nicht gesperrt) — der nächste Lauf holt sie.
-      ausgelassen += 1;
-      continue;
-    }
-    const ean = miss.id;
-    console.log(`[misses-processor] processing ean=${ean}`);
-
-    // 3a. Lock setzen
-    try {
-      await db.collection(MISSES_COLLECTION).doc(ean).update({
-        status: 'processing',
-        lockAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-    } catch (e) {
-      console.warn(`[misses-processor] lock failed for ${ean}:`, e?.message);
-      continue;
-    }
-
-    // 3b. scrapeEan aufrufen
-    let resultStatus = 'pending';
-    let resultSource = null;
-    let resultError = null;
-    let resultCode = null;
-    const bisherigeFehler = Number(miss.get('errorCount') || 0);
-
-    try {
-      const scrapeRes = await callScrapeEan(ean, triggerKey);
-      const result = scrapeRes?.result;
-      resultCode = typeof result === 'string' ? result : null;
-      if (result === 'ok') {
-        resultStatus = 'resolved';
-        resultSource = scrapeRes.successShop || 'scraper';
-        resolved += 1;
-      } else if (result === 'all_failed' || result === 'no_urls') {
-        resultStatus = 'no-data';
-        noData += 1;
-      } else {
-        resultStatus = 'pending'; // unbekannt — beim nächsten Run nochmal
-        resultError = `unexpected scrapeEan result: ${JSON.stringify(result)}`;
-        errored += 1;
-      }
-    } catch (e) {
-      // Netzwerk-Error / Timeout / 500 → status zurück auf pending,
-      // damit der nächste Run es erneut probiert.
-      resultStatus = 'pending';
-      resultError = String(e?.message || e).slice(0, 500);
-      errored += 1;
-      console.error(`[misses-processor] scrapeEan failed for ${ean}:`, e?.message);
-    }
-
-    // 3c. Status zurückschreiben
-    try {
-      if (resultError && bisherigeFehler + 1 >= MAX_ERRORS) {
-        resultStatus = 'error';
-      }
-      const update = {
-        status: resultStatus,
-        processedAt: admin.firestore.FieldValue.serverTimestamp(),
-        processedSource: resultSource,
-        processedResult: resultCode,
-      };
-      if (resultError) {
-        update.processingError = resultError;
-        update.errorCount = admin.firestore.FieldValue.increment(1);
-      } else {
-        update.processingError = admin.firestore.FieldValue.delete();
-        update.errorCount = admin.firestore.FieldValue.delete();
-      }
-      // Lock-Feld räumen
-      update.lockAt = admin.firestore.FieldValue.delete();
-
-      await db.collection(MISSES_COLLECTION).doc(ean).update(update);
-    } catch (e) {
-      console.warn(
-        `[misses-processor] status write failed for ${ean}:`,
-        e?.message,
-      );
-    }
-  }
-
-  const summary = {
-    picked: pending.length,
-    resolved,
-    noData,
-    errored,
-    ausgelassen,
-  };
-  console.log('[misses-processor] done', summary);
-  return summary;
+function schluesselStimmt(erwartet, gegeben) {
+  if (typeof erwartet !== 'string' || !erwartet || typeof gegeben !== 'string') return false;
+  const a = Buffer.from(erwartet);
+  const b = Buffer.from(gegeben);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-/**
- * Sucht 'processing'-Docs deren lockAt älter als LOCK_STALE_MS ist und
- * setzt sie zurück auf 'pending'. Schützt vor Locks die durch Worker-
- * Crashes hängen geblieben sind.
- */
-async function unstickStaleLocks() {
+exports.processExternalMissesManual = functions.https.onRequest(LAUF_OPTIONEN, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).send('POST mit {"key": …} im Body');
+    return;
+  }
+  const triggerKey = TRIGGER_KEY.value();
+  if (!schluesselStimmt(triggerKey, req.body && req.body.key)) {
+    res.status(401).send('Unauthorized');
+    return;
+  }
   try {
-    const cutoff = admin.firestore.Timestamp.fromMillis(
-      Date.now() - LOCK_STALE_MS,
-    );
-    const snap = await db
-      .collection(MISSES_COLLECTION)
-      .where('status', '==', 'processing')
-      .where('lockAt', '<', cutoff)
-      .limit(20)
-      .get();
-    if (snap.empty) return;
-    console.log(`[misses-processor] unsticking ${snap.size} stale locks`);
-    const batch = db.batch();
-    snap.docs.forEach((d) => {
-      // Ein abgebrochener Lauf ist ein Fehler dieser EAN → mitzählen, sonst
-      // könnte eine dauerhaft hängende EAN nie 'error' erreichen.
-      batch.update(d.ref, {
-        status: 'pending',
-        lockAt: admin.firestore.FieldValue.delete(),
-        processingError: 'lock-recovery: vorheriger Run timeout/crashed',
-        errorCount: admin.firestore.FieldValue.increment(1),
-      });
+    const bericht = await prozessor.lauf({
+      triggerKey,
+      serperKey: SERPER_API_KEY.value(),
+      quelle: 'hand',
     });
-    await batch.commit();
+    res.status(200).json(bericht);
   } catch (e) {
-    // Wenn der Composite-Index fehlt (status + lockAt) failt das hier.
-    // Nicht kritisch — beim nächsten Run nochmal versuchen.
-    console.warn('[misses-processor] unstickStaleLocks failed:', e?.message);
+    console.error('processExternalMissesManual:', e);
+    res.status(500).send(String((e && e.message) || e));
   }
-}
-
-/**
- * Pickt bis zu N pending Misses. Sortiert nach hitCount desc, damit
- * populäre EANs (= viele User scannen sie) zuerst dran sind.
- */
-async function pickPendingMisses(n) {
-  try {
-    const snap = await db
-      .collection(MISSES_COLLECTION)
-      .where('status', '==', 'pending')
-      .orderBy('hitCount', 'desc')
-      .limit(n)
-      .get();
-    return snap.docs;
-  } catch (e) {
-    // Composite-Index fehlt? Fallback ohne orderBy.
-    console.warn(
-      '[misses-processor] pickPendingMisses with orderBy failed, falling back without sort:',
-      e?.message,
-    );
-    const snap = await db
-      .collection(MISSES_COLLECTION)
-      .where('status', '==', 'pending')
-      .limit(n)
-      .get();
-    return snap.docs;
-  }
-}
-
-/**
- * Macht einen HTTP-POST an scrapeEan mit dem shared trigger key.
- * Returnt das JSON-Result. Wirft bei Netzwerk-Error / non-2xx.
- */
-async function callScrapeEan(ean, triggerKey) {
-  // Node 22 hat global fetch. Der Schlüssel geht im Body, NICHT in der
-  // Adresse: Adressen landen im Klartext in den Google-Zugriffsprotokollen
-  // (Befund Funktionsinventar 01.10.2026). scrapeEan liest beides.
-  const resp = await fetch(SCRAPE_EAN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ean: String(ean), key: triggerKey }),
-    // CF-internal timeout — scrapeEan hat selbst 540s, wir kappen
-    // hier bei 240s damit wir auf jeden Fall die anderen Misses
-    // noch durchkriegen.
-    signal: AbortSignal.timeout(240_000),
-  });
-  if (!resp.ok) {
-    const txt = await resp.text().catch(() => '');
-    throw new Error(`scrapeEan ${resp.status}: ${txt.slice(0, 200)}`);
-  }
-  return await resp.json();
-}
+});

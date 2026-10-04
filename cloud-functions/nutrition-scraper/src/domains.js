@@ -267,6 +267,42 @@ function isPageGoodCandidate(html, ean) {
   return hasNutritionKw;
 }
 
+// ════════════════════════════════════════════════════════════════
+// PREIS NUR AUS DEUTSCHEN/ÖSTERREICHISCHEN SHOPS (seit 04.10.2026)
+// ════════════════════════════════════════════════════════════════
+// Die KI liest einen Preis ohne Währung. 9 von 447 gespeicherten Preisen kamen
+// aus .ch/.pl/.uk/.nl/.fr-Shops und standen als Euro da (puravita.ch,
+// houra.fr …, teils automatisch freigeschaltet über die Telemetrie).
+// Erlaubt ist ein Preis daher nur bei .de/.at — oder bei einem bekannten
+// Shop mit anderer Endung, der nachweislich in Euro für DE/AT verkauft: die
+// kuratierte SHOPS-Liste oben (atundo.com, depha.eu, fresh-store.eu …) und
+// diese gemessene Ergänzung (Preise in nutritionscrape, Sitz/Währung geprüft).
+// Bewusst NICHT: nalda.com, wirfuerstier.com (Seite nennt CHF), Service-Bund-
+// Großhändler (Nettopreise), unbekannte .com-Shops.
+const PREIS_SHOPS_DE_AT = new Set([
+  'shop-apotheke.com',       // 82 Funde, Preise EUR
+  'violey.com',              // Sitz Hof (JSON-LD addressCountry DE)
+  'lebensmittel-versand.eu', // priceCurrency EUR
+  'scandinavian-park.com',   // Grenzhandel, JSON-LD addressCountry DE, EUR
+]);
+
+/** Darf ein Preis von dieser Seite übernommen werden? Fremde Länder-Endungen
+ *  (zwei Buchstaben außer de/at/eu, auch co.uk) nie; generische Endungen nur
+ *  bei bekannten Shops. */
+function preisLandErlaubt(url) {
+  let host;
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return false;
+  }
+  const endung = host.split('.').pop();
+  if (endung === 'de' || endung === 'at') return true;
+  if (/^[a-z]{2}$/.test(endung) && endung !== 'eu') return false;
+  if (findShopByUrl(url)) return true;
+  return [...PREIS_SHOPS_DE_AT].some((d) => host === d || host.endsWith(`.${d}`));
+}
+
 /** Liefert die Shop-Konfig in Reihenfolge. */
 function getShopsInPriorityOrder() {
   return SHOPS.slice();
@@ -397,8 +433,10 @@ async function isBlacklistedDynamic(host, db) {
 module.exports = {
   SHOPS,
   BLACKLIST,
+  PREIS_SHOPS_DE_AT,
   isBlacklisted,
   isPageGoodCandidate,
+  preisLandErlaubt,
   getShopsInPriorityOrder,
   findShopByUrl,
   getShopPriority,

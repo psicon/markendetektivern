@@ -72,6 +72,8 @@ function query(sammlung, filter = []) {
     where: (f, op, v) => query(sammlung, [...filter, [f, op, v]]),
     select: () => query(sammlung, filter),
     limit: () => query(sammlung, filter),
+    // Zählabfrage wie Firestore count() (Produktsuche: wartende Barcodes).
+    count: () => ({ get: async () => { const r = await query(sammlung, filter).get(); return { data: () => ({ count: r.size }) }; } }),
     get: async () => {
       if (sammlung === 'cashback_sperren' && mockLage.sperrenFehler) throw new Error('UNAVAILABLE');
       const docs = [...mockStore.entries()]
@@ -749,5 +751,36 @@ describe('Schlussprüfung 03.10.2026: Kontosperre vor einer Ablehnung', () => {
       expect(doc('neu').status).toBe('pending');
       expect(b.offenGruende).toEqual({ schreib_fehler: 1 });
     } finally { mockDb.runTransaction = orig; }
+  });
+});
+
+describe('Morgenrunde — Zeile „Produktsuche" (unbekannte Barcodes)', () => {
+  // T0 = 03.10.2026 08:00 Berlin → Vortag 02.10.
+  const GESTERN = '_meta/produktsuche_tage/tage/2026-10-02';
+
+  it('Zahlen des Vortags stehen im Bericht, knappes Serper-Guthaben warnt', async () => {
+    einreichung('frei');
+    mockStore.set(GESTERN, { bearbeitet: 118, gefunden: 57, keineDaten: 49, fehler: 0, uebersprungen: 12, serperRest: 2500, kostenSchaetzungUsd: 1.89 });
+    mockStore.set('external_lookup_misses/4006040000011', { status: 'pending' });
+    mockStore.set('external_lookup_misses/4006040000028', { status: 'resolved' });
+    const b = await scharf();
+    expect(b.produktsuche).toMatchObject({ tag: '2026-10-02', wartend: 1, serperRest: 2500, unlesbar: false, gestern: { bearbeitet: 118, gefunden: 57 } });
+    expect(b.produktsuche.zeile).toBe('Produktsuche gestern: 118 bearbeitet, 57 gefunden, 49 ohne Daten, 12 übersprungen, 0 Fehler · ≈ 1,89 $ · Serper-Rest 2.500');
+    expect(b.warnungen.map((w) => w.code)).toContain('serper_knapp');
+    // Derselbe Stand landet im gespeicherten Bericht (Dashboard + Morgen-Chat).
+    const gespeichert = [...mockStore.entries()].find(([p]) => p.startsWith('ops_tagesberichte/'))[1];
+    expect(gespeichert.produktsuche.zeile).toBe(b.produktsuche.zeile);
+  });
+
+  it('Lesefehler kostet den Bericht nicht — nur eine gelbe Warnung', async () => {
+    einreichung('frei');
+    const orig = mockDb.doc;
+    mockDb.doc = (pfad) => (pfad.startsWith('_meta/') ? { get: async () => { throw new Error('UNAVAILABLE'); } } : orig(pfad));
+    try {
+      const b = await scharf();
+      expect(doc('frei').status).toBe('approved');
+      expect(b.produktsuche).toMatchObject({ unlesbar: true });
+      expect(b.warnungen.find((w) => w.code === 'produktsuche_unbekannt')).toMatchObject({ stufe: 'gelb' });
+    } finally { mockDb.doc = orig; }
   });
 });

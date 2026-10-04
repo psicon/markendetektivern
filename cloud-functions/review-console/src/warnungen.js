@@ -11,11 +11,17 @@
  *  • Bons hängen in der Prüfung / ohne Aktion — der Stau vom 02.09. (163 Bons
  *    seit Juli).
  *  • Morgenrunde nicht fertig geworden / Bildprüfung scheitert reihenweise.
+ *  • Produktsuche angehalten, findet nichts oder läuft nicht — 18.08.–01.10.2026:
+ *    sechs Wochen mit leerem KI-Guthaben, 5.301 Barcodes fälschlich „ohne
+ *    Daten", Serper und Apify weiter bezahlt.
  *
  * Stufen: 'rot' = heute handeln, 'gelb' = im Blick behalten.
  */
 
+const { ANGEHALTEN_TEXT, HALT_OHNE_WARNUNG, SERPER_KNAPP_FAKTOR, bezahltVon } = require('./produktsuche');
+
 const TAG_MS = 24 * 60 * 60 * 1000;
+const zahlDe = (n) => Number(n).toLocaleString('de-DE');
 
 /**
  * @param {object} k
@@ -27,6 +33,7 @@ const TAG_MS = 24 * 60 * 60 * 1000;
  * @param {{bild:boolean, gesamt:boolean, text:string[]}} k.notbremse
  * @param {{alt:string|null, neu:string}} k.regelVersion
  * @param {{scharf:boolean, bericht:object|null, abgebrochen?:boolean, laeuftNoch?:boolean, unbekannt?:boolean}} [k.bonRunde]
+ * @param {object} [k.produktsuche]  Ergebnis von produktsuche.ladeProduktsuche
  * @returns {Array<{stufe:'rot'|'gelb', code:string, text:string}>}
  */
 function warnungen(k) {
@@ -134,6 +141,55 @@ function warnungen(k) {
       : `${budget} Bons konnten nicht bezahlt werden, weil das Budget ihrer Aktion leer ist.`);
     if (bb.offen >= 5) gelb('bonrunde_offen', `${bb.offen} Bons konnte die Bon-Runde nicht entscheiden — bitte in der Prüfkonsole ansehen.`);
     if (bb.tagesKollisionen > 0) gelb('bonrunde_kollision', `Bei ${bb.tagesKollisionen} Personen lagen mehr Bons desselben Tages als das Tageslimit — welcher bezahlt wurde, entschied die Reihenfolge.`);
+  }
+
+  // ── Produktsuche (unbekannte Barcodes, src/produktsuche.js) ──────────
+  const p = k.produktsuche;
+  if (p && p.unlesbar) {
+    gelb('produktsuche_unbekannt', 'Die Zahlen der Produktsuche (unbekannte Barcodes) waren nicht lesbar — ob sie läuft, ist heute offen.');
+  } else if (p) {
+    const mindest = p.serperMindestGuthaben;
+    // Tagesdeckel und „aus" sind gewollt — keine Warnung.
+    if (p.angehalten && !HALT_OHNE_WARNUNG.has(p.angehalten)) {
+      if (p.angehalten === 'serper_guthaben') {
+        rot('produktsuche_angehalten', `Die Produktsuche ist angehalten: Serper-Guthaben ${p.serperRest == null ? 'unbekannt' : zahlDe(p.serperRest)}, Grenze ${zahlDe(mindest)}. Bitte bei Serper nachkaufen — bis dahin werden unbekannte Barcodes nicht gesucht.`);
+      } else if (p.angehalten === 'serper_guthaben_unbekannt') {
+        // Ohne Kontostand wird nichts bezahlt (fail-closed) — auch das hält an.
+        rot('produktsuche_angehalten', 'Die Produktsuche ist angehalten: das Serper-Guthaben ließ sich nicht abfragen (Schlüssel oder Serper-Konto prüfen). Bis dahin werden unbekannte Barcodes nicht gesucht.');
+      } else if (p.angehalten === 'konfig_ungueltig') {
+        const felder = (p.ungueltigeFelder || []).join(', ') || 'unbekannt';
+        rot('produktsuche_angehalten', `Die Produktsuche ist angehalten: in _meta/produktsuche steht ein ungültiger Wert (${felder}). Zahlen als ganze Zahl eintragen, aktiv als true/false — bis dahin wird nichts gesucht.`);
+      } else if (p.angehalten === 'dienst_ausfall') {
+        rot('produktsuche_angehalten', 'Die Produktsuche pausiert: zweimal hintereinander ist ein Dienst ausgefallen (KI, Suche, Schlüssel oder ein Ausrollen von scrapeEan). Sie versucht es mit wachsender Pause selbst wieder — bleibt das so, die Logs von scrapeEan prüfen.');
+      } else {
+        rot('produktsuche_angehalten', `Die Produktsuche ist angehalten (${ANGEHALTEN_TEXT[p.angehalten] || p.angehalten}).`);
+      }
+    } else if (p.aktiv && p.serperRest != null && p.serperRest < SERPER_KNAPP_FAKTOR * mindest) {
+      gelb('serper_knapp', `Serper-Guthaben wird knapp: noch ${zahlDe(p.serperRest)} Suchen, bei ${zahlDe(mindest)} hält die Produktsuche an.`);
+    }
+    const g = p.gestern;
+    const bezahlt = bezahltVon(g);
+    // Ein Fremddienst-Fehler ist kein „nichts gefunden" (scrapeEan → 503): die
+    // Barcodes bleiben offen. Viele davon heißen aber, dass etwas ausgefallen ist.
+    if (g && g.fehler >= 5 && g.fehler / bezahlt > 0.2) {
+      (g.fehler / bezahlt > 0.5 ? rot : gelb)('produktsuche_fehler', `Bei ${zahlDe(g.fehler)} von ${zahlDe(bezahlt)} Suchen gestern ist ein Fremddienst gescheitert (Shopseiten, KI oder Suche). Die Barcodes bleiben offen und werden mit wachsendem Abstand wiederholt; sind alle Shopseiten eines Barcodes zweimal hintereinander gesperrt (mindestens 6 Stunden auseinander), ruht er bis zur normalen Auffrischfrist — bezahlt wurde trotzdem.`);
+    }
+    // Die Handschrift des Vorfalls vom August: alles „ohne Daten", kein Treffer.
+    // Normal ist etwa jeder zweite Barcode ein Treffer (gemessen 02.–04.10.2026).
+    if (g && g.gefunden === 0 && g.keineDaten >= 20) {
+      rot('produktsuche_findet_nichts', `Die Produktsuche hat gestern ${zahlDe(g.keineDaten)} Barcodes ohne einen einzigen Treffer abgeschlossen — sonst ist etwa jeder zweite ein Treffer. Erst prüfen, ob ein Fremddienst (KI, Serper, Apify) ausgefallen ist; im August wurden so 5.301 Barcodes fälschlich als „ohne Daten" abgeschlossen.`);
+    }
+    // Stau oben in der Reihenfolge (Prüfrunde 3): Läufe fanden nur Fälle, die
+    // nach gesperrten Shopseiten noch warten, und bezahlten nichts. Ab einer
+    // Stunde (sechs Läufe im 10-Minuten-Takt) eine Meldung wert.
+    if (g && g.kandidatenKnapp >= 6) {
+      gelb('produktsuche_stau', `Die Produktsuche hat gestern in ${zahlDe(g.kandidatenKnapp)} Läufen nur Barcodes gefunden, die nach gesperrten Shopseiten noch warten, und deshalb nichts gesucht. Bleibt das so, sind mehr Barcodes gesperrt als sonst (Shopseiten oder Apify prüfen).`);
+    }
+    // Eingeschaltet, Barcodes warten, aber weder gestern noch heute ein Lauf.
+    const getan = (z) => (z ? z.bearbeitet + z.uebersprungen : 0);
+    if (p.aktiv && !p.pausiert && !p.angehalten && (p.wartend || 0) > 0 && getan(g) === 0 && getan(p.heute) === 0) {
+      rot('produktsuche_still', `Die Produktsuche ist eingeschaltet, hat aber seit gestern nichts bearbeitet, obwohl ${zahlDe(p.wartend)} Barcodes warten. Vermutlich läuft der Prozessor nicht (Ausrollen, Zeitplan, Schlüssel).`);
+    }
   }
 
   if (k.regelVersion && k.regelVersion.alt && k.regelVersion.alt !== k.regelVersion.neu) {
