@@ -315,6 +315,41 @@ describe('scharf — Resolver-Fehler', () => {
   });
 });
 
+// ── Scharf: Doppel-Schutz in der Buchung (04.10.2026) ────────────────────
+describe('scharf — Resolver lehnt eine Freigabe als Doppel ab', () => {
+  async function resolverDoppel({ receiptId }) {
+    const d = mockStore.get(`receipts/${receiptId}`);
+    mockStore.set(`receipts/${receiptId}`, { ...d, status: 'rejected', rejectReason: 'duplicate_content_self', reviewDecision: 'approve', cashbackCents: 0, updatedAt: ts(9999) });
+    return { ok: true, http: 200, status: 'rejected', rejectReason: 'duplicate_content_self', creditedCents: 0, capReason: 'duplicate_content_self' };
+  }
+
+  it('zählt als doppelImResolver — weder freigegeben noch abgelehnt, nichts gebucht', async () => {
+    lege('receipts/b1', bon('b1'));
+    mockResolver.mockImplementationOnce(resolverDoppel);
+    await scharf();
+    expect(bericht()).toMatchObject({ freigegeben: 0, gedeckelt: 0, abgelehnt: 0, doppelImResolver: 1, gebuchtCents: 0, technikFehler: 0, offen: 0 });
+    expect(fall('b1').ergebnis).toEqual({ http: 200, status: 'rejected', grund: 'duplicate_content_self', gebuchtCents: 0 });
+  });
+
+  it('die Reservierung kommt zurück: ein weiterer Bon derselben Aktion passt noch ins Budget', async () => {
+    lege('cashback_campaigns/sep', { budgetRemainingCents: 8, minItems: 4, cashbackPerBonCents: 8 });
+    lege('receipts/a1', bon('a1', { createdAt: ts(1000) }));
+    lege('receipts/b1', bon('b1', { userId: 'u1', createdAt: ts(2000) }));
+    mockResolver.mockImplementationOnce(resolverDoppel);
+    await scharf();
+    expect(fall('a1').ergebnis).toMatchObject({ status: 'rejected' });
+    expect(fall('b1')).toMatchObject({ entscheidung: 'freigeben', ergebnis: { status: 'approved', gebuchtCents: 8 } });
+  });
+
+  it('Zeitüberschreitung, der Resolver hat aber als Doppel abgelehnt → nachgelesen, passt', async () => {
+    lege('receipts/b1', bon('b1'));
+    mockResolver.mockImplementationOnce(async (a) => { await resolverDoppel(a); return { ok: false, http: 504, raw: 'upstream request timeout' }; });
+    await scharf();
+    expect(fall('b1')).toMatchObject({ entscheidung: 'freigeben', ergebnis: { status: 'rejected', grund: 'duplicate_content_self', gebuchtCents: 0, nachgelesen: true } });
+    expect(bericht()).toMatchObject({ doppelImResolver: 1, technikFehler: 0, offen: 0 });
+  });
+});
+
 // ── Scharf: Gründe, NICHT zu entscheiden ─────────────────────────────────
 describe('scharf — liegen lassen', () => {
   it('Bon zwischen Laden und Entscheidung neu verarbeitet (updatedAt) → offen „veraendert", kein Resolver', async () => {

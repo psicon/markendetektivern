@@ -19,11 +19,45 @@
  *   die Anschrift steht aber auf fast jedem Bon-Kopf. `merchantSubtitle` bleibt
  *   als wörtliche Zeile erhalten (Bestand + deterministischer Fallback-Parser
  *   in lib/storeAddress.js). Items/Preise/Datum unverändert.
+ * v1.5 (2026-10-04) — Belegart (`belegart`: kassenbon | app_kassenbon |
+ *   online_bestellung | sonstiges), `bestellnummer` und `bonComplete`
+ *   (Entscheidung Patrick 04.10.: nur Kassenbons; App-Kassenbons nach Einkauf
+ *   im Laden zählen; Online-Bestellungen nur bei unseren Märkten). Bei einer
+ *   Online-Bestellung KEINE Anschrift in merchantSubtitle/storeAddress — dort
+ *   stand bis v1.4 die Lieferanschrift des Kunden als „Filiale"
+ *   (bon_mtu6wj0anmcck4, mit Namen). Regel 12 (bonComplete) stand bisher nur
+ *   in der Zweitprüfung (Regel J) und gilt jetzt für jede Lesung; vorerst nur
+ *   gespeichert und gemessen, ohne Wirkung.
+ *   Gemessen 04.10. an 18 echten Bons (je eine Lesung v1.4 und v1.5): Laden-
+ *   und App-Bons gleich gut (Summe 11/11, Abgleich 10/11 bei beiden, Artikel-
+ *   folge wie gespeichert 9/11 statt 7/11), kein Laden-/App-Bon als Online-
+ *   Bestellung erkannt, 7/7 Online-Belege erkannt, 0 Anschriften. Abweichung:
+ *   zwei UNVOLLSTÄNDIGE Online-Rechnungen (Seite 1 von 4, keine Summe im Bild)
+ *   liefern jetzt totalCents null und bonComplete false — v1.4 hatte dort die
+ *   Artikelsumme als Endbetrag eingesetzt und bezahlt. Damit das bleibt
+ *   (Patrick: Online-Bestellungen unserer Märkte zählen, dm ja), setzt
+ *   lib/belegart.js bei einer Online-Bestellung ohne Endbetrag die
+ *   Artikelsumme ein und vermerkt `summeAusArtikeln: true`. Eingabe +~600
+ *   Token je Lesung.
+ *   Prüfrunde 04.10.: Regel 7 verbietet, den Händler aus Eigenmarken zu
+ *   schließen — mit geschwärztem Logo las das Modell eine Picnic-Rechnung als
+ *   „Edeka" (aus G&G), und das trifft im Resolver schon die Namensstufe.
+ *   Prüfrunde 2 (04.10.): Mit dieser Regel lieferten 4 von 4 Lidl-Plus-
+ *   Screenshots ohne Logo (Bon beginnt mit der Anschrift) `merchant: null`,
+ *   v1.4 las „Lidl". Darum gilt bei einem App-Kassenbon die sichtbare
+ *   Händler-App als Absender (Name in Kopf-, Tab- oder Navigationsleiste oder
+ *   in einer Bon-Zeile wie „Lidl Plus Rabatt") — eine gedruckte bzw. sichtbare
+ *   Angabe, kein Schluss aus Artikeln. Eine Liefer- oder Shop-App (Picnic)
+ *   zeigt ihren eigenen Namen und bleibt draußen. Nachgemessen (je eine
+ *   Lesung, scratchpad/r2-fix/v15c.js): 4/4 Lidl-Plus-Screenshots → „Lidl",
+ *   beide Picnic-Belege (ohne Kopf, geschwärzt) → merchant null →
+ *   unknown_merchant, 4 Kontroll-Bons (Kaufland, ALDI SÜD, Penny, Lidl)
+ *   unverändert.
  */
 
 'use strict';
 
-const VERSION = 'v1.4';
+const VERSION = 'v1.5';
 
 const SYSTEM_PROMPT = `\
 Du bist ein OCR-Spezialist für deutsche Kassenbons (DACH-Raum: DE, AT,
@@ -48,7 +82,17 @@ extrahieren.
    nach Rabatt aufnehmen. (Pfand-Zeilen als eigene Items mit
    category='Pfand' aufnehmen — die Zuordnung weiter unten gilt auch
    für sie.) Beachte zwingend die Sektion „Zeilen-/Preis-Zuordnung".
-7. **Merchant** = Filialname wie er ganz oben auf dem Bon steht.
+7. **Merchant** = Filialname wie er ganz oben auf dem Bon steht. Nur einen
+   sichtbar GEDRUCKTEN Händler-, Filial- oder Shopnamen übernehmen (Kopf,
+   Logo, Absender, Fußzeile) — NIE aus Artikel- oder Eigenmarkennamen
+   ableiten (z. B. „Gut & Günstig", „ja!", „K-Classic"). Ist kein Name zu
+   sehen: null.
+   Bei einem App-Kassenbon (Regel 13) ist die Händler-App der Absender: steht
+   ihr Name sichtbar in der App-Oberfläche (Kopf-, Tab- oder Navigations-
+   leiste) oder in einer Bon-Zeile (z. B. „Lidl Plus" oder „Lidl Plus
+   Rabatt"), ist merchant die Kette („Lidl"), auch wenn das Logo
+   weggescrollt ist. Zeigt die App einen Liefer- oder Shopnamen (z. B.
+   „Picnic"), ist das der merchant.
    **merchantSubtitle** = die wörtliche(n) Zusatzzeile(n) direkt unter dem
    Filialnamen (Anschrift, Filialnummer), unverändert wie gedruckt.
    **storeAddress** = die Anschrift der FILIALE aus dem Bon-Kopf, aufgeteilt:
@@ -60,7 +104,9 @@ extrahieren.
    die Filialadresse oben, nicht der Firmensitz.
 8. **Total** = der ENDBETRAG nach Rabatten.
 9. Wenn das Bild kein Kassenbon ist, setze isReceipt=false und gib
-   einen Grund in notReceiptReason.
+   einen Grund in notReceiptReason. Ein App-Kassenbon und die Rechnung
+   einer Bestellung mit Artikeln, Preisen und Summe sind Belege
+   (isReceipt=true, Belegart siehe Regel 13).
 10. Bei Manipulationsverdacht setze suspiciousManipulation=true und
     beschreibe in manipulationNotes.
 11. **bonCountry**: setze 'DE' / 'AT' / 'CH' wenn das Land erkennbar
@@ -70,6 +116,34 @@ extrahieren.
     - Adresse mit Bundesland-Hinweis
     - Währung CHF = CH (sonst EUR)
     Wenn unklar: null lassen.
+12. **bonComplete**: true nur, wenn Marktname/Kopf, die Artikelliste bis zur
+    Summe UND das Datum vollständig im Bild und lesbar sind. false, wenn der
+    Bon abgeschnitten, verdeckt oder an entscheidenden Stellen unlesbar ist.
+    null, wenn du es nicht beurteilen kannst.
+
+## Belegart (Pflicht)
+
+13. **belegart** — was für ein Beleg ist das?
+    - 'kassenbon': gedruckter Kassenbon aus einem Geschäft (Foto vom Papier).
+    - 'app_kassenbon': digitaler Kassenbon nach einem Einkauf IM LADEN —
+      Screenshot oder Ansicht aus einer Händler-App (z. B. Lidl Plus,
+      Netto-App, Kaufland-App, REWE-App) oder ein per E-Mail geschickter
+      Kassenbon eines Ladeneinkaufs. Erkennbar am Kassenbon-Aufbau mit
+      Filiale, Kasse/Bon-Nummer und Uhrzeit.
+    - 'online_bestellung': Rechnung, Lieferschein oder Bestellbestätigung
+      einer Bestellung — auch Liefer- und Abholservice (z. B. Onlineshop,
+      Lieferadresse, Bestellnummer, Versandkosten, Liefertermin).
+    - 'sonstiges': alles andere (kein Kassenbon).
+    Im Zweifel zwischen 'kassenbon' und 'app_kassenbon': 'app_kassenbon' nur,
+    wenn es sichtbar eine digitale Ansicht ist.
+14. **bestellnummer**: NUR bei 'online_bestellung' — die Bestell- oder
+    Auftragsnummer wie gedruckt. NIE eine Kunden-, Kassen-, Bon-, Filial-
+    oder Telefonnummer. Sonst null.
+15. **Bei 'online_bestellung' sind storeAddress und merchantSubtitle IMMER
+    null.** Namen von Kunden und Liefer- oder Rechnungsanschriften gehören in
+    KEIN Feld — auch nicht in merchant, raw oder notReceiptReason. merchant
+    ist bei einer Bestellung der Name des Händlers bzw. Shops, wie er
+    gedruckt ist (Regel 7) — nie aus den Artikeln geschlossen.
 
 ## Zeilen-/Preis-Zuordnung (KRITISCH — häufigste Fehlerquelle)
 
@@ -148,6 +222,15 @@ const RESPONSE_SCHEMA = {
     manipulationNotes: { type: 'string', nullable: true },
     ocrConfidence: { type: 'number', nullable: true },
     bonCountry: { type: 'string', nullable: true },
+    // v1.5: Belegart, Bestellnummer (nur Online-Bestellung), Vollständigkeit.
+    belegart: {
+      type: 'string',
+      format: 'enum',
+      enum: ['kassenbon', 'app_kassenbon', 'online_bestellung', 'sonstiges'],
+      nullable: true,
+    },
+    bestellnummer: { type: 'string', nullable: true },
+    bonComplete: { type: 'boolean', nullable: true },
   },
   required: ['isReceipt', 'items'],
 };

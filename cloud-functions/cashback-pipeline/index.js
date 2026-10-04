@@ -74,10 +74,34 @@ const { deriveStoreAddress } = require('./lib/storeAddress');
 const { resolveRegion, pickCampaignForRegion, matchesTargeting, targetingStamp } = require('./lib/targeting');
 const { aktionZumZeitpunkt, wirksameAktionId } = require('./lib/campaignZeit');
 const { laufBeginnen, laufBeenden, entscheidungBeanspruchen, entscheidungFreigeben, aktiveLaeufe, laufFeld, LAUF_MAX_MS } = require('./lib/laufAnspruch');
-const { resolveMerchant } = require('./lib/merchant');
+const { resolveMerchant, nameVerwertbar } = require('./lib/merchant');
 const { sendCashbackReady } = require('./lib/push');
 const { erstelleGastUebernahme, kontoPruefen, tokenPruefen } = require('./lib/gastUebernahme');
 const { sperreRef, istGesperrt, GRUND_KONTO_GESPERRT, GRUND_SPERRE_UNPRUEFBAR } = require('./lib/kontoSperre');
+const {
+  SCHLUESSEL_SAMMLUNG: DOPPEL_SCHLUESSEL,
+  TAGE_SAMMLUNG: DOPPEL_TAGE,
+  SUMMEN_SAMMLUNG: DOPPEL_SUMMEN,
+  MAX_TAGES_EINTRAEGE,
+  MAX_SUMMEN_EINTRAEGE,
+  identitaet: bonIdentitaet,
+  identitaetAusBon,
+  eintragAus,
+  tagesEintragAus,
+  summenEintragAus,
+  tageImFenster,
+  uhrzeitNormal,
+  doppelModi,
+  modiVermerk,
+  kontenArtikelKandidaten,
+  kontenDatumKandidaten,
+  veralteteSummenEintraege,
+  doppelUrteil,
+  grundFuer: doppelGrund,
+  schalterModus,
+} = require('./lib/doppelBon');
+const { pruefeKandidaten: bildKandidatenPruefen } = require('./lib/bildVergleich');
+const { istOnlineBestellung, belegBereinigen, onlineMerkmal } = require('./lib/belegart');
 const {
   computeDHash,
   hammingDistance,
@@ -176,6 +200,32 @@ const DHASH_DEDUP_LOOKBACK = 50;
 // klein bleibt. Großzügig (länger als jedes plausible maxAgeDays), damit die
 // Dedup-Abdeckung praktisch nicht leidet — nur unbegrenztes Wachstum verhindert.
 const DHASH_DEDUP_LOOKBACK_DAYS = 120;
+
+// Feinvergleich der dHash-Treffer (04.10.2026, lib/bildVergleich.js): nur
+// gegen Bons, die noch laufen oder Geld bekommen haben. Gegen abgelehnte und
+// unvergütete Bons ist ein Neuversuch erlaubt (wie bei der Inhaltsprüfung).
+const BILD_SPERR_STATUS = new Set(['approved', 'paid', 'matched', 'review', 'ocr_pending']);
+// Zusammen für alle Kandidaten (Download + Vergleich); danach wird gelesen.
+const BILD_FEINVERGLEICH_BUDGET_MS = 15_000;
+// Dieselbe DATEI noch einmal nach einer Ablehnung wegen eines Lesefehlers:
+// einmal neu lesen statt „schon eingereicht" (Prüfrunde 04.10.: 25 solche
+// Sperren in 30 Tagen, der App-Text „dein erster Eintrag bleibt gültig" stimmte
+// dort nicht). Nur diese Gründe — bei bon_too_old oder unknown_merchant liest
+// eine neue Lesung dasselbe, und jede Lesung kostet.
+const BYTE_NEUVERSUCH_GRUENDE = new Set([
+  'no_bon_date', 'reconciliation_delta', 'not_a_receipt', 'process_error', 'max_retries_exceeded',
+]);
+// Regeln der Buchung, ohne die der Feinvergleich nicht scharf wird: er lässt
+// Kopien durch, die der grobe dHash sperrte (Beschnitt, anders gelesene Summe,
+// geändertes Datum) — die müssen dann in der Buchung hängen bleiben.
+const BILD_FEIN_VORAUSSETZUNGEN = ['doppelSumme', 'doppelArtikel', 'doppelDatum'];
+
+/** Modus des Bild-Feinvergleichs: true nur mit allen Voraussetzungen, sonst wie 'shadow'. */
+function bildFeinModus(config = {}) {
+  const roh = schalterModus(config.bildFeinvergleich);
+  const fehlt = roh === true ? BILD_FEIN_VORAUSSETZUNGEN.filter((k) => schalterModus(config[k]) !== true) : [];
+  return { modus: fehlt.length ? 'shadow' : roh, fehlt };
+}
 
 // 86ca0wbg7 — A: Max. Verarbeitungs-Versuche pro Bon. Nach so vielen
 // fehlgeschlagenen Retries wird der Bon endgültig abgelehnt (poison message),
@@ -525,6 +575,34 @@ const DEFAULT_CONFIG = {
   // einreichen, dann Konto"). Aus = Tickets werden geprüft, aber nicht
   // eingelöst (`pausiert`). Scharf nur über cashback_config/v1, ohne Deploy.
   gastUebernahmeAktiv: false,
+  // Doppel-Schutz in der Buchung (Entscheidung Patrick 04.10.2026,
+  // lib/doppelBon.js). Je Regel false | 'shadow' | true; aus = altes
+  // Verhalten. Einträge und Schlüssel schreibt die Buchung unabhängig davon.
+  doppelSumme: false,
+  doppelKonten: false,
+  doppelArtikel: false,
+  doppelArtikelSchwelle: 0.6,
+  doppelArtikelMin: 5,
+  doppelBestellnummer: false,
+  // Gleiche Person, anderer Tag, gleiche Uhrzeit (Kopie mit geändertem Datum).
+  doppelDatum: false,
+  // Andere Person, gleicher Markt + Tag, gleiche Artikel (Uhrzeit verdeckt).
+  doppelKontenArtikel: false,
+  // Feinvergleich der dHash-Treffer beim Hochladen (lib/bildVergleich.js).
+  // true wirkt erst, wenn doppelSumme, doppelArtikel UND doppelDatum true sind.
+  bildFeinvergleich: false,
+  // Eigenmarken-Stufe des Markt-Resolvers nur noch für Ladenbons mit Uhrzeit
+  // (Picnic mit G&G ist nicht EDEKA). Ein schon bezahlter Bon behält seinen Markt.
+  eigenmarkeNurLadenbon: false,
+  // Prüfrunde 2/3: gleiche Person, Seiten einer Online-Rechnung; anderes Konto,
+  // anderer Tag (Summen-Index).
+  doppelOnlineSeite: false,
+  doppelKontenDatum: false,
+  // Ladenbon ohne verwertbaren Händlernamen streng prüfen (keine Namensstufen,
+  // kein Tippfehler-Abgleich → unknown_merchant statt meist „dm"). Aus = wie
+  // vor Prüfrunde 2. Vor true mit Patrick klären: trifft ehrliche Bons
+  // unserer Märkte ohne Logo (Lidl, Netto; REWE rettet die Umsatzsteuer-ID).
+  marktNurMitName: false,
 };
 
 const CAMPAIGNS_COL = 'cashback_campaigns';
@@ -729,6 +807,8 @@ async function writePurchasedProducts(uid, cashbackId, parsed, merchantInfo, met
           storeZip: store?.zip ?? null,
           storeCity: store?.city ?? null,
           storeStreet: store?.street ?? null,
+          // Prompt v1.5: Online-Bestellungen tragen keine Filiale (store ist dann null).
+          belegart: parsed.belegart ?? null,
           // B2B-Marker (86caf62v6): bonStatus = finaler Bon-Status; rewardEligible
           // = war der Bon angenommen/vergütet. rewardEligible=false markiert
           // valide-aber-abgelehnte Bons → der Matcher auto-matcht/Journey-schließt
@@ -752,6 +832,21 @@ async function writePurchasedProducts(uid, cashbackId, parsed, merchantInfo, met
 }
 
 /**
+ * Netto gutgeschriebener Betrag eines Bons laut Ledger (Earn − Storno), außerhalb
+ * einer Transaktion. Wirft bei einem Lesefehler — die Aufrufer behandeln das
+ * fail-closed (ledger_precheck_failed → Wiederholung, nie eine Ablehnung).
+ */
+async function nettoGutgeschrieben(uid, cashbackId) {
+  const ledgerCol = db.collection(`users/${uid}/cashback_ledger`);
+  const [earnsSnap, reversesSnap] = await Promise.all([
+    ledgerCol.where('receiptId', '==', cashbackId).where('type', '==', 'earn').get(),
+    ledgerCol.where('receiptId', '==', cashbackId).where('type', '==', 'reverse').get(),
+  ]);
+  const sum = (snap) => snap.docs.reduce((a, d) => a + (d.data().cents || 0), 0);
+  return sum(earnsSnap) - sum(reversesSnap);
+}
+
+/**
  * Idempotent ledger sync: enforce that a receiptId has AT MOST one
  * active 'earn' entry, and that the earn matches the current status.
  *
@@ -771,6 +866,33 @@ async function writePurchasedProducts(uid, cashbackId, parsed, merchantInfo, met
  * Aufwärts-Korrektur. Bestehende Gutschriften bleiben, wie sie sind — die Sperre
  * storniert nichts. Weil dies die EINZIGE Stelle ist, an der ein Bon Geld
  * bekommt, gilt das für processCashback und resolveCashbackReview gleichermaßen.
+ *
+ * Doppel-Schutz (Entscheidung Patrick 04.10.2026, lib/doppelBon.js): Aus
+ * demselben Grund prüft die Transaktion vor JEDER ersten Gutschrift, ob
+ * derselbe Bon schon bezahlt ist — gegen die bezahlten Bons der Person
+ * (`cashback_days/{Tag}.eintraege`; derselbe Tag, bei Regel datum ±8 Tage),
+ * gegen die Schlüsseldokumente `cashback_bon_schluessel/{tx_…|bo_…}` und den
+ * Tages-Index `cashback_bon_tage/{markt}_{tag}` (beide über alle Konten, „der
+ * erste gewinnt", beim Storno wieder frei). Nur der Zweig ohne aktiven Earn
+ * prüft — die Regel storniert also nie eine Gutschrift. Wirksam nur mit
+ * Schalter (`opts.doppel`, 'shadow' = nur vermerken); Einträge, Schlüssel und
+ * Summen-Index werden bei jeder Gutschrift geschrieben, damit sie beim
+ * Scharfschalten schon da sind (der Tages-Index nur, solange seine Regel
+ * läuft — Prüfrunde 3), und bei einer erneuten Zustellung um die Werte der neuen
+ * Lesung ERGÄNZT (nie ersetzt): liest sie ein anderes Datum, sperrt der Bon
+ * unter beiden Lesungen.
+ * Ob ein fremder Schlüssel oder Index-Eintrag noch gilt, entscheidet das
+ * LEDGER seines Besitzers (Earn − Storno > 0), nicht der Tageszähler — der ist
+ * abgeleitet und wandert mit einer neuen Datumslesung (Prüfrunde 04.10.: ein
+ * Schlüssel mit altem Tag galt nach dem Umhängen als frei → zweite Zahlung).
+ * Dasselbe gilt für den eigenen Tageseintrag (Prüfrunde 2): wandert ein Bon
+ * mit einer neuen Datumslesung in einen anderen Tag, bleibt sein Eintrag im
+ * alten Tag stehen (nur `receiptIds` — das Tageslimit — räumt ihn), und die
+ * Prüfung vergleicht auch gegen solche Einträge, sofern ihr Bon laut Ledger
+ * noch bezahlt ist. Summen-Index `cashback_bon_summen/{markt}_{summe}` (Regel
+ * kontenDatum, und für dieselbe Person Regel datum bis 95 Tage zurück): bei
+ * jeder Gutschrift ergänzt, beim Storno entfernt, Ledger entscheidet.
+ * opts.bon = lib/doppelBon identitaet() des Bons (fehlt → keine Prüfung).
  */
 async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, bonDateIso, campaignId, campaignMode, caps = null, opts = {}) {
   const ledgerCol = userRef.collection('cashback_ledger');
@@ -790,6 +912,17 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
   // „noch nicht gebucht", einer bucht, der andere landet im Noop-Zweig — und
   // meldete bisher trotzdem `creditedCents > 0`.
   let frischGebucht = false;
+  // Doppel-Prüfung (04.10.2026): der wirksame Treffer bzw. der erste aus der
+  // Beobachtung, alle Treffer, und ob überhaupt geprüft wurde.
+  let doppel = null;
+  let doppelTreffer = [];
+  let doppelGeprueft = false;
+  const neu = opts.bon && typeof opts.bon === 'object' ? opts.bon : null;
+  const modi = opts.doppel || doppelModi({});
+  const eintraegeVon = (snap) => {
+    const e = snap && snap.exists ? snap.data().eintraege : null;
+    return e && typeof e === 'object' ? e : {};
+  };
 
   await db.runTransaction(async (tx) => {
     // Firestore wiederholt den Callback bei Konflikt → Ergebnisfelder pro
@@ -799,6 +932,9 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
     budgetExhausted = false;
     capReason = null;
     frischGebucht = false;
+    doppel = null;
+    doppelTreffer = [];
+    doppelGeprueft = false;
     // ── Alle Reads ZUERST (Firestore-Transaktions-Regel) ──
     const earns = await tx.get(
       ledgerCol.where('receiptId', '==', cashbackId).where('type', '==', 'earn'),
@@ -844,6 +980,182 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
     const netActive = totalEarned - totalReversed;
     const wantApproved = status === 'approved' && cashbackCents > 0;
 
+    // ── Doppel-Prüfung: Lesen (alles vor dem ersten Schreiben) ──
+    // Geprüft wird nur vor einer ERSTEN Gutschrift. Ein gesperrtes Konto bucht
+    // dort ohnehin nichts — die Sperre bleibt der einzige Grund am Bon.
+    // Bei einem schon bezahlten Bon (erneute Zustellung) werden nur seine
+    // Schlüssel und sein Index-Eintrag ergänzt — dafür dieselben Lesevorgänge.
+    const ersteBuchung = wantApproved && netActive === 0;
+    const pruefen = Boolean(neu && ersteBuchung && !gesperrt);
+    const ergaenzen = Boolean(neu && wantApproved && netActive > 0);
+    // Gilt ein fremder Schlüssel / Index-Eintrag noch? Das Ledger des Besitzers
+    // entscheidet (Earn − Storno > 0) — nicht der Tageszähler, der mit einer
+    // neuen Datumslesung wandert. Nur für Treffer gelesen, also selten.
+    const lebendigMerk = new Map();
+    const lebtLautLedger = async (besitzerUid, receiptId) => {
+      const k = `${besitzerUid}/${receiptId}`;
+      if (lebendigMerk.has(k)) return lebendigMerk.get(k);
+      let netto = 0;
+      if (besitzerUid === userRef.id && receiptId === cashbackId) {
+        netto = netActive;
+      } else {
+        const snap = await tx.get(
+          db.collection(`users/${besitzerUid}/cashback_ledger`).where('receiptId', '==', receiptId),
+        );
+        for (const d of snap.docs) {
+          const x = d.data();
+          if (x.type === 'earn') netto += x.cents || 0;
+          else if (x.type === 'reverse') netto -= x.cents || 0;
+        }
+      }
+      lebendigMerk.set(k, netto > 0);
+      return netto > 0;
+    };
+    const schluesselStand = [];
+    const andere = [];
+    const kontenArtikelStand = [];
+    const kontenDatumStand = [];
+    // Tages-Index (Regel kontenArtikel): nur, solange die Regel läuft ('shadow'
+    // oder true) — dann gelesen (Kandidaten, Größenbremse) und ergänzt. Ist sie
+    // aus, wird er weder gelesen noch geschrieben (Prüfrunde 3: vorher schrieb
+    // jede Gutschrift blind und ohne wirksame Bremse hinein, und ein zu großes
+    // Dokument hätte jede weitere Buchung dieses Markt-Tages scheitern lassen).
+    let tagesIndexStand = null;
+    if ((pruefen || ergaenzen) && modi.kontenArtikel && neu.tagesIndex) {
+      const ref = db.collection(DOPPEL_TAGE).doc(neu.tagesIndex);
+      const eintraege = eintraegeVon(await tx.get(ref));
+      tagesIndexStand = { ref, eintraege, anzahl: Object.keys(eintraege).length };
+    }
+    // Summen-Index: bei jeder (möglichen) Gutschrift gelesen — für die Regel,
+    // die Größenbremse und das Aufräumen alter Einträge. Ein Dokument je Markt
+    // und Summe, Konflikte also nur bei exakt gleicher Summe im selben Markt.
+    let summenStand = null;
+    if ((pruefen || ergaenzen) && neu.summenIndex) {
+      const ref = db.collection(DOPPEL_SUMMEN).doc(neu.summenIndex);
+      const snap = await tx.get(ref);
+      summenStand = { ref, eintraege: eintraegeVon(snap) };
+    }
+    if (pruefen || ergaenzen) {
+      for (const [id, regel] of [[neu.kontenId, 'konten'], [neu.bestellHash, 'bestellung']]) {
+        if (!id) continue;
+        const ref = db.collection(DOPPEL_SCHLUESSEL).doc(id);
+        const snap = await tx.get(ref);
+        const daten = snap.exists ? snap.data() : null;
+        // Gehört der Schlüssel noch einem BEZAHLTEN Bon? Ein stornierter oder
+        // nie gebuchter Bon (Storno durch einen Stand vor diesem Umbau,
+        // Test-Reset) sperrt nichts mehr. Unvollständige Schlüssel gelten
+        // vorsichtshalber als belegt.
+        let lebendig = false;
+        if (daten && daten.receiptId && daten.receiptId !== cashbackId) {
+          lebendig = typeof daten.uid === 'string' && daten.uid
+            ? await lebtLautLedger(daten.uid, daten.receiptId)
+            : true;
+        }
+        schluesselStand.push({ id, regel, ref, daten, lebendig });
+      }
+    }
+    if (pruefen) {
+      // Bezahlte Bons derselben Person: derselbe Tag (summe/artikel) und — bei
+      // Regel datum — die Tage im Fenster. Bestand ohne Eintrag (gebucht vor
+      // diesem Umbau): die Identität aus dem Bon-Dokument, höchstens 10 Bons.
+      // `tag` nur bei ANDEREN Tagen (Regel datum); derselbe Tag ohne.
+      let bonLesungen = 0;
+      let waisenPruefungen = 0;
+      const ausTag = async (snap, andererTag) => {
+        const eintr = eintraegeVon(snap);
+        const ids = Array.isArray(snap.data()?.receiptIds) ? snap.data().receiptIds : [];
+        const tagFeld = andererTag ? { tag: andererTag } : {};
+        for (const id of ids) {
+          if (id === cashbackId) continue;
+          if (eintr[id]) {
+            andere.push({ id, eintrag: eintr[id], ...tagFeld });
+          } else if (bonLesungen < 10) {
+            bonLesungen++;
+            const bonSnap = await tx.get(db.doc(`receipts/${id}`));
+            if (bonSnap.exists) andere.push({ id, eintrag: identitaetAusBon(bonSnap.data()), ...tagFeld });
+          }
+        }
+        // Einträge ohne Platz im Tageszähler: ein bezahlter Bon, den eine neue
+        // Datumslesung in einen anderen Tag gehängt hat (Prüfrunde 2: sonst
+        // war derselbe Bon unter der alten Lesung wieder frei), oder ein Rest
+        // von .backfill-cashback-days.js. Ob er noch zählt, sagt das Ledger —
+        // je Prüfung höchstens 5 solcher Abfragen.
+        for (const [id, e] of Object.entries(eintr)) {
+          if (id === cashbackId || ids.includes(id) || !e || waisenPruefungen >= 5) continue;
+          waisenPruefungen++;
+          if (await lebtLautLedger(userRef.id, id)) andere.push({ id, eintrag: e, ...tagFeld });
+        }
+      };
+      if (modi.summe || modi.artikel || modi.seite) await ausTag(daySnap, null);
+      // Nur mit gelesenem Bon-Datum: ohne es wäre bonDay „heute" und jeder Tag
+      // im Fenster ein Zufall. Ohne Uhrzeit nur, wenn Summe und genug Artikel
+      // da sind — sonst kann die Regel nicht treffen (lib/doppelBon.js).
+      const datumKannTreffen = Boolean(neu.uhrzeit) || (Boolean(neu.summe) && neu.artikel.length >= modi.minArtikel);
+      if (modi.datum && datumKannTreffen && neu.markt && neu.tag === bonDay) {
+        for (const tag of tageImFenster(bonDay)) {
+          if (!daySnaps.has(tag)) daySnaps.set(tag, await tx.get(userRef.collection('cashback_days').doc(tag)));
+          const snap = daySnaps.get(tag);
+          if (snap.exists) await ausTag(snap, tag);
+        }
+      }
+      // Tages-Index (Regel kontenArtikel): gelesen ist er oben schon, wenn die
+      // Regel läuft. Nur die besten Treffer auf „noch bezahlt" prüfen (je eine
+      // Ledger-Abfrage).
+      if (tagesIndexStand) {
+        const kandidaten = kontenArtikelKandidaten({ bonId: cashbackId, uid: userRef.id, neu, eintraege: tagesIndexStand.eintraege, modi }).slice(0, 5);
+        for (const k of kandidaten) kontenArtikelStand.push({ ...k, lebendig: await lebtLautLedger(k.uid, k.id) });
+      }
+      // Summen-Index: Regel kontenDatum (andere Konten) und — Prüfrunde 3 —
+      // Regel datum über das Fenster des Tageszählers hinaus (dieselbe Person,
+      // bis SUMMEN_AUFBEWAHRUNG_TAGE; echter Fall 02.10.: Datum als 22. statt
+      // 02. gelesen, 20 Tage). Gelesen ist er oben schon (Größe, Aufräumen).
+      if ((modi.datum || modi.kontenDatum) && summenStand) {
+        const kandidaten = kontenDatumKandidaten({
+          bonId: cashbackId,
+          uid: userRef.id,
+          neu,
+          eintraege: summenStand.eintraege,
+          modi,
+          gleichePerson: Boolean(modi.datum),
+          fremde: Boolean(modi.kontenDatum),
+        }).slice(0, 5);
+        for (const k of kandidaten) kontenDatumStand.push({ ...k, lebendig: await lebtLautLedger(k.uid, k.id) });
+      }
+      doppelGeprueft = true;
+      const urteil = doppelUrteil({
+        bonId: cashbackId,
+        uid: userRef.id,
+        neu,
+        andere,
+        schluessel: schluesselStand.map((x) => ({
+          id: x.id,
+          regel: x.regel,
+          besitzer: x.daten && x.daten.receiptId ? { receiptId: x.daten.receiptId, uid: x.daten.uid ?? null } : null,
+          lebendig: x.lebendig,
+        })),
+        kontenArtikel: kontenArtikelStand,
+        kontenDatum: kontenDatumStand,
+        modi,
+      });
+      doppelTreffer = urteil.treffer;
+      doppel = urteil.wirksam || urteil.treffer[0] || null;
+    }
+    // Was die Gutschrift dieses Bons schon belegt hat (alle Earns zusammen).
+    const bisherSchluessel = [...new Set(earns.docs.flatMap((d) => (Array.isArray(d.data().schluessel) ? d.data().schluessel : [])))]
+      .filter((id) => typeof id === 'string' && id);
+    const bisherTagesIndex = [...new Set(earns.docs.flatMap((d) => (Array.isArray(d.data().tagesIndex) ? d.data().tagesIndex : [])))]
+      .filter((id) => typeof id === 'string' && id);
+    const bisherSummenIndex = [...new Set(earns.docs.flatMap((d) => (Array.isArray(d.data().summenIndex) ? d.data().summenIndex : [])))]
+      .filter((id) => typeof id === 'string' && id);
+    // Storno: die Schlüssel, die dieser Bon belegt hat.
+    const stornoSchluessel = [];
+    if (!wantApproved && netActive > 0) {
+      for (const id of bisherSchluessel.slice(0, 10)) {
+        const ref = db.collection(DOPPEL_SCHLUESSEL).doc(id);
+        stornoSchluessel.push({ ref, snap: await tx.get(ref) });
+      }
+    }
+
     const u = userSnap.exists ? userSnap.data() : {};
     const balance = u.cashback_balance_cents || 0;
     const lifetime = u.cashback_lifetime_cents || 0;
@@ -879,6 +1191,65 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
         { merge: true },
       );
     };
+    // Doppel-Schlüssel dieses Bons (Schreibphase): eigene behalten (Tag der
+    // aktuellen Lesung nachziehen), freie oder verwaiste übernehmen, einen
+    // noch bezahlten fremden nie anfassen. Gibt die IDs zurück, die ihm gehören.
+    const schluesselBelegen = () => {
+      const eigene = [];
+      for (const x of schluesselStand) {
+        if (x.daten && x.daten.receiptId === cashbackId) {
+          if (x.daten.tag !== bonDay) tx.set(x.ref, { tag: bonDay }, { merge: true });
+          eigene.push(x.id);
+        } else if (!x.daten || !x.daten.receiptId || !x.lebendig) {
+          tx.set(x.ref, {
+            receiptId: cashbackId,
+            uid: userRef.id,
+            regel: x.regel,
+            tag: bonDay,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          eigene.push(x.id);
+        }
+      }
+      return eigene;
+    };
+    // Eintrag im Tages-Index (Regel kontenArtikel): nur, wenn er oben gelesen
+    // wurde (Regel läuft) — so greift die Größenbremse immer. Mit weniger als
+    // 3 verschiedenen Artikeln kann er nie treffen — dann keiner.
+    const tagesIndexEintragen = () => {
+      if (!neu || !neu.tagesIndex || !tagesIndexStand) return [];
+      const eintrag = tagesEintragAus(userRef.id, neu);
+      if (eintrag.a.length < 3) return [];
+      if (tagesIndexStand.anzahl >= MAX_TAGES_EINTRAEGE && !tagesIndexStand.eintraege[cashbackId]) {
+        logger.warn('doppel-tagesindex-voll', { cashbackId, index: neu.tagesIndex, anzahl: tagesIndexStand.anzahl });
+        return [];
+      }
+      tx.set(
+        db.collection(DOPPEL_TAGE).doc(neu.tagesIndex),
+        { eintraege: { [cashbackId]: eintrag }, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+        { merge: true },
+      );
+      return [neu.tagesIndex];
+    };
+    // Eintrag im Summen-Index (Regel kontenDatum), dabei veraltete Einträge
+    // (Tag älter als SUMMEN_AUFBEWAHRUNG_TAGE) entfernen. Voll → nicht
+    // eintragen, nur melden.
+    const summenIndexEintragen = () => {
+      if (!neu || !summenStand || !neu.tag) return [];
+      const alt = veralteteSummenEintraege(summenStand.eintraege, todayBerlin());
+      const anzahl = Object.keys(summenStand.eintraege).length - alt.length;
+      if (anzahl >= MAX_SUMMEN_EINTRAEGE && !summenStand.eintraege[cashbackId]) {
+        logger.warn('doppel-summenindex-voll', { cashbackId, index: neu.summenIndex, anzahl });
+        return [];
+      }
+      const entfernen = Object.fromEntries(alt.filter((id) => id !== cashbackId).map((id) => [id, admin.firestore.FieldValue.delete()]));
+      tx.set(
+        summenStand.ref,
+        { eintraege: { ...entfernen, [cashbackId]: summenEintragAus(userRef.id, neu) }, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+        { merge: true },
+      );
+      return [neu.summenIndex];
+    };
 
     if (wantApproved && netActive === 0) {
       // First-time approval (or reapproval after a reverse).
@@ -891,6 +1262,12 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
         // weil capReason gesetzt ist — der Grund am Bon ist die Sperre.
         earnCents = 0;
         capReason = GRUND_KONTO_GESPERRT;
+      }
+      if (earnCents > 0 && doppel && doppel.modus === 'wirksam') {
+        // Derselbe Bon ist schon bezahlt (lib/doppelBon.js). Vor den Deckeln:
+        // ein Doppel soll nicht als „Tageslimit" am Bon stehen.
+        earnCents = 0;
+        capReason = doppelGrund(doppel);
       }
       if (caps) {
         if (earnCents > 0 && campaignMode && campaignId && caps.weeklyBonCap > 0) {
@@ -946,6 +1323,13 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
 
       if (earnCents > 0) {
         frischGebucht = true;
+        // Doppel-Schlüssel und Tages-Index belegen — unabhängig vom Schalter,
+        // damit sie beim Scharfschalten schon da sind. Nie einen Schlüssel
+        // überschreiben, der einem anderen, noch bezahlten Bon gehört („der
+        // erste gewinnt").
+        const eigeneSchluessel = neu ? schluesselBelegen() : [];
+        const eigeneTagesIndex = neu ? tagesIndexEintragen() : [];
+        const eigeneSummenIndex = neu ? summenIndexEintragen() : [];
         const ref = ledgerCol.doc();
         tx.set(ref, {
           type: 'earn',
@@ -955,10 +1339,17 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
           bonDate: bonDay, // Tag des Tageszählers (für den Reverse)
           balanceAfterCents: balance + earnCents,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          ...(neu ? { schluessel: eigeneSchluessel, tagesIndex: eigeneTagesIndex, summenIndex: eigeneSummenIndex } : {}),
         });
         tx.set(
           dayRef,
-          { bonDate: bonDay, receiptIds: [...dayOthers, cashbackId], updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+          {
+            bonDate: bonDay,
+            receiptIds: [...dayOthers, cashbackId],
+            // Was die Doppel-Prüfung künftiger Bons dieses Tages vergleicht.
+            ...(neu ? { eintraege: { [cashbackId]: eintragAus(neu) } } : {}),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
           { merge: true },
         );
         tx.set(
@@ -998,16 +1389,48 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
           if (!ids.includes(cashbackId)) continue;
           tx.set(
             userRef.collection('cashback_days').doc(day),
-            { bonDate: day, receiptIds: ids.filter((id) => id !== cashbackId), updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+            {
+              bonDate: day,
+              // Nur das Tageslimit räumt den alten Tag. Der Doppel-Eintrag
+              // bleibt stehen (Prüfrunde 2): sonst wäre ein zweites Foto mit
+              // der ALTEN Lesung frei. Er zählt, solange das Ledger den Bon
+              // als bezahlt führt (ausTag oben).
+              receiptIds: ids.filter((id) => id !== cashbackId),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
             { merge: true },
           );
         }
         tx.set(
           dayRef,
-          { bonDate: bonDay, receiptIds: [...dayOthers, cashbackId], updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+          {
+            bonDate: bonDay,
+            receiptIds: [...dayOthers, cashbackId],
+            ...(neu ? { eintraege: { [cashbackId]: eintragAus(neu) } } : {}),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
           { merge: true },
         );
         earns.docs.forEach((d) => tx.set(d.ref, { bonDate: bonDay }, { merge: true }));
+      } else if (neu && dayIds.includes(cashbackId) && !eintraegeVon(daySnap)[cashbackId]) {
+        // Bestand (gebucht vor dem Doppel-Schutz): den Eintrag nachtragen,
+        // damit spätere Bons dieses Tages gegen ihn verglichen werden.
+        tx.set(dayRef, { eintraege: { [cashbackId]: eintragAus(neu) } }, { merge: true });
+      }
+      if (ergaenzen) {
+        // Schlüssel und Index-Eintrag der AKTUELLEN Lesung ergänzen (Bestand
+        // ohne Schlüssel, neue Datums- oder Summenlesung). Die bisherigen
+        // bleiben: der Bon sperrt unter jeder Lesung, bis er storniert wird —
+        // sonst wäre derselbe Bon unter der alten Lesung wieder frei.
+        const schluessel = schluesselBelegen();
+        const index = neu.tagesIndex && !bisherTagesIndex.includes(neu.tagesIndex) ? tagesIndexEintragen() : [];
+        const summen = neu.summenIndex && !bisherSummenIndex.includes(neu.summenIndex) ? summenIndexEintragen() : [];
+        const alleS = [...new Set([...bisherSchluessel, ...schluessel])];
+        const alleI = [...new Set([...bisherTagesIndex, ...index])];
+        const alleSu = [...new Set([...bisherSummenIndex, ...summen])];
+        if (alleS.length !== bisherSchluessel.length || alleI.length !== bisherTagesIndex.length || alleSu.length !== bisherSummenIndex.length) {
+          tx.set(earns.docs[0].ref, { schluessel: alleS, tagesIndex: alleI, summenIndex: alleSu }, { merge: true });
+        }
       }
       if (gesperrt && cashbackCents > netActive) {
         // Eine Aufwärts-Korrektur wäre eine NEUE Gutschrift — bei gesperrtem
@@ -1070,13 +1493,37 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
       );
       // Budget zurück an die Kampagne, die ursprünglich gutgeschrieben hat.
       adjustBudget(reverseCid, netActive);
-      // Tageszähler: dieser Bon zählt an keinem Kandidaten-Tag mehr.
+      // Tageszähler: dieser Bon zählt an keinem Kandidaten-Tag mehr — und sein
+      // Doppel-Eintrag verschwindet mit (ein stornierter Bon sperrt nichts).
       for (const [day, snap] of daySnaps) {
         const ids = Array.isArray(snap.data()?.receiptIds) ? snap.data().receiptIds : [];
-        if (!ids.includes(cashbackId)) continue;
+        if (!ids.includes(cashbackId) && !eintraegeVon(snap)[cashbackId]) continue;
         tx.set(
           userRef.collection('cashback_days').doc(day),
-          { bonDate: day, receiptIds: ids.filter((id) => id !== cashbackId), updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+          {
+            bonDate: day,
+            receiptIds: ids.filter((id) => id !== cashbackId),
+            eintraege: { [cashbackId]: admin.firestore.FieldValue.delete() },
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+      }
+      // Doppel-Schlüssel und Index-Einträge freigeben, die dieser Bon belegt hatte.
+      for (const { ref, snap } of stornoSchluessel) {
+        if (snap.exists && snap.data().receiptId === cashbackId) tx.delete(ref);
+      }
+      for (const id of bisherTagesIndex.slice(0, 10)) {
+        tx.set(
+          db.collection(DOPPEL_TAGE).doc(id),
+          { eintraege: { [cashbackId]: admin.firestore.FieldValue.delete() } },
+          { merge: true },
+        );
+      }
+      for (const id of bisherSummenIndex.slice(0, 10)) {
+        tx.set(
+          db.collection(DOPPEL_SUMMEN).doc(id),
+          { eintraege: { [cashbackId]: admin.firestore.FieldValue.delete() } },
           { merge: true },
         );
       }
@@ -1084,7 +1531,7 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
     // else: not approved + no prior earn — noop.
   });
 
-  return { creditedCents, budgetExhausted, capReason, frischGebucht };
+  return { creditedCents, budgetExhausted, capReason, frischGebucht, doppel, doppelTreffer, doppelGeprueft };
 }
 
 async function verifyAuthFromRequest(req) {
@@ -1152,12 +1599,40 @@ exports.enqueueCashback = onRequest(
       return;
     }
 
+    // Wiederholter Aufruf mit derselben clientUploadId (die Antwort ging bei
+    // schwachem Empfang verloren, die App wiederholt): die bestehende
+    // Einreichung unverändert zurückgeben, BEVOR eine Dedup-Schicht läuft
+    // (Prüfrunde 2, 04.10.2026). Seit dem Neuversuch gibt es zwei Bons derselben
+    // Person mit derselben Datei; die Byte-Prüfung fand dann das ältere,
+    // abgelehnte Original und setzte den Spiegel des schon BEZAHLTEN
+    // Neuversuchs auf superseded — der Bon verschwand aus „Meine Bons".
+    // Gehört die ID einer anderen Person oder scheitert das Lesen, bleibt es
+    // beim bisherigen Weg (eine Störung ist kein Urteil).
+    if (typeof clientUploadId === 'string' && clientUploadId && !clientUploadId.includes('/')) {
+      try {
+        const eigen = await db.collection('receipts').doc(clientUploadId).get();
+        if (eigen.exists && eigen.get('userId') === uid) {
+          logger.info('enqueue-wiederholung', { uid, cashbackId: eigen.id, status: eigen.get('status') || null });
+          res.status(200).json({ cashbackId: eigen.id, status: eigen.get('status') });
+          return;
+        }
+      } catch (e) {
+        logger.warn('enqueue-wiederholung-lesen-fehlgeschlagen', { uid, err: e.message });
+      }
+    }
+
     // KEIN Daily-Cap-Block mehr beim Upload (ClickUp 86ca8hr90): der Bon soll
     // IMMER eingereicht + getrackt werden (OCR, Positionen, Journey, Ausgaben-
     // übersicht), auch wenn das Tageslimit schon erreicht ist. Das Tageslimit
     // gated nur noch die CASHBACK-Gutschrift — processCashback setzt dann
     // 'no_reward' (Bon-Datum-Semantik gegen cashback_last_bon_date), statt den
     // Upload zu verwerfen.
+
+    // Bildprüfung mit Feinvergleich (Entscheidung Patrick 04.10.2026, siehe
+    // Layer 2): Modus einmal bestimmen, er gilt für beide Schichten.
+    const fein = bildFeinModus(config);
+    const feinModus = fein.modus;
+    if (fein.fehlt.length) logger.warn('bildfeinvergleich-wartet-auf-doppelregeln', { uid, fehlt: fein.fehlt });
 
     // ─── Layer 1: exact-byte duplicate (sha256) ──────────────────────
     // Cheapest check first: caught the trivial "user retry-tapped" case
@@ -1168,8 +1643,36 @@ exports.enqueueCashback = onRequest(
       .where('capture.hash', '==', bytesHash)
       .limit(1)
       .get();
-    if (!dedupQuery.empty) {
+    // Neuversuch derselben Datei nach einem Lesefehler (nur mit scharfem
+    // Feinvergleich): höchstens einmal je Original, vermerkt am neuen Bon. Ein
+    // Fehler bei dieser Abfrage ist kein Urteil — dann bleibt es bei der Sperre
+    // wie bisher (gegen Doppelzahlung schützt ohnehin die Buchung).
+    let neuversuchVon = null;
+    // Gibt es den Neuversuch schon, verweist die Sperre auf IHN (den Bon, der
+    // zählt), nicht auf das abgelehnte Original (Prüfrunde 2).
+    let juengsterVersuch = null;
+    if (!dedupQuery.empty && feinModus === true) {
       const existing = dedupQuery.docs[0];
+      if (existing.get('status') === 'rejected' && BYTE_NEUVERSUCH_GRUENDE.has(existing.get('rejectReason'))) {
+        try {
+          const schon = await db
+            .collection('receipts')
+            .where('userId', '==', uid)
+            .where('capture.neuversuchVon', '==', existing.id)
+            .limit(1)
+            .get();
+          if (schon.empty) neuversuchVon = existing.id;
+          else juengsterVersuch = schon.docs[0];
+        } catch (e) {
+          logger.warn('bon-neuversuch-abfrage-fehlgeschlagen', { uid, err: e.message });
+        }
+      }
+      if (neuversuchVon) {
+        logger.info('bon-neuversuch-gleiche-datei', { uid, original: existing.id, grund: existing.get('rejectReason') });
+      }
+    }
+    if (!dedupQuery.empty && !neuversuchVon) {
+      const existing = juengsterVersuch || dedupQuery.docs[0];
       // If the client wrote a placeholder mirror doc with a different
       // id, mark it as superseded so it disappears from the user's
       // history (the canonical existing receipt is the source of truth).
@@ -1209,6 +1712,8 @@ exports.enqueueCashback = onRequest(
     let exifMeta = null;
     let forensicFlags = null;
     let serverBytesSize = 0;
+    // Nicht bestätigter dHash-Treffer (Feinvergleich) — landet am Bon.
+    let bildAehnlich = null;
     try {
       const bucket = admin.storage().bucket();
       const file = bucket.file(storagePath);
@@ -1248,17 +1753,36 @@ exports.enqueueCashback = onRequest(
       // catches the bit-identical pHash case after JPEG re-encoding).
       // Then Hamming-distance scan over the user's recent receipts to
       // catch crop/resave attacks where bits flip a little.
+      //
+      // Feinvergleich (Entscheidung Patrick 04.10.2026, lib/bildVergleich.js):
+      // Der grobe dHash sperrte in 30 Tagen 200 Uploads, nur 8 der 118 Bilder
+      // dahinter waren dasselbe Bild — App-Bons, Screenshots und A4-Rechnungen
+      // sehen für 64 Bit alle gleich aus, auch Abstand 0 irrt. Mit
+      // `bildFeinvergleich === true` sperrt ein Treffer nur noch, wenn ein
+      // Feinvergleich DASSELBE Bild bestätigt, und nie gegen einen abgelehnten
+      // oder unvergüteten Bon (dort ist ein Neuversuch erlaubt, wie bei der
+      // Inhaltsprüfung, LIVE_STATUSES). Alles andere wird gelesen; gegen eine
+      // Doppelzahlung schützt die Buchung (lib/doppelBon.js). Darum wirkt der
+      // Schalter erst, wenn doppelSumme, doppelArtikel UND doppelDatum true
+      // sind (bildFeinModus) — sonst wie 'shadow'. Der Feinvergleich erkennt
+      // Neuspeichern, Helligkeit und Kontrast, aber keinen Beschnitt (2 % unten
+      // weg: SSIM ~0,5); solche Kopien fängt erst die Buchung — gleicher Tag
+      // über Summe/Artikel, geändertes Datum über die Uhrzeit oder —
+      // auch mit geänderter/verdeckter Uhrzeit — über Summe UND Artikel (Regel
+      // datum, Prüfrunde 2).
+      // 'shadow' = Verhalten wie bisher, der Feinvergleich wird nur
+      // protokolliert ('forensics-feinvergleich').
       const exactDhashQuery = await db
         .collection('receipts')
         .where('userId', '==', uid)
         .where('capture.perceptualHashServer', '==', serverDhash)
-        .limit(1)
+        .limit(feinModus ? 5 : 1)
         .get();
 
-      let nearDuplicate = null;
-      if (!exactDhashQuery.empty) {
-        nearDuplicate = { doc: exactDhashQuery.docs[0], distance: 0, mode: 'dhash_exact' };
-      } else {
+      // Alle Treffer ≤ Schwelle sammeln (für den Feinvergleich nächste zuerst);
+      // das bisherige Verhalten nimmt wie gehabt den ersten.
+      const treffer = exactDhashQuery.docs.map((d) => ({ doc: d, distance: 0, mode: 'dhash_exact' }));
+      if (!treffer.length || feinModus) {
         // Hamming-distance scan: pull last N receipts that have a
         // server-dHash, compute distance client-side. This is bounded
         // by DHASH_DEDUP_LOOKBACK so cost is predictable.
@@ -1276,12 +1800,60 @@ exports.enqueueCashback = onRequest(
           .limit(DHASH_DEDUP_LOOKBACK)
           .get();
         for (const d of recentSnap.docs) {
+          if (treffer.some((t) => t.doc.id === d.id)) continue;
           const otherHash = d.get('capture.perceptualHashServer');
           if (typeof otherHash !== 'string' || otherHash.length !== serverDhash.length) continue;
           const dist = hammingDistance(serverDhash, otherHash);
           if (dist >= 0 && dist <= DHASH_DUPLICATE_THRESHOLD) {
-            nearDuplicate = { doc: d, distance: dist, mode: 'dhash_near' };
-            break;
+            treffer.push({ doc: d, distance: dist, mode: dist === 0 ? 'dhash_exact' : 'dhash_near' });
+            if (!feinModus) break;
+          }
+        }
+      }
+
+      let nearDuplicate = treffer[0] || null;
+      if (nearDuplicate && feinModus) {
+        // Nur Bons, gegen die eine Sperre überhaupt sinnvoll ist.
+        const kandidaten = treffer
+          .filter((t) => BILD_SPERR_STATUS.has(t.doc.get('status')))
+          .map((t) => ({ id: t.doc.id, distanz: t.distance, pfad: t.doc.get('storage.path') || null, treffer: t }));
+        const fein = kandidaten.length
+          ? await bildKandidatenPruefen({
+              neuBytes: bytes,
+              kandidaten,
+              laden: async (pfad) => (await bucket.file(pfad).download())[0],
+              budgetMs: BILD_FEINVERGLEICH_BUDGET_MS,
+            })
+          : { bestaetigt: null, ergebnisse: [] };
+        const naechster = treffer.slice().sort((x, y) => x.distance - y.distance)[0];
+        logger.info('forensics-feinvergleich', {
+          uid,
+          modus: feinModus === true ? 'wirksam' : 'beobachtung',
+          treffer: treffer.length,
+          gesperrtBisher: nearDuplicate.doc.id,
+          statusBisher: nearDuplicate.doc.get('status') || null,
+          neuWuerde: fein.bestaetigt ? 'sperren' : 'lesen',
+          ergebnisse: fein.ergebnisse,
+        });
+        if (feinModus === true) {
+          if (fein.bestaetigt) {
+            nearDuplicate = kandidaten.find((k) => k.id === fein.bestaetigt.kandidat).treffer;
+          } else {
+            nearDuplicate = null;
+            // Am Bon festhalten, wie nah das Bild war — für die Prüfkonsole und
+            // die Auswertung. Ein Fehler/Zeitlimit ist kein Urteil: gelesen wird
+            // trotzdem.
+            const erster = fein.ergebnisse[0] || null;
+            bildAehnlich = {
+              kandidat: erster ? erster.kandidat : naechster.doc.id,
+              distanz: erster ? erster.distanz : naechster.distance,
+              ssim: erster && Number.isFinite(erster.ssim) ? erster.ssim : null,
+              abweichung: erster && Number.isFinite(erster.abweichung) ? erster.abweichung : null,
+              seitenDiff: erster && Number.isFinite(erster.seitenDiff) ? erster.seitenDiff : null,
+              bestaetigt: false,
+              ...(erster && erster.fehler ? { fehler: erster.fehler } : {}),
+              ...(kandidaten.length ? {} : { grund: 'nur_abgelehnte_oder_unverguetete' }),
+            };
           }
         }
       }
@@ -1409,6 +1981,11 @@ exports.enqueueCashback = onRequest(
             }
           : null,
         forensicFlags: forensicFlags || null,
+        // dHash-Treffer, den der Feinvergleich NICHT bestätigt hat (04.10.2026).
+        ...(bildAehnlich ? { bildAehnlich } : {}),
+        // Dieselbe Datei wie ein wegen eines Lesefehlers abgelehnter Bon —
+        // einmal neu gelesen (04.10.2026).
+        ...(neuversuchVon ? { neuversuchVon } : {}),
       },
       storage: {
         bucket: admin.storage().bucket().name,
@@ -1572,8 +2149,75 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
       let recon;
       let escalation = { fired: false };
       const cachedOcr = receipt.ocr && receipt.ocr.parsed ? receipt.ocr : null;
+      // Eigenmarken-Stufe des Markt-Resolvers (Prompt v1.5, 04.10.2026): sie
+      // erkennt selbstständige EDEKA-/REWE-Kaufleute, deren Bonkopf die Kette
+      // nicht nennt, an den Eigenmarken. Ein Lieferdienst mit G&G-Artikeln
+      // (Picnic) ist aber nicht EDEKA — mit
+      // `cashback_config/v1.eigenmarkeNurLadenbon === true` gilt die Stufe nur
+      // noch für Ladenbons MIT Uhrzeit: nicht für Online-Bestellungen und nicht
+      // für Belege ohne Uhrzeit (ein Picnic-Beleg mit abgeschnittenem Kopf liest
+      // sich als App-Kassenbon ohne Händler; alle Picnic-/Knuspr-Belege der
+      // Messung hatten keine Uhrzeit, 26 von 28 bezahlten Bons ohne Kettennamen
+      // im Kopf hatten eine). 'shadow' protokolliert nur.
+      // Ein SCHON BEZAHLTER Bon behält die Stufe immer (Prüfrunde 04.10.): sonst
+      // würde eine erneute Zustellung nach dem Umschalten seine Gutschrift als
+      // unknown_merchant stornieren — Gates, die von approved wegführen, hängen
+      // an alreadyCredited. Die Abfrage kostet zwei Lesevorgänge und läuft nur
+      // bei scharfem Schalter; scheitert sie, wird wiederholt (fail-closed wie
+      // der Ledger-Precheck unten).
+      const eigenmarkeModus = schalterModus(config.eigenmarkeNurLadenbon);
+      const eigenmarkeWuerdeFehlen = (p) => istOnlineBestellung(p) || !uhrzeitNormal(p && p.bonTime);
+      // Schon bezahlt? Einmal je Lauf gefragt, nur wenn es eine Regel braucht
+      // (Eigenmarke scharf, Bestandsschutz des Markt-Resolvers unten).
+      let _schonBezahlt = null;
+      const schonBezahlt = async (stelle) => {
+        if (_schonBezahlt === null) {
+          try {
+            _schonBezahlt = await nettoGutgeschrieben(uid, cashbackId) > 0;
+          } catch (e) {
+            logger.warn('ledger-precheck-failed', { cashbackId, err: e.message, stelle });
+            const err = new Error(`ledger precheck failed: ${e.message}`);
+            err.code = 'ledger_precheck_failed';
+            throw err;
+          }
+        }
+        return _schonBezahlt;
+      };
+      const bonSchonBezahlt = eigenmarkeModus === true ? await schonBezahlt('eigenmarke') : false;
+      const eigenmarkeFuer = (p) => bonSchonBezahlt || !(eigenmarkeModus === true && eigenmarkeWuerdeFehlen(p));
+      // Markt-Resolver (Prüfrunde 2, 04.10.2026, lib/merchant.js): bei einer
+      // Online-Bestellung kein Tippfehler-Abgleich (fremde Shops wie „Denns"
+      // trafen Penny) und ohne gelesenen Händlernamen keine Namensstufen —
+      // ohne Schalter, das ist Patricks Regel für Online-Bestellungen.
+      // Ladenbons ohne verwertbaren Namen (Prüfrunde 3): die strenge Fassung
+      // traf ehrliche Bons UNSERER Märkte (REWE-eBon, Lidl/Netto mit
+      // abgeschnittenem Logo; ~4 Fälle in 7 Tagen) und meldete „Markt nicht
+      // dabei". Deshalb hängt sie an `cashback_config/v1.marktNurMitName`
+      // (false | 'shadow' | true, Default false = Verhalten vor Prüfrunde 2:
+      // Namensstufen auch ohne Namen, meist „dm"). Ausnahme: mit scharfem
+      // `eigenmarkeNurLadenbon` bleibt ein Beleg OHNE Uhrzeit streng — das ist
+      // der Picnic-Beleg mit abgeschnittenem Kopf (eigenmarkeFuer). Die
+      // gedruckte Umsatzsteuer-ID der Kette (Stufe 1b, `kopf`) gilt immer.
+      const marktModus = schalterModus(config.marktNurMitName);
+      const marktNachsichtig = (p) => !istOnlineBestellung(p) && marktModus !== true && eigenmarkeFuer(p);
+      const marktOptionen = (p) => ({
+        eigenmarke: eigenmarkeFuer(p),
+        fuzzy: !istOnlineBestellung(p),
+        nachsichtig: marktNachsichtig(p),
+        kopf: p ? p.merchantSubtitle ?? null : null,
+      });
       if (cachedOcr) {
-        ({ ocr, recon, escalation } = ocrFromCache(cachedOcr));
+        // Bestand vor v1.5: eine Lieferanschrift im Kopf auch hier entfernen,
+        // bevor der Final-Write das OCR-Feld neu schreibt (idempotent). Setzt
+        // die Bereinigung erst hier die Artikelsumme als Endbetrag einer
+        // Online-Rechnung ein, gilt der gespeicherte Abgleich nicht mehr.
+        const parsedBereinigt = belegBereinigen(cachedOcr.parsed);
+        const summeNeu = Boolean(parsedBereinigt && parsedBereinigt.summeAusArtikeln && !cachedOcr.parsed.summeAusArtikeln);
+        ({ ocr, recon, escalation } = ocrFromCache({
+          ...cachedOcr,
+          parsed: parsedBereinigt,
+          ...(summeNeu ? { reconciliation: null } : {}),
+        }));
       } else {
         if (OCR_ENGINE === 'cv-hybrid') {
           ocr = await extractReceiptCVHybrid(bytes, mimeType, { model: config.ocrModel });
@@ -1609,7 +2253,7 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
                 }
                 if (parsedReads.every((p) => String(p.merchant || '').trim())) {
                   const infos = await Promise.all(
-                    parsedReads.map((p) => resolveMerchant(p.merchant, p.bonCountry, p.items)),
+                    parsedReads.map((p) => resolveMerchant(p.merchant, p.bonCountry, p.items, marktOptionen(p))),
                   );
                   if (infos.every((m) => !m)) return 'unknown_merchant';
                 }
@@ -1656,6 +2300,9 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
           ocr.geminiLatencyMs = ocr.latencyMs;
           ocr.ocrText = '';
         }
+        // Belegart normalisieren, Lieferanschrift entfernen — für jede Engine
+        // (die Gemini-Lesungen tun es schon in lib/ocr.js; idempotent).
+        ocr.parsed = belegBereinigen(ocr.parsed);
 
         // 3) Reconciliation — asymmetric tolerance (Σ < total: ±200¢ for
         //    Pfand; Σ > total: only ±50¢ — that's the suspicious direction).
@@ -1920,13 +2567,59 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
       const bonDateFuture = ageDays != null && ageDays < -1;
 
       // 5) Merchant resolution against /discounter, country-aware.
-      const merchantInfo = await resolveMerchant(
+      let merchantInfo = await resolveMerchant(
         ocr.parsed.merchant,
         ocr.parsed.bonCountry,
         // Artikel mitgeben: nennt der Bonkopf die Kette nicht (selbstständige
         // EDEKA-/REWE-Kaufleute), erkennt der Resolver sie an den Eigenmarken.
         ocr.parsed.items,
+        // Online-Bestellung (Entscheidung 04.10.2026): zählt nur, wenn der
+        // HÄNDLER einer unserer Märkte ist — ein Lieferdienst mit G&G-Artikeln
+        // (Picnic) ist nicht EDEKA. Dann unknown_merchant mit dem vorhandenen
+        // App-Text („Diesen Markt unterstützen wir aktuell noch nicht").
+        marktOptionen(ocr.parsed),
       );
+      if (!merchantInfo) {
+        // Bestandsschutz: hätte der Resolver VOR der Prüfrunde 2 einen Markt
+        // gefunden und ist der Bon schon bezahlt, bleibt es dabei — sonst
+        // stornierte eine erneute Zustellung die Gutschrift als
+        // unknown_merchant (Gates, die von approved wegführen, hängen an
+        // alreadyCredited). Kostet die Ledger-Abfrage nur in diesem Fall.
+        const vorher = await resolveMerchant(ocr.parsed.merchant, ocr.parsed.bonCountry, ocr.parsed.items, { eigenmarke: true, nachsichtig: true });
+        if (vorher && await schonBezahlt('markt-bestandsschutz')) {
+          merchantInfo = vorher;
+          logger.info('markt-bestandsschutz', { cashbackId, markt: vorher.id, matchVia: vorher.matchVia });
+        }
+      }
+      if (marktModus === 'shadow' && marktNachsichtig(ocr.parsed) && !nameVerwertbar(ocr.parsed.merchant)) {
+        // Beobachtung (Prüfrunde 3): was die strenge Fassung bei diesem
+        // Ladenbon ohne Händlernamen ergäbe. Auswertung vor dem Umschalten:
+        // gcloud logging read 'jsonPayload.message="markt-ohne-namen"'.
+        const streng = await resolveMerchant(
+          ocr.parsed.merchant, ocr.parsed.bonCountry, ocr.parsed.items,
+          { ...marktOptionen(ocr.parsed), nachsichtig: false },
+        );
+        if ((streng?.id ?? null) !== (merchantInfo?.id ?? null)) {
+          logger.info('markt-ohne-namen', {
+            cashbackId,
+            jetzt: merchantInfo?.id ?? null,
+            jetztVia: merchantInfo?.matchVia ?? null,
+            streng: streng?.id ?? null,
+            strengVia: streng?.matchVia ?? null,
+            belegart: ocr.parsed.belegart ?? null,
+            mitUhrzeit: Boolean(uhrzeitNormal(ocr.parsed.bonTime)),
+            wuerde: streng ? null : 'unknown_merchant',
+          });
+        }
+      }
+      if (eigenmarkeModus === 'shadow' && merchantInfo?.matchVia === 'eigenmarke' && eigenmarkeWuerdeFehlen(ocr.parsed)) {
+        logger.info('eigenmarke-beobachtung', {
+          cashbackId,
+          markt: merchantInfo.id,
+          grund: istOnlineBestellung(ocr.parsed) ? 'online_bestellung' : 'ohne_uhrzeit',
+          wuerde: 'unknown_merchant',
+        });
+      }
       // 5a) Filialadresse (Straße/PLZ/Ort) — Entscheidung 05.09.2026: der
       //     Einkaufsort kommt vom Bon-Kopf (OCR v1.4 `storeAddress`, sonst
       //     Parser über `merchantSubtitle`), nicht aus der IP-Journey. Läuft
@@ -2135,13 +2828,7 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
       // Transaktion (caps-Parameter von syncLedgerForReceipt).
       let alreadyCredited = false;
       try {
-        const ledgerCol = db.collection(`users/${uid}/cashback_ledger`);
-        const [earnsSnap, reversesSnap] = await Promise.all([
-          ledgerCol.where('receiptId', '==', cashbackId).where('type', '==', 'earn').get(),
-          ledgerCol.where('receiptId', '==', cashbackId).where('type', '==', 'reverse').get(),
-        ]);
-        const sum = (s) => s.docs.reduce((a, d) => a + (d.data().cents || 0), 0);
-        alreadyCredited = sum(earnsSnap) - sum(reversesSnap) > 0;
+        alreadyCredited = await nettoGutgeschrieben(uid, cashbackId) > 0;
       } catch (e) {
         // FAIL-CLOSED (Backlog-Audit 02.09.): ohne diese Antwort dürfen die
         // Cap-Pre-Checks nicht laufen — sie sähen die eigene Gutschrift in den
@@ -2622,7 +3309,22 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
           },
           // Reverse-Kandidat: das GESPEICHERTE Bon-Datum (Backfill-Schlüssel),
           // falls die frische OCR-Lesung ein anderes Datum liefert.
-          { extraDays: [receipt.bonDate] },
+          // bon/doppel: Doppel-Schutz in der Buchung (04.10.2026).
+          {
+            extraDays: [receipt.bonDate],
+            bon: bonIdentitaet({
+              merchantId: merchantInfo?.id,
+              bonDate: ocr.parsed.bonDate,
+              totalCents: ocr.parsed.totalCents,
+              bonTime: ocr.parsed.bonTime,
+              items: ocr.parsed.items,
+              bestellnummer: ocr.parsed.bestellnummer,
+              // Regel seite (Prüfrunde 2): Seiten einer Online-Rechnung.
+              online: Boolean(onlineMerkmal(ocr.parsed)),
+              summeAusArtikeln: ocr.parsed.summeAusArtikeln === true,
+            }),
+            doppel: doppelModi(config),
+          },
         );
       } catch (e) {
         // Eine gescheiterte Ledger-Transaktion ist Infrastruktur, keine Aussage
@@ -2634,6 +3336,38 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
         const err = new Error(`ledger tx failed: ${e.message}`);
         err.code = 'ledger_tx_failed';
         throw err;
+      }
+      // Doppel-Schutz (04.10.2026): derselbe Bon ist schon bezahlt — dieselbe
+      // Ablehnung wie bei der Inhaltsprüfung (Schritt 5b), nur in der Buchung
+      // erkannt (gleichzeitiger Lauf, andere Lesung der Summe, Teilfoto).
+      // Keine Positionen (duplicate* steht nicht in RELIABLE_REJECT_REASONS),
+      // kein Push (frischGebucht ist false).
+      if (settle.doppelTreffer && settle.doppelTreffer.length) {
+        for (const t of settle.doppelTreffer) {
+          // Nie eine fremde uid loggen; die fremde Bon-ID nur bei derselben Person.
+          logger.warn('doppel-treffer', {
+            cashbackId,
+            regel: t.regel,
+            modus: t.modus,
+            sameUser: t.sameUser,
+            gegen: t.sameUser ? t.gegen : null,
+            anteil: t.anteil ?? null,
+            // Prüfrunde 3: in der Beobachtung getrennt auswerten.
+            andererMarkt: t.andererMarkt === true,
+            abstand: t.abstand ?? null,
+          });
+        }
+      }
+      if (status === 'approved' && settle.doppel && settle.doppel.modus === 'wirksam') {
+        status = 'rejected';
+        rejectReason = settle.capReason || doppelGrund(settle.doppel);
+        cashbackCents = 0;
+        duplicateOf = {
+          receiptId: settle.doppel.gegen,
+          sameUser: settle.doppel.sameUser,
+          priorStatus: 'approved',
+          kind: settle.doppel.regel,
+        };
       }
       // Transaktion hat den Betrag gedeckelt (Budget leer, ein Limit race-frei
       // erkannt ODER das Konto gesperrt) → Betrag + Status korrigieren, damit
@@ -2709,6 +3443,8 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
               : null,
             rejectReason,
             rejectDetail: rejectDetail ?? null,
+            // Prompt v1.5: kassenbon | app_kassenbon | online_bestellung | sonstiges.
+            belegart: ocr.parsed.belegart ?? null,
             updatedAt: now,
           },
           { merge: true },
@@ -2767,6 +3503,23 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
         transactionHash: transactionHash ?? null,
         itemsHash: itemsHash ?? null,
         duplicateOf: duplicateOf ?? null,
+        // Doppel-Schutz in der Buchung (04.10.2026): was geprüft wurde und was
+        // getroffen hätte bzw. hat — auch im Beobachtungs-Modus. Nur wenn die
+        // Buchung geprüft hat (erste Gutschrift); eine erneute Zustellung lässt
+        // den Vermerk stehen.
+        ...(settle.doppelGeprueft
+          ? {
+              doppelPruefung: {
+                modi: modiVermerk(doppelModi(config)),
+                treffer: settle.doppelTreffer,
+                at: admin.firestore.Timestamp.now(),
+              },
+            }
+          : {}),
+        // Prompt v1.5: Belegart und ob der Bon vollständig im Bild ist (vorerst
+        // nur gemessen, ohne Wirkung).
+        belegart: ocr.parsed.belegart ?? null,
+        bonVollstaendig: typeof ocr.parsed.bonComplete === 'boolean' ? ocr.parsed.bonComplete : null,
         items: Array.isArray(ocr.parsed.items)
           ? ocr.parsed.items.map((it) => ({
               raw: it.name,
@@ -3711,7 +4464,56 @@ exports.resolveCashbackReview = onRequest(
           dailyCap: Number(config.dailyCap) || 0,
           legacyFallback: config.dailyCapLegacyFallback !== false,
         },
+        // Doppel-Schutz (04.10.2026): auch eine Freigabe durch einen Menschen
+        // oder die Bon-Runde bucht keinen Bon, der schon bezahlt ist.
+        { bon: identitaetAusBon(r), doppel: doppelModi(config) },
       );
+      if (settle?.doppelTreffer?.length) {
+        for (const t of settle.doppelTreffer) {
+          logger.warn('doppel-treffer', { cashbackId: receiptId, quelle: 'resolver', regel: t.regel, modus: t.modus, sameUser: t.sameUser, gegen: t.sameUser ? t.gegen : null, anteil: t.anteil ?? null, andererMarkt: t.andererMarkt === true, abstand: t.abstand ?? null });
+        }
+      }
+      const doppelPruefung = settle?.doppelGeprueft
+        ? {
+            modi: modiVermerk(doppelModi(config)),
+            treffer: settle.doppelTreffer,
+            at: admin.firestore.Timestamp.now(),
+          }
+        : null;
+      if (settle?.doppel && settle.doppel.modus === 'wirksam') {
+        // Derselbe Bon ist schon bezahlt: Ablehnung wie in der Pipeline. Die
+        // Entscheidung des Menschen (approve) bleibt als reviewDecision stehen
+        // — eine erneute Zustellung rechnet damit dasselbe Ergebnis.
+        const rejectReason = settle.capReason || doppelGrund(settle.doppel);
+        const sameUser = settle.doppel.sameUser === true;
+        const duplicateOf = { receiptId: settle.doppel.gegen, sameUser, priorStatus: 'approved', kind: settle.doppel.regel };
+        await ref.update({
+          status: 'rejected',
+          cashbackCents: 0,
+          rejectReason,
+          duplicateOf,
+          doppelPruefung,
+          reviewDecision: 'approve',
+          entscheidungLaeuft: admin.firestore.FieldValue.delete(),
+          store: store ?? null,
+          reviewResolvedAt: ts,
+          updatedAt: ts,
+        });
+        await mirrorRef.set(
+          {
+            status: 'rejected',
+            cashbackCents: 0,
+            rejectReason,
+            ...storeMirror,
+            duplicate: { sameUser, priorReceiptId: sameUser ? duplicateOf.receiptId : null },
+            updatedAt: ts,
+          },
+          { merge: true },
+        );
+        logger.info('cashback-review-doppel', { receiptId, uid, rejectReason, regel: settle.doppel.regel });
+        res.json({ ok: true, status: 'rejected', rejectReason, creditedCents: 0, capReason: rejectReason });
+        return;
+      }
       const credited = Number(settle?.creditedCents) || 0;
       const finalStatus = credited > 0 ? 'approved' : 'no_reward';
       const finalReason = credited > 0 ? null : settle?.capReason || 'campaign_budget_exhausted';
@@ -3719,6 +4521,7 @@ exports.resolveCashbackReview = onRequest(
         status: finalStatus,
         cashbackCents: credited,
         rejectReason: finalReason,
+        ...(doppelPruefung ? { doppelPruefung } : {}),
         reviewDecision: 'approve',
         entscheidungLaeuft: admin.firestore.FieldValue.delete(),
         store: store ?? null,

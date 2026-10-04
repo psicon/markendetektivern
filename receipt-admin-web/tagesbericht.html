@@ -374,6 +374,7 @@
             ${kachel(br.abgelehnt ?? 0, `${br.dryRun ? 'würde ablehnen' : 'abgelehnt'} (doppelt)`, 'var(--nein)')}
             ${kachel(br.offen ?? 0, 'wartet auf dich', 'var(--offen)')}
             ${br.gedeckelt ? kachel(br.gedeckelt, 'freigegeben, aber ohne Prämie (Limit/Budget)') : ''}
+            ${br.doppelImResolver ? kachel(br.doppelImResolver, 'freigegeben, aber derselbe Bon war schon bezahlt (abgelehnt)', 'var(--nein)') : ''}
             ${kachel(euro(br.gebuchtCents || 0), 'gebucht', 'var(--geld)')}
           </div>
           ${offen.length ? `<div class="liste">${offen.map((f) => `<div class="fall"><a href="pruefen.html?tab=receipts&id=${encodeURIComponent(f.id)}">${esc(f.markt || 'Bon')} · ${esc(f.datum || '')}</a><span class="leer">${esc(wort[f.entscheidung] || f.entscheidung)}</span><span class="g">${esc(g(f.grund))}${f.hinweis ? ' · ' + esc(gHinweis(f.hinweis).slice(0, 140)) : ''}</span></div>`).join('')}</div>` : '<div class="leer">Nichts offen.</div>'}

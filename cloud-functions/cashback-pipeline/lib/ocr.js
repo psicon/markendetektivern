@@ -15,6 +15,7 @@
 
 const { GoogleGenAI } = require('@google/genai');
 const { vertexStandort } = require('./geminiModelle');
+const { belegBereinigen } = require('./belegart');
 const {
   SYSTEM_PROMPT,
   USER_PROMPT,
@@ -196,6 +197,11 @@ async function extractReceipt(imageBytes, mimeType, opts = {}) {
     err.finishReason = finishReason;
     throw err;
   }
+
+  // Prompt v1.5 (04.10.2026): Belegart normalisieren und bei einer Online-
+  // Bestellung die Kundenanschrift aus dem Kopf nehmen — HIER, vor jeder
+  // Speicherung (Zwischenstand, Zweitprüfung, OCR-Feld am Bon).
+  parsed = belegBereinigen(parsed);
 
   const usage = response.usageMetadata || {};
   return {

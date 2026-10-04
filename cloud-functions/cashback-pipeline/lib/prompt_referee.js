@@ -14,6 +14,9 @@
  * referee-v1 (2026-09-14) — initial (Live-Test an 13 Bons).
  * referee-v2 (2026-09-14) — ohne Grund-Hinweis und Upload-Datum, Regel H ohne
  *   ausgeschriebene Gleichung (beides lud zum Zurechtbiegen ein, Review).
+ * referee-v2+v1.5 (2026-10-04) — die frühere Regel J (bonComplete) steht
+ *   wortgleich als Regel 12 im Haupt-Prompt und gilt damit für jede Lesung;
+ *   hier entfällt sie, die frühere Regel K heißt jetzt J. Inhalt unverändert.
  */
 
 'use strict';
@@ -44,11 +47,7 @@ H. **subtotalCents** = die gedruckte Zwischensumme VOR diesen Rabatten (oft
 I. **Zahlungszeilen** (BAR, EC-Karte, Kreditkarte, Gutschein- oder
    Geschenkkarte ALS ZAHLUNGSMITTEL, eingelöste Punkte, Rückgeld) sind weder
    Items noch basketDiscounts.
-J. **bonComplete**: true nur, wenn Marktname/Kopf, die Artikelliste bis zur
-   Summe UND das Datum vollständig im Bild und lesbar sind. false, wenn der
-   Bon abgeschnitten, verdeckt oder an entscheidenden Stellen unlesbar ist.
-   null, wenn du es nicht beurteilen kannst.
-K. **Nichts erzwingen.** Passt die Summe nicht, liefere trotzdem, was
+J. **Nichts erzwingen.** Passt die Summe nicht, liefere trotzdem, was
    gedruckt ist. Unlesbare Ziffern NIE raten, damit eine Summe aufgeht.`;
 
 /**

@@ -3184,6 +3184,12 @@ vorher kommen soll.
   Scheduler), dann Schalter auf true. **Pflicht beim Aktivieren:** `gueltigBis`
   aller Tickets zurücksetzen — sie liegen seit Stufe 1 beliebig lange, und die
   Ablaufprüfung greift erst, wenn der Schalter an ist (lib/gastUebernahme.js).
+  **Ebenfalls Pflicht (Doppel-Schutz 04.10.2026):** beim Umbuchen eines Gast-
+  Bons ziehen `cashback_days/{Tag}.eintraege.{id}`, die Schlüssel in
+  `cashback_bon_schluessel` (Feld `uid`) und die Einträge in
+  `cashback_bon_tage` und `cashback_bon_summen` (Feld `u`) mit um — sonst vergleicht das Zielkonto gegen
+  nichts, und Schlüssel/Eintrag gelten als verwaist (das Gast-Ledger ist nach
+  der Umbuchung leer).
 - **Warteschlangen** führen Aufträge nur für die aktuelle uid oder eine vom Server
   BESTÄTIGTE Zuordnung (`GastUebernahme.zielVon`) aus — nie bedingungslos
   umschreiben. `docUid` behält die ursprüngliche Doc-ID der Foto-Einreichung.
@@ -3297,6 +3303,167 @@ Patrick, 02.10.: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche",
 - **Lassen (vorerst):** BigQuery-Update, öffentliche Buttons/alte Bild-
   Schnittstelle, Rotation des Admin-Schlüssels, Löschen der zwei alten
   Media-Ingestor-Reste in us-central1.
+
+## Doppelzahlungen bei Bons, Bildprüfung, Online-Belege (gebaut 04.10.2026)
+
+Patrick 04.10.: „ja, abstellen". Zweig `claude/bon-doppelzahlung`, Analyse in
+ClickUp 12487v2dezk. Alles hängt an Schaltern in `cashback_config/v1`
+(Code-Default `false` = altes Verhalten, `'shadow'` = nur am Bon vermerken).
+
+- **Der Doppel-Schutz sitzt in `syncLedgerForReceipt`** (`lib/doppelBon.js`) —
+  der EINEN Buchungsstelle für Pipeline, Resolver, Prüfkonsole und Bon-Runde.
+  Die Vorprüfung in Schritt 5b (contentHash & Co.) bleibt, ist aber KEIN Schutz
+  gegen gleichzeitige Läufe (Kaufland 04.10.: zwei Gutschriften 0,28 s
+  auseinander) und keiner bei Resolver-Freigaben. Neue Buchungswege nie an
+  `syncLedgerForReceipt` vorbei bauen und `opts.bon` (identitaet) mitgeben.
+- **Regeln** (gemessen an 14.369 Bons, 0 Fehlalarme mit Geld): `doppelSumme`
+  (Person+Markt+Tag+Endsumme gegen BEZAHLTE Bons des Tages), `doppelKonten`
+  (Markt+Tag+Uhrzeit+Summe über alle Konten, nur mit Uhrzeit),
+  `doppelArtikel` (≥ 0,6 gleiche Artikel des kleineren Bons, beide ≥ 5
+  verschiedene Artikel, ohne Pfand/Rabatt), `doppelBestellnummer`,
+  `doppelDatum` (gleiche Person+Markt+Uhrzeit, anderer Tag ±8, gleiche Summe
+  oder Artikel ≥ 0,6 — fängt die Kopie mit geändertem Datum; ohne Uhrzeit
+  nicht tragfähig, Gewohnheitskäufe erreichen 0,6), `doppelKontenArtikel`
+  (anderes Konto, gleicher Markt+Tag, Artikel ≥ 0,6 — fängt verdeckte oder
+  geänderte Uhrzeit; 89.463 Paare, alle 21 ≥ 0,6 derselbe Bon). Prüfrunde 2
+  (Angriffe mit dem echten index.js nachgestellt): `doppelDatum` greift auch
+  OHNE gleiche Uhrzeit, wenn Summe UND Artikel ≥ 0,6 passen (Datum und Uhrzeit
+  geändert; 0 von 3.834 Paaren gleiche Person/Markt über Tage mit gleicher
+  Summe); `doppelOnlineSeite` (gleiche Person+Markt+Tag, beide Belege Online-
+  Bestellungen, mindestens einer ohne gedruckten Endbetrag — die Seiten EINER
+  mehrseitigen Rechnung; verschieden gelesene Bestellnummern heben sie auf);
+  `doppelKontenDatum` (gleicher Markt+Endsumme über alle Konten, anderer Tag
+  ±8, gleiche Uhrzeit ODER Artikel ≥ 0,6 — zweites Konto mit geändertem Datum;
+  577.206 Paare, 80 mit gleicher Summe, davon 0 mit gleicher Uhrzeit oder
+  Artikel ≥ 0,6). Prüfrunde 3: `doppelDatum` liest für dieselbe Person auch den
+  Summen-Index — bis **95 Tage** Abstand, gleiche Summe plus gleiche Uhrzeit oder
+  Artikel ≥ 0,6 (echte Doppelzahlung 02.10.: Netto 93,28 €, ein Foto als
+  „22.10." gelesen und in der Prüfung freigegeben, das andere bezahlt —
+  `bon_muqq8e4v91hjae`/`bon_muqrjuzcqpewrg`, 20 Tage, Artikelnamen verlesen; in
+  95 Tagen das EINZIGE Paar gleiche Person/Summe/Uhrzeit ≥ 9 Tage).
+  `doppelKontenDatum` jenseits von 8 Tagen nur über Artikel (gleiche Summe und
+  Uhrzeit trafen dort 2 echte Zufälle). Ohne Uhrzeit zählt bei `doppelDatum`
+  auch die gleiche Artikelsumme (nur die gedruckte Endsumme geändert, Pfand-
+  Toleranz 200 ct). Regeln derselben Person vergleichen über Märkte hinweg
+  (Händlername geändert): Artikel ≥ 0,6 oder Summe mit gleicher Uhrzeit, am
+  Treffer `andererMarkt` (0 von 6.575 Paaren). Nur vor der ERSTEN Gutschrift
+  geprüft — die Regel storniert nie. Grund-Codes sind die
+  vorhandenen `duplicate_content_self/_cross_user`, `duplicateOf.kind` sagt die
+  Regel. Treffer stehen in `receipts.doppelPruefung`.
+- **Daten:** `users/{uid}/cashback_days/{Tag}.eintraege.{receiptId}` (zählt nur,
+  wenn die ID in `receiptIds` steht ODER das Ledger den Bon als bezahlt führt —
+  wandert ein Bon mit einer neuen Datumslesung, bleibt sein Eintrag im alten
+  Tag stehen, sonst wäre ein Zweitfoto mit der alten Lesung frei),
+  `cashback_bon_schluessel/{tx_…|bo_…}`,
+  `cashback_bon_tage/{markt}_{tag}.eintraege.{receiptId} = {u, a}` und
+  `cashback_bon_summen/{markt}_{summe}.eintraege.{receiptId} = {u, t, z, a}`
+  (nur Artikel-Hashes, keine Namen; alle server-only, deny-all reicht; „der
+  erste gewinnt", beim Storno frei; Summen-Einträge älter als 95 Tage räumt die
+  nächste Gutschrift — gemessen höchstens 3 Einträge je Dokument). Den Tages-
+  Index schreibt die Buchung nur, solange `doppelKontenArtikel` läuft
+  (`'shadow'`/`true`) — nur dann greift seine Größenbremse. Die Gutschrift merkt sich ihre Belegungen
+  (`earn.schluessel`, `earn.tagesIndex`, `earn.summenIndex`). **Ob ein fremder Schlüssel oder
+  Index-Eintrag noch gilt, entscheidet das LEDGER seines Besitzers** (Earn −
+  Storno > 0), nie der Tageszähler — der wandert mit einer neuen Datumslesung,
+  und ein Schlüssel mit altem Tag galt dann als frei (Prüfrunde 04.10.: zweite
+  Zahlung derselben Bestellung). Eine erneute Zustellung ERGÄNZT Schlüssel und
+  Index um die neue Lesung, ersetzt nie: der Bon sperrt unter jeder Lesung.
+- **Resolver-Freigabe kann `rejected` zurückgeben** (`creditedCents: 0`). Die
+  Bon-Runde zählt das als `doppelImResolver`, die Konsole meldet „Nicht
+  freigegeben – …". Wer einen neuen Aufrufer baut: `status` auswerten.
+- **Bildprüfung** (`bildFeinvergleich`, `lib/bildVergleich.js`): ein dHash-
+  Treffer sperrt nur noch, wenn der Feinvergleich DASSELBE Bild bestätigt
+  (SSIM ≥ 0,98 + gleiches Seitenverhältnis; genau die 6 echten unter 200
+  gemessenen Sperren), und nie gegen `rejected`/`no_reward`. Neuspeichern,
+  Helligkeit, Kontrast gelten als dasselbe Bild — die mittlere
+  Pixelabweichung ist nur Auskunft (als Kriterium erkannte sie 0 von 46
+  helleren und nur 19 von 54 neu gespeicherten Kopien). **Beschnitt erkennt der
+  Vergleich nicht** (SSIM ~0,5): solche Kopien fängt die Buchung — bei
+  geändertem Datum aber nur innerhalb von 95 Tagen (Summen-Index) und nicht in
+  den Fällen unter „Bekannte Lücken". Darum wirkt
+  der Schalter erst, wenn `doppelSumme`, `doppelArtikel` UND `doppelDatum`
+  `true` sind — sonst wie `'shadow'`. Nicht bestätigt/Fehler/Zeitlimit → Bon
+  wird gelesen, `capture.bildAehnlich` am Bon. Dieselbe DATEI nach einer
+  Ablehnung wegen eines Lesefehlers (no_bon_date, reconciliation_delta …) wird
+  einmal neu gelesen (`capture.neuversuchVon`), sonst bleibt die Byte-Sperre.
+- **Online-Belege (Prompt v1.5):** `belegart`, `bestellnummer`, `bonComplete`.
+  `lib/belegart.js` nimmt bei jeder Gemini-Lesung die Kundenanschrift aus dem
+  Kopf; `deriveStoreAddress` gibt bei Online-Merkmal null zurück — also keine
+  Filiale, keine `users.region`, keine `storeStreet`. Online-Rechnung ohne
+  Endbetrag (dm.de, Seite 1 von 3) → Artikelsumme als Endbetrag,
+  `summeAusArtikeln: true` (wie v1.4, das diese Rechnungen bezahlte).
+  `merchant` nur, wie er gedruckt ist — nie aus Eigenmarken geschlossen
+  (sonst las das Modell Picnic als „Edeka"). Die Eigenmarken-Stufe des
+  Markt-Resolvers gilt mit `eigenmarkeNurLadenbon === true` nur noch für
+  Ladenbons MIT Uhrzeit (Picnic/Knuspr haben nie eine); ein SCHON BEZAHLTER
+  Bon behält sie, sonst stornierte die erneute Zustellung. Neue
+  Online-Stichwörter nur mit Gegenprobe: „Onlineshop" stand auf einem
+  BILLA-Ladenbon und zählt deshalb nur ohne Uhrzeit.
+- **Ausrollen (Reihenfolge):** (1) `cloud-functions/cashback-pipeline/.env`
+  aus dem Haupt-Checkout in den Worktree kopieren, `cmp` prüfen — sonst fällt
+  die DocAI-Eskalation still weg; (2) `functions:cashback-pipeline` allein,
+  alle Schalter aus; per `gcloud functions describe … environmentVariables`
+  prüfen; (3) `functions:review-console` allein; (4) `hosting:md-receipt-admin`
+  (die alte `pruefen.html` meldete einen Doppel als „ohne Prämie"; neu: Zeile
+  „Doppel-Prüfung" im Bon und Kachel `doppelImResolver` im Tagesbericht); (5)
+  Schalter auf `'shadow'` und Treffer durchsehen —
+  `gcloud logging read 'jsonPayload.message="doppel-treffer"' --project=markendetektive-895f7 --freshness=7d`
+  (je Treffer Regel, Modus, `andererMarkt`, `abstand`) und
+  `jsonPayload.message="markt-ohne-namen"` für `marktNurMitName`; am Bon steht
+  derselbe Befund in `receipts.doppelPruefung.treffer`, in der Konsole als Zeile
+  „Doppel-Prüfung"; (6) auf `true`; `bildFeinvergleich` zuletzt. **Die Regeln
+  über Konten kennen nur Gutschriften NACH dem Deploy** (Schlüssel und Indizes
+  entstehen erst dann; nur die Regeln derselben Person lesen den Bestand aus
+  `receipts` — die Erweiterung von `doppelDatum` über den Summen-Index nicht,
+  ihr Rückblick wächst ab dem Deploy auf 95 Tage). Deshalb `doppelKonten` und
+  `doppelBestellnummer` frühestens **8 Tage** nach dem Deploy,
+  `doppelKontenArtikel` frühestens **8 Tage nach dem Umschalten auf `'shadow'`**
+  (erst dann entsteht der Tages-Index), `doppelKontenDatum` frühestens **16 Tage**
+  nach dem Deploy auf `true` (Bon-Alter 7 Tage, beim Summen-Index plus 8 Tage
+  Fenster) — sonst lässt ein zu frühes Scharfschalten Kopien aus der Zeit davor
+  durch. Eine Kopie mit sichtbarer Uhrzeit fängt bis dahin die alte Vorprüfung
+  (transactionHash). Optional, ohne Deploy: für `cashback_bon_tage` und
+  `cashback_bon_summen` das Feld `eintraege` vom Einzelfeld-Index ausnehmen
+  (Firestore-Admin-REST-API, PATCH `…/fields/eintraege` mit
+  `indexConfig.indexes: []` — NIE über `firestore:indexes`); keine Abfrage nutzt
+  es, und es hebt die Grenze von 40.000 Indexeinträgen je Dokument auf.
+  `doppelOnlineSeite` hängt nur an Gutschriften derselben Person und darf mit
+  `doppelSumme` zusammen scharf werden (0 Treffer in 95 Tagen).
+- **Markt-Resolver** (Prüfrunde 2): ohne gelesenen Händlernamen keine
+  Namensstufen (ein LEERER Name hatte Abstand 2 zu „dm" und wurde dm — unter
+  Prompt v1.5 lasen Lidl-Plus-Screenshots ohne Logo `merchant: null`), der
+  Tippfehler-Abgleich erst ab 3 Zeichen und nie bei Online-Bestellungen
+  („Denns Online-Shop" → Penny). **Prüfrunde 3:** für Online-Bestellungen gilt
+  das sofort (Patricks Regel); für LADENBONS hängt es am Schalter
+  `marktNurMitName` (Default `false` = wie vor Prüfrunde 2, also meist „dm"),
+  weil es ehrliche Bons unserer Märkte ablehnte und „Markt nicht dabei" zeigte
+  (REWE-eBon/-App, Lidl und Netto mit abgeschnittenem Logo; 4 bezahlte Fälle in
+  7 Tagen). Ausnahme: mit scharfem `eigenmarkeNurLadenbon` bleibt ein Beleg ohne
+  Uhrzeit streng (Picnic mit abgeschnittenem Kopf). Neu und immer aktiv:
+  Stufe 1b, die gedruckte Umsatzsteuer-ID der Kette im Bonkopf, nur ohne Namen
+  (`DE812706034` REWE, `DE132748925` Norma, `DE202748117` Penny — je ≥ 98 % ein
+  Markt). **Vor `marktNurMitName: true` mit Patrick klären**, was mit Lidl-/
+  Netto-Bons ohne Logo passiert (z. B. Kassen-Seriennummer `LDL-…`/`NTO-…`
+  als Schemafeld, oder Prüfung statt Ablehnung) — sonst lehnt `true` sie mit
+  falschem Text ab. Auswertung: Log `markt-ohne-namen` im Modus `'shadow'`. Prompt Regel 7: bei einem App-Kassenbon ist die
+  sichtbare Händler-App der Absender („Lidl Plus" → Lidl). Ein schon bezahlter
+  Bon behält den Markt, den der alte Resolver fand (`markt-bestandsschutz`).
+  Bei Ladenbons trifft der Tippfehler-Abgleich weiter kurze Wörter („Das" → dm,
+  „denns BioMarkt" → Penny, „Getränke Hoffmann" → Rossmann) — eigene Aufgabe,
+  vorher am Bestand messen.
+- **Bekannte Lücken des Doppel-Schutzes (Prüfrunde 3, bewusst offen):**
+  ANDERES Konto + geänderter Händlername (kein Index ohne Markt); anderes Konto
+  + geändertes Datum + geänderte Endsumme (bräuchte Artikelvergleich über die
+  Tages-Indizes der ±8 Tage außerhalb der Transaktion; gemessen 0 Fehlalarme
+  erst ab Anteil 0,7, niedrigster echter Doppelbon 0,71 — zu knapp für ohne
+  eigene Beobachtung); Datum > 95 Tage daneben; Bon in zwei Hälften mit kaum
+  gleichen Artikeln. Betrug über mehrere Konten (Verbünde) stoppt die
+  Kontosperre, nicht diese Regeln. Die Doppelzahlung vom 02.10.
+  (8 ct) ist bezahlt; eine Rückforderung ist nicht Teil dieses Baus.
+- **Bekannte Lücke (nicht Teil dieses Baus, gemeldet):** die Vorprüfung in
+  Schritt 5b hängt nicht an `alreadyCredited`. Sind zwei Kopien desselben Bons
+  schon BEIDE bezahlt, storniert eine erneute Zustellung der einen ihre
+  Gutschrift (`reprocess_to_rejected`) — auch die des Originals.
 
 ## Produktentscheidung 20.09.2026: lose Ware wird angenommen
 
@@ -4073,7 +4240,10 @@ Gotchas:
 - **Test-Reset eines Users:** NUR `receipts` löschen reicht NICHT (→ Doppel-
   Gutschrift, Geister-Historie, Budget-Leck). Sauber = `receipts`(des Users) +
   `cashback_status` + `purchased_products` + `cashback_ledger` + `cashback_days`
-  (Tageszähler — sonst bleibt der Tag für den User gesperrt) löschen +
+  (Tageszähler samt `eintraege` — sonst bleibt der Tag für den User gesperrt) +
+  `cashback_bon_schluessel` mit `uid` des Users und seine Einträge in
+  `cashback_bon_tage` und `cashback_bon_summen` (Doppel-Schutz seit 04.10.2026; sperren ohne Ledger nichts
+  mehr, sind aber Altlast) löschen +
   User-Cashback-Felder zurücksetzen + `budgetRemainingCents` je Kampagne um den
   vom User verbrauchten Betrag (Ledger `earn`−`reverse` je `campaignId`) zurückgeben.
 - **App-Reject-Texte ohne Hardcode:** Pipeline schreibt angewandte `maxAgeDays`

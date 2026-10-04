@@ -301,6 +301,27 @@
         support_kulanz_unknown_merchant: { titel: 'Kulanzfall aus dem Support', tun: 'Wie mit dem Support besprochen entscheiden' },
       };
       const CONFIDENCE_DE = { high: 'sicher', medium: 'mittel', low: 'unsicher', none: 'kein Ergebnis' };
+      // Doppel-Prüfung der Buchung (cashback-pipeline/lib/doppelBon.js).
+      const DOPPEL_REGEL_DE = {
+        summe: 'gleiche Summe am selben Tag',
+        konten: 'gleicher Bon in einem anderen Konto (Uhrzeit + Summe)',
+        bestellung: 'gleiche Bestellnummer',
+        seite: 'weitere Seite derselben Online-Rechnung',
+        artikel: 'gleiche Artikel am selben Tag',
+        datum: 'gleicher Bon mit anderem Datum',
+        kontenArtikel: 'gleiche Artikel in einem anderen Konto',
+        kontenDatum: 'gleicher Bon in einem anderen Konto, anderes Datum',
+      };
+      function doppelZeile(dp) {
+        const t = (dp && dp.treffer) || [];
+        if (!t.length) return '';
+        return `<div class="k">Doppel-Prüfung</div><div class="v">${t.map((x) => `${esc(DOPPEL_REGEL_DE[x.regel] || x.regel)}${
+          x.anteil != null ? ` · ${Math.round(x.anteil * 100)} % gleiche Artikel` : ''}${
+          x.sameUser === false ? ' · anderes Konto' : ''}${x.andererMarkt ? ' · anderer Markt' : ''}${
+          x.abstand ? ` · ${esc(String(x.abstand))} Tage daneben` : ''}${
+          x.gegen ? ` · <a href="pruefen.html?tab=receipts&id=${encodeURIComponent(x.gegen)}">${esc(x.gegen)}</a>` : ''}${
+          x.modus === 'beobachtung' ? ' <span style="color:var(--fg3)">· Beobachtungs-Modus, ohne Wirkung</span>' : ''}`).join('<br>')}</div>`;
+      }
       const LEDGER_DE = { earn: 'gutgeschrieben', reverse: 'storniert', payout: 'ausgezahlt' };
 
       // Antworten des Bon-Resolvers im Klartext.
@@ -338,6 +359,10 @@
         campaign_budget_exhausted: 'das Budget der Aktion ist aufgebraucht',
         technischer_fehler: 'die Buchung scheiterte auch nach Wiederholung an einem technischen Fehler — bitte melden',
         status_geaendert: 'die Einreichung war beim Buchen nicht mehr freigegeben',
+        // Doppel-Schutz in der Buchung (04.10.2026): der Resolver lehnt eine
+        // Freigabe ab, wenn derselbe Bon schon vergütet ist.
+        duplicate_content_self: 'derselbe Bon wurde dieser Person schon vergütet',
+        duplicate_content_cross_user: 'derselbe Bon wurde schon über ein anderes Konto vergütet',
       };
       const PREISBILD_DE = {
         preisschild: 'vom Preisschild',
@@ -702,6 +727,7 @@
                       r.ocrFieldAgreement.modus === 'beobachtung' ? ' · Beobachtungs-Modus, ohne Wirkung' : ''}</div>`
                   : ''
               }</div>
+              ${doppelZeile(r.doppelPruefung)}
               <div class="k">Eingereicht</div><div class="v">${esc(fmtDateTime(r.createdAt))}</div>
               <div class="k">Bisher</div><div class="v">${(c.ledger || []).length
                 ? esc(c.ledger.map((l) => `${LEDGER_DE[l.type] || l.type} ${euro(l.cents)}`).join(', '))
@@ -852,7 +878,12 @@
             const gebucht = Number(r.data.creditedCents) || 0;
             const stand = r.data.status || null;
             if (decision === 'approve') {
-              if (gebucht > 0) {
+              if (stand === 'rejected') {
+                // Doppel-Schutz in der Buchung (04.10.2026): nichts gebucht,
+                // der Bon ist als Doppel abgelehnt.
+                const warum = FOLGE_DE[r.data.rejectReason] || 'derselbe Bon wurde schon vergütet';
+                toast(`Nicht freigegeben – ${warum}`, 'bad');
+              } else if (gebucht > 0) {
                 toast(`Freigegeben · ${euro(gebucht)} gebucht`, 'good');
               } else {
                 const warum = FOLGE_DE[r.data.capReason] || FOLGE_DE[stand] || r.data.capReason || 'kein Betrag berechnet';

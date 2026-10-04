@@ -445,6 +445,9 @@ const RECEIPT_LIST_FIELDS = [
   // Ergebnis der feldweisen Prüfung — ohne das ist der Beobachtungs-Modus
   // blind: er schriebe ein Feld, das niemand liest.
   'ocrFieldAgreement',
+  // Doppel-Schutz in der Buchung und Belegart (04.10.2026) — aus demselben
+  // Grund: der Beobachtungs-Modus der Doppel-Regeln braucht einen Leser.
+  'doppelPruefung', 'belegart',
 ];
 
 function receiptRowOf(d) {
@@ -454,6 +457,17 @@ function receiptRowOf(d) {
     // Ergebnis der feldweisen Prüfung (86cbet2w1). Im Beobachtungs-Modus steht
     // hier, was das Gate im Dauer-Modus entschieden hätte.
     ocrFieldAgreement: x.ocrFieldAgreement ?? null,
+    // Doppel-Prüfung der Buchung: Schalterstand und Treffer (Regel, Modus,
+    // Gegen-Bon, Anteil gleicher Artikel). Nur für Admins sichtbar.
+    doppelPruefung: x.doppelPruefung
+      ? {
+          modi: x.doppelPruefung.modi ?? null,
+          treffer: Array.isArray(x.doppelPruefung.treffer) ? x.doppelPruefung.treffer : [],
+          at: ms(x.doppelPruefung.at),
+        }
+      : null,
+    // Prompt v1.5: kassenbon | app_kassenbon | online_bestellung | sonstiges.
+    belegart: x.belegart ?? null,
     status: safeReceiptStatus(x.status),
     userId: x.userId ?? null,
     campaignId: x.campaignId ?? null,
