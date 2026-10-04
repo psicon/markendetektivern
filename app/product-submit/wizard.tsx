@@ -950,13 +950,18 @@ export default function ProductWizardScreen() {
         {/* top bar */}
         <View style={[styles.camTop, { paddingTop: insets.top + 8 }]}>
           {editingFromReview ? (
+            // Während einer Aufnahme gesperrt wie Pills, Übersicht und
+            // Galerie: das Bild landet nach dem Tipp sonst trotzdem im Fach
+            // (gleicher Screen, onCaptured aus dem Render vor dem Tipp) —
+            // „Abbrechen“ würde das alte Foto stillschweigend ersetzen.
             <Pressable
               onPress={() => {
                 setEditingFromReview(false);
                 setPhase('review');
               }}
+              disabled={capturing}
               hitSlop={10}
-              style={styles.cancelBtn}
+              style={[styles.cancelBtn, capturing && { opacity: 0.4 }]}
             >
               <Text style={styles.cancelText}>Abbrechen</Text>
             </Pressable>

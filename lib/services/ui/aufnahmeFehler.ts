@@ -23,9 +23,13 @@ export function kameraBelegtHinweis(grund: string | null): { titel: string; text
         text: 'Öffne MarkenDetektive im Vollbild, dann kannst du direkt loslegen. Oder nimm ein Foto aus deiner Galerie.',
       };
     case 'other_client':
+      // Neutral, ohne „eine andere App“: Apple meldet diesen Grund auch,
+      // wenn eine zweite Kamerasitzung DIESER App die Kamera übernimmt
+      // (AVCaptureSession.h, VideoDeviceInUseByAnotherClient) — im
+      // Produkt-Assistenten wechseln sich zwei Kamerasitzungen ab.
       return {
-        titel: 'Die Kamera ist gerade in Benutzung',
-        text: 'Eine andere App nutzt gerade die Kamera. Sobald sie frei ist, geht’s hier weiter. Oder nimm ein Foto aus deiner Galerie.',
+        titel: 'Die Kamera ist gerade belegt',
+        text: 'Sobald sie wieder frei ist, geht’s hier direkt weiter. Oder nimm ein Foto aus deiner Galerie.',
       };
     case 'system_pressure':
       return {

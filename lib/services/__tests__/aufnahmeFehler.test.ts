@@ -74,6 +74,12 @@ describe('zeigeAufnahmeFehler', () => {
 });
 
 describe('kameraBelegtHinweis', () => {
+  it('behauptet bei „other_client“ keine fremde App (kann auch die eigene zweite Kamerasitzung sein)', () => {
+    const { titel, text } = kameraBelegtHinweis('other_client');
+    expect(`${titel} ${text}`).not.toMatch(/andere App/);
+    expect(titel).toMatch(/belegt/);
+  });
+
   it.each(['multitasking', 'other_client', 'system_pressure', null, 'ein_neuer_grund'])(
     'hat für %p einen Text mit Ausweg und ohne „gleich bereit“',
     (grund) => {

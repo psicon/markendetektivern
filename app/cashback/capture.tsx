@@ -45,6 +45,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   BonScanner,
   DEFAULT_SCANNER_TUNING,
+  detectAndCropDocument,
   isBonScannerAvailable,
   type BonScannerHandle,
   type BonScannerQuality,
@@ -58,7 +59,7 @@ import { useStandortPflicht } from '@/hooks/useStandortPflicht';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { getCashbackConfig, hasValidCashbackConsent } from '@/lib/services/cashbackService';
-import { BILDSCHIRM_WEG, aufnahmeMitGrenze } from '@/lib/services/kameraAufnahme';
+import { BILDSCHIRM_WEG, aufnahmeMitGrenze, entzerrenMitGrenze } from '@/lib/services/kameraAufnahme';
 import { zeigeAufnahmeFehler } from '@/lib/services/ui/aufnahmeFehler';
 import { buildCapturedBon } from '@/lib/utils/cashbackImage';
 
@@ -410,14 +411,8 @@ export default function CashbackCaptureScreen() {
       // cropped bon; on null (no clear quad / Android stub / detect
       // error) we send the RAW frame — Gemini OCR copes with
       // backgrounds, and we never bounce the user through a manual crop.
-      let outUri = photo.uri;
-      try {
-        const { detectAndCropDocument } = await import('bon-edge-detector');
-        const auto = await detectAndCropDocument(photo.uri);
-        if (auto) outUri = auto.uri;
-      } catch (e: any) {
-        console.warn('⚠️ auto-crop unavailable, sending raw frame:', e?.message);
-      }
+      // Mit Zeitgrenze: hängt das Entzerren, geht es mit dem Rohbild weiter.
+      const outUri = await entzerrenMitGrenze(photo.uri, detectAndCropDocument);
       await goReview(outUri, 'live_camera');
     } catch (error: any) {
       // Screen inzwischen verlassen: kein Hinweis über einer fremden Seite.
@@ -491,14 +486,10 @@ export default function CashbackCaptureScreen() {
       // we send the RAW image straight to Review — Gemini OCR is
       // robust enough to extract items from photos with backgrounds.
       // We never bounce the user through a manual crop step.
-      let outUri = a.uri;
-      try {
-        const { detectAndCropDocument } = await import('bon-edge-detector');
-        const auto = await detectAndCropDocument(a.uri);
-        if (auto) outUri = auto.uri;
-      } catch (e: any) {
-        console.warn('⚠️ auto-crop unavailable, sending raw image:', e?.message);
-      }
+      // Mit Zeitgrenze: der Auslöser zeigt solange einen Spinner und darf an
+      // diesem nativen await nicht endlos drehen — hängt das Entzerren, geht
+      // es mit dem Rohbild weiter.
+      const outUri = await entzerrenMitGrenze(a.uri, detectAndCropDocument);
       await goReview(outUri, 'upload');
     } catch (error: any) {
       console.warn('⚠️ Gallery pick failed:', error);
