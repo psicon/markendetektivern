@@ -4308,6 +4308,11 @@ Token-Cache + 503-Retry). Vollständige Analyse-Methodik + Referenz-Abfragen:
 
 Play stand 07/2026 bei **3,44★** (545 Bewertungen, davon 146× 1★), iOS bei
 4,02★ — obwohl die App gut ist: die zufriedene Mehrheit wurde nie gefragt.
+**Stand 04.10.2026 (Play Console, von Patrick gezeigt): 4,448★ bei 833
+Bewertungen** — seit dem Auto-Prompt (26.07.) also ~+300 Bewertungen und
++1 Stern. Store-Wertungen NIE aus dieser Notiz zitieren, sondern vorher den
+aktuellen Stand holen (Play Console bzw. ASC); am 03.10. habe ich Patrick
+fälschlich die Juli-Zahl als aktuellen Stand genannt.
 Aktueller Stand: Auto-Prompt = **nativer Dialog direkt**, ausgelöst nach dem
 ersten Erfolg + Walk-Through (`lib/services/firstCaseService.ts`, ClickUp
 86cav7gqm) sowie beim Level-Up ≥3 (`ratingPrompt.ts`).
