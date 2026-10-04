@@ -286,15 +286,14 @@ describe('Morgenrunde — Entscheidungen Patrick 02.10.2026', () => {
     expect(b.wartetAufDich[0]).toMatchObject({ id: 'k', grund: 'ean_unsicher' });
   });
 
-  it('zweite Lesung liest die GESPEICHERTE Nummer → trotzdem liegen lassen, ein Mensch entscheidet (Wortlaut Patrick 2a; Frage (d) vorgelegt 03.10.)', async () => {
+  it('zweite Lesung liest die GESPEICHERTE Nummer → die erste war falsch gelesen, freigegeben (erster Tag; Entscheidung Patrick 04.10.)', async () => {
     einreichung('k');
     mockAudit.set(doc('k').images.ean, ANDERE);
     mockZweit.set(doc('k').images.ean, EAN);
     const b = await scharf();
-    expect(doc('k').status).toBe('pending');
-    expect(doc('k').eanFotoOcr).toMatchObject({ befund: 'unsicher', grund: 'erste_lesung_abweichend' });
-    expect(b.eanFoto).toEqual({ unsicher: 1 });
-    expect(b.wartetAufDich[0]).toMatchObject({ id: 'k', grund: 'ean_unsicher' });
+    expect(doc('k').status).toBe('approved');
+    expect(doc('k').eanFotoOcr).toMatchObject({ ean: EAN, befund: 'gleich', grund: 'zweite_lesung' });
+    expect(b.eanFoto).toEqual({ gleich: 1 });
   });
 
   it('Lidl-EAN-8 auf dem Foto, gespeichert eine ganz andere EAN → bleibt liegen (vorher: kein Urteil, Prüfrunde 02.10.)', async () => {

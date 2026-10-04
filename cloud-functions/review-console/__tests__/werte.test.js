@@ -195,10 +195,9 @@ describe('Nummer vom Barcode-Foto (Entscheidung Patrick 02.10.2026)', () => {
     const { eanFotoBestaetigen } = require('../src/werte');
     const ab = eanFotoBefund(GUELTIG, ANDERE);
     expect(eanFotoBestaetigen(ab, ANDERE)).toMatchObject({ art: 'abweichend', bestaetigt: true });
-    // die zweite Lesung liest die GESPEICHERTE Nummer → trotzdem liegen lassen
-    // (Wortlaut Patrick 2a: weicht sie ab, bleibt die Einreichung liegen; Frage (d) vorgelegt 03.10.)
-    expect(eanFotoBestaetigen(ab, GUELTIG)).toEqual({ art: 'unsicher', gelesen: ANDERE, gespeichert: GUELTIG, zweit: GUELTIG, grund: 'erste_lesung_abweichend' });
-    expect(eanFotoBestaetigen(ab, '0' + GUELTIG).art).toBe('unsicher');
+    // die zweite Lesung liest die GESPEICHERTE Nummer → die erste war falsch gelesen
+    expect(eanFotoBestaetigen(ab, GUELTIG)).toEqual({ art: 'gleich', gelesen: GUELTIG, gespeichert: GUELTIG, grund: 'zweite_lesung' });
+    expect(eanFotoBestaetigen(ab, '0' + GUELTIG).art).toBe('gleich');
     // erfundene, aber gültige dritte Nummer bei unscharfem Foto (gemessen 02.10.)
     expect(eanFotoBestaetigen(ab, '4001382088125')).toEqual({ art: 'unsicher', gelesen: ANDERE, gespeichert: GUELTIG, zweit: '4001382088125', grund: 'lesungen_uneinig' });
     // eine Ziffer falsch gelesen → Prüfziffer falsch; leer → ebenfalls unsicher
@@ -353,10 +352,10 @@ describe('Halte-Befund früherer Läufe (Prüfrunde 2, 02.10.2026)', () => {
     expect(eanFotoMitVorbefund(nurEine, vorher()).art).toBe('abweichend');
     const einfach = eanFotoBefund(KFS.ean, KFS.ean); // ohne zweite Lesung
     expect(eanFotoMitVorbefund(einfach, vorher()).art).toBe('abweichend');
-    // erste Lesung abweichend, zweite gespeichert → hält schon selbst (Wortlaut 2a, 03.10.) und erst recht gegen einen alten Befund
+    // erste Lesung abweichend, zweite gespeichert (am ersten Tag reicht das) — gegen einen alten Befund nicht
     const zweiteGleich = eanFotoBestaetigen(eanFotoBefund(KFS.ean, ANDERE), KFS.ean);
-    expect(zweiteGleich.art).toBe('unsicher');
-    expect(['abweichend', 'unsicher']).toContain(eanFotoMitVorbefund(zweiteGleich, vorher()).art);
+    expect(zweiteGleich.art).toBe('gleich');
+    expect(eanFotoMitVorbefund(zweiteGleich, vorher()).art).toBe('abweichend');
   });
   it('heute eine BESTÄTIGTE Abweichung → ersetzt den alten Befund (stärkerer Beleg)', () => {
     const ab = eanFotoBestaetigen(eanFotoBefund(KFS.ean, ANDERE), ANDERE);
@@ -370,8 +369,8 @@ describe('Halte-Befund früherer Läufe (Prüfrunde 2, 02.10.2026)', () => {
     expect(eanFotoEintrag(eanFotoBestaetigen(eanFotoBefund(KFS.ean, ANDERE), ANDERE))).toEqual({ ean: ANDERE, befund: 'abweichend', bestaetigt: true });
     expect(eanFotoEintrag(eanFotoBestaetigen(eanFotoBefund(KFS.ean, '4013602313647'), ''))).toEqual({ ean: '4013602313647', befund: 'unsicher', grund: 'zweite_lesung_leer', zweit: null });
     expect(eanFotoEintrag({ art: 'zweifelhaft', roh: '123', gespeichert: KFS.ean })).toMatchObject({ befund: 'unsicher', ean: '123' });
-    // erste Lesung abweichend, zweite gespeichert (erster Tag) → unsicher, bleibt liegen
-    expect(eanFotoEintrag(eanFotoBestaetigen(eanFotoBefund(KFS.ean, ANDERE), KFS.ean))).toMatchObject({ befund: 'unsicher', grund: 'erste_lesung_abweichend' });
+    // erste Lesung abweichend, zweite gespeichert (erster Tag) → gleich, ohne Reste
+    expect(eanFotoEintrag(eanFotoBestaetigen(eanFotoBefund(KFS.ean, ANDERE), KFS.ean))).toEqual({ ean: KFS.ean, befund: 'gleich', grund: 'zweite_lesung' });
     expect(eanFotoEintrag(eanFotoBefund(KFS.ean, ''))).toEqual({ ean: null, befund: 'kein_urteil', grund: 'nicht_lesbar' });
   });
 });

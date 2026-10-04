@@ -265,14 +265,11 @@ function eanFotoBestaetigen(befund, zweitRoh) {
   const istGespeichert = gueltig && !!befund.gespeichert && gtin14(zweit) === gtin14(befund.gespeichert);
   if (befund.art === 'abweichend') {
     if (gueltig && gtin14(zweit) === gtin14(befund.gelesen)) return { ...befund, bestaetigt: true };
-    // Erste Lesung eine ANDERE gültige Nummer, zweite die gespeicherte: Das
-    // könnte eine Fehllesung der ersten sein. Patricks Wortlaut („weicht sie
-    // ab, bleibt die Einreichung liegen") gilt trotzdem: der Fall bleibt
-    // liegen, ein Mensch entscheidet. Ob die Maschine hier selbst weitergeben
-    // darf, ist Patrick am 03.10.2026 vorgelegt (WISSEN-FOTORUNDE.md, „Offen
-    // für Patrick" (d)); bis zur Antwort gilt die strengere Auslegung.
-    // Wirkung laut Trockenlauf ~1 Fall/Tag.
-    if (istGespeichert) return { art: 'unsicher', gelesen: befund.gelesen, gespeichert: befund.gespeichert, zweit, grund: 'erste_lesung_abweichend' };
+    // Erste Lesung eine ANDERE gültige Nummer, zweite die gespeicherte → weiter
+    // wie „gleich": die erste gilt als Fehllesung. Entscheidung Patrick
+    // 04.10.2026 („ja", Frage 6). Wirkung laut Trockenlauf ~1 Fall/Tag. Gilt
+    // nur am ersten Tag — ein angehaltener Fall bleibt bis zum Menschen.
+    if (istGespeichert) return { art: 'gleich', gelesen: zweit, gespeichert: befund.gespeichert, grund: 'zweite_lesung' };
     return { art: 'unsicher', gelesen: befund.gelesen, gespeichert: befund.gespeichert, zweit: gueltig ? zweit : null, grund: gueltig ? 'lesungen_uneinig' : 'zweite_lesung_leer' };
   }
   if (befund.art === 'zweifelhaft') {

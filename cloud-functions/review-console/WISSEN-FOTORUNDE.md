@@ -163,11 +163,9 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   bestätigte Abweichung ersetzt einen alten Befund (hält weiter); alles andere
   lässt ihn stehen. Scheiterte das Speichern von `eanFotoOcr`, steht der Befund
   auch in `review.rundeOffen.eanFoto` (`werte.eanFotoVorbefund`); hält EINE der
-  beiden Quellen an, gilt der Halt (vorher: der jüngere Lauf). Auch am ersten
-  Tag gibt die Maschine eine Abweichung nicht selbst frei: liest die
-  Bildprüfung eine ANDERE gültige Nummer und die zweite Lesung die
-  gespeicherte, wird das `unsicher` (`erste_lesung_abweichend`) und bleibt
-  liegen — siehe „Offen für Patrick" (d).
+  beiden Quellen an, gilt der Halt (vorher: der jüngere Lauf). Der erste Tag
+  ist davon unberührt: dort führt eine zweite Lesung der gespeicherten Nummer
+  weiter zu `gleich` (Entscheidung Patrick 04.10.2026, siehe (d)).
   **Falsche Prüfziffer, weit weg (Prüfrunde 2):** liest das Modell eine
   Nummer mit falscher Prüfziffer, die sich an mehr als 2 von 14 Stellen von
   der gespeicherten unterscheidet (`zweifelhaft`), wird sie wie eine
@@ -420,13 +418,12 @@ Freigaben laufen IMMER — sie sind die harmlose Richtung. Zurückgehalten
   (13 Dokumente, 10 Personen), las in der App „ab dem nächsten Tag zählt es
   wieder". (c) Gespeicherte EAN mit falscher Prüfziffer und unlesbares
   Barcode-Foto → heute kein Urteil (6 von 3.894 gespeicherten EANs).
-  (d) **Barcode, erster Tag (Patrick vorgelegt am 03.10.2026):** liest die
-  Bildprüfung eine ANDERE gültige Nummer und die zweite Lesung die
-  gespeicherte, war die erste vermutlich eine Fehllesung. Bis zu Patricks
-  Antwort gilt sein Wortlaut („weicht sie ab, bleibt die Einreichung
-  liegen"): der Fall bleibt liegen (`unsicher`, `erste_lesung_abweichend`), ein
-  Mensch entscheidet. Wirkung laut Trockenlauf ~1 Fall/Tag. **Frage: darf die
-  Maschine in diesem Fall selbst weitergeben?** (`werte.eanFotoBestaetigen`)
+  (d) **Barcode, erster Tag — ENTSCHIEDEN (Patrick 04.10.2026: „ja"):** liest
+  die Bildprüfung eine ANDERE gültige Nummer und die zweite Lesung die
+  gespeicherte, gilt die erste als Fehllesung → `gleich`, die Runde
+  entscheidet normal weiter (meist Freigabe). Wirkung laut Trockenlauf ~1
+  Fall/Tag. Gilt nur am ersten Tag: ein einmal angehaltener Fall wird nie
+  automatisch aufgehoben. (`werte.eanFotoBestaetigen`)
   Ebenso: die alten Handrunden-Skripte (`.crowd-review-0909/1309.js`, nicht
   versioniert) schreiben `dup.reason` unverändert — nicht mehr benutzen.
 
