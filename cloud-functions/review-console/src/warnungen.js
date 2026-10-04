@@ -23,7 +23,7 @@ const TAG_MS = 24 * 60 * 60 * 1000;
  * @param {Array<{id:string, kind:string, active:boolean, startAt:number, endAt:number, budgetRemainingCents?:number, budgetTotalCents?:number}>} k.aktionen
  * @param {{eingeschaltet:boolean, laeufeLetzte48h:number}} k.zweitpruefung
  * @param {{inPruefung:number, aeltesteTage:number|null, letzte24h:{gesamt:number, ohneAktion:number}}} k.bons
- * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number, aeltesteOffenTage?:number|null, fotoAbgleichGescheitert?:boolean, kontoSperrenUnlesbar?:boolean, eanHaltenNeu?:number, haltBefundNichtGespeichert?:number, eanFotoNichtGespeichert?:number}} k.runde
+ * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number, aeltesteOffenTage?:number|null, fotoAbgleichGescheitert?:boolean, kontoSperrenUnlesbar?:boolean, eanHaltenNeu?:number, haltBefundNichtGespeichert?:number, eanFotoNichtGespeichert?:number, preisQuelleBefragt?:number, preisQuelleOhneAntwort?:number, preisBildschirmHalten?:number, preisBildschirmTrotzBon?:number, preisBildschirmBonWiderspruch?:number, preisBildschirmSchalterUnbekannt?:string|null, preisKopfNichtAbrufbar?:number, preisBildschirmScharf?:boolean}} k.runde
  * @param {{bild:boolean, gesamt:boolean, text:string[]}} k.notbremse
  * @param {{alt:string|null, neu:string}} k.regelVersion
  * @param {{scharf:boolean, bericht:object|null, abgebrochen?:boolean, laeuftNoch?:boolean, unbekannt?:boolean}} [k.bonRunde]
@@ -103,12 +103,63 @@ function warnungen(k) {
       (eanNeu / r.auditVersucht > 0.25 ? rot : gelb)('barcode_haelt_viele', `${eanNeu} von ${r.auditVersucht} geprüften Einreichungen hält die Runde wegen der Barcode-Nummer an (normal etwa 3 %) — Lesung des Modells prüfen.`);
     }
     // Ohne diese Einträge sieht die Prüfkonsole nicht, warum die Runde einen
-    // Fall liegen ließ, und gibt ihn ohne Warnung frei (Prüfrunde 2).
+    // Fall liegen ließ, und gibt ihn ohne Warnung frei (Prüfrunde 2) — und der
+    // nächste Lauf kennt einen scharfen Halt der Bildschirm-Regel nicht mehr
+    // (Prüfrunde 2 Bildschirmfoto, 04.10.2026).
     if (r.haltBefundNichtGespeichert > 0) {
-      rot('befund_nicht_gespeichert', `Bei ${r.haltBefundNichtGespeichert} offenen Fällen konnte der Halte-Grund (gleiches Foto, Barcode-Nummer) nicht gespeichert werden — die Prüfkonsole zeigt sie als unauffällig. Vor einer Freigabe die Fälle im Bericht ansehen.`);
+      rot('befund_nicht_gespeichert', `Bei ${r.haltBefundNichtGespeichert} offenen Fällen konnte der Halte-Grund (gleiches Foto, Barcode-Nummer, Bildschirmfoto als Preis) nicht gespeichert werden — die Prüfkonsole zeigt sie als unauffällig, und der nächste Lauf kennt den Halt nicht. Vor einer Freigabe die Fälle im Bericht ansehen.`);
     }
     if (r.eanFotoNichtGespeichert > 0) {
       gelb('barcode_befund_nicht_gespeichert', `Bei ${r.eanFotoNichtGespeichert} Fällen konnte der Barcode-Befund (eanFotoOcr) nicht gespeichert werden; er steht ersatzweise am Halte-Grund der Runde.`);
+    }
+    // Bildschirmfoto als Preisbeleg (04.10.2026). Beantwortet die Bildprüfung
+    // die Frage nach der Preisquelle nicht mehr (wie beim thinkingBudget am
+    // 22.09.: Google ändert das Modell), erkennt die Regel still nichts mehr —
+    // Bildschirmfotos würden wieder bezahlt. Gemessen: 0 von 448 ohne Antwort.
+    const befragt = Number(r.preisQuelleBefragt) || 0;
+    const ohne = Number(r.preisQuelleOhneAntwort) || 0;
+    if (befragt >= 8 && ohne / befragt > 0.25) {
+      gelb('preisquelle_ohne_antwort', `Bei ${ohne} von ${befragt} geprüften Einreichungen hat die Bildprüfung nicht gesagt, woher der Preis stammt — Bildschirmfotos als Preisbeleg werden so nicht erkannt. Modell bzw. Anweisung prüfen.`);
+    }
+    // Normal etwa 1 pro Woche (zugeschnittene Regalfotos). Viele auf einmal
+    // deuten auf eine geänderte Lesart des Modells.
+    const pbHalten = Number(r.preisBildschirmHalten) || 0;
+    if (r.auditVersucht > 0 && pbHalten >= 5 && pbHalten / r.auditVersucht > 0.05) {
+      gelb('preisquelle_haelt_viele', `${pbHalten} von ${r.auditVersucht} geprüften Einreichungen hält die Runde wegen einer unsicheren Preisquelle (Bildschirmfoto?) an — normal etwa einer pro Woche. Lesung des Modells prüfen.`);
+    }
+    // Fingerabdruck des wahrscheinlichsten Modellfehlers (Gegenprüfung
+    // 04.10.2026): die Bildprüfung nennt Kassenbons „Bildschirm", die der
+    // Lesedienst als Kassenbon erkannt hat. Gemessen 0 von 167 Kassenbons.
+    // Die Regel lehnt diese Fälle nicht ab, sie hält sie an — die Warnung
+    // sagt, warum plötzlich e-Bons liegen bleiben.
+    const trotzBon = Number(r.preisBildschirmTrotzBon) || 0;
+    if (trotzBon >= 2) {
+      gelb('preisquelle_bon_als_bildschirm', `Bei ${trotzBon} Einreichungen nannte die Bildprüfung das Preisfoto „Bildschirm", obwohl der Lesedienst einen Kassenbon erkannte (normal nie) — abgelehnt wird so ein Fall nie, mit scharfer Regel bleibt er liegen. Lesung des Modells prüfen; Kassenbons, auch e-Bons, zählen immer.`);
+    }
+    // Gegenrichtung (Prüfrunde 2, 04.10.2026): die Bildprüfung nennt das
+    // Preisfoto „Kassenbon", der Lesedienst las es und sah keinen — dort
+    // würde bezahlt. Gemessen 0 von 126; die Fälle bleiben liegen.
+    const bonWiderspruch = Number(r.preisBildschirmBonWiderspruch) || 0;
+    if (bonWiderspruch >= 2) {
+      gelb('preisquelle_bon_widerspruch', `Bei ${bonWiderspruch} Einreichungen nannte die Bildprüfung das Preisfoto „Kassenbon", der Lesedienst sah dort keinen (normal nie) — die Fälle bleiben liegen. Preisfotos ansehen: Warenkorb oder Bestellübersicht statt Bon? Sonst Lesung des Modells prüfen.`);
+    }
+    // Unbekannter Schalterwert (etwa "true" als Text): gilt als Beobachtung —
+    // Bildschirmfotos werden weiter bezahlt, wer „scharf" erwartet, merkt es
+    // sonst nicht (Prüfrunde 2, 04.10.2026).
+    if (r.preisBildschirmSchalterUnbekannt) {
+      gelb('preisbildschirm_schalter_unbekannt', `Schalter preisBildschirmRegel hat den Wert ${r.preisBildschirmSchalterUnbekannt} — gilt als Beobachtung. Scharf nur mit true (Typ boolean), aus mit false.`);
+    }
+    // Kopf des Preisfotos nicht abrufbar (Storage): ohne ihn gibt die Regel
+    // keine Freigabe — mehrere auf einmal deuten auf eine Störung bei uns.
+    // Scharf und bei mehr als einem Viertel der befragten Fälle ist das ein
+    // Tag (fast) ohne Freigaben → rot wie kontosperren_unlesbar und
+    // bildpruefung_gestoert (Prüfrunde 3, 04.10.2026). In der Beobachtung
+    // ändert der Kopf keine Entscheidung → gelb.
+    const ohneKopf = Number(r.preisKopfNichtAbrufbar) || 0;
+    if (r.preisBildschirmScharf && befragt >= 8 && ohneKopf / befragt > 0.25) {
+      rot('preisfoto_kopf_nicht_abrufbar', `Bei ${ohneKopf} von ${befragt} geprüften Einreichungen war der Anfang des Preisfotos nicht abrufbar (Storage/Zeitgrenze) — mit scharfer Regel gibt die Runde sie nicht frei, heute also kaum Freigaben. Storage prüfen; die Fälle sind morgen wieder dran.`);
+    } else if (ohneKopf >= 3) {
+      gelb('preisfoto_kopf_nicht_abrufbar', `Bei ${ohneKopf} Einreichungen war der Anfang des Preisfotos nicht abrufbar (Storage/Zeitgrenze) — mit scharfer Regel bleiben sie liegen (Kassenbon nur, wenn der Lesedienst dort keinen Bon sah), bis die Runde ihn lesen kann.`);
     }
   }
   for (const t of (k.notbremse?.text || [])) rot('notbremse', `Notbremse: ${t}`);

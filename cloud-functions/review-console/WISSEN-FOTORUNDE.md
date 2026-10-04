@@ -20,6 +20,7 @@ hat, steht hier als Regel. Wer die Runde ändert, ändert zuerst diese Datei.
 | Dashboard | https://md-receipt-admin.web.app/tagesbericht.html (Callable `reviewTagesberichte`) |
 | Morgen-Chat | geplante Aufgabe `morgenrunde-bericht` in der Claude-App (08:35/08:48), postet in ClickUp |
 | Schalter | `cashback_config/v1.fotoWorker === true` → scharf, sonst Trockenlauf |
+| Bildschirmfoto als Preisbeleg | `src/preisBildschirm.js` (+ Tests), Schalter `cashback_config/v1.preisBildschirmRegel`: `false` \| `'shadow'` (Standard) \| `true` |
 | Von Hand anstoßen | HTTP `fotoRundeManuell?key=…` (europe-west1) — ohne Schlüssel 403; scharf nur mit `scharf=1` und eingeschaltetem Schalter |
 
 Die Runde liegt bewusst in der Prüfkonsole und nicht in einer eigenen
@@ -45,7 +46,10 @@ Notbremse zurückhält — das steht im Bericht unter `wartetAufDich`.
    Einreichungen, über eine Storage-Liste von `crowduploads/` (6 Seiten, ~3 s
    für 28.741 Dateien, 02.10.2026).
 4. **Bildprüfung** aller Fälle, denen kein Foto fehlt. Sie liest im selben
-   Aufruf die Nummer unter dem Strichcode des Barcode-Fotos mit (`eanFoto`);
+   Aufruf die Nummer unter dem Strichcode des Barcode-Fotos mit (`eanFoto`)
+   und — ist der Schalter `preisBildschirmRegel` nicht aus — woher der Preis
+   stammt (`preisQuelle`); danach liest die Runde den Kopf des Preisfotos
+   (192 KB: Format, Maße, Kamerahersteller, EXIF-Datum/Software);
    wo nötig folgt eine zweite Lesung nur dieses Fotos (innerhalb der
    Arbeitszeit). Ein Halte-Befund eines früheren Laufs gilt weiter, bis ein
    Mensch in der Konsole entscheidet. Die Runde
@@ -248,6 +252,185 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   Freigaben keinen gelesenen Preis; hochgerechnet aus einer Sichtprobe zeigte
   knapp jede fünfte Freigabe gar keinen Preis. In der Morgenrunde waren es 30
   von 284. Zurückgefordert wird nichts.
+- **Bildschirmfoto als Preisbeleg (Patrick 04.10.2026: „ja, bau das" —
+  erst eine Woche beobachten, dann ablehnen mit `fotos_unpassend`).**
+  Anlass: 40 Einreichungen von 20 Personen zeigten als „Preis" ein
+  Bildschirmfoto (Händler-App, Online-Shop, Online-Prospekt, Google), alle
+  bezahlt (5,77 €), 6 davon seit der Preis-Pflicht; Prüfrunde 2 fand 2
+  weitere bezahlte außerhalb der Messmenge (mindestens 42). Der Lesedienst las dort
+  einen Preis und hielt das Bild meist für ein Preisschild; die Bildprüfung
+  nannte alle 40 „echt" — die Preis-Pflicht allein fängt sie nicht.
+  **Zwei Signale:** (1) die Bildprüfung beantwortet im selben Aufruf
+  `preisQuelle` = laden | kassenbon | bildschirm | keiner | unklar (Wortlaut
+  in `taeglicheRunde.js`, `PREIS_QUELLE_FRAGE`, wortgleich mit der Messung —
+  wer ein Wort ändert, misst neu); (2) Bildmerkmale der Datei
+  (`bildschirmMerkmal`): kein Kamerahersteller in den EXIF-Daten UND (EXIF
+  mit Software oder Aufnahmedatum ODER PNG ODER Seitenverhältnis weder 4:3
+  noch 16:9). Gemessen 04.10.: im vollen Aufruf 40 von 40 Bildschirmfotos
+  „bildschirm", keine von 54 schwierigen Gegenproben (e-Bons mit App-Rahmen,
+  E-Paper-Schilder, Digitaldisplay im Kaufland); nur mit dem Preisfoto 0 von
+  311 Nicht-Bildschirmen, 167 von 167 Kassenbons richtig. Merkmal:
+  Kamerafotos 0/170; die App-Kamera speichert immer 4:3 (3.687 von 3.688) und
+  ohne Hersteller, Datum und Software — auf iOS steht ein EXIF-Rest aus
+  Ausrichtung, Auflösung und Pixelmaßen (49 von 294 Stichproben, Prüfrunde 2;
+  die Messung hatte das als „ohne EXIF" gezählt). Ein bloßer EXIF-Block
+  taugt deshalb NICHT als Zeichen, nur Software (0x0131) oder Aufnahmedatum
+  (0x9003). Allein taugt das Merkmal nicht: e-Bons (127/127) und
+  zugeschnittene Regalfotos tragen es auch.
+  **„40 von 40" ist ein Auswahl-Effekt** (Prüfrunde 2): die 40 wurden über
+  die Merkmal-Klasse gefunden, außerhalb gab es nur 100 Zufallsfälle. In der
+  ungeprüften Klasse „EXIF ohne Hersteller, Kameraformat" (3 Dateien im
+  Bestand) lagen 2 bezahlte Bildschirmfotos (Billa-Online-Shop 1200×2152 ≈
+  16:9; ein auf „2,79 € Aldi Süd" zugeschnittener App-Ausschnitt 446×248) —
+  beide mit EXIF-Datum ohne Hersteller, deshalb die EXIF-Bedingung. Die
+  dritte Datei ist ein nachbearbeitetes Regalfoto (mit „laden" → liegt).
+  Mehrkosten im Bestand genau diese 3 Dateien. Der Bildkopf-Parser ist
+  handgeschrieben (sharp scheitert an gekürzten JPEGs) und wurde an 627
+  echten Preisfotos gegen die Messung geprüft, nach der Erweiterung an 731
+  (alle mit EXIF, 294 App-Kamera-Fotos, die 40 Bildschirmfotos): 0
+  Abweichungen, kein App-Kamera-Foto mit Merkmal.
+  **Regel** (`preisBildschirmBefund`, ausgewertet in `freigabe()`, NACH der
+  Preis-Pflicht — bei 36 von 37 Bildschirmfotos der Vor-Analyse war ein Preis
+  gelesen, die Regel muss greifen, bevor er zur Freigabe führt):
+  „bildschirm" + Merkmale + der Lesedienst hat das Preisfoto GELESEN und
+  KEINEN Kassenbon gesehen (`lesedienstOhneBonOf`: preisschild/produktfoto/
+  sonstiges) → ablehnen; „bildschirm" sonst (ohne Merkmale, Merkmale
+  unbekannt, der Lesedienst sah einen Kassenbon, oder er hat das Preisfoto
+  gar nicht gelesen) → liegen lassen; „laden" + Merkmale → liegen lassen
+  (meist zugeschnittene Regalfotos, ~1 pro Woche); „keiner" + Merkmale →
+  liegen lassen wie eine fehlende Antwort (Prüfrunde 3 — las der Lesedienst
+  trotzdem einen Preis, wäre die Preis-Pflicht erfüllt und es würde bezahlt;
+  ohne gelesenen Preis bleibt es bei „Preis fehlt"; gemessen 9 von 9 solchen
+  Fällen ohne gelesenen Preis, kostet also nichts); „unklar" → liegen lassen;
+  Antwort fehlt + Merkmale → liegen lassen; „laden", „keiner" oder Antwort
+  fehlt, aber Kopf des Preisfotos nicht abrufbar → liegen lassen
+  (`preis_kopf_nicht_lesbar`); „kassenbon" → nie abgelehnt (Kassenbons
+  zählen immer, auch e-Bons und App-Bons als Bildschirmfoto — Entscheidung
+  Patrick 04.10., CLAUDE.md), aber liegen lassen, wenn die Merkmale passen
+  (oder der Kopf nicht abrufbar war, Prüfrunde 3) UND der Lesedienst das
+  Preisfoto gelesen und KEINEN Bon gesehen hat (Prüfrunde 2 — sonst hinge die
+  Bezahlung an EINER Antwort, etwa bei einem Warenkorb oder einer
+  Bestellübersicht als „Bon"; gemessen trägt der Lesedienst 0 von 167
+  Kassenbons als „kein Bon", kostet also nichts). Ein Halte-Befund macht
+  nur aus einer sonst fälligen FREIGABE einen offenen Fall
+  (`preis_bildschirm_unsicher`); „Preis fehlt" bleibt eine Ablehnung, ein
+  schon offener Fall behält seinen Grund. Ein Ablehn-Befund ersetzt auch
+  „Preis fehlt" und einen sonst offenen Fall (Ort auffällig, Preis unsicher,
+  Kontosperre unbekannt — die Ablehnung hängt an keinem dieser Abgleiche; die
+  Kontosperre liest die Runde beim Schreiben ohnehin nach). Ein
+  „Nachlesen gescheitert" ersetzt sie dagegen nur, wenn die Erstlesung das
+  Preisfoto schon gelesen hatte — sonst kommt es gar nicht zur Ablehnung
+  (Prüfrunde 3, siehe unten).
+  **Gegenzeichen des Lesedienstes** (`lesedienstBonOf`, Gegenprüfung
+  04.10.2026): `priceImageKind` kassenbon/beides (Erst- ODER Nachlesung —
+  die Nachlesung ergänzt, sie ersetzt nicht; Prüfrunde 2) oder eine gelesene
+  Bon-Kopfzeile in `priceReceipt`. Gemessen: 164 von 167
+  Kassenbons tragen es, 0 von 40 Bildschirmfotos. Ohne dieses Zeichen hinge der
+  Schutz der e-Bons an EINER Modellantwort — die Merkmale tragen sie immer
+  (127/127), und ein Modellwechsel (wie 22.09.) lehnte sie still ab. Bewusst
+  ohne „preisschild": so hielt der Lesedienst 26 von 40 Bildschirmfotos.
+  Erkennt der Lesedienst während des Laufs einen Kassenbon, wird eine schon
+  geplante Ablehnung nicht geschrieben (Transaktion, wie bei „Preis fehlt").
+  **Abgelehnt wird nur auf eine Lesung hin** (Prüfrunde 3, 04.10.2026): hat
+  der Lesedienst das Preisfoto NICHT gelesen (Erstlesung gescheitert,
+  `productNameOcrFehler`, und die Nachlesung am Google-Limit oder an der
+  Zeitgrenze gescheitert), fehlt genau der Abgleich, der einen e-Bon vor einer
+  einzelnen Fehlantwort schützt — dann liegen lassen, nie ablehnen. Kostet
+  gemessen 1 von 40 Bildschirmfotos (vom 11.09., ohne Bildart-Feld; die 6
+  seit dem 26.09. tragen alle „gelesen, kein Bon"). Ebenso zählt, was die
+  Nachlesung des Laufs (Preis oder Hersteller — sie liest das Preisfoto mit)
+  sah, auch wenn nichts übernommen wurde (zwei Lesungen, verschiedene
+  Beträge — dann steht ihre Bildart nicht am Dokument): sah eine davon einen
+  Kassenbon, ist das ein Gegenzeichen (`lesedienstBonOf(x, zusatzArten)`).
+  Nur in diese Richtung — ungeeinte „preisschild"-Lesungen machen nichts
+  ablehnbar.
+  **Technik ist kein Freispruch** (Gegenprüfung 04.10.2026): ist der Kopf des
+  Preisfotos nicht abrufbar (Storage, Zeitgrenze), gibt die Regel einen Preis
+  „aus dem Laden" (auch „keiner", keine Antwort, und einen „Kassenbon", dem
+  der Lesedienst widerspricht) nicht frei — wie `kontosperre_unbekannt` und
+  `foto_abgleich_gescheitert`. Ein Format ohne lesbare Maße (WebP, HEIC) ist
+  dagegen kein Technikfehler. Dieser Halt wird NICHT weitergetragen: am
+  nächsten Morgen prüft die Runde neu. Scharf und bei mehr als einem Viertel
+  der befragten Fälle (mind. 8) warnt der Bericht ROT
+  (`preisfoto_kopf_nicht_abrufbar`) — das ist ein Tag fast ohne Freigaben.
+  **Ein angehaltener Fall wird nie automatisch frei** (Gegenprüfung
+  04.10.2026, wie Barcode- und Foto-Befund): ein Befund aus einem SCHARFEN Lauf
+  steht als `review.rundeOffen.preisBildschirm` am Fall und gilt im nächsten
+  Lauf weiter (`preisBildschirmVorbefund`/`preisBildschirmMitVorbefund`) —
+  auch wenn das Modell dann anders antwortet oder die Bildprüfung scheitert.
+  Er verschärft höchstens zu „liegen lassen", nie zur Ablehnung. Ein Befund
+  „liegen lassen" bleibt das auch, wenn der Tag selbst „ablehnen" liest
+  (Prüfrunde 3, 04.10.2026): gehalten wurde, weil sich etwas widersprach
+  („laden" oder „kassenbon" zu einer Datei wie ein Bildschirm), und die
+  Antwort des Vortags steht nicht am Dokument — würde jeden Morgen neu
+  gefragt, wüchse die Wahrscheinlichkeit einer Ablehnung mit jedem Tag, den
+  der Fall auf Patrick wartet. Nur ein Befund „ablehnen" (von der Notbremse
+  zurückgehalten) darf bei heutiger Ablehn-Lesung abgelehnt werden. Folge:
+  ein am ersten Tag nur wegen „unklar" oder fehlender Antwort gehaltenes
+  Bildschirmfoto lehnt die Runde nicht mehr selbst ab, es wartet auf die
+  Konsole (gemessen selten: unklar 3 von 351, ohne Antwort 0 von 448).
+  Aufheben: jede Entscheidung in der Konsole
+  (ersetzt `review`), oder der Schalter (`false` nimmt alles weg, in
+  `'shadow'` hält der Befund nichts mehr). Ein Befund aus der Beobachtung wird
+  nie übernommen.
+  **Schalter** `cashback_config/v1.preisBildschirmRegel`: `false` = aus
+  (keine Zusatzfrage, kein Bildkopf, nichts am Dokument); `'shadow'` =
+  Beobachtung, entschieden wird wie bisher; `true` = scharf (wirkt nur, wenn
+  auch `fotoWorker` scharf ist). Fehlt der Schalter oder hat er einen anderen
+  Wert (Tippfehler, `"true"` als Text — so legt die Firebase-Konsole ein neues
+  Feld standardmäßig an!) → `'shadow'`: ein Tippfehler schaltet weder still
+  scharf noch die Beobachtung ab, steht aber gelb im Bericht
+  (`preisbildschirm_schalter_unbekannt`, mit Wert und Typ; Prüfrunde 2).
+  Gelesen wird der Schalter EINMAL, zusammen mit `fotoWorker` (index.js reicht
+  ihn durch): ein eigenes zweites Lesen konnte allein scheitern, und als
+  `'shadow'` hätte dann kein scharfer Befund mehr gehalten — angehaltene Fälle
+  wären ohne Menschen frei geworden (Prüfrunde 2). Scheitert das Lesen, läuft
+  die Runde gar nicht. Ein Wechsel ändert die Regelversion (gelbe Warnung
+  „Regeln geändert"). Kein Deploy nötig.
+  **Am Dokument** (`review` ist server-only, firestore.rules) steht so wenig
+  wie möglich, denn das Dokument liest der Einreicher selbst (firestore.rules
+  `crowd_uploads` read für den Eigentümer, die App lädt es ganz): NUR bei einem
+  nach dem Lauf offenen Fall mit Befund `review.rundeOffen.preisBildschirm` =
+  `{modus, befund, seit}` und ein neutraler Hinweis („Preisquelle unsicher …
+  Einzelheiten im Tagesbericht"). Nicht am Dokument (Gegenprüfung 04.10.2026):
+  die Antwort und Begründung des Modells (`preisQuelle`, `preisQuelleGrund`),
+  das Merkmal, Format, Maße, Gerätemarke — das wäre eine Anleitung zum
+  Umgehen (zuschneiden, Statusleiste weg); und an freigegebenen Fällen gar
+  nichts, sonst trüge in der Beobachtungswoche jedes bezahlte Bildschirmfoto
+  eine Woche Vorwarnung. Alles das steht im Tagesbericht (nur Admins).
+  Abgelehnt steht `rejectReason: 'fotos_unpassend'` (App-Text seit 05.09. in jeder Version;
+  `preis_fehlt` behauptete „kein Preis zu sehen" und gibt es erst ab 6.0.20),
+  intern `review.reason: 'preis_bildschirm'` (`duplicatePolicy.APP_GRUND`).
+  Ein eigener App-Text liegt unter `preis_bildschirm` in `REASON_COPY` für
+  eine spätere Version bereit. Nicht in `DOPPEL_GRUENDE`: wer danach mit
+  einem echten Preisfoto nachreicht, wird normal geprüft.
+  **Bericht** `preisBildschirm`: Modus, Antworten je Quelle, Merkmal
+  ja/nein/unbekannt, `befundAblehnen`, `befundHalten` (nur wo sonst
+  freigegeben), `stattFreigabe` (ohne die Regel bezahlt), `kassenbonMitMerkmal`,
+  `bildschirmTrotzBon` (Bildprüfung „Bildschirm", Lesedienst „Kassenbon"),
+  `kassenbonOhneLesedienstBon` (Bildprüfung „Kassenbon", Lesedienst las und
+  sah keinen — liegt), `kassenbonLesedienstOhneBon` + bis 20
+  `kassenbonLesedienstOhneBonFaelle` (dasselbe für ALLE solchen Fälle, auch
+  ohne Merkmale — die werden bezahlt; Prüfrunde 3, siehe Lücken),
+  `schalterUnbekannt` (nur bei unbekanntem Wert),
+  `kopfNichtAbrufbar`, `vorbefund` (aus früheren Läufen übernommen) und bis 50
+  Fälle mit Link in die Konsole, je Fall mit Antwort, Begründung und Datei.
+  **Kosten:** ~440 Eingabe- und ~25
+  Ausgabe-Token je Fall im ohnehin laufenden Aufruf (~3 $ im Monat zum
+  Listenpreis) plus ~120 Storage-Abrufe à 192 KB am Tag.
+  **Nach der Beobachtungswoche:** im Dashboard jeden „wäre abgelehnt"-Fall
+  am Preisfoto ansehen (Ziel: 0 echte Preisschilder/Bons darunter), dazu
+  jeden „Kassenbon, Lesedienst sah keinen" (Ziel: nur echte Bons), dann
+  `preisBildschirmRegel: true` setzen. Rückweg: `'shadow'` oder `false`.
+  Nichts wirkt rückwirkend: in der Beobachtung freigegebene Fälle bleiben
+  bezahlt, zurückgefordert wird nichts.
+  **Vor dem Ausrollen gemessen (04.10.2026, nur lesend):** die Zusatzfrage
+  ändert die übrigen Antworten nicht — an 40 frischen, von der Runde
+  entschiedenen Fällen (davon 10 Ablehnungen) waren echt, lose Ware,
+  trägt Angaben, dieselbe Ansicht und Preis sichtbar bis auf eine Antwort
+  gleich (Preis sichtbar „unsicher" → „ja" bei einem freigegebenen Fall);
+  die Regel hätte dort nichts angehalten. Der Bildkopf-Parser lieferte an
+  627 Preisfotos dieselbe Klasse wie die Messung (0 Abweichungen).
 - **Aufnahmeort passt nicht zum Markt** (anderes Land, Ausland, Simulator-
   Standort; `ort.auffaelligkeiten`) → bleibt für Patrick liegen (`ort_auffaellig`).
   Selten (3 von 1.973 Freigaben seit 01.09.) und oft harmlos (Aldi Süd/Hofer).
@@ -349,8 +532,17 @@ gesperrten Konten), dort als „Vorprüfung ok" mit Freigabe-Taste.
   Dokument (`sameUser === true`): die Doc-IDs beginnen mit der uid, eine fremde
   Referenz-ID verriet die uid eines anderen Kontos (03.10.: 237 Dokumente im
   Bestand, nicht bereinigt).
-- Scheitert das Speichern bei einem Fall mit sperrendem Befund → rote Warnung
-  `befund_nicht_gespeichert`.
+- Scheitert das Speichern bei einem Fall mit sperrendem Befund oder mit einem
+  scharfen Halt der Bildschirm-Regel → rote Warnung `befund_nicht_gespeichert`.
+- **Bildschirmfoto als Preisbeleg (04.10.2026) ist KEIN sperrender Befund.**
+  Die Konsole übernimmt den Befund der Runde aus
+  `review.rundeOffen.preisBildschirm` als Hinweis: `preis_bildschirm` (Befund
+  „ablehnen") bzw. `preis_bildschirm_unsicher` („halten") — gelber Punkt in
+  der Warteschlange, Zeile „Preisfoto: Bildschirmfoto" im Fall, Freigabe ohne
+  Notiz möglich (wer hinsieht, entscheidet; Ablehnen mit A, dann 2 = „Fotos
+  passen nicht", derselbe Code wie in der Runde). Nachrechnen kann sie ihn
+  nicht: woran er hängt, steht bewusst nicht am Dokument, sondern im
+  Tagesbericht des Laufs (`seit`).
 
 ## Rettungsläufe vor dem Urteil
 
@@ -384,6 +576,23 @@ Freigaben laufen IMMER — sie sind die harmlose Richtung. Zurückgehalten
 - **Wochen-Sperre auffällig oft:** mindestens 10 und mehr als 15 % aller Fälle
   des Laufs → nur diese Ablehnungen (gemessen 3,3 %). Eher ein Fehler beim
   Gruppieren als echte Doppel.
+- **Bildschirmfoto als Preisbeleg auffällig oft:** mindestens 4 PERSONEN und
+  mehr als 2,5 % der geprüften Fälle → nur diese Ablehnungen
+  (`notbremse_preis_bildschirm`; gemessen 6 in 8,5 Tagen bei ~120 Fällen am
+  Tag, ~0,6 %). Personen, nicht Fälle (Prüfrunde 2): Bildschirmfotos kommen
+  gebündelt — im Lauf 2026-10-02_080004 vier von zwei Personen bei 126
+  geprüften (3,2 %); als Fälle gezählt hätte die Bremse genau an einem Tag
+  gegriffen, an dem die Regel richtig lag, und die zurückgehaltenen Fälle
+  zählten mit ihrem Befund am Folgetag wieder mit. Die frühere Schätzung
+  „fälschlich an einem von 170 Tagen" setzte unabhängige Fälle voraus und
+  stimmte nicht (mit Fällen: 1 von 9 scharfen Läufen seit 26.09.). Seit 26.09.
+  höchstens 2 Personen je Lauf. Vorher 5 und 5 % — das ließ eine Fehllesung
+  im Umfang der e-Bon-Quote (~4 %, viele Personen) an jedem echten Tag seit
+  26.09. durch (Gegenprüfung 04.10.2026). Eine geänderte Lesart des Modells
+  trifft viele Personen, eine Welle eine oder zwei. Zählt wie „Preis fehlt" nicht in die Gesamtquote
+  (`AUSSER_GESAMTQUOTE`, am Dokument über `review.reason`). Ein zurückgehaltener
+  Ablehn-Befund steht am Fall und hält im nächsten Lauf weiter, solange der
+  Tag ihn nicht selbst wieder als „ablehnen" liest.
 - Wochen-Sperre und alte 24-h-Sperre zählen wie „Preis fehlt" NICHT in die
   Gesamtquote — weder heute noch im 30-Tage-Schnitt (`AUSSER_GESAMTQUOTE`,
   geprüft an `rejectReason` UND `review.reason`). Gesperrte Konten brauchen
@@ -426,6 +635,84 @@ Freigaben laufen IMMER — sie sind die harmlose Richtung. Zurückgehalten
   automatisch aufgehoben. (`werte.eanFotoBestaetigen`)
   Ebenso: die alten Handrunden-Skripte (`.crowd-review-0909/1309.js`, nicht
   versioniert) schreiben `dup.reason` unverändert — nicht mehr benutzen.
+  (e) **Bildschirmfoto als Preisbeleg (04.10.2026), offen:** Kassenbons mit
+  Bildschirm-Merkmalen (e-Bons, App-Bons) bleiben unberührt, weil Kassenbons
+  immer zählen. Wörtlich genommen („nur eins von beiden → liegen lassen")
+  lägen ~34 e-Bons pro Woche bei Patrick — der Bericht zählt sie
+  (`kassenbonMitMerkmal`). Die Wahl ist aber nicht „34 pro Woche oder
+  keiner": seit Prüfrunde 2 bleibt ein „Kassenbon" mit Merkmalen liegen, wenn
+  der Lesedienst das Foto las und keinen Bon sah — gemessen 0 Fälle, schließt
+  aber die Lücke, dass die Bezahlung an EINER Antwort hing. „Unklar" bleibt liegen, auch ohne Merkmale (eine
+  Verschärfung, gemessen 0 von 311 Nicht-Bildschirmen). Neu gegenüber der
+  wörtlichen Vorgabe und deshalb Patrick vorzulegen: die Regel lehnt nicht ab,
+  wenn der Lesedienst einen Kassenbon erkannte (strenger als „Bildschirm UND
+  Merkmale"; gibt keinen gemessenen Bildschirmfall frei).
+  (f) **Rechnungen fremder Händler, offen:** die Anweisung zählt jede
+  Rechnung als „kassenbon" — auch eine Amazon-Rechnung als Preisbeleg zu einem
+  Netto-Produkt (Fall `otzruvTyXmQjDj9dv0RnXTzEETt1_1963faab…`, freigegeben).
+  Für Bons gilt seit 04.10.: Online-Bestellungen nur bei UNSEREN Märkten,
+  „Amazon nein" (CLAUDE.md). Ob das auch für den Preisbeleg gilt, entscheidet
+  Patrick; heute selten (1 von 1.172 Preisfotos mit gelesenem Bon-Händler),
+  nach dem Scharfschalten aber der naheliegende Ausweg für Online-Preise.
+  Umsetzung wäre: gelesenen Händler (`priceReceipt.merchant`) gegen
+  `discounter` auflösen wie `cashback-pipeline/lib/merchant.js`, fremd →
+  liegen lassen. Die gemessene Anweisung nicht ohne neue Messung umschreiben.
+- **Bildschirmfoto als Preisbeleg, Lücken:** ein mit der App-Kamera
+  abfotografierter Bildschirm hat keine Bildschirm-Merkmale (immer 4:3, ohne
+  Datum und Software). Sagt das Modell „bildschirm", bleibt er liegen (nie automatisch
+  abgelehnt; gemessen 0 von 170 Kamerafotos). Sagt es „laden", wird er STILL
+  freigegeben — kein Befund, keine Zahl im Bericht. Messbar ist also nur der
+  Treffer, nicht der Fehlschlag; die Erkennungsrate für abfotografierte
+  Bildschirme ist ungemessen (alle 40 Messfälle waren digitale
+  Bildschirmfotos). Ebenso still: ein Bildschirmfoto, das nur das Foto eines
+  Preisschilds zeigt (Vergleichs-App), auf 4:3 oder 16:9 zugeschnitten — im
+  Modus nur mit Preisfoto sagte das Modell dort einmal „laden".
+  **Auch OHNE Zuschnitt fehlt das Merkmal** (Prüfrunde 3, 04.10.2026): JEDES
+  Bildschirmfoto im Format 4:3 oder 16:9, das als JPEG ohne EXIF ankommt
+  (Messenger, „kompatibel teilen"), hat keins — denn so sind die Bildschirme
+  selbst: iPad (2048×1536, 2732×2048), 16:9-Handys wie iPhone 8/SE (750×1334)
+  und ältere Androids (1080×1920), Monitore und Laptops (1920×1080,
+  1366×768). Dann entscheidet allein das Modell: „bildschirm" → liegen
+  lassen, „laden" → still bezahlt. Wie oft das vorkommt, ist ungemessen
+  (iOS-Bildschirmfotos sind PNG, viele Android-Fotos tragen ein EXIF-Datum,
+  heutige Handys sind länger als 16:9).
+  **Warenkorb als „Kassenbon"** (Prüfrunde 3, 04.10.2026): der naheliegende
+  Ausweg nach einer Ablehnung — im Online-Shop eines unserer Märkte das
+  Produkt in den Warenkorb legen, ohne zu kaufen, das Bildschirmfoto auf die
+  Artikelzeilen zuschneiden. Die gemessene Anweisung lenkt das Modell dabei
+  selbst zu „kassenbon" („auch nur ein Ausschnitt mit Bon-Zeilen", „eine
+  Rechnung ist immer kassenbon"). Als 4:3 ohne EXIF (kein Merkmal) wird er
+  IMMER bezahlt; mit Merkmal, wenn der Lesedienst ebenfalls einen Bon liest.
+  Ob gekauft wurde, prüft niemand; ein Abgleich des Händlers mit `discounter`
+  (Punkt f) schließt das nicht — ein REWE-Warenkorb ginge durch. Messbar
+  gemacht: der Bericht zählt und listet jeden „Kassenbon", den der Lesedienst
+  las und nicht als Bon sah (`kassenbonLesedienstOhneBon`, gemessen 0 von 167
+  Kassenbons). Offene Frage an Patrick: diese Fälle auch OHNE Merkmale liegen
+  lassen (kostet gemessen nichts, schließt aber nur den Teil, bei dem der
+  Lesedienst den Warenkorb nicht für einen Bon hält)?
+  **Zuschneiden kann zur Bezahlung führen** (Prüfrunde 2; die frühere Aussage
+  „nie eine Bezahlung" war falsch): ein Zuschnitt ändert nicht nur die
+  Dateimerkmale, er entfernt auch die Zeichen, an denen das Modell den
+  Bildschirm erkennt (30 von 40 Begründungen nennen Statusleiste, Such- oder
+  Adressleiste, Warenkorb, Herz, Sterne, Schließen/Teilen). Bleibt beim
+  Zuschneiden das EXIF-Datum stehen (Galerie-App), passt das Merkmal und
+  „laden" bleibt liegen. Kommt der Zuschnitt OHNE EXIF als 4:3/16:9 an (etwa
+  über einen Messenger), hängt alles an der Antwort des Modells — sagt es
+  „laden", wird STILL bezahlt. Ungemessen. Ein eingefügter Kamerahersteller
+  macht aus „ablehnen" weiter nur „liegen lassen" — und dass Merkmale zählen,
+  steht nirgends am Dokument.
+  Empfehlung vor `preisBildschirmRegel: true`: etwa 10 selbst gemachte
+  App-Kamera-Fotos von Produktseiten (Handy und Monitor) im vollen Aufruf
+  messen (wenige Cent); dazu die 2 Bildschirmfotos aus Prüfrunde 2
+  (`tT20t2pxYUC7lrfpR64l`, `FP6AmNLicieuzWrr5k0t`), etwa 10 bekannte
+  Bildschirmfotos, auf 4:3 zugeschnitten und ohne EXIF (~0,20 $), je ein
+  NICHT zugeschnittenes iPad- und 16:9-Desktop-Bildschirmfoto als JPEG ohne
+  EXIF, und 3–5 auf Artikelzeilen zugeschnittene Warenkorb- bzw.
+  Bestelllisten-Bildschirmfotos als 4:3 ohne EXIF (Prüfrunde 3). Nicht
+  gemessen, weil das Messbudget (~3 $) schon überschritten war — braucht
+  Patricks Freigabe. Papier-Prospekte kamen in den Daten nicht vor
+  (Anweisung: „unklar" → liegen lassen, ungetestet). Die Wahrheit der Messung
+  beruht auf einer Sichtprüfung von Vorschaubildern (eine Person).
 
 ## Warnungen im Bericht
 
@@ -444,7 +731,23 @@ Zweifel mehr liegen), mehr als 10 % (mind. 8) der geprüften Fälle heute NEU
 wegen der Barcode-Nummer angehalten (gelb, über 25 % rot; normal ~3 % — ein
 Sprung deutet auf das Modell, Prüfrunde 2), Halte-Grund für die Konsole nicht
 gespeichert (rot) bzw. nur der Barcode-Befund nicht (gelb, steht ersatzweise
-am Halte-Grund). Dass die Runde gar nicht lief, erkennen
+am Halte-Grund), die Bildprüfung beantwortet die Preisquelle bei mehr als
+25 % (mind. 8) nicht mehr (gelb — die Bildschirm-Regel erkennt dann still
+nichts; gemessen 0 von 448), mehr als 5 % (mind. 5) heute NEU wegen unsicherer
+Preisquelle angehalten (gelb; normal ~1 pro Woche; übernommene Befunde zählen
+nicht, sonst käme die Warnung jeden Morgen, bis Patrick entschieden hat),
+mindestens 2 Preisfotos „Bildschirm", obwohl der Lesedienst einen Kassenbon
+erkannte (gelb; gemessen nie — Fingerabdruck einer geänderten Lesart, die
+Fälle bleiben liegen), mindestens 2 Preisfotos „Kassenbon", obwohl der
+Lesedienst das Foto las und keinen Bon sah (gelb, `preisquelle_bon_widerspruch`;
+gemessen nie — Warenkorb statt Bon, oder geänderte Lesart; die Fälle bleiben
+liegen), ein unbekannter Wert des Schalters `preisBildschirmRegel` (gelb, mit
+Wert und Typ — gilt als Beobachtung), mindestens 3 Preisfotos, deren Kopf
+nicht abrufbar war (gelb; Storage-Störung — scharf und bei mehr als 25 % der
+befragten, mind. 8, rot: ein Tag fast ohne Freigaben, Prüfrunde 3). Ein scharfer Halt der
+Bildschirm-Regel, der nicht gespeichert werden konnte, zählt zur roten
+Warnung `befund_nicht_gespeichert` (ohne Eintrag kennt der nächste Lauf ihn
+nicht). Dass die Runde gar nicht lief, erkennen
 Dashboard und Morgen-Chat selbst (Bericht älter als 26 h bzw. nicht von heute).
 
 ## Nachricht an die Nutzer

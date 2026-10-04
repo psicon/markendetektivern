@@ -14,13 +14,19 @@
 // ── In-Memory-Firestore ────────────────────────────────────────────────
 const mockStore = new Map();
 const mockWrites = [];
-const mockLage = { sperrenFehler: false, listeFehler: false, auditAufrufe: [], auditTexte: [], zweitLesungen: [], updateFehler: () => false, txUpdateFehler: () => false };
+const mockLage = { sperrenFehler: false, listeFehler: false, configFehler: 0, configLesungen: 0, auditAufrufe: [], auditTexte: [], zweitLesungen: [], updateFehler: () => false, txUpdateFehler: () => false };
 const mockSentinel = { __feld: 'serverTimestamp' };
 const mockDelete = { __feld: 'delete' };
 const mockListe = new Map(); // Pfad → { md5, size }
 const mockAudit = new Map(); // Pfad des ean-Fotos → eanFoto-Antwort
 const mockZweit = new Map(); // Pfad des ean-Fotos → Antwort der zweiten Lesung ('FEHLER' = wirft)
 const mockCreate = new Map(); // Dokumentpfad → Server-Zeitpunkt (createTime), sonst keiner
+const mockKopf = new Map(); // Pfad → Buffer (Anfang der Datei), 'FEHLER' (wirft) oder Funktion (liefert den Buffer); sonst ein Kamerafoto 4:3
+const mockQuelle = new Map(); // Pfad des Preisfotos → Antwort preisQuelle der Bildprüfung
+const mockNachlese = new Map(); // Pfad des Preisfotos → Antworten der Preis-Nachlesung, der Reihe nach ('FEHLER' = wirft)
+const mockDownloads = [];
+/** Ohne Angabe: Anfang eines Fotos aus der App-Kamera (JPEG 4:3, ohne EXIF) — die Regel findet nichts. */
+function mockKameraKopf() { return require('./helpers/bildKopfDaten').jpeg(3000, 4000); }
 
 function kopie(v) {
   if (Array.isArray(v)) return v.map(kopie);
@@ -56,7 +62,12 @@ function anwenden(pfad, daten, merge) {
 function docRef(pfad) {
   return {
     path: pfad, id: pfad.split('/').pop(),
-    get: async () => snapshot(pfad, mockStore.get(pfad)),
+    get: async () => {
+      // `configFehler`: so viele Lesevorgänge von cashback_config/v1 scheitern.
+      if (pfad === 'cashback_config/v1') mockLage.configLesungen++;
+      if (pfad === 'cashback_config/v1' && mockLage.configFehler > 0) { mockLage.configFehler--; throw new Error('UNAVAILABLE config'); }
+      return snapshot(pfad, mockStore.get(pfad));
+    },
     set: async (daten, opts) => { mockWrites.push({ path: pfad, art: 'set', data: kopie(daten) }); anwenden(pfad, daten, opts && opts.merge); },
     update: async (daten) => {
       if (mockLage.updateFehler(pfad, daten)) throw new Error('UNAVAILABLE update');
@@ -107,7 +118,15 @@ jest.mock('firebase-admin', () => {
           if (mockLage.listeFehler) throw new Error('storage list 503');
           return [[...mockListe.entries()].map(([name, m]) => ({ name, md5Hash: m.md5, size: String(m.size) })), null];
         },
-        file: (p) => ({ getMetadata: async () => { const m = mockListe.get(p); if (!m) throw new Error('No such object'); return [{ md5Hash: m.md5, size: String(m.size) }]; } }),
+        file: (p) => ({
+          getMetadata: async () => { const m = mockListe.get(p); if (!m) throw new Error('No such object'); return [{ md5Hash: m.md5, size: String(m.size) }]; },
+          download: async (opts) => {
+            mockDownloads.push({ p, opts });
+            const k = mockKopf.has(p) ? mockKopf.get(p) : mockKameraKopf();
+            if (k === 'FEHLER') throw new Error('No such object');
+            return [typeof k === 'function' ? k() : k];
+          },
+        }),
       }),
     }),
   };
@@ -130,6 +149,14 @@ jest.mock('@google/genai', () => ({
             if (z === 'FEHLER') throw new Error('INVALID_ARGUMENT kaputt');
             return { text: JSON.stringify({ ean: z, sicher: true }) };
           }
+          if (text.includes('Lies zwei Angaben, sonst nichts')) {
+            // Preis-Nachlesung (nur, wenn kein Preis gelesen ist).
+            const liste = mockNachlese.get(pfade.find((p) => p.endsWith('/preis.jpg')));
+            if (!liste || !liste.length) throw new Error('unerwarteter Aufruf (Nachlesen sollte nicht nötig sein)');
+            const a = liste.shift();
+            if (a === 'FEHLER') throw new Error('INVALID_ARGUMENT Nachlesung gescheitert');
+            return { text: JSON.stringify(a) };
+          }
           if (!text.includes('Du prüfst eine Produkt-Einreichung')) throw new Error('unerwarteter Aufruf (Nachlesen sollte nicht nötig sein)');
           mockLage.auditAufrufe.push(pfade);
           mockLage.auditTexte.push(text);
@@ -137,7 +164,10 @@ jest.mock('@google/genai', () => ({
           const eanFoto = mockAudit.has(eanPfad) ? mockAudit.get(eanPfad) : (eanPfad || '').split('/')[1];
           if (eanFoto === 'AUDIT_FEHLER') throw new Error('INVALID_ARGUMENT Bild nicht lesbar');
           if (mockLage.nachAudit) mockLage.nachAudit();
-          return { text: JSON.stringify({ echt: true, loseWare: false, traegtAngaben: true, gleicheAnsicht: false, preisSichtbar: true, eanFoto, grund: 'ok' }) };
+          // Zusatzfrage „Woher stammt der Preis?" (04.10.2026) nur, wenn sie gestellt wurde.
+          const preisPfad = pfade.find((p) => p.endsWith('/preis.jpg'));
+          const quelle = text.includes('"preisQuelle":') && mockQuelle.has(preisPfad) ? { preisQuelle: mockQuelle.get(preisPfad), preisQuelleGrund: 'Statusleiste' } : {};
+          return { text: JSON.stringify({ echt: true, loseWare: false, traegtAngaben: true, gleicheAnsicht: false, preisSichtbar: true, eanFoto, grund: 'ok', ...quelle }) };
         },
       },
     };
@@ -175,6 +205,8 @@ beforeEach(() => {
   mockAudit.clear();
   mockLage.sperrenFehler = false;
   mockLage.listeFehler = false;
+  mockLage.configFehler = 0;
+  mockLage.configLesungen = 0;
   mockLage.auditAufrufe = [];
   mockLage.auditTexte = [];
   mockLage.zweitLesungen = [];
@@ -183,6 +215,10 @@ beforeEach(() => {
   mockLage.nachAudit = null;
   mockZweit.clear();
   mockCreate.clear();
+  mockKopf.clear();
+  mockQuelle.clear();
+  mockNachlese.clear();
+  mockDownloads.length = 0;
   dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => T0);
   mockStore.set('cashback_config/v1', { fotoWorker: true });
 });
@@ -749,5 +785,444 @@ describe('Schlussprüfung 03.10.2026: Kontosperre vor einer Ablehnung', () => {
       expect(doc('neu').status).toBe('pending');
       expect(b.offenGruende).toEqual({ schreib_fehler: 1 });
     } finally { mockDb.runTransaction = orig; }
+  });
+});
+
+describe('Bildschirmfoto als Preisbeleg (Patrick 04.10.2026: „ja, bau das")', () => {
+  const { png, jpeg, EXIF } = require('./helpers/bildKopfDaten');
+  const { rowOf, precheckOf } = require('../src/einreichung');
+  const preisPfad = (id, uid = 'u1') => `crowduploads/${uid}/${id}/preis.jpg`;
+  /**
+   * Einreichung, deren Preisfoto die Bildprüfung als `quelle` sieht und deren Datei `kopf` beginnt.
+   * Der Lesedienst hat das Preisfoto standardmäßig gelesen und ein Preisschild
+   * gesehen — so wie bei 26 von 40 gemessenen Bildschirmfotos (Prüfrunde 3:
+   * ohne Lesung wird nie abgelehnt).
+   */
+  function mitPreisfoto(id, quelle, kopf, extra = {}) {
+    einreichung(id, { priceImageKind: 'preisschild', ...extra });
+    if (quelle) mockQuelle.set(preisPfad(id, extra.uid), quelle);
+    if (kopf) mockKopf.set(preisPfad(id, extra.uid), kopf);
+  }
+  const schalter = (v) => mockStore.set('cashback_config/v1', { fotoWorker: true, ...(v === undefined ? {} : { preisBildschirmRegel: v }) });
+
+  it('ohne Schalter = Beobachtung: Bildschirmfoto wird freigegeben, der Befund steht NUR im Bericht', async () => {
+    mitPreisfoto('schirm', 'bildschirm', png(1080, 2400));
+    const b = await scharf();
+    expect(mockLage.auditTexte[0]).toContain('"preisQuelle":"laden|kassenbon|bildschirm|keiner|unklar"');
+    expect(doc('schirm').status).toBe('approved');
+    // Gegenprüfung 04.10.2026: das Dokument liest der Einreicher — keine
+    // Woche Vorwarnung an jedem bezahlten Bildschirmfoto.
+    expect(doc('schirm').review.bildAudit).not.toHaveProperty('preisQuelle');
+    expect(doc('schirm').review.bildAudit).not.toHaveProperty('preisQuelleGrund');
+    expect(doc('schirm').review).not.toHaveProperty('preisBildschirm');
+    expect(JSON.stringify(doc('schirm'))).not.toMatch(/Statusleiste|bildschirm/i);
+    expect(b.preisBildschirm).toMatchObject({
+      modus: 'shadow', befragt: 1, quellen: { bildschirm: 1 }, merkmal: { ja: 1 }, befundAblehnen: 1, befundHalten: 0, stattFreigabe: 1, kassenbonMitMerkmal: 0,
+      faelle: [{ id: 'schirm', befund: 'ablehnen', ohneRegel: 'freigeben', entscheidung: 'freigeben', quelle: 'bildschirm', merkmal: true, lesedienstBon: false, datei: 'png 1080×2400' }],
+    });
+    // gelesen wird nur der Anfang der Datei
+    expect(mockDownloads).toEqual([{ p: preisPfad('schirm'), opts: { start: 0, end: 192 * 1024 - 1 } }]);
+  });
+
+  it('scharf (true): Bildschirm UND Merkmale → abgelehnt, am Dokument fotos_unpassend, intern preis_bildschirm', async () => {
+    schalter(true);
+    mitPreisfoto('schirm', 'bildschirm', jpeg(1080, 2400));
+    const b = await scharf();
+    expect(doc('schirm')).toMatchObject({
+      status: 'rejected', rejectReason: 'fotos_unpassend', holdReasons: ['fotos_unpassend'],
+      review: { reason: 'preis_bildschirm' },
+    });
+    expect(doc('schirm').reviewNote).toMatch(/Bildschirm/);
+    expect(JSON.stringify(doc('schirm').review)).not.toMatch(/Statusleiste|merkmal|png|jpg/i);
+    expect(b).toMatchObject({ abgelehnt: 1, freigegeben: 0, ablehnGruende: { preis_bildschirm: 1 } });
+  });
+
+  it('scharf: Bildschirm, aber Kamerafoto (abfotografierter Bildschirm?) → liegen lassen, die Konsole zeigt denselben Befund', async () => {
+    schalter(true);
+    mitPreisfoto('kamera', 'bildschirm', jpeg(3000, 4000));
+    const b = await scharf();
+    const d = doc('kamera');
+    expect(d.status).toBe('pending');
+    expect(d.review.rundeOffen).toMatchObject({ grund: 'preis_bildschirm_unsicher', sperrend: [], preisBildschirm: { modus: true, befund: 'halten' } });
+    expect(JSON.stringify(d.review.rundeOffen)).not.toMatch(/Statusleiste|merkmal|Kamera|format/i);
+    expect(d.holdReasons).toBeUndefined(); // die App zeigt „wird geprüft", nicht „zurückgestellt"
+    expect(b.offenGruende).toEqual({ preis_bildschirm_unsicher: 1 });
+    // Prüfkonsole: Hinweis, keine Sperre
+    const pre = precheckOf(rowOf({ id: 'kamera', data: () => d }), []);
+    expect(pre).toMatchObject({ verdict: 'ok', hinweise: ['preis_bildschirm_unsicher'] });
+  });
+
+  it('scharf: e-Bon als Bildschirmfoto zählt (Kassenbon immer erlaubt) — im Bericht gezählt', async () => {
+    schalter(true);
+    mitPreisfoto('ebon', 'kassenbon', png(1080, 2400), { priceImageKind: 'kassenbon' });
+    const b = await scharf();
+    expect(doc('ebon').status).toBe('approved');
+    expect(b.preisBildschirm).toMatchObject({ kassenbonMitMerkmal: 1, befundAblehnen: 0, befundHalten: 0, faelle: [] });
+  });
+
+  it('scharf: Regalfoto aus der App-Kamera → freigegeben, kein Befund', async () => {
+    schalter(true);
+    mitPreisfoto('regal', 'laden', jpeg(3000, 4000));
+    const b = await scharf();
+    expect(doc('regal').status).toBe('approved');
+    expect(doc('regal').review).not.toHaveProperty('preisBildschirm');
+    expect(b.preisBildschirm).toMatchObject({ quellen: { laden: 1 }, merkmal: { nein: 1 }, faelle: [] });
+  });
+
+  it('scharf: Datei nicht lesbar ist kein Urteil — „Bildschirm" ohne Merkmale bleibt liegen, nie abgelehnt', async () => {
+    schalter(true);
+    mitPreisfoto('weg', 'bildschirm', 'FEHLER');
+    const b = await scharf();
+    expect(doc('weg').status).toBe('pending');
+    expect(doc('weg').review.rundeOffen).toMatchObject({ grund: 'preis_bildschirm_unsicher', preisBildschirm: { modus: true, befund: 'halten' } });
+    expect(b.preisBildschirm.merkmal).toEqual({ unbekannt: 1 });
+  });
+
+  // Gegenprüfung 04.10.2026: ein Technikfehler darf auch nichts FREIGEBEN.
+  it('scharf: „Laden", aber Kopf des Preisfotos nicht abrufbar → liegen lassen (preis_kopf_nicht_lesbar), Warnung ab 3', async () => {
+    schalter(true);
+    for (const id of ['w1', 'w2', 'w3']) mitPreisfoto(id, 'laden', 'FEHLER', { ean: String(4000000000000 + id.charCodeAt(1) * 97) });
+    const b = await scharf();
+    for (const id of ['w1', 'w2', 'w3']) {
+      expect(doc(id).status).toBe('pending');
+      expect(doc(id).review.rundeOffen).toMatchObject({ grund: 'preis_kopf_nicht_lesbar' });
+      expect(doc(id).review.rundeOffen.hinweis).toMatch(/nicht abrufbar \(Technik\)/);
+      // kein Befund über das Foto → nicht weitergetragen
+      expect(doc(id).review.rundeOffen).not.toHaveProperty('preisBildschirm');
+    }
+    expect(b.preisBildschirm.kopfNichtAbrufbar).toBe(3);
+    expect(b.warnungen.map((w) => w.code)).toContain('preisfoto_kopf_nicht_abrufbar');
+    expect(b.warnungen.map((w) => w.code)).not.toContain('preisquelle_haelt_viele');
+    // Am nächsten Morgen ist Storage wieder da → neu geprüft, freigegeben
+    mockKopf.clear();
+    await scharf();
+    for (const id of ['w1', 'w2', 'w3']) expect(doc(id).status).toBe('approved');
+  });
+
+  // Gegenprüfung 04.10.2026: e-Bons tragen die Merkmale immer — ihr Schutz
+  // darf nicht an einer einzigen Modellantwort hängen.
+  it('scharf: „Bildschirm" + Merkmale, aber der Lesedienst erkannte einen Kassenbon → nie abgelehnt, liegt; Warnung ab 2', async () => {
+    schalter(true);
+    mitPreisfoto('ebon1', 'bildschirm', png(1080, 2400), { priceImageKind: 'kassenbon' });
+    mitPreisfoto('ebon2', 'bildschirm', png(1080, 2400), { ean: '4000000000017', priceReceipt: { merchant: 'Lidl', zip: '10115' } });
+    const b = await scharf();
+    for (const id of ['ebon1', 'ebon2']) {
+      expect(doc(id).status).toBe('pending');
+      expect(doc(id).review.rundeOffen).toMatchObject({ grund: 'preis_bildschirm_unsicher', preisBildschirm: { befund: 'halten' } });
+    }
+    expect(b).toMatchObject({ abgelehnt: 0 });
+    expect(b.preisBildschirm).toMatchObject({ bildschirmTrotzBon: 2, befundAblehnen: 0 });
+    expect(b.warnungen.map((w) => w.code)).toContain('preisquelle_bon_als_bildschirm');
+  });
+
+  it('scharf: erkennt der Lesedienst während des Laufs einen Kassenbon → die Ablehnung wird nicht geschrieben', async () => {
+    schalter(true);
+    mitPreisfoto('spaet', 'bildschirm', png(1080, 2400));
+    mockLage.nachAudit = () => { const d = doc('spaet'); mockStore.set('crowd_uploads/spaet', { ...d, priceImageKind: 'kassenbon' }); };
+    const b = await scharf();
+    expect(doc('spaet').status).toBe('pending');
+    expect(b).toMatchObject({ abgelehnt: 0 });
+  });
+
+  // Gegenprüfung 04.10.2026: ein angehaltener Fall wird nie automatisch frei.
+  it('scharf: Befund vom Vortag hält weiter — auch wenn das Modell heute „Laden" sagt oder die Bildprüfung scheitert', async () => {
+    schalter(true);
+    mitPreisfoto('halt', 'bildschirm', jpeg(3000, 4000));
+    await scharf();
+    const tag1 = doc('halt').review.rundeOffen;
+    expect(tag1).toMatchObject({ grund: 'preis_bildschirm_unsicher', preisBildschirm: { modus: true, befund: 'halten', seit: tag1.lauf } });
+
+    // Tag 2: Modell liest „Laden" aus einem Kamerafoto — ohne Vorbefund wäre das eine Freigabe.
+    mockQuelle.set(preisPfad('halt'), 'laden');
+    const b2 = await scharf();
+    expect(doc('halt').status).toBe('pending');
+    expect(doc('halt').review.rundeOffen).toMatchObject({ grund: 'preis_bildschirm_unsicher', preisBildschirm: { befund: 'halten', seit: tag1.lauf } });
+    expect(doc('halt').review.rundeOffen.hinweis).toMatch(/gilt bis zur Entscheidung/);
+    expect(b2.preisBildschirm).toMatchObject({ vorbefund: 1, faelle: [{ id: 'halt', vorbefund: tag1.lauf }] });
+
+    // Tag 3: Bildprüfung scheitert — der Befund bleibt für die Konsole stehen.
+    mockAudit.set(doc('halt').images.ean, 'AUDIT_FEHLER');
+    await scharf();
+    expect(doc('halt').status).toBe('pending');
+    expect(doc('halt').review.rundeOffen).toMatchObject({ grund: 'bild_audit_gescheitert', preisBildschirm: { modus: true, befund: 'halten', seit: tag1.lauf } });
+    const pre = precheckOf(rowOf({ id: 'halt', data: () => doc('halt') }), []);
+    expect(pre.hinweise).toContain('preis_bildschirm_unsicher');
+
+    // Schalter zurück auf Beobachtung: der Befund hält nichts mehr.
+    mockAudit.delete(doc('halt').images.ean);
+    schalter('shadow');
+    await scharf();
+    expect(doc('halt').status).toBe('approved');
+  });
+
+  it('übernommene Befunde lösen die Warnung „hält viele an" nicht jeden Morgen neu aus', async () => {
+    schalter(true);
+    const gestern = { review: { rundeOffen: { grund: 'preis_bildschirm_unsicher', lauf: 'GESTERN', preisBildschirm: { modus: true, befund: 'halten', seit: 'GESTERN' } } } };
+    for (let i = 0; i < 5; i++) mitPreisfoto(`v${i}`, 'laden', jpeg(3000, 4000), { ean: String(4000000000000 + i * 97), ...gestern });
+    const b = await scharf();
+    expect(b.offenGruende).toEqual({ preis_bildschirm_unsicher: 5 });
+    expect(b.preisBildschirm.vorbefund).toBe(5);
+    expect(b.warnungen.map((w) => w.code)).not.toContain('preisquelle_haelt_viele');
+    // frisch gehaltene dagegen schon
+    mockStore.clear(); mockListe.clear(); mockKopf.clear(); mockQuelle.clear(); schalter(true);
+    for (let i = 0; i < 5; i++) mitPreisfoto(`f${i}`, 'laden', png(900, 900), { ean: String(4000000000000 + i * 97) });
+    expect((await scharf()).warnungen.map((w) => w.code)).toContain('preisquelle_haelt_viele');
+  });
+
+  it('Beobachtungs-Befund am offenen Fall hält im scharfen Lauf NICHT (nur scharfe Befunde gelten weiter)', async () => {
+    schalter(true);
+    mitPreisfoto('alt', 'laden', jpeg(3000, 4000), { review: { rundeOffen: { grund: 'ort_auffaellig', lauf: 'GESTERN', preisBildschirm: { modus: 'shadow', befund: 'ablehnen', seit: 'GESTERN' } } } });
+    await scharf();
+    expect(doc('alt').status).toBe('approved');
+  });
+
+  it('Schalter aus (false): keine Zusatzfrage, kein Bildkopf, nichts am Dokument', async () => {
+    schalter(false);
+    mitPreisfoto('schirm', 'bildschirm', png(1080, 2400));
+    const b = await scharf();
+    expect(mockLage.auditTexte[0]).not.toContain('preisQuelle');
+    expect(mockDownloads).toEqual([]);
+    expect(doc('schirm').status).toBe('approved');
+    expect(doc('schirm').review.preisBildschirm).toBeUndefined();
+    expect(doc('schirm').review.bildAudit).not.toHaveProperty('preisQuelle');
+    expect(b.preisBildschirm).toMatchObject({ modus: false, befragt: 0, faelle: [] });
+  });
+
+  it('unbekannter Schalterwert („ja") gilt als Beobachtung — nie still scharf', async () => {
+    schalter('ja');
+    mitPreisfoto('schirm', 'bildschirm', png(1080, 2400));
+    const b = await scharf();
+    expect(doc('schirm').status).toBe('approved');
+    expect(b.preisBildschirm.modus).toBe('shadow');
+    expect(b.preisBildschirm.schalterUnbekannt).toBe('"ja" (Text)');
+  });
+
+  // Prüfrunde 2 (04.10.2026): die Firebase-Konsole legt ein neues Feld als
+  // Text an — "true" sieht aus wie scharf und ist es nicht.
+  it('"true" als Text → Beobachtung, aber gelbe Warnung mit dem Wert (nicht still)', async () => {
+    schalter('true');
+    mitPreisfoto('schirm', 'bildschirm', png(1080, 2400));
+    const b = await scharf();
+    expect(doc('schirm').status).toBe('approved');
+    expect(b.preisBildschirm).toMatchObject({ modus: 'shadow', schalterUnbekannt: '"true" (Text)' });
+    expect(b.warnungen.find((w) => w.code === 'preisbildschirm_schalter_unbekannt')).toMatchObject({ stufe: 'gelb' });
+    // gültige Werte und ein fehlender Schalter warnen nicht
+    for (const v of [undefined, 'shadow', true, false]) {
+      mockStore.clear(); mockListe.clear(); mockKopf.clear(); mockQuelle.clear(); schalter(v);
+      einreichung('a');
+      const w = await scharf();
+      expect(w.preisBildschirm).not.toHaveProperty('schalterUnbekannt');
+      expect(w.warnungen.map((x) => x.code)).not.toContain('preisbildschirm_schalter_unbekannt');
+    }
+  });
+
+  // Prüfrunde 2 (04.10.2026): ein nicht lesbarer Schalter ist KEIN Wert — als
+  // 'shadow' gälte kein scharfer Befund mehr, angehaltene Fälle würden frei.
+  it('Schalter nicht lesbar (Runde liest selbst) → Lauf bricht ab: kein angehaltener Fall frei, kein neues Bildschirmfoto bezahlt', async () => {
+    schalter(true);
+    mitPreisfoto('halt', 'bildschirm', jpeg(3000, 4000));
+    await scharf();
+    expect(doc('halt').review.rundeOffen).toMatchObject({ preisBildschirm: { modus: true, befund: 'halten' } });
+    mitPreisfoto('neu', 'bildschirm', png(1080, 2400), { ean: '4000000000017' });
+    mockQuelle.set(preisPfad('halt'), 'laden');
+    mockWrites.length = 0;
+    mockLage.configFehler = 1;
+    await expect(scharf()).rejects.toThrow(/preisBildschirmRegel nicht lesbar/);
+    expect(doc('halt').status).toBe('pending');
+    expect(doc('neu').status).toBe('pending');
+    expect(mockWrites.filter((w) => w.path.startsWith('crowd_uploads/'))).toEqual([]);
+  });
+  it('index.js-Weg: der Schalter kommt als Wert mit → die Runde liest ihn nicht ein zweites Mal', async () => {
+    schalter('shadow'); // stünde im Dokument — gilt nicht, der übergebene Wert gilt
+    mitPreisfoto('schirm', 'bildschirm', png(1080, 2400));
+    const b = await scharf({ preisBildschirmRegel: true });
+    // nur das Lesen der Bon-Lage (bonWorker) — kein eigenes für den Schalter
+    expect(mockLage.configLesungen).toBe(1);
+    expect(b.preisBildschirm.modus).toBe(true);
+    expect(doc('schirm')).toMatchObject({ status: 'rejected', review: { reason: 'preis_bildschirm' } });
+    // null (Feld fehlt im Dokument) = Beobachtung
+    mockStore.clear(); mockListe.clear(); mockKopf.clear(); mockQuelle.clear(); schalter(true);
+    mitPreisfoto('s2', 'bildschirm', png(1080, 2400));
+    expect((await scharf({ preisBildschirmRegel: null })).preisBildschirm.modus).toBe('shadow');
+    expect(doc('s2').status).toBe('approved');
+  });
+
+  it('Schalter-Wechsel ändert die Regelversion (der Bericht meldet ihn wie eine Regeländerung)', async () => {
+    einreichung('a');
+    const v1 = (await scharf()).regelVersion;
+    mockStore.clear(); mockListe.clear(); schalter(true); einreichung('b');
+    const v2 = (await scharf()).regelVersion;
+    expect(v1).not.toBe(v2);
+  });
+
+  it('hängender Abruf des Bildkopfs → nach der Zeitgrenze „Merkmale unbekannt", kein Urteil', async () => {
+    const { preisFotoKopf } = require('../src/taeglicheRunde');
+    const haengt = { file: () => ({ download: () => new Promise(() => {}) }) };
+    await expect(preisFotoKopf(haengt, { images: { preis: 'p' } }, 10)).resolves.toEqual({ kopf: null, merkmal: null, fehler: 'zeit_abgelaufen' });
+    await expect(preisFotoKopf(haengt, { images: {} }, 10)).resolves.toMatchObject({ merkmal: null, fehler: 'kein_preisfoto' });
+    const gut = { file: () => ({ download: async () => [png(1080, 2400)] }) };
+    await expect(preisFotoKopf(gut, { images: { preis: 'p' } }, 10)).resolves.toMatchObject({ merkmal: true, fehler: null });
+  });
+
+  // Prüfrunde 2 (04.10.2026): ohne den Eintrag kennt der nächste Lauf den
+  // scharfen Halt nicht und gäbe den Fall bei einer anderen Lesung frei.
+  it('scharfer Halt nicht speicherbar → rote Warnung (wie ein sperrender Befund)', async () => {
+    schalter(true);
+    mitPreisfoto('kamera', 'bildschirm', jpeg(3000, 4000));
+    mockLage.txUpdateFehler = (pfad, daten) => Object.keys(daten).includes('review.rundeOffen');
+    const b = await scharf();
+    expect(doc('kamera').status).toBe('pending');
+    expect(b.rundeOffen).toMatchObject({ fehler: 1, fehlerSperrend: 1 });
+    expect(b.warnungen.find((w) => w.code === 'befund_nicht_gespeichert')).toMatchObject({ stufe: 'rot' });
+  });
+  it('… ein Halt nur wegen des nicht abrufbaren Kopfs ist kein Befund → kein Eintrag, keine rote Warnung', async () => {
+    schalter(true);
+    mitPreisfoto('weg', 'laden', 'FEHLER');
+    mockLage.txUpdateFehler = (pfad, daten) => Object.keys(daten).includes('review.rundeOffen');
+    const b = await scharf();
+    expect(b.rundeOffen.fehlerSperrend).toBe(0);
+    expect(b.warnungen.map((w) => w.code)).not.toContain('befund_nicht_gespeichert');
+  });
+
+  // Prüfrunde 2 (04.10.2026): Bildschirmfotos außerhalb der gemessenen
+  // Merkmal-Klasse (Billa-Online-Shop 1200×2152, zugeschnittener App-Ausschnitt).
+  it('scharf: Bildschirmfoto im 16:9-Format mit EXIF-Datum ohne Hersteller → abgelehnt; zugeschnitten mit „Laden" → liegt', async () => {
+    schalter(true);
+    mitPreisfoto('billa', 'bildschirm', jpeg(1200, 2152, { exif: EXIF.androidBildschirm }));
+    mitPreisfoto('ausschnitt', 'laden', jpeg(446, 248, { exif: EXIF.zugeschnitten }), { ean: '4000000000017' });
+    mitPreisfoto('ios', 'laden', jpeg(3024, 4032, { exif: EXIF.iosAppKamera }), { ean: '4000000000024' });
+    await scharf();
+    expect(doc('billa')).toMatchObject({ status: 'rejected', rejectReason: 'fotos_unpassend' });
+    expect(doc('ausschnitt')).toMatchObject({ status: 'pending', review: { rundeOffen: { grund: 'preis_bildschirm_unsicher' } } });
+    expect(doc('ios').status).toBe('approved'); // App-Kamera mit EXIF-Rest bleibt ein Kamerafoto
+  });
+
+  // Prüfrunde 2 (04.10.2026): Gegenzeichen auch in der Richtung, in der bezahlt wird.
+  it('scharf: „Kassenbon" + Merkmale, der Lesedienst las ein Preisschild bzw. „sonstiges" → liegt; Warnung ab 2; mit Lesedienst-Bon frei', async () => {
+    schalter(true);
+    mitPreisfoto('kb1', 'kassenbon', png(1080, 2400), { priceImageKind: 'preisschild' });
+    mitPreisfoto('kb2', 'kassenbon', jpeg(1080, 2400), { ean: '4000000000017', priceImageKind: 'sonstiges' });
+    mitPreisfoto('ebon', 'kassenbon', png(1080, 2400), { ean: '4000000000024', priceImageKind: 'kassenbon' });
+    mitPreisfoto('papier', 'kassenbon', jpeg(3000, 4000), { ean: '4000000000031', priceImageKind: 'preisschild' });
+    const b = await scharf();
+    for (const id of ['kb1', 'kb2']) {
+      expect(doc(id).status).toBe('pending');
+      expect(doc(id).review.rundeOffen).toMatchObject({ grund: 'preis_bildschirm_unsicher', preisBildschirm: { modus: true, befund: 'halten' } });
+    }
+    expect(doc('ebon').status).toBe('approved');
+    expect(doc('papier').status).toBe('approved'); // Kamerafoto eines Papierbons
+    expect(b.preisBildschirm).toMatchObject({ kassenbonOhneLesedienstBon: 2, kassenbonMitMerkmal: 3 });
+    expect(b.warnungen.map((w) => w.code)).toContain('preisquelle_bon_widerspruch');
+  });
+
+  // Prüfrunde 2 (04.10.2026): Zeitgrenze des ganzen Kopf-Schritts (3 min).
+  it('Kopf-Schritt läuft über seine Zeitgrenze → die übrigen „Laden"-Fälle bleiben liegen (preis_kopf_nicht_lesbar), nie frei', async () => {
+    schalter(true);
+    // Das erste Preisfoto braucht 4 Minuten — danach beginnt der Schritt nichts Neues.
+    mitPreisfoto('k0', 'laden', () => { dateSpy.mockImplementation(() => T0 + 4 * 60 * 1000); return jpeg(3000, 4000); });
+    mitPreisfoto('k1', 'laden', null, { ean: '4000000000017' });
+    mitPreisfoto('k2', 'laden', null, { ean: '4000000000024' });
+    const b = await scharf();
+    expect(doc('k0').status).toBe('approved');
+    for (const id of ['k1', 'k2']) {
+      expect(doc(id).status).toBe('pending');
+      expect(doc(id).review.rundeOffen).toMatchObject({ grund: 'preis_kopf_nicht_lesbar' });
+    }
+    expect(mockDownloads.map((d) => d.p)).toEqual([preisPfad('k0')]);
+    expect(b.preisBildschirm).toMatchObject({ kopfNichtAbrufbar: 2, merkmal: { nein: 1, unbekannt: 2 } });
+    expect(b.preisBildschirm.faelle.map((f) => f.datei)).toEqual(['zeit_abgelaufen', 'zeit_abgelaufen']);
+  });
+
+  // Prüfrunde 3 (04.10.2026): Erstlesung ohne Bildart, Nachlesung gescheitert —
+  // ein Werkzeugfehler wird nicht zur Ablehnung an EINER Modellantwort.
+  it('scharf: Lesedienst hat das Preisfoto nie gelesen, Nachlesung gescheitert → nicht abgelehnt, liegt', async () => {
+    schalter(true);
+    mitPreisfoto('ungelesen', 'bildschirm', png(1080, 2400), { priceImageKind: undefined, preis: null });
+    mockNachlese.set(preisPfad('ungelesen'), ['FEHLER']);
+    const b = await scharf();
+    expect(doc('ungelesen').status).toBe('pending');
+    expect(doc('ungelesen').review.rundeOffen).toMatchObject({ grund: 'preis_bildschirm_unsicher', preisBildschirm: { modus: true, befund: 'halten' } });
+    expect(b).toMatchObject({ abgelehnt: 0 });
+  });
+
+  // Prüfrunde 3 (04.10.2026): zwei Nachlesungen sahen einen Kassenbon, lasen aber
+  // verschiedene Beträge — am Dokument steht dann nichts, das Zeichen zählt trotzdem.
+  it('scharf: ungeeinte Nachlesung sah einen Kassenbon → nicht abgelehnt, liegt', async () => {
+    schalter(true);
+    mitPreisfoto('uneinig', 'bildschirm', png(1080, 2400), { preis: null });
+    mockNachlese.set(preisPfad('uneinig'), [{ priceCents: 129, priceImageKind: 'kassenbon' }, { priceCents: 179, priceImageKind: 'kassenbon' }]);
+    const b = await scharf();
+    expect(doc('uneinig').status).toBe('pending');
+    expect(doc('uneinig').priceRescueOcr).toBeUndefined();
+    expect(doc('uneinig').review.rundeOffen).toMatchObject({ grund: 'preis_bildschirm_unsicher', preisBildschirm: { befund: 'halten' } });
+    expect(b.preisBildschirm.faelle[0]).toMatchObject({ id: 'uneinig', befund: 'halten', lesedienstBon: true });
+    // Gegenprobe: sahen beide Lesungen ein Preisschild, gilt die Regel wie sonst
+    mockStore.clear(); mockListe.clear(); mockKopf.clear(); mockQuelle.clear(); mockNachlese.clear(); schalter(true);
+    mitPreisfoto('uneinig2', 'bildschirm', png(1080, 2400), { preis: null });
+    mockNachlese.set(preisPfad('uneinig2'), [{ priceCents: 129, priceImageKind: 'preisschild' }, { priceCents: 179, priceImageKind: 'preisschild' }]);
+    await scharf();
+    expect(doc('uneinig2')).toMatchObject({ status: 'rejected', review: { reason: 'preis_bildschirm' } });
+  });
+
+  // Prüfrunde 3 (04.10.2026): ein liegender Fall wird nicht jeden Morgen neu ausgewürfelt.
+  it('scharf: Tag 1 „Laden" + Merkmale (liegt), Tag 2 „Bildschirm" → bleibt liegen, nie automatisch abgelehnt', async () => {
+    schalter(true);
+    mitPreisfoto('regal', 'laden', png(1200, 900));
+    await scharf();
+    const tag1 = doc('regal').review.rundeOffen;
+    expect(tag1).toMatchObject({ grund: 'preis_bildschirm_unsicher', preisBildschirm: { modus: true, befund: 'halten' } });
+    mockQuelle.set(preisPfad('regal'), 'bildschirm');
+    const b2 = await scharf();
+    expect(doc('regal').status).toBe('pending');
+    expect(doc('regal').review.rundeOffen).toMatchObject({ grund: 'preis_bildschirm_unsicher', preisBildschirm: { befund: 'halten', seit: tag1.lauf } });
+    expect(b2).toMatchObject({ abgelehnt: 0 });
+  });
+
+  // Prüfrunde 3 (04.10.2026): „Kassenbon", den der Lesedienst nicht als Bon las,
+  // OHNE Bildschirm-Merkmale (etwa ein zugeschnittener Warenkorb als 4:3 ohne
+  // EXIF) — wird bezahlt, steht aber einzeln im Bericht.
+  it('„Kassenbon" ohne Merkmale, Lesedienst sah keinen Bon → bezahlt, aber im Bericht gezählt und gelistet', async () => {
+    schalter(true);
+    mitPreisfoto('warenkorb', 'kassenbon', jpeg(1200, 900), { priceImageKind: 'sonstiges' });
+    mitPreisfoto('ebon', 'kassenbon', png(1080, 2400), { ean: '4000000000017', priceImageKind: 'kassenbon' });
+    const b = await scharf();
+    expect(doc('warenkorb').status).toBe('approved');
+    expect(b.preisBildschirm).toMatchObject({
+      kassenbonOhneLesedienstBon: 0, kassenbonLesedienstOhneBon: 1,
+      kassenbonLesedienstOhneBonFaelle: [{ id: 'warenkorb', entscheidung: 'freigeben', merkmal: false, lesedienst: 'sonstiges', datei: 'jpg 1200×900' }],
+    });
+  });
+
+  // Prüfrunde 3 (04.10.2026): ohne abrufbaren Kopf gibt die Regel auch einen
+  // „Kassenbon" nicht frei, dem der Lesedienst widerspricht.
+  it('scharf: „Kassenbon", Kopf nicht abrufbar, Lesedienst sah keinen Bon → liegt (Technik); mit Lesedienst-Bon frei', async () => {
+    schalter(true);
+    mitPreisfoto('kbweg', 'kassenbon', 'FEHLER');
+    mitPreisfoto('ebonweg', 'kassenbon', 'FEHLER', { ean: '4000000000017', priceImageKind: 'kassenbon' });
+    await scharf();
+    expect(doc('kbweg').status).toBe('pending');
+    expect(doc('kbweg').review.rundeOffen).toMatchObject({ grund: 'preis_kopf_nicht_lesbar' });
+    expect(doc('kbweg').review.rundeOffen).not.toHaveProperty('preisBildschirm');
+    expect(doc('ebonweg').status).toBe('approved');
+  });
+
+  // Prüfrunde 3 (04.10.2026): Storage-Störung im scharfen Modus = ein Tag ohne Freigaben → rot.
+  it('scharf: Kopf bei mehr als einem Viertel nicht abrufbar → rote Warnung; Beobachtung → gelb', async () => {
+    schalter(true);
+    for (let i = 0; i < 8; i++) mitPreisfoto(`s${i}`, 'laden', 'FEHLER', { ean: String(4000000000000 + i * 97) });
+    const b = await scharf();
+    expect(b.warnungen.find((w) => w.code === 'preisfoto_kopf_nicht_abrufbar')).toMatchObject({ stufe: 'rot' });
+    mockStore.clear(); mockListe.clear(); mockKopf.clear(); mockQuelle.clear(); schalter('shadow');
+    for (let i = 0; i < 8; i++) mitPreisfoto(`s${i}`, 'laden', 'FEHLER', { ean: String(4000000000000 + i * 97) });
+    const b2 = await scharf();
+    expect(b2.warnungen.find((w) => w.code === 'preisfoto_kopf_nicht_abrufbar')).toMatchObject({ stufe: 'gelb' });
+    for (let i = 0; i < 8; i++) expect(doc(`s${i}`).status).toBe('approved');
+  });
+
+  it('Bildprüfung beantwortet die Frage nicht (Modelländerung) → gelbe Warnung', async () => {
+    for (let i = 0; i < 8; i++) einreichung(`x${i}`, { ean: String(4000000000000 + i * 97) });
+    const b = await scharf();
+    expect(b.preisBildschirm.quellen).toEqual({ ohne_antwort: 8 });
+    expect(b.warnungen.map((w) => w.code)).toContain('preisquelle_ohne_antwort');
   });
 });

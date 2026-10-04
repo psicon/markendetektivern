@@ -21,6 +21,8 @@
  *   Alles, was an unserer Technik hängt: Storage nicht lesbar, Bildprüfung
  *   oder Nachlesen am Google-Limit gescheitert, beschädigte Datei — alles,
  *   was die Notbremse zurückhält, und jede Abweichung der Barcode-Nummer.
+ *   Mit `preisBildschirmRegel: true` auch ein Preisfoto, das vielleicht ein
+ *   Bildschirmfoto ist (src/preisBildschirm.js, Patrick 04.10.2026).
  *   Einreichungen gesperrter Konten liegen STUMM (eigener Zähler im Bericht,
  *   nicht in `wartetAufDich`).
  * WAS ER NIE TUT
@@ -62,6 +64,11 @@ const { auffaelligkeiten } = require('./ort');
 const { bildDefektOf } = require('./einreichung');
 const { warnungen } = require('./warnungen');
 const { mitWiederholung, arbeite, schlafe } = require('./ki');
+const {
+  modusPreisBildschirm, schalterRohOf, preisQuelleOf, lesedienstBonOf, lesedienstOhneBonOf, bildKopf, bildschirmMerkmal, preisBildschirmBefund,
+  preisBildschirmVorbefund, preisBildschirmMitVorbefund,
+  PREIS_QUELLEN, PREIS_BILDSCHIRM, PREIS_BILDSCHIRM_UNSICHER, KOPF_BYTES,
+} = require('./preisBildschirm');
 
 const COL = 'crowd_uploads';
 const BERICHTE = 'ops_tagesberichte';
@@ -81,6 +88,9 @@ const UPLOAD_PRAEFIX = 'crowduploads/';
 /** Ab hier gilt ein geplanter Nachlauf des Lesedienstes als hängend (Takt: 15 min). */
 const NAMER_HAENGT_MS = 2 * 60 * 60 * 1000;
 const BUCHUNG_WARTEN_MS = 5 * 60 * 1000;
+/** Bildkopf des Preisfotos: Zeitgrenze je Abruf und für den ganzen Schritt (Bildschirmfoto als Preisbeleg). */
+const KOPF_ZEIT_MS = 20 * 1000;
+const KOPF_SCHRITT_MS = 3 * 60 * 1000;
 /** Konto beim Schreiben gesperrt vorgefunden (Schritt 7) — liegt wie KONTO_GESPERRT stumm. */
 const KONTO_GESPERRT_IM_LAUF = 'konto_gesperrt_im_lauf';
 
@@ -103,6 +113,7 @@ function noteFor(reason, ctx = {}) {
     case 'fotos_unpassend': return 'Die Fotos zeigen nicht das erwartete Produkt oder nicht die verlangten Ansichten.';
     case 'gleiche_ansicht_mehrfach': return 'Fast alle Fotos zeigen dieselbe Ansicht — Zutaten, Nährwerte, Hersteller und Preis brauchen wir einzeln.';
     case 'preis_fehlt': return 'Auf dem Preisfoto war kein Preis zu sehen — beim nächsten Mal das Preisschild am Regal oder den Kassenbon fotografieren.';
+    case PREIS_BILDSCHIRM: return 'Das Preisfoto zeigt einen Bildschirm (App, Online-Shop, Prospekt) — der Preis zählt vom Preisschild im Markt oder vom Kassenbon, gern auch als e-Bon.';
     default: return 'Danke fürs Einreichen — beim nächsten Datensatz geht es weiter.';
   }
 }
@@ -122,7 +133,7 @@ const PROMPT_PREIS = [
   'manufacturer: Inverkehrbringer laut Verpackung als Firmenname ohne Adresse. Nicht lesbar → leer.',
   'Nichts raten — ein erfundener Wert ist schlechter als ein leeres Feld.',
 ].join('\n');
-const AUDIT_ANWEISUNG = [
+const AUDIT_ZEILEN = Object.freeze([
   'Erwartung je Schritt: front=Vorderseite, rueckseite=Rückseite, hersteller=Hersteller-/Adressangabe, ean=Barcode, naehrwerte=Nährwerttabelle, zutaten=Zutatenliste, preis=Preisschild oder Bon.',
   'JSON: {"echt":true|false,"loseWare":true|false,"traegtAngaben":true|false,"gleicheAnsicht":true|false,"preisSichtbar":true|false|null,"eanFoto":"","grund":"kurz"}.',
   'echt=false NUR bei eindeutigem Ausschluss: kein reales Produkt, abfotografierter Bildschirm, fremde Motive, Schritte grob falsch belegt.',
@@ -147,7 +158,33 @@ const AUDIT_ANWEISUNG = [
   // EAN im Auftrag (bildAudit nennt sie nicht mehr) — sonst schreibt das
   // Modell sie ab, statt zu lesen.
   'eanFoto: die Ziffern unter dem Strichcode auf dem Foto "ean", vollständig und in gedruckter Reihenfolge, nur Ziffern. Nicht vollständig und zweifelsfrei lesbar, kein Strichcode auf diesem Foto oder nur ein Waage-/Preisetikett → leer. Nichts raten, nichts ergänzen.',
-].join('\n');
+]);
+const AUDIT_ANWEISUNG = AUDIT_ZEILEN.join('\n');
+
+// 04.10.2026 (Patrick: „ja, bau das"): Woher stammt der Preis? Wortgleich die
+// Fassung, die am selben Tag gemessen wurde (scratchpad preisquelle/messen.js,
+// FRAGE und JSON_NEU): im vollen Aufruf 40 von 40 Bildschirmfotos
+// „bildschirm", keine von 54 schwierigen Gegenproben; nur mit dem Preisfoto
+// 0 von 311 Nicht-Bildschirmen, 167 von 167 Kassenbons richtig. Wer hier ein
+// Wort ändert, misst neu. Kostet ~440 Eingabe- und ~25 Ausgabe-Token je Fall
+// im ohnehin laufenden Aufruf (~3 $ im Monat zum Listenpreis).
+// Nur mit eingeschaltetem Schalter (`preisBildschirmRegel` ≠ false) gefragt.
+const PREIS_QUELLE_JSON = `"preisQuelle":"${PREIS_QUELLEN.join('|')}","preisQuelleGrund":"kurz"`;
+const PREIS_QUELLE_FRAGE = Object.freeze([
+  'preisQuelle: Woher stammt der Preis auf dem Foto "preis"? Genau einer dieser Werte:',
+  '- "laden": im Geschäft fotografiert — Preisschild am Regal, auch ein elektronisches Preisschild (E-Paper-Etikett, kleines Display an der Regalkante), Waage-Etikett, Preisaufkleber auf der Packung, Aktionsschild oder Plakat im Markt, Display an Waage, Selbstbedienungskasse oder Preisterminal im Markt.',
+  '- "kassenbon": Kassenbon oder Rechnung, gedruckt oder digital — auch ein Bildschirmfoto eines e-Bons, eines Bons in einer Händler-App oder einer Rechnung, auch nur ein Ausschnitt mit Bon-Zeilen.',
+  '- "bildschirm": Bildschirmfoto oder abfotografierter Bildschirm, der KEIN Bon ist — Produktseite einer Händler-App oder eines Online-Shops, Online-Prospekt, Suchergebnis (z. B. Google), Vergleichs-App, KI-Antwort. Erkennbar z. B. an Statusleiste mit Uhrzeit/Akku, Adress- oder Suchleiste, Knöpfen wie „In den Warenkorb", Bewertungssternen, freigestelltem Produktbild auf weißem Grund, Bildschirmraster. Zeigt ein Bildschirmfoto seinerseits ein Foto eines Preisschilds (etwa in einer Such- oder Vergleichs-App), ist es "bildschirm".',
+  '- "keiner": auf dem Foto "preis" ist kein Preis zu sehen.',
+  '- "unklar": nicht sicher zuzuordnen, z. B. ein Werbeprospekt aus Papier oder du schwankst zwischen zwei Werten.',
+  'Ein e-Bon oder eine Rechnung ist immer "kassenbon", auch als Bildschirmfoto. Ein elektronisches Preisschild im Regal ist immer "laden".',
+  'preisQuelleGrund: woran du die Quelle erkennst, höchstens zehn Wörter.',
+]);
+/** Prüfanweisung mit der Zusatzfrage: JSON-Zeile erweitert, Frage am Ende — wie gemessen. */
+const AUDIT_ANWEISUNG_PREISQUELLE = AUDIT_ZEILEN
+  .map((z) => (z.startsWith('JSON: {') ? z.replace('"grund":"kurz"}', `"grund":"kurz",${PREIS_QUELLE_JSON}}`) : z))
+  .concat(PREIS_QUELLE_FRAGE)
+  .join('\n');
 
 /* ─────────────────────────── Bilder lesen ─────────────────────────── */
 
@@ -172,15 +209,18 @@ async function frage(ai, bucket, images, slots, text) {
  * Lesungen gleich lesen; alles landet in EIGENEN Feldern, damit messbar
  * bleibt, wie gut die Ersterkennung liest. Gibt zurück, was übernommen wurde
  * und woran das Nachlesen technisch scheiterte (das ist kein Urteil).
+ * `preisArten`: was die beiden Lesungen von Preis/Hersteller im Preisfoto sahen,
+ * auch wenn nichts übernommen wurde (Bildschirmfoto als Preisbeleg, Prüfrunde 3).
  */
 async function rettungFuer(ai, bucket, ref, x, { schreiben = true } = {}) {
   const patch = {};
   const fehler = {};
+  let preisArten = [];
   const offenName = !nameOf(x);
   const offenEan = !eanOf(x) && !!x.images?.ean;
   const offenPreis = !preisOf(x);
   const offenHersteller = !(x.manufacturerOcr && String(x.manufacturerOcr.name || '').trim()) && !x.manufacturerRescueOcr;
-  if (!offenName && !offenEan && !offenPreis && !offenHersteller) return { patch: null, fehler };
+  if (!offenName && !offenEan && !offenPreis && !offenHersteller) return { patch: null, fehler, preisArten };
 
   if (offenName) {
     const p = PROMPT_NAME;
@@ -210,15 +250,17 @@ async function rettungFuer(ai, bucket, ref, x, { schreiben = true } = {}) {
     try {
       const r = await preisUndHersteller(ai, bucket, x, { preis: offenPreis, hersteller: offenHersteller });
       Object.assign(patch, r.patch);
+      // Auch die Hersteller-Nachlesung liest das Preisfoto mit (gleiche Anweisung).
+      preisArten = r.arten;
       if (r.preisUnsicher) fehler.preis = 'lesungen_uneinig';
     } catch (e) { fehler.preis = String(e.message).slice(0, 120); }
   }
-  if (!Object.keys(patch).length) return { patch: null, fehler };
-  if (!schreiben) return { patch, fehler };
+  if (!Object.keys(patch).length) return { patch: null, fehler, preisArten };
+  if (!schreiben) return { patch, fehler, preisArten };
   patch.rescueAt = FieldValue.serverTimestamp();
   patch.rescueQuelle = `${MODELL}/vertex mit Denken, zwei übereinstimmende Lesungen (Morgenrunde)`;
   await ref.set(patch, { merge: true });
-  return { patch, fehler };
+  return { patch, fehler, preisArten };
 }
 
 /**
@@ -228,6 +270,11 @@ async function rettungFuer(ai, bucket, ref, x, { schreiben = true } = {}) {
  * `preisUnsicher`: der Preis wurde NICHT übernommen, aber mindestens eine
  * Lesung sah einen Preis oder ein Preisschild/einen Kassenbon. Dann darf die
  * Runde nicht „Preis fehlt" ablehnen (Preis-Pflicht 26.09.) — ein Mensch sieht hin.
+ *
+ * `arten`: die Bildart beider Lesungen (priceImageKind), normalisiert — auch
+ * ohne Übernahme. Sahen sie verschiedene Preise, steht nichts am Dokument;
+ * sah eine davon einen Kassenbon, ist das trotzdem ein Gegenzeichen gegen die
+ * Ablehnung als Bildschirmfoto (preisBildschirm.lesedienstBonOf, Prüfrunde 3).
  */
 async function preisUndHersteller(ai, bucket, x, { preis, hersteller }) {
   const patch = {};
@@ -245,12 +292,17 @@ async function preisUndHersteller(ai, bucket, x, { preis, hersteller }) {
   }
   const sahPreis = (l) => (Number.isFinite(l.priceCents) && l.priceCents > 0) || PREIS_ARTEN.includes(String(l.priceImageKind || '').toLowerCase());
   const preisUnsicher = !!preis && !patch.priceRescueOcr && (sahPreis(a) || sahPreis(b));
-  return { patch, preisUnsicher };
+  const arten = [a, b].map((l) => String((l && l.priceImageKind) || '').trim().toLowerCase()).filter(Boolean);
+  return { patch, preisUnsicher, arten };
 }
 
 
-/** Bildprüfung: sieht alle sieben Fotos an. */
-async function bildAudit(ai, bucket, x) {
+/**
+ * Bildprüfung: sieht alle sieben Fotos an. Mit `preisQuelle` beantwortet sie
+ * im selben Aufruf, woher der Preis stammt (Bildschirmfoto als Preisbeleg,
+ * 04.10.2026) — kein zusätzlicher Aufruf.
+ */
+async function bildAudit(ai, bucket, x, { preisQuelle = false } = {}) {
   const parts = [];
   for (const s of REQUIRED) if (x.images?.[s]) parts.push(...teil(bucket, s, x.images[s]));
   parts.push({
@@ -259,7 +311,7 @@ async function bildAudit(ai, bucket, x) {
       // Ohne gespeicherte EAN: das Modell liest sie selbst (eanFoto) — mit der
       // erwarteten Nummer im Auftrag schriebe es sie ab (02.10.2026).
       `Erwartet: echtes Einzelhandels-Produkt "${nameOf(x) || 'unbekannt'}".`,
-      AUDIT_ANWEISUNG,
+      preisQuelle ? AUDIT_ANWEISUNG_PREISQUELLE : AUDIT_ANWEISUNG,
     ].join('\n'),
   });
   const r = await mitWiederholung(() => ai.models.generateContent({
@@ -275,19 +327,51 @@ async function bildAudit(ai, bucket, x) {
     // Nur Ziffern; ob es eine gültige GTIN ist, prüft werte.eanFotoBefund.
     eanFoto: String(p.eanFoto ?? '').replace(/\D/g, '').slice(0, 14) || null,
     grund: String(p.grund || '').slice(0, 140),
+    // Fehlt die Antwort oder ist sie unbekannt → null. Das ist kein Freispruch:
+    // passen die Bildmerkmale, bleibt der Fall liegen (preisBildschirmBefund).
+    ...(preisQuelle ? { preisQuelle: preisQuelleOf(p.preisQuelle), preisQuelleGrund: String(p.preisQuelleGrund || '').slice(0, 80) || null } : {}),
   };
+}
+
+/**
+ * Bildmerkmale des Preisfotos (src/preisBildschirm.js): die ersten KOPF_BYTES
+ * der Datei — ~120 Abrufe à 192 KB am Tag. Ein Lesefehler ist kein Urteil:
+ * `merkmal: null` zählt nie als „passt" (die Regel lehnt dann nicht ab).
+ * Mit Zeitgrenze je Abruf: ein hängender Abruf darf die Runde nicht über ihre
+ * Laufzeit schieben.
+ */
+async function preisFotoKopf(storage, x, zeitgrenzeMs = KOPF_ZEIT_MS) {
+  const pfad = x.images && x.images.preis;
+  if (!pfad) return { kopf: null, merkmal: null, fehler: 'kein_preisfoto' };
+  let uhr = null;
+  try {
+    const [buf] = await Promise.race([
+      storage.file(String(pfad)).download({ start: 0, end: KOPF_BYTES - 1 }),
+      new Promise((_, nein) => { uhr = setTimeout(() => nein(new Error('zeit_abgelaufen')), zeitgrenzeMs); }),
+    ]);
+    const kopf = bildKopf(buf);
+    return { kopf, merkmal: bildschirmMerkmal(kopf), fehler: null };
+  } catch (e) {
+    return { kopf: null, merkmal: null, fehler: String(e && e.message).slice(0, 120) };
+  } finally {
+    clearTimeout(uhr);
+  }
 }
 
 /* ─────────────────────────── Hilfen ─────────────────────────── */
 
-function regelVersion() {
+function regelVersion(preisBildschirmModus) {
   const h = crypto.createHash('sha1');
   // werte.js gehört dazu: es bestimmt, welche EAN, welcher Preis und welcher
   // Hersteller in die Regeln eingehen; ort.js, wann der Aufnahmeort auffällt.
   // kontoSperre.js: welche Konten als gesperrt gelten (02.10.2026).
-  for (const f of ['duplicatePolicy.js', 'fotoRundeRegeln.js', 'werte.js', 'ort.js', 'kontoSperre.js']) h.update(fs.readFileSync(path.join(__dirname, f)));
+  // preisBildschirm.js: Bildschirmfoto als Preisbeleg (04.10.2026).
+  for (const f of ['duplicatePolicy.js', 'fotoRundeRegeln.js', 'werte.js', 'ort.js', 'kontoSperre.js', 'preisBildschirm.js']) h.update(fs.readFileSync(path.join(__dirname, f)));
   // Ebenso die Anweisungen an das Modell: sie entscheiden mit (Gegenprüfung 26.09.).
-  h.update([PROMPT_NAME, PROMPT_EAN, PROMPT_PREIS, AUDIT_ANWEISUNG].join('\n'));
+  h.update([PROMPT_NAME, PROMPT_EAN, PROMPT_PREIS, AUDIT_ANWEISUNG, AUDIT_ANWEISUNG_PREISQUELLE].join('\n'));
+  // Und der Schalter der Bildschirm-Regel: von 'shadow' auf true entscheidet
+  // die Runde anders — der Bericht meldet das wie eine geänderte Regel.
+  h.update(`preisBildschirmRegel=${String(preisBildschirmModus)}`);
   return h.digest('hex').slice(0, 10);
 }
 
@@ -398,8 +482,13 @@ async function dateiListe(storage) {
  *   02.10.2026, Wochen-Sperre). Der normale Trockenlauf (`dryRun`) schreibt
  *   dagegen Nachlesungen und Bericht.
  * @param {number} [opts.arbeitszeitMs]  Nach dieser Zeit beginnt die Runde nichts Neues mehr.
+ * @param {*} [opts.preisBildschirmRegel]  Rohwert des Schalters der Bildschirm-Regel
+ *   (`cashback_config/v1.preisBildschirmRegel`; false | 'shadow' | true, fehlt = null).
+ *   index.js reicht ihn aus seinem eigenen Lesen von cashback_config/v1 durch;
+ *   nur ohne Angabe (undefined) liest die Runde selbst — scheitert das, bricht
+ *   sie ab (src/preisBildschirm.js modusPreisBildschirm).
  */
-async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser = 'zeitplan', vergleich = null, nurLesen = false, arbeitszeitMs = ARBEITSZEIT_MS } = {}) {
+async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser = 'zeitplan', vergleich = null, nurLesen = false, arbeitszeitMs = ARBEITSZEIT_MS, preisBildschirmRegel } = {}) {
   if (vergleich || nurLesen) dryRun = true;
   // Nachgelesene Angaben und die Foto-Nummer sind Tatsachen über die Fotos und
   // werden auch im normalen Trockenlauf gespeichert — nur nicht beim reinen Rechnen.
@@ -411,6 +500,23 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   const frist = start + arbeitszeitMs;
   const tag = berlinTag(start);
   const lauf = `${tag}_${berlinZeit(start)}${dryRun ? '_trocken' : ''}`;
+
+  // Bildschirmfoto als Preisbeleg (Patrick 04.10.2026): Schalter
+  // `cashback_config/v1.preisBildschirmRegel` — false | 'shadow' | true,
+  // fehlt er oder ist er unbekannt, gilt 'shadow' (ein unbekannter Wert steht
+  // gelb im Bericht, schalterRohOf). Ein NICHT LESBARER Schalter ist kein
+  // Wert: in 'shadow' hielte ein Befund aus einem scharfen Lauf nichts mehr,
+  // angehaltene Fälle würden ohne Menschen freigegeben (Prüfrunde 2,
+  // 04.10.2026). index.js reicht den Wert aus seinem eigenen Lesen durch
+  // (scheitert das, läuft gar nichts); liest die Runde selbst und scheitert,
+  // bricht sie ab — wie bei jedem anderen Fehler beim Laden.
+  let pbRoh = preisBildschirmRegel;
+  if (pbRoh === undefined) {
+    try { pbRoh = ((await db.doc('cashback_config/v1').get()).data() || {}).preisBildschirmRegel ?? null; }
+    catch (e) { throw new Error(`Schalter preisBildschirmRegel nicht lesbar — Lauf abgebrochen (${String(e && e.message).slice(0, 120)})`); }
+  }
+  const pbModus = modusPreisBildschirm(pbRoh);
+  const pbSchalter = schalterRohOf(pbRoh);
 
   const [alleSnap, sperren] = await Promise.all([db.collection(COL).get(), ladeSperren(db)]);
   // `zeit`: Server-Zeitpunkt des Dokuments (createTime) — die Regeln rechnen
@@ -440,10 +546,14 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   // 1) Fehlende Angaben nachlesen
   const nachgelesen = { name: 0, ean: 0, preis: 0, hersteller: 0 };
   const rettungFehler = new Map();
+  // Bildarten der Preis-Nachlesung dieses Laufs (auch ohne Übernahme) — für
+  // das Lesedienst-Gegenzeichen der Bildschirm-Regel (Schritt 4a).
+  const nachleseArten = new Map();
   const nichtNachgelesen = vergleich ? [] : await arbeite(zuBearbeiten, async (d) => {
     try {
-      const { patch, fehler } = await rettungFuer(ai, bucket, d.ref, d.x, { schreiben: schreibtAngaben });
+      const { patch, fehler, preisArten } = await rettungFuer(ai, bucket, d.ref, d.x, { schreiben: schreibtAngaben });
       if (Object.keys(fehler).length) rettungFehler.set(d.id, fehler);
+      if (preisArten && preisArten.length) nachleseArten.set(d.id, preisArten);
       if (patch) {
         Object.assign(d.x, patch);
         if (patch.productNameRescueOcr) nachgelesen.name++;
@@ -516,10 +626,48 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   const zuPruefen = zuBearbeiten.filter((d) => { const v = vor.get(d.id); return !v.comp.problems.includes('unvollstaendig') && !v.leer.length && !v.unlesbar.length; });
   const audit = new Map(); const auditFehler = new Map();
   const nichtGeprueft = await arbeite(zuPruefen, async (d) => {
-    try { audit.set(d.id, await bildAudit(ai, bucket, d.x)); }
+    try { audit.set(d.id, await bildAudit(ai, bucket, d.x, { preisQuelle: pbModus !== false })); }
     catch (e) { auditFehler.set(d.id, String(e.message).slice(0, 140)); }
   }, PARALLEL_KI, frist);
   nichtGeprueft.forEach((d) => auditFehler.set(d.id, 'zeit_abgelaufen'));
+
+  // 4a) Bildmerkmale des Preisfotos (Bildschirmfoto als Preisbeleg, 04.10.2026)
+  //     — nur für geprüfte Fälle; die Regel greift erst in der Freigabe, und
+  //     dorthin kommt kein Fall ohne Bildprüfung. Auch bei „kassenbon":
+  //     der Bericht zählt, wie viele e-Bons die Merkmale tragen (offene Frage
+  //     an Patrick, preisBildschirm.preisBildschirmBefund).
+  //     Eigene Zeitgrenze (3 min ab hier, auch wenn die Arbeitszeit schon um
+  //     ist): was nicht mehr gelesen wird, gilt als „Merkmale unbekannt" und
+  //     „Kopf nicht abrufbar" — nie ein Ablehnungsgrund, aber auch kein
+  //     Freispruch: ohne Kopf gibt die Regel nichts frei (kopfGescheitert).
+  //     Dazu das Gegenzeichen des Lesedienstes (lesedienstBonOf, aus dem
+  //     Dokument inkl. der eben nachgelesenen Werte und der Bildarten einer
+  //     ungeeinten Preis-Nachlesung): sah er einen Kassenbon, wird nie
+  //     abgelehnt (Gegenprüfung 04.10.2026). Abgelehnt wird nur, wenn er das
+  //     Preisfoto GELESEN und keinen Bon gesehen hat (Prüfrunde 3) — las er es
+  //     nicht, bleibt ein „Bildschirm" liegen. Ein „Kassenbon" mit Merkmalen
+  //     (oder ohne abrufbaren Kopf), den der Lesedienst las und nicht als Bon
+  //     sah, wird nicht bezahlt, sondern liegen gelassen (lesedienstOhneBonOf,
+  //     Prüfrunde 2).
+  const pbVon = new Map();
+  if (pbModus !== false) {
+    const mitKopf = (d, k) => {
+      const a = audit.get(d.id);
+      // Auch was die Preis-Nachlesung dieses Laufs sah, ohne dass der Preis
+      // übernommen wurde (Prüfrunde 3, 04.10.2026): ein Bon-Zeichen dort zählt.
+      const zusatz = nachleseArten.get(d.id) || [];
+      const e = {
+        modus: pbModus, quelle: a.preisQuelle ?? null, grund: a.preisQuelleGrund ?? null,
+        merkmal: k.merkmal, kopf: k.kopf, kopfFehler: k.fehler, kopfGescheitert: !!k.fehler,
+        lesedienstBon: lesedienstBonOf(d.x, zusatz), lesedienstOhneBon: lesedienstOhneBonOf(d.x, zusatz),
+      };
+      pbVon.set(d.id, { ...e, befund: preisBildschirmBefund(e) });
+    };
+    const ohneKopf = await arbeite(zuPruefen.filter((d) => audit.has(d.id)), async (d) => {
+      mitKopf(d, await preisFotoKopf(storage, d.x));
+    }, 20, Date.now() + KOPF_SCHRITT_MS);
+    ohneKopf.forEach((d) => mitKopf(d, { kopf: null, merkmal: null, fehler: 'zeit_abgelaufen' }));
+  }
 
   // 4b) Nummer vom Barcode-Foto gegen die gespeicherte (Entscheidung Patrick
   //     02.10.2026). Gelesen im Aufruf der Bildprüfung — kein Zusatzaufruf.
@@ -659,6 +807,9 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       audit: audit.get(d.id) || null, auditFehler: auditFehler.get(d.id) || null, rettungFehler: rf,
       preisVorhanden: !!preisOf(d.x), preisHinweis: preisHinweisOf(d.x), ortAuffaellig: ort ? ort.text : null,
       namerLaeuft: namerAb != null && namerAb > start - NAMER_HAENGT_MS, preisBildDefekt,
+      // Ein scharfer Befund eines früheren Laufs gilt weiter, auch ohne
+      // heutige Bildprüfung (preisBildschirm.preisBildschirmMitVorbefund).
+      preisBildschirm: preisBildschirmMitVorbefund(pbVon.get(d.id) || null, preisBildschirmVorbefund(d.x), pbModus),
     };
     const e = entscheideFall(eingabe);
     plan.push({ ...d, ...e, comp: v.comp, dup, audit: audit.get(d.id) || null, eingabe });
@@ -677,6 +828,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       plan: plan.map((p) => ({
         id: p.id, userId: p.x.userId ?? null, name: String(nameOf(p.x) || '?').slice(0, 60), markt: p.x.marketName || null,
         entscheidung: p.entscheidung, grund: p.grund, hinweis: p.ctx?.hinweis || null, loseWare: !!p.loseWare, zurueckgehalten: p.zurueckgehaltenGrund || null,
+        preisBildschirmFall: p.preisBildschirmFall || null,
         audit: p.audit || null, auditFehler: auditFehler.get(p.id) || null,
         // Eingaben inkl. der (nur im Speicher) nachgelesenen Werte — damit sich
         // ein Lauf nach alter Regel daneben rechnen lässt.
@@ -709,6 +861,12 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
         reasons: [...p.comp.problems, ...(p.dup.reason ? [p.dup.reason] : [])],
         dup: dupZumSpeichern(p.dup),
       };
+      // Die Antwort auf „Woher stammt der Preis?" (preisQuelle) bewusst NICHT
+      // am Dokument: das liest der Einreicher selbst (firestore.rules), und
+      // in der Beobachtungswoche stünde an jedem bezahlten Bildschirmfoto,
+      // dass es erkannt wurde — eine Woche Vorwarnung. Antworten, Befunde und
+      // Dateiangaben stehen im Tagesbericht (`preisBildschirm`, nur Admins);
+      // eine Ablehnung trägt `review.reason: 'preis_bildschirm'`.
       const bild = p.audit ? { echt: p.audit.echt, loseWare: p.audit.loseWare, traegtAngaben: p.audit.traegtAngaben, gleicheAnsicht: p.audit.gleicheAnsicht, preisSichtbar: p.audit.preisSichtbar, grund: p.audit.grund } : null;
       try {
         // Ergebnis der Transaktion als Rückgabe, nicht als Flag aus dem Callback:
@@ -720,6 +878,10 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
           // einen Preis oder ein Preisschild gefunden, ist „Preis fehlt" überholt
           // — nicht ablehnen, morgen neu entscheiden (Gegenprüfung 26.09.).
           if (p.grund === 'preis_fehlt' && (preisOf(s.data()) || preisHinweisOf(s.data()))) return 'uebersprungen';
+          // Ebenso „Bildschirmfoto": erkennt der Lesedienst inzwischen einen
+          // Kassenbon, widersprechen sich zwei Lesungen — nicht ablehnen
+          // (preisBildschirm.preisBildschirmBefund), morgen neu entscheiden.
+          if (p.grund === PREIS_BILDSCHIRM && lesedienstBonOf(s.data())) return 'uebersprungen';
           // Kontosperre im Moment des Schreibens nachlesen — vor JEDER
           // Entscheidung, auch vor einer Ablehnung (Schlussprüfung 03.10.2026):
           // war die Sperrliste beim Laden nicht lesbar, galten alle Konten als
@@ -801,7 +963,11 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
         if (ausgang) rundeOffenStand[ausgang]++;
       } catch (e) {
         rundeOffenStand.fehler++;
-        if (eintrag && eintrag.sperrend.length) rundeOffenStand.fehlerSperrend++;
+        // Auch ein scharfer Halt der Bildschirm-Regel: er ist nicht sperrend
+        // (die Konsole gibt ohne Notiz frei), aber ohne den Eintrag kennt der
+        // nächste Lauf ihn nicht (preisBildschirmVorbefund) und gäbe den Fall
+        // bei einer anderen Lesung frei (Prüfrunde 2, 04.10.2026).
+        if (eintrag && (eintrag.sperrend.length || (eintrag.preisBildschirm && eintrag.preisBildschirm.modus === true))) rundeOffenStand.fehlerSperrend++;
         logger.warn('review.rundeOffen nicht gespeichert', { id: p.id, fehler: String(e.message).slice(0, 160) });
       }
     }, 20, null);
@@ -855,7 +1021,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     });
   }
   if (bonNachgereicht) bonRundeHeute = bonRundeRoh(bonNachgereicht);
-  const version = regelVersion();
+  const version = regelVersion(pbModus);
   const zaehle = (liste, feld) => liste.reduce((a, p) => { const k = p[feld] || '?'; a[k] = (a[k] || 0) + 1; return a; }, {});
   const abgelehnt = plan.filter((p) => p.entscheidung === 'ablehnen' && !p.uebersprungen);
   // Gesperrte Konten liegen stumm und dauerhaft — sie warten NICHT auf eine
@@ -864,6 +1030,74 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   const gesperrtOffen = plan.filter((p) => p.entscheidung === 'offen' && p.grund === KONTO_GESPERRT);
   const eanHaltenNeu = [...eanFoto.values()].filter((b) => EAN_HALTEN.has(b.art) && !b.vorbefund).length;
   const offen = plan.filter((p) => p.entscheidung === 'offen' && p.grund !== KONTO_GESPERRT);
+  // Bildschirmfoto als Preisbeleg (Patrick 04.10.2026). In der
+  // Beobachtungswoche ist das die Messung: wie oft die Regel gegriffen hätte
+  // und wie oft dadurch eine Freigabe weggefallen wäre (`stattFreigabe`).
+  const pbAlle = [...pbVon.values()];
+  const pbFaelle = plan.filter((p) => p.preisBildschirmFall);
+  // Frische Halte-Befunde (ohne die eines früheren Laufs, die sonst täglich
+  // dieselbe Warnung auslösten, solange der Fall auf Patrick wartet).
+  const pbFrischGehalten = (grund) => plan.filter((p) => p.entscheidung === 'offen' && p.grund === grund && !(p.preisBildschirmFall && p.preisBildschirmFall.vorbefund)).length;
+  const pbZaehle = (liste, f) => liste.reduce((a, x) => { const k = f(x); a[k] = (a[k] || 0) + 1; return a; }, {});
+  const pbDatei = (e) => (e.kopf ? `${e.kopf.format} ${e.kopf.breite || '?'}×${e.kopf.hoehe || '?'}${e.kopf.kameraHersteller ? ' Kamera' : ''}` : (e.kopfFehler || null));
+  // Prüfrunde 3 (04.10.2026): JEDER „Kassenbon", den der Lesedienst las und
+  // NICHT als Bon sah — unabhängig von den Merkmalen. Mit Merkmalen bleibt er
+  // liegen, ohne wird er bezahlt: Kamerafoto eines Papierbons, das der
+  // Lesedienst falsch einordnet — oder ein auf Bon-Zeilen zugeschnittener
+  // Warenkorb, als 4:3 ohne EXIF weitergegeben (WISSEN-FOTORUNDE.md, Lücken).
+  // Gemessen 0 von 167 Kassenbons; die Zahl zeigt, ob der Weg genutzt wird.
+  const pbKassenbonOhneBon = plan.filter((p) => {
+    const e = pbVon.get(p.id);
+    return e && e.quelle === 'kassenbon' && e.lesedienstOhneBon === true && e.lesedienstBon !== true;
+  });
+  const preisBildschirm = {
+    modus: pbModus,
+    // Rohwert, wenn er nicht false/'shadow'/true ist (gilt als Beobachtung, gelbe Warnung).
+    ...(pbSchalter.art === 'unbekannt' ? { schalterUnbekannt: pbSchalter.roh } : {}),
+    befragt: pbAlle.length,
+    quellen: pbZaehle(pbAlle, (e) => e.quelle || 'ohne_antwort'),
+    merkmal: pbZaehle(pbAlle, (e) => (e.merkmal === true ? 'ja' : e.merkmal === false ? 'nein' : 'unbekannt')),
+    // Kassenbons mit Bildschirm-Merkmalen (meist e-Bons): bleiben unberührt,
+    // außer der Lesedienst las das Foto und sah keinen Bon (eigene Zahl
+    // unten) — nach wörtlicher Lesart („nur eins von beiden → liegen lassen")
+    // lägen sie alle bei Patrick. Offene Entscheidung, hier gezählt.
+    kassenbonMitMerkmal: pbAlle.filter((e) => e.quelle === 'kassenbon' && e.merkmal === true).length,
+    // Bildprüfung „Bildschirm", Lesedienst „Kassenbon" — gemessen 0 von 167
+    // Kassenbons; mehr deutet auf eine geänderte Lesart des Modells (Warnung).
+    bildschirmTrotzBon: pbAlle.filter((e) => e.quelle === 'bildschirm' && e.lesedienstBon).length,
+    // Bildprüfung „Kassenbon" (mit Merkmalen), der Lesedienst las das Foto
+    // und sah KEINEN Bon — gemessen 0 von 126; die Fälle bleiben liegen
+    // (Prüfrunde 2, 04.10.2026). Mehr deutet auf eine geänderte Lesart oder
+    // auf Warenkörbe/Bestellübersichten als „Bon" (Warnung).
+    kassenbonOhneLesedienstBon: pbAlle.filter((e) => e.quelle === 'kassenbon' && e.befund === 'halten').length,
+    // Alle davon, auch ohne Merkmale (bezahlt) — mit Fällen zum Ansehen.
+    kassenbonLesedienstOhneBon: pbKassenbonOhneBon.length,
+    kassenbonLesedienstOhneBonFaelle: pbKassenbonOhneBon.slice(0, 20).map((p) => {
+      const e = pbVon.get(p.id);
+      return {
+        id: p.id, name: String(nameOf(p.x) || '?').slice(0, 60), markt: p.x.marketName || null,
+        entscheidung: p.uebersprungen ? 'uebersprungen' : p.entscheidung, merkmal: e.merkmal,
+        lesedienst: String(p.x.priceImageKind || (p.x.priceRescueOcr && p.x.priceRescueOcr.priceImageKind) || '').slice(0, 20) || null,
+        quelleGrund: e.grund || null, datei: pbDatei(e),
+      };
+    }),
+    kopfNichtAbrufbar: pbAlle.filter((e) => e.kopfGescheitert).length,
+    vorbefund: pbFaelle.filter((p) => p.preisBildschirmFall.vorbefund).length,
+    befundAblehnen: pbFaelle.filter((p) => p.preisBildschirmFall.befund === 'ablehnen').length,
+    // `halten` ändert nur etwas, wo sonst freigegeben würde.
+    befundHalten: pbFaelle.filter((p) => p.preisBildschirmFall.befund === 'halten' && p.preisBildschirmFall.ohneRegel === 'freigeben').length,
+    stattFreigabe: pbFaelle.filter((p) => p.preisBildschirmFall.ohneRegel === 'freigeben').length,
+    faelle: pbFaelle.slice(0, 50).map((p) => {
+      const e = p.eingabe.preisBildschirm;
+      return {
+        id: p.id, name: String(nameOf(p.x) || '?').slice(0, 60), markt: p.x.marketName || null,
+        befund: p.preisBildschirmFall.befund, ohneRegel: p.preisBildschirmFall.ohneRegel, entscheidung: p.uebersprungen ? 'uebersprungen' : p.entscheidung,
+        quelle: e.quelle, quelleGrund: e.grund || null, merkmal: e.merkmal, lesedienstBon: !!e.lesedienstBon,
+        vorbefund: e.vorbefund ? e.vorbefund.seit || 'früherer Lauf' : null,
+        datei: pbDatei(e),
+      };
+    }),
+  };
   const runde = {
     geprueft: pending.length, offen: offen.length,
     auditVersucht: zuPruefen.length - nichtGeprueft.length, auditFehler: [...auditFehler.values()].filter((f) => f !== 'zeit_abgelaufen').length,
@@ -880,6 +1114,17 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     // … und Halte-Befunde, die die Prüfkonsole nicht sieht.
     haltBefundNichtGespeichert: rundeOffenStand.fehlerSperrend,
     eanFotoNichtGespeichert: eanFotoStand.nichtGespeichertHalten,
+    // Bildschirmfoto als Preisbeleg: beantwortet die Bildprüfung die Frage
+    // nicht mehr (Modelländerung), erkennt die Regel still nichts mehr.
+    preisQuelleBefragt: pbAlle.length,
+    preisQuelleOhneAntwort: pbAlle.filter((e) => !e.quelle).length,
+    preisBildschirmHalten: pbFrischGehalten(PREIS_BILDSCHIRM_UNSICHER),
+    preisBildschirmTrotzBon: preisBildschirm.bildschirmTrotzBon,
+    preisBildschirmBonWiderspruch: preisBildschirm.kassenbonOhneLesedienstBon,
+    preisBildschirmSchalterUnbekannt: pbSchalter.art === 'unbekannt' ? pbSchalter.roh : null,
+    preisKopfNichtAbrufbar: preisBildschirm.kopfNichtAbrufbar,
+    // Nur scharf hält ein nicht abrufbarer Kopf Freigaben an (Prüfrunde 3).
+    preisBildschirmScharf: pbModus === true,
   };
   const warn = warnungen({
     jetzt: start, aktionen, zweitpruefung: lage.zweitpruefung, bons: lage.bons, runde, notbremse: bremse,
@@ -910,7 +1155,9 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     bildpruefung: { versucht: runde.auditVersucht, gescheitert: runde.auditFehler, unpassend: plan.filter((p) => BILD_GRUENDE.has(p.grund) || BILD_GRUENDE.has(p.zurueckgehaltenGrund)).length },
     nichtGeschafft: runde.nichtGeschafft,
     schreibFehler: runde.schreibFehler,
-    notbremse: { bild: bremse.bild, gesamt: bremse.gesamt, preis: bremse.preis, woche: bremse.woche },
+    notbremse: { bild: bremse.bild, gesamt: bremse.gesamt, preis: bremse.preis, woche: bremse.woche, bildschirm: bremse.bildschirm },
+    // Bildschirmfoto als Preisbeleg (Patrick 04.10.2026) — Zahlen und Fälle.
+    preisBildschirm,
     // Neu 02.10.2026 (Entscheidungen Patrick): Nummer vom Barcode-Foto, Abgleich
     // gegen alle früheren Fotos, gesperrte Konten — nur Zahlen, die Fälle stehen
     // in wartetAufDich bzw. abgelehntListe.
@@ -944,4 +1191,4 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   return { ...bericht, laufAt: new Date().toISOString() };
 }
 
-module.exports = { taeglicheRunde, noteFor };
+module.exports = { taeglicheRunde, noteFor, preisFotoKopf };

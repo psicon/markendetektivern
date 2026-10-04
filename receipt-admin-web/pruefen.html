@@ -263,6 +263,12 @@
         ['preis_unsicher', 'Preis unsicher — auf dem Preisfoto nachsehen'],
         ['ort_auffaellig', 'Aufnahmeort passt nicht zum Markt'],
         ['namer_laeuft_noch', 'Wird noch nachgelesen'],
+        // Bildschirmfoto als Preisbeleg (Patrick 04.10.2026). Am Dokument
+        // steht bei einer Ablehnung `fotos_unpassend`, intern `preis_bildschirm`.
+        ['preis_bildschirm', 'Preisfoto ist ein Bildschirmfoto (App, Online-Shop, Prospekt)'],
+        ['preis_bildschirm_unsicher', 'Preisfoto vielleicht ein Bildschirmfoto — selbst ansehen'],
+        ['preis_kopf_nicht_lesbar', 'Preisfoto-Datei war nicht abrufbar (Technik) — selbst ansehen'],
+        ['notbremse_preis_bildschirm', 'Notbremse (Bildschirmfoto als Preis)'],
       ]]);
       /** Was die Barcode-Lesung der Morgenrunde ergab (row.eanFoto, src/einreichung.js eanFotoZeile). */
       const EANFOTO_DE = { abweichend: 'zeigt andere Nummer', unsicher: 'Lesungen uneinig', gleich: 'bestätigt', kein_urteil: 'nicht lesbar' };
@@ -600,6 +606,7 @@
             ${entschieden}
             ${rundeZeile(r)}
             ${zurueckZeile(r)}
+            ${preisQuelleZeile(p, r)}
             <div class="folge ${c.folge && c.folge.buchtCent > 0 ? 'zahlt' : 'zahlt-nicht'}">
               ${c.folge && c.folge.buchtCent > 0
                 ? `Freigabe bucht <b>${euro(c.folge.buchtCent)}</b>`
@@ -655,6 +662,25 @@
         if (!grund) return '';
         const wer = w.vorherVon === 'worker-fotorunde' ? 'von der Morgenrunde' : 'in der Konsole';
         return `<div class="folge zahlt-nicht">Zurückgeholt — vorher ${wer} abgelehnt: <b>${esc(REASON_DE[grund] || grund)}</b></div>`;
+      }
+
+      /**
+       * Bildschirmfoto als Preisbeleg (Patrick 04.10.2026): Befund der
+       * Morgenrunde aus review.rundeOffen.preisBildschirm (einreichung.precheckOf).
+       * Am Dokument steht nur der Befund — woran er hängt (Antwort des
+       * Modells, Dateimerkmale), liest der Einreicher sonst mit; das steht im
+       * Tagesbericht des Laufs. Nur Hinweis, keine Sperre: wer hinsieht,
+       * entscheidet. Kassenbons zählen immer, auch als e-Bon.
+       */
+      function preisQuelleZeile(p, r) {
+        const h = p.hinweise || [];
+        const sicher = h.includes('preis_bildschirm');
+        if (!sicher && !h.includes('preis_bildschirm_unsicher')) return '';
+        const pb = (r.rundeOffen && r.rundeOffen.preisBildschirm) || {};
+        const beob = pb.modus !== true ? ' (Beobachtung)' : '';
+        const seit = pb.seit ? ` Befund seit ${esc(pb.seit)}, Einzelheiten im Tagesbericht.` : ' Einzelheiten im Tagesbericht.';
+        return `<div class="folge zahlt-nicht">Preisfoto: <b>${sicher ? 'Bildschirmfoto' : 'vielleicht ein Bildschirmfoto — selbst ansehen'}</b>${beob}
+          <br><small>${seit} Der Preis zählt aus dem Markt (Preisschild, Kassenbon, auch e-Bon). Ablehnen: A, dann 2.</small></div>`;
       }
 
       /** Nummer vom Barcode-Foto, wo sie etwas zu sagen hat. */

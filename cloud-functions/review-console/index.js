@@ -1050,6 +1050,11 @@ exports.reviewMapPoints = onCall({ region: REGION, memory: '1GiB', timeoutSecond
  * Scharf NUR, wenn `cashback_config/v1.fotoWorker === true` — sonst Trockenlauf,
  * der nur den Bericht schreibt. Ein Deploy schaltet also nichts still scharf
  * (gleiche Bauart wie der Schalter `ocrReferee`).
+ *
+ * Der Schalter der Bildschirm-Regel (`preisBildschirmRegel`) kommt aus
+ * DEMSELBEN Lesen von cashback_config/v1 — ein zweites Lesen in der Runde
+ * könnte allein scheitern und die Regel still auf Beobachtung stellen
+ * (Prüfrunde 2, 04.10.2026). `?? null`: fehlt der Schalter, gilt 'shadow'.
  */
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { taeglicheRunde } = require('./src/taeglicheRunde');
@@ -1067,7 +1072,7 @@ exports.fotoRundeTaeglich = onSchedule(
   async () => {
     const cfg = (await db.doc('cashback_config/v1').get()).data() || {};
     const scharf = cfg.fotoWorker === true;
-    const bericht = await taeglicheRunde({ dryRun: !scharf, projekt: PROJEKT, ausloeser: 'zeitplan' });
+    const bericht = await taeglicheRunde({ dryRun: !scharf, projekt: PROJEKT, ausloeser: 'zeitplan', preisBildschirmRegel: cfg.preisBildschirmRegel ?? null });
     logger.info(scharf ? 'Morgenrunde scharf gelaufen' : 'Morgenrunde als Trockenlauf (Schalter fotoWorker steht nicht auf true)', { lauf: bericht.lauf });
   },
 );
@@ -1089,7 +1094,7 @@ exports.fotoRundeManuell = onRequest(
     }
     const cfg = (await db.doc('cashback_config/v1').get()).data() || {};
     const scharf = req.query.scharf === '1' && cfg.fotoWorker === true;
-    const bericht = await taeglicheRunde({ dryRun: !scharf, projekt: PROJEKT, ausloeser: 'manuell' });
+    const bericht = await taeglicheRunde({ dryRun: !scharf, projekt: PROJEKT, ausloeser: 'manuell', preisBildschirmRegel: cfg.preisBildschirmRegel ?? null });
     // Nur Zahlen zurück — die Listen (Einreichungs-IDs beginnen mit der uid)
     // stehen im Bericht in Firestore und im Dashboard, nicht in einer HTTP-Antwort.
     const { lauf, dryRun, geprueft, freigegeben, abgelehnt, offen, gebuchtCents, warnungen: warn } = bericht;

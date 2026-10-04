@@ -14,6 +14,7 @@
  */
 
 const { REASON } = require('./duplicatePolicy');
+const { PREIS_BILDSCHIRM, preisBildschirmHalteGrund, preisBildschirmHinweis, preisBildschirmEintrag } = require('./preisBildschirm');
 
 const PENDING_OLDER = REASON.PENDING_OLDER;
 const KONTO_GESPERRT = 'konto_gesperrt';
@@ -55,6 +56,24 @@ const EIGENE_BREMSEN = Object.freeze([
   // Fehler beim Gruppieren (EAN, Nutzer) als auf echte Doppel.
   { schalter: 'woche', gruende: [REASON.SAME_USER_WEEK], halten: 'notbremse_wochensperre', basis: 'alle', min: 10, anteil: 0.15,
     text: (n, g, pz) => `${n} von ${g} Einreichungen wären wegen der Wochen-Sperre abgelehnt worden (${pz} %) — diese Ablehnungen zurückgehalten.` },
+  // Bildschirmfoto als Preisbeleg (Patrick 04.10.2026). Beruht auf der
+  // Bildprüfung. Gemessen: seit 26.09. 6 Fälle in 8,5 Tagen bei ~120
+  // geprüften am Tag (~0,6 %). Gezählt werden PERSONEN, nicht Fälle
+  // (`zaehle: 'personen'`, Prüfrunde 2, 04.10.2026): Bildschirmfotos kommen
+  // gebündelt — am 02.10. vier von zwei Personen (drei von einer binnen
+  // vier Minuten) bei 126 geprüften; als Fälle gezählt (4, 3,2 %) hätte die
+  // Bremse genau dann gegriffen, wenn die Regel richtig lag, und die Fälle
+  // hätten mit ihrem Befund am nächsten Tag wieder mitgezählt. Eine
+  // geänderte Lesart des Modells trifft dagegen viele Personen. Seit 26.09.
+  // höchstens 2 Personen je Lauf. Schwelle: mindestens 4 Personen und mehr
+  // als 2,5 % der geprüften (vorher 5 und 5 % auf Fälle — das ließ eine
+  // Fehllesung im Umfang der e-Bon-Quote, ~4 %, an jedem normalen Tag
+  // durch). Die Bremse hält nur zurück, ein Fehlgriff kostet einen Blick.
+  // Den häufigsten Modellfehler (e-Bon als „Bildschirm") fängt schon die
+  // Regel selbst ab (Lesedienst-Gegenzeichen, preisBildschirm.preisBildschirmBefund)
+  // und meldet ihn als Warnung.
+  { schalter: 'bildschirm', gruende: [PREIS_BILDSCHIRM], halten: 'notbremse_preis_bildschirm', basis: 'geprueft', min: 4, anteil: 0.025, zaehle: 'personen',
+    text: (n, g, pz, personen) => `Bei ${n} von ${g} Einreichungen (${personen} Personen, ${pz} %) hielt die Bildprüfung das Preisfoto für ein Bildschirmfoto — diese Ablehnungen zurückgehalten.` },
 ]);
 const AUSSER_GESAMTQUOTE = new Set([...EIGENE_BREMSEN.flatMap((b) => b.gruende), REASON.SAME_USER]);
 
@@ -79,7 +98,9 @@ const AUSSER_GESAMTQUOTE = new Set([...EIGENE_BREMSEN.flatMap((b) => b.gruende),
  * @param {boolean} [f.preisBildDefekt]  Preisfoto kam beim Hochladen beschädigt an (unser Fehler, nicht der Einreichung)
  * @param {string|null} [f.ortAuffaellig]  Aufnahmeort passt nicht zum Markt (Ausland, anderes Land, Simulator)
  * @param {boolean} [f.namerLaeuft]  Der Lesedienst liest die Einreichung noch nach (namerNachlesenAb)
- * @returns {{entscheidung:'freigeben'|'ablehnen'|'offen', grund:string|null, ctx:object, loseWare?:boolean}}
+ * @param {{modus:'shadow'|true, quelle:string|null, grund?:string|null, merkmal:boolean|null, lesedienstBon?:boolean, kopfGescheitert?:boolean, befund:'ablehnen'|'halten'|null, vorbefund?:{befund:string, seit:string|null}}|null} [f.preisBildschirm]
+ *   Bildschirmfoto als Preisbeleg (src/preisBildschirm.js) — null, wenn der Schalter aus ist oder weder eine Bildprüfung noch ein scharfer Befund eines früheren Laufs vorliegt
+ * @returns {{entscheidung:'freigeben'|'ablehnen'|'offen', grund:string|null, ctx:object, loseWare?:boolean, preisBildschirmFall?:{befund:string, ohneRegel:string, vorbefund?:boolean}}}
  */
 function entscheideFall(f) {
   const comp = f.comp || { ok: true, problems: [], missing: [] };
@@ -327,8 +348,42 @@ function vorbefundHinweis(bild) {
  *    lassen kostet nur einen Blick (Gegenprüfung 26.09.).
  *  - Aufnahmeort passt nicht zum Markt → Mensch (kann harmlos sein, etwa Aldi
  *    Süd statt Hofer in Österreich; 3 von 1.973 Freigaben seit 01.09.).
+ *  - Bildschirmfoto als Preisbeleg (04.10.2026) — über dem Ergebnis der
+ *    übrigen Hürden, siehe unten und src/preisBildschirm.js.
  */
 function freigabe(f, audit, extra = {}) {
+  const e = freigabeOhneBildschirm(f, audit, extra);
+  // Bildschirmfoto als Preisbeleg (Patrick 04.10.2026: „ja, bau das" — erst
+  // eine Woche beobachten, dann ablehnen). Bewusst HIER und nach der
+  // Preis-Prüfung ausgewertet: bei 36 von 37 Bildschirmfotos der Vor-Analyse
+  // hatte der Lesedienst einen Preis gelesen, die Preis-Pflicht war also
+  // erfüllt — die Regel muss greifen, BEVOR dieser Preis zur Freigabe führt.
+  //  - Beobachtung ('shadow'): Entscheidung unverändert, der Befund reist mit
+  //    (`preisBildschirmFall`) — für den Bericht (am Dokument nur, wenn der
+  //    Fall aus anderem Grund offen bleibt: review.rundeOffen).
+  //  - Scharf (true): `ablehnen` → Ablehnung (am Dokument `fotos_unpassend`,
+  //    duplicatePolicy.APP_GRUND), auch statt „Preis fehlt" und statt eines
+  //    sonst offenen Falls (Ort auffällig, Preis unsicher …) — der genauere
+  //    Grund, und er hängt an keinem dieser Abgleiche. Sah der Lesedienst
+  //    einen Kassenbon — auch nur in einer ungeeinten Nachlesung dieses
+  //    Laufs — oder hat er das Preisfoto gar nicht gelesen (Erst- und
+  //    Nachlesung gescheitert), kommt es gar nicht erst zu `ablehnen`
+  //    (preisBildschirmBefund, Prüfrunde 3): ein `nachlesen_gescheitert`
+  //    wird so nie durch eine Ablehnung ersetzt, die an EINER Modellantwort
+  //    hängt. `halten` → nur eine sonst fällige FREIGABE wird
+  //    zum offenen Fall; eine Ablehnung (Preis fehlt) oder ein schon offener
+  //    Fall bleibt, wie er ist — der Befund steht trotzdem in review.rundeOffen.
+  const pb = f.preisBildschirm || null;
+  const befund = pb && (pb.befund === 'ablehnen' || pb.befund === 'halten') ? pb.befund : null;
+  if (!befund) return e;
+  const fallDazu = (x) => ({ ...x, preisBildschirmFall: { befund, ohneRegel: e.entscheidung, ...(pb.vorbefund ? { vorbefund: true } : {}) } });
+  if (pb.modus !== true) return fallDazu(e);
+  const hinweis = preisBildschirmHinweis(pb);
+  if (befund === 'ablehnen') return fallDazu(ablehnen(PREIS_BILDSCHIRM, { hinweis }));
+  return fallDazu(e.entscheidung === 'freigeben' ? offen(preisBildschirmHalteGrund(pb), { hinweis }) : e);
+}
+
+function freigabeOhneBildschirm(f, audit, extra = {}) {
   if (!f.preisVorhanden && !(audit && audit.preisSichtbar === true)) {
     const rf = f.rettungFehler || {};
     if (rf.preis === 'lesungen_uneinig') return offen('preis_unsicher', { hinweis: 'Nur eine von zwei Nachlesungen fand einen Preis' });
@@ -459,6 +514,10 @@ function rundeBefunde(eingabe) {
  *  - `fotoSeit`: Lauf, seit dem der Foto-Befund steht (nur mit Foto-Befund).
  *  - `eanFoto`: Halte-Befund der Barcode-Nummer als Rückfall für die nächste
  *    Runde, falls `eanFotoOcr` nicht gespeichert werden konnte (eanFotoVorbefund).
+ *  - `preisBildschirm`: Befund der Bildschirm-Regel `{modus, befund, seit}`
+ *    (src/preisBildschirm.js) — Hinweis in der Konsole, und ein scharfer
+ *    Befund gilt im nächsten Lauf weiter (preisBildschirmVorbefund). Keine
+ *    Sperre: die Konsole gibt ohne Notiz frei, wer hinsieht, entscheidet.
  *  - Im Trockenlauf (`trocken`) bleibt auch ein geplanter Entscheid offen —
  *    `geplant` sagt, was die Runde getan hätte. Eine geplante Freigabe ohne
  *    sperrenden Befund hinterlässt nichts.
@@ -485,6 +544,7 @@ function rundeOffenEintrag(p, { lauf, trocken = false } = {}) {
   const hinweis = p.grund === 'foto_fremdes_konto' && !(bild && bild.vorbefund)
     ? `Gleiches Foto bei ${fremd || 'einer'} Einreichung${fremd === 1 || !fremd ? '' : 'en'} eines anderen Kontos — welche, steht im Tagesbericht`
     : (p.ctx && p.ctx.hinweis) ? String(p.ctx.hinweis).slice(0, 300) : null;
+  const pbEintrag = p.eingabe ? preisBildschirmEintrag(p.eingabe.preisBildschirm, { lauf }) : null;
   return {
     grund: p.grund || null,
     ...(p.entscheidung !== 'offen' ? { geplant: p.entscheidung } : {}),
@@ -498,6 +558,12 @@ function rundeOffenEintrag(p, { lauf, trocken = false } = {}) {
       befund: ef.art === 'abweichend' ? 'abweichend' : 'unsicher', ean: ef.gelesen || ef.roh || null,
       ...(ef.art === 'abweichend' ? { bestaetigt: ef.bestaetigt === true } : { zweit: ef.zweit || null }),
     } : null,
+    // Bildschirmfoto als Preisbeleg (04.10.2026) — nur mit Befund, und nur
+    // Modus, Befund und `seit` (preisBildschirm.preisBildschirmEintrag: was
+    // das Urteil trägt, steht nur im Tagesbericht). Die Konsole zeigt daraus
+    // einen Hinweis (einreichung.precheckOf), der nächste Lauf übernimmt einen
+    // scharfen Befund (preisBildschirmVorbefund).
+    ...(pbEintrag ? { preisBildschirm: pbEintrag } : {}),
     lauf: lauf || null,
     trocken: !!trocken,
   };
@@ -512,9 +578,10 @@ function offen(grund, ctx = {}) { return { entscheidung: 'offen', grund, ctx }; 
  * bleiben offen — und der Bericht warnt rot. Freigaben laufen immer weiter:
  * sie sind die harmlose Richtung.
  *
- *  A) Eigene Bremsen (EIGENE_BREMSEN): Preis fehlt, Wochen-Sperre — jede mit
- *     eigener Schwelle, bezogen auf die geprüften Fälle (Preis, beruht auf der
- *     Bildprüfung) bzw. auf alle Fälle des Laufs. Gesperrte Konten brauchen
+ *  A) Eigene Bremsen (EIGENE_BREMSEN): Preis fehlt, Wochen-Sperre,
+ *     Bildschirmfoto als Preisbeleg — jede mit eigener Schwelle, bezogen auf
+ *     die geprüften Fälle (Preis und Bildschirm beruhen auf der Bildprüfung)
+ *     bzw. auf alle Fälle des Laufs. Gesperrte Konten brauchen
  *     keine: sie werden nicht abgelehnt, sondern liegen gelassen.
  *  B) Bildprüfung: mehr als `bildMaxAnteil` der geprüften Fälle als unecht
  *     bzw. „dieselbe Ansicht" — dann liegt es eher am Modell als an den
@@ -529,19 +596,23 @@ function offen(grund, ctx = {}) { return { entscheidung: 'offen', grund, ctx }; 
  *
  * @param {Array<{entscheidung:string, grund:string|null, audit?:object|null}>} plan (wird verändert)
  * @param {{schnittQuote:number|null, bildMaxAnteil?:number, bildMin?:number, gesamtMin?:number}} opts
- * @returns {{bild:boolean, gesamt:boolean, preis:boolean, woche:boolean, text:string[]}}
+ * @returns {{bild:boolean, gesamt:boolean, preis:boolean, woche:boolean, bildschirm:boolean, text:string[]}}
  */
 function notbremse(plan, { schnittQuote = null, bildMaxAnteil = 0.1, bildMin = 5, gesamtMin = 10 } = {}) {
-  const ergebnis = { bild: false, gesamt: false, preis: false, woche: false, text: [] };
+  const ergebnis = { bild: false, gesamt: false, preis: false, woche: false, bildschirm: false, text: [] };
   const geprueft = plan.filter((p) => p.audit).length;
   const halten = (liste, grund) => liste.forEach((p) => { p.zurueckgehaltenGrund = p.grund; p.entscheidung = 'offen'; p.grund = grund; });
   const pz = (n, g) => Math.round((100 * n) / g);
   for (const b of EIGENE_BREMSEN) {
     const betroffen = plan.filter((p) => p.entscheidung === 'ablehnen' && b.gruende.includes(p.grund));
     const basis = b.basis === 'geprueft' ? geprueft : plan.length;
-    if (betroffen.length >= b.min && basis && betroffen.length / basis > b.anteil) {
+    // `zaehle: 'personen'`: verschiedene Konten statt Fälle. Ohne Konto zählt
+    // ein Fall als eigene Person (die strengere Richtung).
+    const personen = new Set(betroffen.map((p, i) => (p.x && p.x.userId) || `ohne_konto_${p.id || i}`)).size;
+    const n = b.zaehle === 'personen' ? personen : betroffen.length;
+    if (n >= b.min && basis && n / basis > b.anteil) {
       ergebnis[b.schalter] = true;
-      ergebnis.text.push(b.text(betroffen.length, basis, pz(betroffen.length, basis)));
+      ergebnis.text.push(b.text(betroffen.length, basis, pz(n, basis), personen));
       halten(betroffen, b.halten);
     }
   }
