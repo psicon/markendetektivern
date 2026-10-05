@@ -92,8 +92,8 @@ describe('belegBereinigen', () => {
     expect(belegBereinigen(p)).toEqual(p);
   });
 
-  test('Ladenbon oder App-Bon ohne Endbetrag bleibt ohne Endbetrag (Teilfoto)', () => {
-    for (const belegart of ['kassenbon', 'app_kassenbon', null]) {
+  test('gedruckter Ladenbon ohne Endbetrag bleibt ohne Endbetrag (Teilfoto)', () => {
+    for (const belegart of ['kassenbon', 'sonstiges', null]) {
       const p = belegBereinigen({ merchant: 'Lidl', belegart, totalCents: null, items: [{ name: 'Milch', priceCents: 119 }] });
       expect(p.totalCents).toBeNull();
       expect(p.summeAusArtikeln).toBeUndefined();
@@ -101,6 +101,24 @@ describe('belegBereinigen', () => {
     // gedruckter Endbetrag wird nie ersetzt
     expect(belegBereinigen({ belegart: 'online_bestellung', totalCents: 999, items: [{ name: 'A', priceCents: 100 }] }))
       .toMatchObject({ totalCents: 999 });
+  });
+
+  test('Nachprüfung 05.10.: App-Kassenbon-Screenshot ohne sichtbare Summe → Artikelsumme wie unter v1.4 (vermerkt)', () => {
+    // Echter Fall bon_mutilou057guzo (Lidl Plus, 31 Artikel, Summe weggescrollt):
+    // v1.4 setzte 7825 = Artikelsumme und zahlte; v1.5 lieferte null.
+    const p = belegBereinigen({
+      merchant: 'Lidl', belegart: 'app_kassenbon', bonTime: null, totalCents: null,
+      items: [{ name: 'Milch', priceCents: 119 }, { name: 'Brot', priceCents: 249 }, { name: 'Pfand', priceCents: 25, category: 'Pfand' }],
+    });
+    expect(p).toMatchObject({ totalCents: 393, summeAusArtikeln: true, belegart: 'app_kassenbon' });
+    // Keine Anschrift-Bereinigung: ein App-Bon ist kein Online-Beleg.
+    expect(p.onlineMerkmal).toBeUndefined();
+    // Gedruckte Summe wird nie ersetzt; ohne Artikel keine Summe.
+    expect(belegBereinigen({ belegart: 'app_kassenbon', totalCents: 1234, items: [{ name: 'A', priceCents: 100 }] }))
+      .toMatchObject({ totalCents: 1234 });
+    expect(belegBereinigen({ belegart: 'app_kassenbon', totalCents: null, items: [] }).totalCents).toBeNull();
+    // idempotent
+    expect(belegBereinigen(p)).toEqual(p);
   });
 
   test('idempotent und robust', () => {

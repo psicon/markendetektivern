@@ -30,16 +30,31 @@
  * zählen, dm ja"). Darum: Online-Bestellung ohne Endbetrag → Artikelsumme als
  * Endbetrag, vermerkt als `summeAusArtikeln: true` (wie v1.4, jetzt sichtbar).
  * Ob ein fremder Händler dahintersteht, entscheidet weiter der Markt-Resolver.
- * Gilt NUR für Online-Bestellungen: ein Laden- oder App-Bon ohne lesbare Summe
- * bleibt ein Teilfoto.
+ * Nachprüfung 05.10.2026: dasselbe gilt für einen APP-Kassenbon (Lidl Plus …).
+ * Ein langer App-Bon passt nicht auf einen Bildschirm; v1.4 setzte bei einem
+ * Screenshot ohne sichtbare Summe die Artikelsumme ein und bezahlte, v1.5
+ * liefert `totalCents: null` — ohne Ausgleich würde jeder solche Bon still als
+ * reconciliation_delta abgelehnt (gemessen 1 von 10 App-Bons), gegen Patricks
+ * „App-Kassenbons zählen" und ohne Schalter. Darum auch hier Artikelsumme +
+ * `summeAusArtikeln: true`; ob die Summe Pflicht wird, entscheidet der Schalter
+ * `cashback_config/v1.appSummePflicht` in index.js (Default false = wie v1.4).
+ * Ein gedruckter Ladenbon ohne lesbare Summe bleibt ein Teilfoto.
  * Prüfrunde 2 (04.10.2026): damit geht der Abgleich auch für JEDE einzelne
  * Seite einer mehrseitigen Rechnung auf (echter Fall: dm-Bestellung, vier
  * Seiten binnen zwei Minuten). Dieselbe Person bekommt sie trotzdem nur einmal
  * bezahlt: Regel `seite` in lib/doppelBon.js (Schalter doppelOnlineSeite) —
  * gleicher Markt und Tag, beide Online-Bestellungen, eine ohne gedruckte Summe.
+ * Nachprüfung 05.10.2026: ebenso jeder Bildschirmabschnitt EINES App-Bons
+ * (echte Fälle Lidl 16.07. und 21.09.: zwei Scrollbilder, beide ohne Summe).
+ * Die Regel deckt deshalb auch App-Bons (nur selber Tag) und ist per Code-
+ * Default AN: diese Ergänzung wirkt ohne Schalter, also muss es ihr Schutz
+ * auch — sonst zahlte schon der Deploy jeden Abschnitt einzeln.
  */
 
 const BELEGARTEN = new Set(['kassenbon', 'app_kassenbon', 'online_bestellung', 'sonstiges']);
+// Belegarten, bei denen ein fehlender Endbetrag aus den Artikeln kommt: eine
+// Rechnungsseite ohne Summe und ein App-Screenshot, auf dem sie weggescrollt ist.
+const SUMME_AUS_ARTIKELN = new Set(['online_bestellung', 'app_kassenbon']);
 
 // Wörter im Kopf (Händlerzeile, Zusatzzeile), die eine Bestellung verraten —
 // auch ohne Belegart (Bestand vor v1.5, cv-hybrid, DocAI). Bewusst eng: ein
@@ -87,7 +102,7 @@ function belegBereinigen(parsed) {
   const nr = typeof out.bestellnummer === 'string' ? out.bestellnummer.trim().slice(0, 40) : null;
   out.bestellnummer = out.belegart === 'online_bestellung' && nr ? nr : null;
   out.bonComplete = out.bonComplete === true ? true : out.bonComplete === false ? false : null;
-  if (out.belegart === 'online_bestellung' && !Number.isFinite(out.totalCents) && Array.isArray(out.items)) {
+  if (SUMME_AUS_ARTIKELN.has(out.belegart) && !Number.isFinite(out.totalCents) && Array.isArray(out.items)) {
     // Dieselbe Summe wie reconcile() in lib/ocr.js.
     const summe = out.items.reduce((acc, it) => acc + (it && Number.isFinite(it.priceCents) ? it.priceCents : 0), 0);
     if (summe > 0) {

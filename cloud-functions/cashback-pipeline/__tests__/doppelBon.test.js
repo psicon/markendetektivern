@@ -101,10 +101,15 @@ describe('Schalter', () => {
     expect(D.schalterModus(v)).toBe(e);
   });
 
-  test('Code-Default: alles aus, Schwelle 0,6, mindestens 5 Artikel', () => {
-    expect(D.doppelModi({})).toEqual({ summe: false, konten: false, artikel: false, bestellung: false, datum: false, kontenArtikel: false, seite: false, kontenDatum: false, schwelle: 0.6, minArtikel: 5 });
-    expect(D.modiVermerk(D.doppelModi({ doppelDatum: 'shadow', doppelKontenArtikel: true, doppelOnlineSeite: 'shadow', doppelKontenDatum: true })))
-      .toEqual({ summe: false, konten: false, artikel: false, bestellung: false, datum: 'shadow', kontenArtikel: true, seite: 'shadow', kontenDatum: true });
+  test('Code-Default: alles aus außer seite und bild, Schwelle 0,6, mindestens 5 Artikel', () => {
+    // seite/bild an (Nachprüfung 05.10.2026): sie sichern nur Zahlwege ab, die
+    // ohne Schalter (Artikelsumme) bzw. erst mit scharfem Feinvergleich entstehen.
+    expect(D.doppelModi({})).toEqual({ summe: false, konten: false, artikel: false, bestellung: false, datum: false, kontenArtikel: false, seite: true, kontenDatum: false, bild: true, schwelle: 0.6, minArtikel: 5 });
+    expect(D.modiVermerk(D.doppelModi({ doppelDatum: 'shadow', doppelKontenArtikel: true, doppelOnlineSeite: 'shadow', doppelKontenDatum: true, doppelBildAehnlich: false })))
+      .toEqual({ summe: false, konten: false, artikel: false, bestellung: false, datum: 'shadow', kontenArtikel: true, seite: 'shadow', kontenDatum: true, bild: false });
+    // Nur ein FEHLENDER Wert gilt als an; alles Unbekannte bleibt aus.
+    expect(D.doppelModi({ doppelOnlineSeite: null, doppelBildAehnlich: undefined })).toMatchObject({ seite: true, bild: true });
+    expect(D.doppelModi({ doppelOnlineSeite: 'true', doppelBildAehnlich: 0 })).toMatchObject({ seite: false, bild: false });
   });
 
   test('unsinnige Schwellen fallen auf die gemessenen Werte zurück', () => {

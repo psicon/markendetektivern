@@ -236,7 +236,8 @@ describe('Beobachtungs-Modus', () => {
     expect(res.body).toMatchObject({ ok: true, status: 'approved', creditedCents: 8 });
     expect(earns()).toHaveLength(2);
     const vermerk = fake.store.get('receipts/s2').doppelPruefung;
-    expect(vermerk.modi).toEqual({ summe: 'shadow', konten: 'shadow', artikel: 'shadow', bestellung: false, datum: false, kontenArtikel: false, seite: false, kontenDatum: false });
+    // seite und bild sind per Code-Default an (Nachprüfung 05.10.2026).
+    expect(vermerk.modi).toEqual({ summe: 'shadow', konten: 'shadow', artikel: 'shadow', bestellung: false, datum: false, kontenArtikel: false, seite: true, kontenDatum: false, bild: true });
     expect(vermerk.treffer.map((t) => [t.regel, t.modus])).toEqual(expect.arrayContaining([['summe', 'beobachtung'], ['konten', 'beobachtung'], ['artikel', 'beobachtung']]));
     // Der Schlüssel bleibt beim ersten Bon („der erste gewinnt").
     expect(fake.store.get(`cashback_bon_schluessel/${kontenId('netto', summe(ZEHN), '10:15')}`).receiptId).toBe('s1');
@@ -717,14 +718,26 @@ describe('Prüfrunde 2: Seiten einer Online-Rechnung (doppelOnlineSeite)', () =>
     expect(earns()).toHaveLength(2);
   });
 
-  test('Schalter aus → altes Verhalten (beide bezahlt), Merkmale stehen am Tageseintrag', async () => {
-    config({ doppelSumme: true });
+  test('Schalter ausdrücklich false → beide bezahlt, Merkmale stehen am Tageseintrag', async () => {
+    config({ doppelSumme: true, doppelOnlineSeite: false });
     seite('t1', S1);
     await verarbeiten('t1');
     seite('t2', S2);
     await verarbeiten('t2');
     expect(earns()).toHaveLength(2);
     expect(fake.store.get(`users/${U1}/cashback_days/${GESTERN}`).eintraege.t1).toMatchObject({ online: true, ohneSumme: true });
+  });
+
+  test('Nachprüfung 05.10.: Schalter fehlt (Deploy-Stand) → Code-Default an, eine Gutschrift', async () => {
+    // Die Artikelsumme der Seite ohne Endbetrag setzt lib/belegart.js ohne
+    // Schalter ein — ohne Schutz zahlte schon der Deploy jede Seite einzeln.
+    config({});
+    seite('u1', S1);
+    await verarbeiten('u1');
+    seite('u2', S2);
+    await verarbeiten('u2');
+    expect(fake.store.get('receipts/u2')).toMatchObject({ status: 'rejected', duplicateOf: { receiptId: 'u1', kind: 'seite' } });
+    expect(earns()).toHaveLength(1);
   });
 });
 

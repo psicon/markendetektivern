@@ -139,6 +139,15 @@ function erstelleFakeAdmin() {
         return snap(pfad);
       },
       set: async (d, o) => schreiben(pfad, d, o),
+      // Wie Firestore: scheitert mit ALREADY_EXISTS (6), wenn es das Dokument gibt.
+      create: async (d) => {
+        if (store.has(pfad)) {
+          const e = new Error(`ALREADY_EXISTS: ${pfad}`);
+          e.code = 6;
+          throw e;
+        }
+        schreiben(pfad, d);
+      },
       update: async (d) => aendern(pfad, d),
       delete: async () => loeschen(pfad),
       collection: (sub) => sammlung(`${pfad}/${sub}`),
@@ -218,6 +227,13 @@ function erstelleFakeAdmin() {
             if (r.__abfrage) gelesen.set(`S:${r.__pfad}`, sammlungsVersionen.get(r.__pfad) || 0);
             else gelesen.set(`D:${r.path}`, versionen.get(r.path) || 0);
             return r.get();
+          },
+          // Wie Firestore: mehrere Dokumente auf einmal, Leseoptionen (fieldMask) ignoriert.
+          getAll: async (...args) => {
+            const refs = args.filter((a) => a && typeof a.path === 'string' && !a.__abfrage);
+            const out = [];
+            for (const r of refs) out.push(await tx.get(r));
+            return out;
           },
           set: (r, d, o) => { ops.push(() => schreiben(r.path, d, o)); return tx; },
           update: (r, d) => { ops.push(() => aendern(r.path, d)); return tx; },

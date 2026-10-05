@@ -93,9 +93,68 @@
  *              verschiedener Markt, 0–8 Tage: 0 mit Anteil ≥ 0,5, 0 mit
  *              gleicher Summe und Uhrzeit.
  *
+ * Nachprüfung 05.10.2026 (Angriffe mit dem echten index.js nachgestellt,
+ * Gegenprobe an denselben 6.421 bezahlten Bons, scratchpad/nachpruef-0510):
+ *   datum      liest zusätzlich den PERSONEN-Index `cashback_bon_person/{uid}`
+ *              — alle bezahlten Bons derselben Person der letzten 95 Tage,
+ *              ohne Markt und ohne gedruckte Endsumme im Schlüssel. Vorher hing
+ *              der Rückblick über 8 Tage hinaus allein am Summen-Index
+ *              `{markt}_{summe}`: Datum ≥ 9 Tage verschoben UND eine Ziffer der
+ *              Endsumme oder ein Wort im Kopf geändert — keine Regel griff.
+ *              Dieselbe Bedingung wie im Fenster des Tageszählers (gleiche
+ *              Uhrzeit: Summe ODER Artikel; ohne sie: Summe bzw. Artikelsumme
+ *              UND Artikel), Markt egal. 29.519 Paare gleiche Person, 1–95
+ *              Tage, jeder Markt: genau 1 Treffer — die echte Doppelzahlung vom
+ *              02.10. Verworfen: „Artikel ≥ 0,6 und Endsumme ±2 €" — traf einen
+ *              echten Zweitkauf (REWE, zwei Abende hintereinander, gleicher
+ *              Ingwer-Shot, Tomaten, Gurke, Cola).
+ *   seite      auch an einem ANDEREN Tag im Fenster ±8 (Datum auf einer Seite
+ *              geändert). 0 Paare zweier bezahlter Online-Belege desselben
+ *              Markts ohne Uhrzeit in 1–8 Tagen.
+ *
+ * Nachprüfung 05.10.2026, zweite Runde (scratchpad/nachpruef-0510-*.js):
+ *   seite      gilt auch für zwei Bildschirmabschnitte EINES App-Kassenbons
+ *              (Lidl Plus …): beide `app_kassenbon`, gleicher Markt, gleicher
+ *              Tag, mindestens einer ohne sichtbare Summe (lib/belegart.js
+ *              setzt dort die Artikelsumme ein, OHNE Schalter — darum ohne
+ *              diese Regel zwei Gutschriften; echte Fälle 16.07. und 21.09.).
+ *              Nur am SELBEN Tag: Lidl-App-Bons tragen meist keine Uhrzeit,
+ *              und 36 ehrliche Lidl-Paare derselben Person lagen 1–8 Tage
+ *              auseinander, eines davon ohne Uhrzeit. Am selben Tag: 144
+ *              bezahlte Paare gleiche Person/Markt, nur 1 ohne Uhrzeit — der
+ *              echte Doppelbon vom 17.09. Zwei VERSCHIEDENE Uhrzeiten heben
+ *              die Regel auf (zwei Einkäufe). Schalter `doppelOnlineSeite`
+ *              mit Code-Default TRUE: die Regel greift nur, wenn ein Beleg
+ *              ohne gedruckte Summe beteiligt ist, und dieser Zahlweg ist
+ *              selbst ohne Schalter — ohne sie zahlte schon der Deploy jede
+ *              Seite bzw. jeden Abschnitt einzeln. `false` schaltet sie ab.
+ *   bild       Feinvergleich beim Hochladen (lib/bildVergleich.js) hat einen
+ *              groben Bildtreffer NICHT bestätigt (Beschnitt ab 1 %), der
+ *              Kandidat ist ein bezahlter Bon derselben Person, gleicher Markt,
+ *              Bon-Tag ±8 → der Bon geht in die PRÜFUNG (`review`,
+ *              `bild_aehnlich_bezahlt`), nicht in die Ablehnung. Ohne sie
+ *              ließ `bildFeinvergleich: true` eine beschnittene Kopie mit
+ *              einigen geänderten Preisziffern durch (keine Textregel greift,
+ *              der grobe dHash sperrte sie bisher). Nur wenn keine andere
+ *              Regel wirksam trifft (Reihenfolge), nur in processCashback —
+ *              eine Freigabe durch Mensch/Resolver entscheidet selbst.
+ *              Schalter `doppelBildAehnlich`, Code-Default TRUE (wirkt nur,
+ *              wo der scharfe Feinvergleich `capture.bildAehnlich` schrieb),
+ *              und Voraussetzung für `bildFeinvergleich: true`.
+ *
+ * Bekannte Lücke (Korrektur 05.10.2026): dieselbe Person, ANDERER Bon-Tag (ab
+ * 1 Tag, nicht erst ab 9), Uhrzeit geändert oder verdeckt UND Endsumme UND
+ * mindestens ein Artikelpreis geändert → weder Summe noch Artikelsumme passt,
+ * keine Textregel greift. Heute sperrt der grobe dHash solche Kopien (außer
+ * bei starkem Beschnitt); mit scharfem Feinvergleich fängt sie Regel `bild`
+ * nur bis ±8 Tage um den Bon-Tag des Originals. Gemessen als Kandidat (nicht
+ * gebaut): „gleiche Person, gleicher Markt, 1–95 Tage, Artikelanteil ≥ 0,8
+ * ohne Summe" — 0 von 11.442 bezahlten Paaren, höchster ehrlicher Wert 0,75.
+ *
  * Jede Regel hängt an einem Schalter in `cashback_config/v1` (false | 'shadow'
- * | true, Code-Default false = altes Verhalten). Ein Treffer im Modus 'shadow'
- * wird am Bon vermerkt, ändert aber nichts.
+ * | true, Code-Default false = altes Verhalten; Ausnahmen `seite` und `bild`,
+ * siehe oben). Ein Treffer im Modus 'shadow' wird am Bon vermerkt, ändert aber
+ * nichts.
  */
 
 const crypto = require('crypto');
@@ -136,6 +195,26 @@ const DATUM_FENSTER_TAGE = 8;
 const SUMMEN_SAMMLUNG = 'cashback_bon_summen';
 const MAX_SUMMEN_EINTRAEGE = 400;
 const SUMMEN_AUFBEWAHRUNG_TAGE = 95;
+// Personen-Index für die Regel datum (Nachprüfung 05.10.2026):
+// `cashback_bon_person/{uid}` = { eintraege: { [receiptId]: { l: [Lesung] } } },
+// Lesung = { t: Tag, m: Markt, z: Uhrzeit|null, s: Endsumme|null,
+// as: Artikelsumme|null, a: [Artikel-Hashes] } — nur für den Server, keine
+// Artikelnamen. Höchstens 2 Lesungen je Bon (die erste und die jüngste
+// abweichende: der Bon sperrt unter beiden), höchstens 80 Artikel-Hashes je
+// Lesung, höchstens 300 Bons je Person (mehr als 3 bezahlte Bons am Tag über
+// 95 Tage gibt es nicht; darüber fallen die ältesten heraus). Größtes Dokument
+// damit unter 500 KB, typisch wenige KB. Die Lesungen stehen bewusst in einem
+// ARRAY: Felder in Maps innerhalb eines Arrays indexiert Firestore nicht
+// einzeln — je Bon ~2 Indexeinträge statt ~90 (Grenze 40.000 je Dokument; als
+// Map wäre eine Person mit 300 Bons darüber, und ihre Buchung scheiterte).
+// Geschrieben bei JEDER Gutschrift,
+// unabhängig vom Schalter — damit er beim Scharfschalten vollständig ist; den
+// Bestand davor trägt `.backfill-doppel-person.js` nach.
+const PERSON_SAMMLUNG = 'cashback_bon_person';
+const MAX_PERSON_EINTRAEGE = 300;
+const MAX_PERSON_LESUNGEN = 2;
+const MAX_PERSON_ARTIKEL = 80;
+const PERSON_AUFBEWAHRUNG_TAGE = SUMMEN_AUFBEWAHRUNG_TAGE;
 
 /** Wie in der Messung: klein, nur a–z, 0–9, äöüß. */
 function normName(s) {
@@ -290,7 +369,7 @@ function artikelSummeVon(items) {
  *            artikel:string[], artikelSumme:number|null, bestellHash:string|null,
  *            kontenId:string|null, tagesIndex:string|null}}
  */
-function identitaet({ merchantId, bonDate, totalCents, bonTime, items, bestellnummer, online, summeAusArtikeln } = {}) {
+function identitaet({ merchantId, bonDate, totalCents, bonTime, items, bestellnummer, online, summeAusArtikeln, belegart } = {}) {
   const markt = merchantId && merchantId !== 'unknown' ? String(merchantId).toLowerCase() : null;
   const tag = tagNormal(bonDate);
   const summe = Number.isInteger(totalCents) && totalCents > 0 ? totalCents : null;
@@ -310,6 +389,9 @@ function identitaet({ merchantId, bonDate, totalCents, bonTime, items, bestellnu
     // Endbetrag nur aus den Artikeln stammt (Seite ohne gedruckte Summe).
     online: online === true,
     ohneSumme: summeAusArtikeln === true,
+    // Regel seite für App-Kassenbons (Nachprüfung 05.10.2026): Abschnitte
+    // EINES App-Bons. Nur die Belegart des Modells (Prompt v1.5) zählt.
+    app: belegart === 'app_kassenbon',
   };
 }
 
@@ -332,6 +414,7 @@ function identitaetAusBon(bon) {
     bestellnummer: parsed.bestellnummer,
     online: Boolean(onlineMerkmal(parsed)),
     summeAusArtikeln: parsed.summeAusArtikeln === true,
+    belegart: parsed.belegart ?? b.belegart ?? null,
   });
 }
 
@@ -348,6 +431,7 @@ function eintragAus(id) {
     // Nur gesetzt, wenn wahr (Regel seite) — spart Platz am Tageszähler.
     ...(id.online ? { online: true } : {}),
     ...(id.ohneSumme ? { ohneSumme: true } : {}),
+    ...(id.app ? { app: true } : {}),
     v: EINTRAG_VERSION,
   };
 }
@@ -381,6 +465,17 @@ function schalterModus(v) {
   return false;
 }
 
+/**
+ * Wie schalterModus, aber ein FEHLENDER Wert (undefined/null) gilt als true.
+ * Nur für Schutzregeln, die ausschließlich einen Zahlweg absichern, der selbst
+ * ohne Schalter gilt (seite) bzw. erst mit einem anderen scharfen Schalter
+ * entsteht (bild) — dort hieße „aus" per Default: der Deploy öffnet die Lücke.
+ * Ein ausdrückliches false oder 'shadow' wirkt wie überall.
+ */
+function schalterModusStandardAn(v) {
+  return v == null ? true : schalterModus(v);
+}
+
 /** Schalter und Schwellen aus `cashback_config/v1`. */
 function doppelModi(config = {}) {
   const schwelle = Number(config.doppelArtikelSchwelle);
@@ -392,8 +487,10 @@ function doppelModi(config = {}) {
     bestellung: schalterModus(config.doppelBestellnummer),
     datum: schalterModus(config.doppelDatum),
     kontenArtikel: schalterModus(config.doppelKontenArtikel),
-    seite: schalterModus(config.doppelOnlineSeite),
+    // Code-Default AN (Nachprüfung 05.10.2026, siehe Kopf).
+    seite: schalterModusStandardAn(config.doppelOnlineSeite),
     kontenDatum: schalterModus(config.doppelKontenDatum),
+    bild: schalterModusStandardAn(config.doppelBildAehnlich),
     // Untergrenze 0,5: darunter lag in der Messung kein Wert mehr gemessen, und
     // ein Tippfehler (0.06) sperrte sonst echte Zweitkäufe.
     schwelle: Number.isFinite(schwelle) && schwelle >= 0.5 && schwelle <= 1 ? schwelle : 0.6,
@@ -403,7 +500,7 @@ function doppelModi(config = {}) {
 
 /** Schalterstand für den Vermerk am Bon (`receipts.doppelPruefung.modi`). */
 function modiVermerk(modi = {}) {
-  const { summe, konten, artikel, bestellung, datum, kontenArtikel, seite, kontenDatum } = modi;
+  const { summe, konten, artikel, bestellung, datum, kontenArtikel, seite, kontenDatum, bild } = modi;
   return {
     summe: summe ?? false,
     konten: konten ?? false,
@@ -413,10 +510,35 @@ function modiVermerk(modi = {}) {
     kontenArtikel: kontenArtikel ?? false,
     seite: seite ?? false,
     kontenDatum: kontenDatum ?? false,
+    bild: bild ?? false,
   };
 }
 
-const REGEL_REIHENFOLGE = ['summe', 'konten', 'bestellung', 'seite', 'artikel', 'datum', 'kontenArtikel', 'kontenDatum'];
+// `bild` zuletzt: sie hält nur in der Prüfung fest — trifft eine Regel
+// wirksam, die ablehnt, gewinnt die (ein erneut fotografierter, schon
+// bezahlter Bon soll abgelehnt werden, nicht einen Menschen beschäftigen).
+const REGEL_REIHENFOLGE = ['summe', 'konten', 'bestellung', 'seite', 'artikel', 'datum', 'kontenArtikel', 'kontenDatum', 'bild'];
+
+// Grund am Bon, wenn Regel `bild` wirksam trifft: Prüfung durch einen Menschen.
+const BILD_GRUND = 'bild_aehnlich_bezahlt';
+
+/**
+ * Regel bild (Nachprüfung 05.10.2026): passt ein Kandidat aus dem
+ * Feinvergleich (`capture.bildAehnlich`, bezahlter Bon derselben Person) zur
+ * neuen Lesung? Gleicher Markt und Bon-Tag höchstens DATUM_FENSTER_TAGE
+ * daneben. Ob er noch bezahlt ist, prüft der Aufrufer (Ledger).
+ * @param {object} neu        identitaet()
+ * @param {{markt?:string|null, tag?:string|null}} kandidat
+ * @returns {{abstand:number}|null}
+ */
+function bildTrifft(neu, kandidat) {
+  if (!neu || !kandidat || !neu.markt || !neu.tag) return null;
+  const markt = kandidat.markt ? String(kandidat.markt).toLowerCase() : null;
+  if (!markt || markt !== neu.markt) return null;
+  const abstand = tageAbstand(neu.tag, kandidat.tag);
+  if (abstand == null || abstand > DATUM_FENSTER_TAGE) return null;
+  return { abstand };
+}
 
 /**
  * Regel kontenArtikel, erster Schritt: welche Einträge des Tages-Index
@@ -515,6 +637,104 @@ function veralteteSummenEintraege(eintraege, heute, tage = SUMMEN_AUFBEWAHRUNG_T
     .map(([id]) => id);
 }
 
+/** Eine Lesung eines bezahlten Bons im Personen-Index; null ohne Tag. */
+function personLesungAus(id) {
+  if (!id || !id.tag) return null;
+  return {
+    t: id.tag,
+    m: id.markt ?? null,
+    z: id.uhrzeit ?? null,
+    s: Number.isInteger(id.summe) ? id.summe : null,
+    as: Number.isInteger(id.artikelSumme) ? id.artikelSumme : null,
+    a: artikelHashes(id.artikel).slice(0, MAX_PERSON_ARTIKEL),
+  };
+}
+
+const lesungenVon = (e) => (e && Array.isArray(e.l) ? e.l.filter((x) => x && typeof x === 'object') : []);
+const gleicheLesung = (x, y) => x.t === y.t && x.m === y.m && x.z === y.z && x.s === y.s && x.as === y.as;
+
+/**
+ * Neuer Wert des eigenen Eintrags im Personen-Index: die bisherigen Lesungen
+ * um die aktuelle ERGÄNZT (nie ersetzt — der Bon sperrt unter jeder Lesung),
+ * höchstens MAX_PERSON_LESUNGEN (die erste und die jüngste). null, wenn sich
+ * nichts ändert.
+ */
+function personEintragWert(alt, lesung) {
+  if (!lesung) return null;
+  const bisher = lesungenVon(alt);
+  if (bisher.some((x) => gleicheLesung(x, lesung))) return null;
+  const l = bisher.length >= MAX_PERSON_LESUNGEN ? [bisher[0], lesung] : [...bisher, lesung];
+  return { l };
+}
+
+/**
+ * Welche Einträge des Personen-Index fallen weg? Alle, deren jüngste Lesung
+ * mehr als PERSON_AUFBEWAHRUNG_TAGE vor `heute` liegt, und — ist das Dokument
+ * danach noch voll — die ältesten, bis Platz für `neuId` ist.
+ */
+function personAufraeumen(eintraege, heute, neuId = null, tage = PERSON_AUFBEWAHRUNG_TAGE) {
+  if (!eintraege || typeof eintraege !== 'object') return [];
+  const h = tagNormal(heute);
+  const juengster = (e) => lesungenVon(e).map((x) => tagNormal(x.t)).filter(Boolean).sort().pop() || null;
+  const weg = [];
+  const bleiben = [];
+  for (const [id, e] of Object.entries(eintraege)) {
+    if (id === neuId) continue;
+    const t = juengster(e);
+    if (!t || (h && t < h && tageAbstand(h, t) > tage)) weg.push(id);
+    else bleiben.push([id, t]);
+  }
+  const platz = MAX_PERSON_EINTRAEGE - (neuId ? 1 : 0);
+  if (bleiben.length > platz) {
+    bleiben.sort((x, y) => (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0));
+    for (const [id] of bleiben.slice(0, bleiben.length - platz)) weg.push(id);
+  }
+  return weg;
+}
+
+/**
+ * Regel datum über den Personen-Index: welche bezahlten Bons DERSELBEN Person
+ * (jeder Markt, 1–PERSON_AUFBEWAHRUNG_TAGE Tage daneben) passen? Dieselbe
+ * Bedingung wie im Fenster des Tageszählers (doppelUrteil, `andererTag`):
+ * gleiche Uhrzeit → Endsumme ODER Artikel ≥ Schwelle; ohne sie → (Endsumme
+ * ODER Artikelsumme) UND Artikel ≥ Schwelle. Ob ihr Bon noch bezahlt ist,
+ * prüft der Aufrufer (Ledger).
+ * @returns {Array<{id:string, tag:string, abstand:number, anteil:number|null, gleicheZeit:boolean, andererMarkt:boolean}>}
+ */
+function personKandidaten({ bonId, neu, eintraege, modi = {} }) {
+  const minArtikel = modi.minArtikel ?? 5;
+  const schwelle = modi.schwelle ?? 0.6;
+  if (!neu || !neu.tag || !eintraege || typeof eintraege !== 'object') return [];
+  const a = artikelHashes(neu.artikel).slice(0, MAX_PERSON_ARTIKEL);
+  const out = [];
+  for (const [id, e] of Object.entries(eintraege)) {
+    if (id === bonId) continue;
+    let bester = null;
+    for (const r of lesungenVon(e)) {
+      if (!r.t || r.t === neu.tag) continue;
+      const abstand = tageAbstand(neu.tag, r.t);
+      if (abstand == null || abstand < 1 || abstand > PERSON_AUFBEWAHRUNG_TAGE) continue;
+      const gleicheZeit = Boolean(neu.uhrzeit) && neu.uhrzeit === r.z;
+      const summe = Number.isInteger(neu.summe) && neu.summe > 0 && neu.summe === r.s;
+      const artikelSumme = Number.isInteger(neu.artikelSumme) && neu.artikelSumme > 0 && neu.artikelSumme === r.as;
+      let anteil = null;
+      const b = new Set(Array.isArray(r.a) ? r.a : []);
+      if (a.length >= minArtikel && b.size >= minArtikel) {
+        let gemeinsam = 0;
+        for (const k of a) if (b.has(k)) gemeinsam++;
+        anteil = Math.round((gemeinsam / Math.min(a.length, b.size)) * 1000) / 1000;
+      }
+      const artikelPasst = anteil != null && anteil >= schwelle;
+      const trifft = gleicheZeit ? summe || artikelPasst : (summe || artikelSumme) && artikelPasst;
+      if (!trifft) continue;
+      const k = { id, tag: r.t, abstand, anteil, gleicheZeit, andererMarkt: Boolean(neu.markt) && Boolean(r.m) && neu.markt !== r.m };
+      if (!bester || Number(k.gleicheZeit) > Number(bester.gleicheZeit) || (k.anteil ?? 0) > (bester.anteil ?? 0)) bester = k;
+    }
+    if (bester) out.push(bester);
+  }
+  return out.sort((x, y) => Number(y.gleicheZeit) - Number(x.gleicheZeit) || (y.anteil ?? 0) - (x.anteil ?? 0));
+}
+
 /**
  * Das Urteil über einen noch nicht gebuchten Bon.
  *
@@ -531,14 +751,30 @@ function veralteteSummenEintraege(eintraege, heute, tage = SUMMEN_AUFBEWAHRUNG_T
  * @param {Array<{id:string, uid:string, tag:string, abstand?:number, anteil:number|null, gleicheZeit:boolean, lebendig:boolean}>} o.kontenDatum
  *        Kandidaten aus dem Summen-Index (kontenDatumKandidaten): eigene →
  *        Regel datum, fremde → Regel kontenDatum.
+ * @param {Array<{id:string, tag:string, abstand:number, anteil:number|null, gleicheZeit:boolean, andererMarkt:boolean, lebendig:boolean}>} o.person
+ *        Kandidaten aus dem Personen-Index (personKandidaten) → Regel datum.
+ * @param {Array<{id:string, markt:string|null, tag:string|null, lebendig:boolean}>} o.bild
+ *        Kandidaten des Bild-Feinvergleichs (`capture.bildAehnlich`, nur
+ *        dieselbe Person) → Regel bild (hält in der Prüfung, lehnt nicht ab).
  * @param {object} o.modi        doppelModi()
  * @returns {{treffer: Array<{regel:string, gegen:string, sameUser:boolean, anteil?:number, modus:'wirksam'|'beobachtung'}>, wirksam: object|null}}
  */
-function doppelUrteil({ bonId, uid, neu, andere = [], schluessel = [], kontenArtikel = [], kontenDatum = [], modi = {} }) {
+function doppelUrteil({ bonId, uid, neu, andere = [], schluessel = [], kontenArtikel = [], kontenDatum = [], person = [], bild = [], modi = {} }) {
   const treffer = [];
   const modusVon = (regel) => (modi[regel] === true ? 'wirksam' : modi[regel] === 'shadow' ? 'beobachtung' : null);
   const schwelle = modi.schwelle ?? 0.6;
   const rund = (v) => Math.round(v * 1000) / 1000;
+  // Regel seite: zwei Teile EINES Belegs — Seiten einer Online-Rechnung oder
+  // Bildschirmabschnitte eines App-Kassenbons (Nachprüfung 05.10.2026). Nur,
+  // wenn beide dieselbe Art haben (beide online oder beide App), derselbe
+  // Markt, und mindestens einer ohne gedruckten Endbetrag — zwei vollständige
+  // Belege sind zwei Einkäufe. Zwei VERSCHIEDEN gelesene Bestellnummern oder
+  // zwei verschiedene Uhrzeiten heben sie auf.
+  const gleicheArt = (eintrag) => (neu.online && eintrag.online) || (neu.app && eintrag.app);
+  const seiteTrifft = (v, eintrag) => v.gleicherMarkt && gleicheArt(eintrag) && (neu.ohneSumme || eintrag.ohneSumme)
+    && !(Boolean(neu.bestellHash) && Boolean(eintrag.bestellHash) && neu.bestellHash !== eintrag.bestellHash)
+    && !(Boolean(neu.uhrzeit) && Boolean(eintrag.uhrzeit) && neu.uhrzeit !== eintrag.uhrzeit);
+  const appFeld = (eintrag) => (neu.app && eintrag.app ? { app: true } : {});
   if (neu && neu.markt) {
     for (const { id, eintrag, tag } of andere) {
       if (!eintrag || id === bonId || !eintrag.markt) continue;
@@ -550,6 +786,15 @@ function doppelUrteil({ bonId, uid, neu, andere = [], schluessel = [], kontenArt
       const marktFeld = v.gleicherMarkt ? {} : { andererMarkt: true };
       const andererTag = Boolean(tag) && tag !== neu.tag;
       if (andererTag) {
+        // Regel seite auch an einem anderen Tag im Fenster (Nachprüfung
+        // 05.10.2026): sonst genügte es, auf EINER Seite das Datum zu ändern,
+        // und jede Seite wurde bezahlt — am Tageslimit vorbei. Nur für
+        // Online-Rechnungen: App-Bons derselben Person tragen über Tage hinweg
+        // oft keine Uhrzeit (36 ehrliche Lidl-Paare in 1–8 Tagen).
+        const abstand = tageAbstand(neu.tag, tag);
+        if (modusVon('seite') && neu.online && eintrag.online && abstand != null && abstand <= DATUM_FENSTER_TAGE && seiteTrifft(v, eintrag)) {
+          treffer.push({ regel: 'seite', gegen: id, sameUser: true, tag, modus: modusVon('seite') });
+        }
         // Regel datum. Mit derselben Uhrzeit genügt Summe ODER Artikel; ohne
         // sie (verdeckt, geändert) braucht es Summe UND Artikel — Gewohnheits-
         // käufe über Tage hinweg erreichen den Artikelanteil, aber nie
@@ -578,13 +823,9 @@ function doppelUrteil({ bonId, uid, neu, andere = [], schluessel = [], kontenArt
       if (artikelPasst && modusVon('artikel')) {
         treffer.push({ regel: 'artikel', gegen: id, sameUser: true, anteil: rund(v.anteil), ...marktFeld, modus: modusVon('artikel') });
       }
-      // Regel seite: zwei Seiten derselben Online-Rechnung. Nur, wenn beide
-      // Online-Bestellungen desselben Markts sind und mindestens eine ohne
-      // gedruckten Endbetrag — zwei vollständige Rechnungen sind zwei
-      // Bestellungen. Zwei VERSCHIEDEN gelesene Bestellnummern heben sie auf.
-      if (modusVon('seite') && v.gleicherMarkt && neu.online && eintrag.online && (neu.ohneSumme || eintrag.ohneSumme)) {
-        const andereNummer = Boolean(neu.bestellHash) && Boolean(eintrag.bestellHash) && neu.bestellHash !== eintrag.bestellHash;
-        if (!andereNummer) treffer.push({ regel: 'seite', gegen: id, sameUser: true, modus: modusVon('seite') });
+      // Regel seite (siehe seiteTrifft).
+      if (modusVon('seite') && seiteTrifft(v, eintrag)) {
+        treffer.push({ regel: 'seite', gegen: id, sameUser: true, ...appFeld(eintrag), modus: modusVon('seite') });
       }
     }
   }
@@ -620,13 +861,46 @@ function doppelUrteil({ bonId, uid, neu, andere = [], schluessel = [], kontenArt
       modus,
     });
   }
+  // Personen-Index (Nachprüfung 05.10.2026): dieselbe Person, jeder Markt, bis
+  // 95 Tage — Regel datum. Einen Bon, den Tageszähler oder Summen-Index schon
+  // unter datum gemeldet haben, nicht doppelt.
+  for (const k of person) {
+    if (!k || !k.lebendig || k.id === bonId) continue;
+    const modus = modusVon('datum');
+    if (!modus) break;
+    if (treffer.some((t) => t.regel === 'datum' && t.gegen === k.id)) continue;
+    treffer.push({
+      regel: 'datum', gegen: k.id, sameUser: true, tag: k.tag, quelle: 'person',
+      ...(k.anteil != null ? { anteil: k.anteil } : {}),
+      ...(k.gleicheZeit ? {} : { ohneUhrzeit: true }),
+      ...(k.andererMarkt ? { andererMarkt: true } : {}),
+      ...(Number.isInteger(k.abstand) && k.abstand > DATUM_FENSTER_TAGE ? { abstand: k.abstand } : {}),
+      modus,
+    });
+  }
+  // Regel bild (Nachprüfung 05.10.2026): Bild ähnlich einem bezahlten Bon
+  // derselben Person, vom Feinvergleich nicht als dasselbe bestätigt, gleicher
+  // Markt, Bon-Tag ±8 → Prüfung durch einen Menschen.
+  for (const k of bild) {
+    if (!k || !k.lebendig || k.id === bonId) continue;
+    const modus = modusVon('bild');
+    if (!modus) break;
+    const t = bildTrifft(neu, k);
+    if (!t) continue;
+    if (treffer.some((x) => x.regel === 'bild' && x.gegen === k.id)) continue;
+    treffer.push({ regel: 'bild', gegen: k.id, sameUser: true, tag: k.tag, abstand: t.abstand, modus });
+  }
   treffer.sort((a, b) => REGEL_REIHENFOLGE.indexOf(a.regel) - REGEL_REIHENFOLGE.indexOf(b.regel));
   const wirksam = treffer.find((t) => t.modus === 'wirksam') || null;
   return { treffer, wirksam };
 }
 
-/** Grund-Code am Bon — dieselben Codes wie die Inhaltsprüfung, kein neuer. */
+/**
+ * Grund-Code am Bon — dieselben Codes wie die Inhaltsprüfung, kein neuer.
+ * Ausnahme Regel bild: sie lehnt nicht ab, der Code ist der Prüfgrund.
+ */
 function grundFuer(t) {
+  if (t && t.regel === 'bild') return BILD_GRUND;
   return t && t.sameUser === false ? 'duplicate_content_cross_user' : 'duplicate_content_self';
 }
 
@@ -637,7 +911,13 @@ module.exports = {
   MAX_TAGES_EINTRAEGE,
   MAX_SUMMEN_EINTRAEGE,
   SUMMEN_AUFBEWAHRUNG_TAGE,
+  PERSON_SAMMLUNG,
+  MAX_PERSON_EINTRAEGE,
+  MAX_PERSON_LESUNGEN,
+  MAX_PERSON_ARTIKEL,
+  PERSON_AUFBEWAHRUNG_TAGE,
   DATUM_FENSTER_TAGE,
+  BILD_GRUND,
   NICHT_ARTIKEL_RE,
   normName,
   artikelSchluessel,
@@ -658,11 +938,17 @@ module.exports = {
   summenEintragAus,
   vergleiche,
   schalterModus,
+  schalterModusStandardAn,
   doppelModi,
+  bildTrifft,
   modiVermerk,
   kontenArtikelKandidaten,
   kontenDatumKandidaten,
   veralteteSummenEintraege,
+  personLesungAus,
+  personEintragWert,
+  personAufraeumen,
+  personKandidaten,
   doppelUrteil,
   grundFuer,
 };

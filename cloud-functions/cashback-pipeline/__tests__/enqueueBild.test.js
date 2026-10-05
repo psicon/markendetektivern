@@ -98,7 +98,7 @@ async function hochladen(bild = BILD_NEU_GESPEICHERT, id = 'neu1') {
   return res;
 }
 
-const SCHARF = { bildFeinvergleich: true, doppelSumme: true, doppelArtikel: true, doppelDatum: true };
+const SCHARF = { bildFeinvergleich: true, doppelSumme: true, doppelArtikel: true, doppelDatum: true, doppelBestandIndexiert: true };
 
 function config(extra) {
   fake.store.set('cashback_config/v1', { campaignsEnabled: true, ...extra });
@@ -182,6 +182,50 @@ describe('Verhalten wie bisher', () => {
     expect(log[1]).toMatchObject({ fehlt: [regel] });
   });
 
+  test('Nachprüfung 05.10.: true und alle Regeln true, aber Bestand nicht nachgetragen → wirkt wie shadow', async () => {
+    // Ohne `.backfill-doppel-person.js` kennt die Regel datum jenseits von 8
+    // Tagen nur Gutschriften seit dem Deploy — die beschnittene Kopie eines
+    // älteren Bons mit geändertem Datum sperrt dann nur der grobe Vergleich.
+    const { doppelBestandIndexiert, ...ohne } = SCHARF;
+    expect(doppelBestandIndexiert).toBe(true);
+    config(ohne);
+    frueher('alt', 'approved', ANDERES_BILD);
+    const res = await hochladen();
+    expect(res.body).toMatchObject({ cashbackId: 'alt', duplicate: true });
+    const log = global.__logs.find((l) => l[0] === 'bildfeinvergleich-wartet-auf-doppelregeln');
+    expect(log[1]).toMatchObject({ fehlt: ['doppelBestandIndexiert'] });
+    // Nur ein echtes true zählt.
+    config({ ...SCHARF, doppelBestandIndexiert: 'true' });
+    global.__logs = [];
+    const res2 = await hochladen(BILD, 'neu2');
+    expect(res2.body).toMatchObject({ cashbackId: 'alt', duplicate: true });
+  });
+
+  test('Nachprüfung 05.10. (Regel bild): ausdrücklich abgeschaltet → Feinvergleich wirkt wie shadow', async () => {
+    // Ohne Regel bild ließe der scharfe Feinvergleich eine beschnittene Kopie
+    // mit geänderten Preisziffern still durch — der grobe dHash sperrte sie.
+    for (const aus of [false, 'shadow']) {
+      fake.zuruecksetzen();
+      global.__logs = [];
+      fake.tokens.set('tok', UID);
+      fake.store.set(`users/${UID}`, { cashback_consent: { accepted: true, version: 'v1.0-2026-05' } });
+      config({ ...SCHARF, doppelBildAehnlich: aus });
+      frueher('alt', 'approved', ANDERES_BILD);
+      const res = await hochladen();
+      expect(res.body).toMatchObject({ cashbackId: 'alt', duplicate: true });
+      const log = global.__logs.find((l) => l[0] === 'bildfeinvergleich-wartet-auf-doppelregeln');
+      expect(log[1]).toMatchObject({ fehlt: ['doppelBildAehnlich'] });
+    }
+  });
+
+  test('Nachprüfung 05.10.: der Vermerk nennt alle verglichenen Kandidaten (für Regel bild)', async () => {
+    frueher('alt', 'review', ANDERES_BILD);
+    frueher('alt2', 'approved', ANDERES_BILD);
+    const res = await hochladen();
+    expect(res.body).toMatchObject({ cashbackId: 'neu1' });
+    expect(fake.store.get('receipts/neu1').capture.bildAehnlich.kandidaten.sort()).toEqual(['alt', 'alt2']);
+  });
+
   test('Schalter aus → kein Feinvergleich, Sperre wie bisher', async () => {
     config({});
     frueher('alt', 'rejected', ANDERES_BILD);
@@ -239,10 +283,17 @@ describe('dieselbe Datei noch einmal (Byte-Prüfung)', () => {
     expect(global.__published).toHaveLength(0);
   });
 
-  test('die ID gehört einer anderen Person → kein Abkürzen, der bisherige Weg läuft', async () => {
-    fake.store.set('receipts/neu1', { userId: 'jemandAnderes', status: 'approved', capture: { hash: 'zzz' } });
-    await hochladen(ANDERES_BILD, 'neu1');
+  test('Nachprüfung 05.10.: die ID gehört einer anderen Person → 409, der fremde Bon bleibt unverändert', async () => {
+    const fremd = { userId: 'jemandAnderes', status: 'approved', capture: { hash: 'zzz' } };
+    fake.store.set('receipts/neu1', fremd);
+    const res = await hochladen(ANDERES_BILD, 'neu1');
+    expect(res.code).toBe(409);
+    expect(res.body).toEqual({ code: 'invalid_upload_id' });
+    expect(fake.store.get('receipts/neu1')).toEqual(fremd);
+    expect(global.__published).toHaveLength(0);
     expect(global.__logs.some((l) => l[0] === 'enqueue-wiederholung')).toBe(false);
+    // Nie die uid des Besitzers im Log.
+    expect(JSON.stringify(global.__logs.filter((l) => l[0] === 'enqueue-fremde-upload-id'))).not.toMatch(/jemandAnderes/);
   });
 
   test.each([['rejected', 'bon_too_old'], ['rejected', 'unknown_merchant'], ['approved', null], ['no_reward', 'daily_cap_reached']])(

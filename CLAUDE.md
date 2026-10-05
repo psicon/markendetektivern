@@ -3187,7 +3187,9 @@ vorher kommen soll.
   **Ebenfalls Pflicht (Doppel-Schutz 04.10.2026):** beim Umbuchen eines Gast-
   Bons ziehen `cashback_days/{Tag}.eintraege.{id}`, die Schlüssel in
   `cashback_bon_schluessel` (Feld `uid`) und die Einträge in
-  `cashback_bon_tage` und `cashback_bon_summen` (Feld `u`) mit um — sonst vergleicht das Zielkonto gegen
+  `cashback_bon_tage` und `cashback_bon_summen` (Feld `u`) und den Eintrag in
+  `cashback_bon_person/{uid}` (Dokument je Person, seit 05.10.2026) mit um —
+  sonst vergleicht das Zielkonto gegen
   nichts, und Schlüssel/Eintrag gelten als verwaist (das Gast-Ledger ist nach
   der Umbuchung leer).
 - **Warteschlangen** führen Aufträge nur für die aktuelle uid oder eine vom Server
@@ -3308,7 +3310,9 @@ Patrick, 02.10.: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche",
 
 Patrick 04.10.: „ja, abstellen". Zweig `claude/bon-doppelzahlung`, Analyse in
 ClickUp 12487v2dezk. Alles hängt an Schaltern in `cashback_config/v1`
-(Code-Default `false` = altes Verhalten, `'shadow'` = nur am Bon vermerken).
+(Code-Default `false` = altes Verhalten, `'shadow'` = nur am Bon vermerken;
+Ausnahmen mit Default `true`: `doppelOnlineSeite` und `doppelBildAehnlich`,
+siehe unten — beide sichern nur Zahlwege ab, die ohne sie neu entstünden).
 
 - **Der Doppel-Schutz sitzt in `syncLedgerForReceipt`** (`lib/doppelBon.js`) —
   der EINEN Buchungsstelle für Pipeline, Resolver, Prüfkonsole und Bon-Runde.
@@ -3346,7 +3350,30 @@ ClickUp 12487v2dezk. Alles hängt an Schaltern in `cashback_config/v1`
   auch die gleiche Artikelsumme (nur die gedruckte Endsumme geändert, Pfand-
   Toleranz 200 ct). Regeln derselben Person vergleichen über Märkte hinweg
   (Händlername geändert): Artikel ≥ 0,6 oder Summe mit gleicher Uhrzeit, am
-  Treffer `andererMarkt` (0 von 6.575 Paaren). Nur vor der ERSTEN Gutschrift
+  Treffer `andererMarkt` (0 von 6.575 Paaren). **Nachprüfung 05.10.2026:**
+  `doppelDatum` liest zusätzlich den Personen-Index (alle bezahlten Bons der
+  Person, 95 Tage, Schlüssel ohne Markt und ohne gedruckte Endsumme) — vorher
+  genügte jenseits von 8 Tagen eine geänderte Ziffer der Endsumme oder ein
+  anderes Wort im Kopf, und die Kopie wurde bezahlt. Bedingung wie im Fenster:
+  gleiche Uhrzeit → Summe ODER Artikel ≥ 0,6; ohne → (Summe ODER Artikelsumme)
+  UND Artikel ≥ 0,6, jeder Markt. 29.519 Paare gleiche Person, 1–95 Tage: nur
+  der echte Netto-Fall. Verworfen „Artikel ≥ 0,6 + Endsumme ±2 €": traf einen
+  echten REWE-Zweitkauf. Treffer mit `quelle: 'person'`. `doppelOnlineSeite`
+  greift auch an einem anderen Tag im Fenster ±8 (Datum auf einer Seite
+  geändert; 0 Paare zweier Online-Belege desselben Markts in 1–8 Tagen).
+  **Nachprüfung 05.10.2026 (zweite Runde):** `doppelOnlineSeite` deckt auch
+  Bildschirmabschnitte EINES App-Kassenbons (beide `app_kassenbon`, gleicher
+  Markt, NUR selber Tag, einer ohne sichtbare Summe; zwei verschiedene
+  Uhrzeiten heben die Regel auf, bei Online-Seiten ebenso; Treffer mit
+  `app: true`). Echte Fälle Lidl 16.07. und 21.09. (zwei Scrollbilder, je ohne
+  Summe). Über Tage hinweg NICHT: 36 ehrliche Lidl-Paare derselben Person in
+  1–8 Tagen, App-Bons meist ohne Uhrzeit; am selben Tag 144 bezahlte Paare
+  gleiche Person/Markt, nur 1 ohne Uhrzeit — der echte Doppelbon 17.09.
+  **Code-Default von `doppelOnlineSeite` ist `true`**: die Artikelsumme bei
+  Belegen ohne Summe setzt `lib/belegart.js` OHNE Schalter ein — mit Schutz
+  `false` zahlte schon der Deploy jede Seite/jeden Abschnitt einzeln (D1/N3
+  im Nachprüf-Angriff). Rückweg: ausdrücklich `false`.
+  Nur vor der ERSTEN Gutschrift
   geprüft — die Regel storniert nie. Grund-Codes sind die
   vorhandenen `duplicate_content_self/_cross_user`, `duplicateOf.kind` sagt die
   Regel. Treffer stehen in `receipts.doppelPruefung`.
@@ -3356,7 +3383,11 @@ ClickUp 12487v2dezk. Alles hängt an Schaltern in `cashback_config/v1`
   Tag stehen, sonst wäre ein Zweitfoto mit der alten Lesung frei),
   `cashback_bon_schluessel/{tx_…|bo_…}`,
   `cashback_bon_tage/{markt}_{tag}.eintraege.{receiptId} = {u, a}` und
-  `cashback_bon_summen/{markt}_{summe}.eintraege.{receiptId} = {u, t, z, a}`
+  `cashback_bon_summen/{markt}_{summe}.eintraege.{receiptId} = {u, t, z, a}`,
+  `cashback_bon_person/{uid}.eintraege.{receiptId} = {l: [{t, m, z, s, as, a}]}`
+  (höchstens 2 Lesungen je Bon, 80 Hashes je Lesung, 300 Bons je Person,
+  bei JEDER Gutschrift geschrieben — auch ohne Schalter —, beim Storno
+  entfernt, Einträge älter als 95 Tage räumt die nächste Gutschrift)
   (nur Artikel-Hashes, keine Namen; alle server-only, deny-all reicht; „der
   erste gewinnt", beim Storno frei; Summen-Einträge älter als 95 Tage räumt die
   nächste Gutschrift — gemessen höchstens 3 Einträge je Dokument). Den Tages-
@@ -3368,6 +3399,13 @@ ClickUp 12487v2dezk. Alles hängt an Schaltern in `cashback_config/v1`
   und ein Schlüssel mit altem Tag galt dann als frei (Prüfrunde 04.10.: zweite
   Zahlung derselben Bestellung). Eine erneute Zustellung ERGÄNZT Schlüssel und
   Index um die neue Lesung, ersetzt nie: der Bon sperrt unter jeder Lesung.
+- **`enqueueCashback` legt Bons mit `create()` an, nie mit `set()`**
+  (Nachprüfung 05.10.2026): eine `clientUploadId`, die einem ANDEREN Konto
+  gehört, bekommt 409 `invalid_upload_id`. Vorher überschrieb sie dessen Bon —
+  auch einen bezahlten —, und danach war dieselbe Datei für Byte-, dHash- und
+  Inhaltsprüfung des Besitzers unsichtbar (zweite Gutschrift; live nie
+  ausgenutzt, 0 von 6.496 aktiven Earns). Die Doppel-Prüfung vergleicht
+  Bestand aus `receipts` nur, wenn `userId` passt (Log `doppel-bestand-fremder-bon`).
 - **Resolver-Freigabe kann `rejected` zurückgeben** (`creditedCents: 0`). Die
   Bon-Runde zählt das als `doppelImResolver`, die Konsole meldet „Nicht
   freigegeben – …". Wer einen neuen Aufrufer baut: `status` auswerten.
@@ -3379,19 +3417,54 @@ ClickUp 12487v2dezk. Alles hängt an Schaltern in `cashback_config/v1`
   Pixelabweichung ist nur Auskunft (als Kriterium erkannte sie 0 von 46
   helleren und nur 19 von 54 neu gespeicherten Kopien). **Beschnitt erkennt der
   Vergleich nicht** (SSIM ~0,5): solche Kopien fängt die Buchung — bei
-  geändertem Datum aber nur innerhalb von 95 Tagen (Summen-Index) und nicht in
+  geändertem Datum aber nur innerhalb von 95 Tagen (Personen-Index) und nicht in
   den Fällen unter „Bekannte Lücken". Darum wirkt
   der Schalter erst, wenn `doppelSumme`, `doppelArtikel` UND `doppelDatum`
-  `true` sind — sonst wie `'shadow'`. Nicht bestätigt/Fehler/Zeitlimit → Bon
+  `true` sind UND `doppelBestandIndexiert === true` — sonst wie `'shadow'`.
+  Letzteres setzt NUR `.backfill-doppel-person.js` nach grünem VERIFY
+  (Nachprüfung 05.10.2026: ohne Nachtrag kennt der Personen-Index nur
+  Gutschriften seit dem Deploy, und 95 Tage lang wäre die beschnittene Kopie
+  jedes älteren Bons mit geändertem Datum bezahlt worden; heute sperrt sie der
+  dHash). Nicht bestätigt/Fehler/Zeitlimit → Bon
   wird gelesen, `capture.bildAehnlich` am Bon. Dieselbe DATEI nach einer
   Ablehnung wegen eines Lesefehlers (no_bon_date, reconciliation_delta …) wird
   einmal neu gelesen (`capture.neuversuchVon`), sonst bleibt die Byte-Sperre.
+  **Regel bild (Nachprüfung 05.10.2026, `doppelBildAehnlich`, Code-Default
+  `true`):** schon 1 % Beschnitt verfehlt die Seitenverhältnis-Grenze (|ln| ≤
+  0,01) — der Feinvergleich bestätigte 0 von 60 beschnittenen Kopien, die der
+  grobe dHash zu 59/60 sperrte. Eine solche Kopie mit einigen geänderten
+  Preisziffern (Endsumme mit) trifft keine Textregel (Angriffe N1/N2). Darum:
+  nennt `capture.bildAehnlich` (`kandidaten`, höchstens 3) einen BEZAHLTEN Bon
+  derselben Person (Ledger), gleicher Markt, Bon-Tag ±8 → Status `review`,
+  `reviewReason: bild_aehnlich_bezahlt` (nie Ablehnung, der Betrag bleibt am
+  Bon für die Freigabe). In der Buchung als LETZTE Regel — eine ablehnende
+  Regel (erneut fotografierter, bezahlter Bon) gewinnt. Geht der Bon ohnehin
+  wegen der Lese-Sicherheit in die Prüfung, ersetzt der Grund den der
+  Texterkennung (sonst gäbe die Bon-Runde, die nur `ocr_confidence_*`
+  entscheidet, die Kopie über den Resolver frei). Resolver/Konsole wenden sie
+  nicht an — dort entscheidet der Mensch, die Konsole verlinkt den Kandidaten
+  (Zeile „Doppel-Prüfung"). Voraussetzung für `bildFeinvergleich: true`;
+  ausdrücklich `false`/`'shadow'` → Feinvergleich wie `'shadow'`. Erwartete
+  Prüffälle: Obergrenze ~26 Gruppen in 30 Tagen (Sperren September mit
+  bezahltem Kandidaten ≤ 8 Tage), 11 davon < 1 h nach dem Original (meist
+  derselbe Bon → Textregeln lehnen ab) — also etwa 15 im Monat, nicht
+  gemessen (die gesperrten Uploads wurden nie gelesen).
 - **Online-Belege (Prompt v1.5):** `belegart`, `bestellnummer`, `bonComplete`.
   `lib/belegart.js` nimmt bei jeder Gemini-Lesung die Kundenanschrift aus dem
   Kopf; `deriveStoreAddress` gibt bei Online-Merkmal null zurück — also keine
   Filiale, keine `users.region`, keine `storeStreet`. Online-Rechnung ohne
   Endbetrag (dm.de, Seite 1 von 3) → Artikelsumme als Endbetrag,
   `summeAusArtikeln: true` (wie v1.4, das diese Rechnungen bezahlte).
+  **Ebenso ein App-Kassenbon ohne sichtbare Summe** (Nachprüfung 05.10.2026:
+  ein langer Lidl-Plus-Bon passt nicht auf einen Bildschirm; v1.4 setzte die
+  Artikelsumme ein und zahlte, v1.5 lieferte null und lehnte still als
+  reconciliation_delta ab, 1 von 10 App-Bons). Schalter
+  `appSummePflicht` (Default false = bezahlen wie bisher, `true` = Summe
+  Pflicht; Log `app-ohne-summe`). **Offene Entscheidung Patrick** (ob die
+  Summe Pflicht wird); als Pflicht braucht die App vorher einen eigenen Text
+  (der zu reconciliation_delta rät zum Fotografieren). Zwei Abschnitte
+  desselben App-Bons am selben Tag zahlt seit der Nachprüfung 05.10. die
+  Buchung nur einmal (Regel seite, s. o.).
   `merchant` nur, wie er gedruckt ist — nie aus Eigenmarken geschlossen
   (sonst las das Modell Picnic als „Edeka"). Die Eigenmarken-Stufe des
   Markt-Resolvers gilt mit `eigenmarkeNurLadenbon === true` nur noch für
@@ -3399,7 +3472,10 @@ ClickUp 12487v2dezk. Alles hängt an Schaltern in `cashback_config/v1`
   Bon behält sie, sonst stornierte die erneute Zustellung. Neue
   Online-Stichwörter nur mit Gegenprobe: „Onlineshop" stand auf einem
   BILLA-Ladenbon und zählt deshalb nur ohne Uhrzeit.
-- **Ausrollen (Reihenfolge):** (1) `cloud-functions/cashback-pipeline/.env`
+- **Ausrollen (Reihenfolge, Nachtrag 05.10.2026):** nach dem Deploy der
+  Pipeline `.backfill-doppel-person.js` laufen lassen (Trockenlauf →
+  `SCHREIBEN=1` → `VERIFY=1 SCHALTER=1`, setzt `doppelBestandIndexiert`), erst
+  dann darf `bildFeinvergleich` scharf werden. (1) `cloud-functions/cashback-pipeline/.env`
   aus dem Haupt-Checkout in den Worktree kopieren, `cmp` prüfen — sonst fällt
   die DocAI-Eskalation still weg; (2) `functions:cashback-pipeline` allein,
   alle Schalter aus; per `gcloud functions describe … environmentVariables`
@@ -3427,8 +3503,12 @@ ClickUp 12487v2dezk. Alles hängt an Schaltern in `cashback_config/v1`
   (Firestore-Admin-REST-API, PATCH `…/fields/eintraege` mit
   `indexConfig.indexes: []` — NIE über `firestore:indexes`); keine Abfrage nutzt
   es, und es hebt die Grenze von 40.000 Indexeinträgen je Dokument auf.
-  `doppelOnlineSeite` hängt nur an Gutschriften derselben Person und darf mit
-  `doppelSumme` zusammen scharf werden (0 Treffer in 95 Tagen).
+  `doppelOnlineSeite` hängt nur an Gutschriften derselben Person und ist per
+  Code-Default `true` (Nachprüfung 05.10.2026) — ebenso `doppelBildAehnlich`,
+  das aber nur wirkt, wo der scharfe Feinvergleich `capture.bildAehnlich`
+  schrieb. Beim Deploy sind also NICHT alle Doppel-Regeln aus: `seite` greift
+  sofort (nur Belege ohne gedruckte Summe, die ohne sie doppelt bezahlt
+  würden).
 - **Markt-Resolver** (Prüfrunde 2): ohne gelesenen Händlernamen keine
   Namensstufen (ein LEERER Name hatte Abstand 2 zu „dm" und wurde dm — unter
   Prompt v1.5 lasen Lidl-Plus-Screenshots ohne Logo `merchant: null`), der
@@ -3452,7 +3532,22 @@ ClickUp 12487v2dezk. Alles hängt an Schaltern in `cashback_config/v1`
   „denns BioMarkt" → Penny, „Getränke Hoffmann" → Rossmann) — eigene Aufgabe,
   vorher am Bestand messen.
 - **Bekannte Lücken des Doppel-Schutzes (Prüfrunde 3, bewusst offen):**
-  ANDERES Konto + geänderter Händlername (kein Index ohne Markt); anderes Konto
+  dieselbe Person, Textregeln allein (Korrektur Nachprüfung 05.10.2026 — die
+  Lücke gilt ab **1 Tag** Abstand, nicht erst ab 9): Datum geändert, Uhrzeit
+  geändert/verdeckt UND Endsumme UND mindestens ein Artikelpreis geändert →
+  weder Summe noch Artikelsumme passt; am SELBEN Tag ebenso, wenn ≥ 40 % der
+  Preise geändert sind (Artikelanteil < 0,6). Heute sperrt solche Kopien der
+  grobe dHash (außer bei starkem Beschnitt, ab ~10 % kommt er in 44 von 60
+  Fällen durch); mit scharfem Feinvergleich hält sie Regel bild in der Prüfung
+  — aber nur bis ±8 Tage um den Bon-Tag des Originals. **Bleibt offen:**
+  beschnittene + bearbeitete Kopie mit einem Bon-Tag ≥ 9 Tage neben dem
+  Original (z. B. ein zwei Wochen alter bezahlter Bon mit heutigem Datum).
+  Gemessener Kandidat, NICHT gebaut (Entscheidung Patrick): „gleiche Person,
+  gleicher Markt, 1–95 Tage, Artikelanteil ≥ 0,8 ohne Summe" — 0 von 11.442
+  bezahlten Paaren, höchster ehrlicher Wert 0,75 (knapp), fängt nur Kopien
+  mit höchstens 2 von 10 geänderten Preisen;
+  Seiten einer Online-Rechnung mit geändertem Datum UND geänderter
+  Bestellnummer; ANDERES Konto + geänderter Händlername (kein Index ohne Markt); anderes Konto
   + geändertes Datum + geänderte Endsumme (bräuchte Artikelvergleich über die
   Tages-Indizes der ±8 Tage außerhalb der Transaktion; gemessen 0 Fehlalarme
   erst ab Anteil 0,7, niedrigster echter Doppelbon 0,71 — zu knapp für ohne
@@ -3460,10 +3555,12 @@ ClickUp 12487v2dezk. Alles hängt an Schaltern in `cashback_config/v1`
   gleichen Artikeln. Betrug über mehrere Konten (Verbünde) stoppt die
   Kontosperre, nicht diese Regeln. Die Doppelzahlung vom 02.10.
   (8 ct) ist bezahlt; eine Rückforderung ist nicht Teil dieses Baus.
-- **Bekannte Lücke (nicht Teil dieses Baus, gemeldet):** die Vorprüfung in
-  Schritt 5b hängt nicht an `alreadyCredited`. Sind zwei Kopien desselben Bons
-  schon BEIDE bezahlt, storniert eine erneute Zustellung der einen ihre
-  Gutschrift (`reprocess_to_rejected`) — auch die des Originals.
+- **Behoben 05.10.2026 (Altfehler):** die Vorprüfung in Schritt 5b hing nicht
+  an `alreadyCredited`. Lag eine zweite Kopie desselben Bons in einem lebenden
+  Status (bezahlt, in Prüfung, wartend), stornierte eine erneute Zustellung des
+  bezahlten Originals dessen Gutschrift (`reprocess_to_rejected`). Jetzt: ein
+  bezahlter Bon wird von 5b nie abgelehnt (Log `vorpruefung-doppel-schon-bezahlt`),
+  die Kopie lehnt ihr eigener Lauf ab. Siehe Regel „Bestandsschutz" unten.
 
 ## Produktentscheidung 20.09.2026: lose Ware wird angenommen
 
@@ -3629,6 +3726,28 @@ Review-Runden (29 Funde) haben Fallen gezeigt, die für JEDE Nacharbeit gelten:
   'approve'`). Sonst storniert eine PubSub-Redelivery über
   `syncLedgerForReceipt(status='review')` eine echte Gutschrift — dieselbe
   Klasse wie die Selbststornos vom 19./26.08.
+  **Seit 05.10.2026 in der Buchung erzwungen (Bestandsschutz):**
+  processCashback ruft `syncLedgerForReceipt` mit `opts.bestandsschutz`
+  (immer, außer `reviewDecision` reject/no_reward am Bon). Die Transaktion
+  storniert dann nie einen aktiven Earn, schreibt nichts und meldet
+  `bestandGeschuetzt`; der Lauf setzt den Bon auf `approved` mit dem aktiven
+  Betrag zurück (Log `bestandsschutz-gutschrift`, mit `waereStatus/waereGrund`).
+  Grund: das vorab gelesene `alreadyCredited` ist bei parallelen Läufen mit
+  anderer Event-ID veraltet, und neben 5b hatten weitere Gates dieselbe Lücke
+  (Zukunftsdatum nach Freigabe durch einen Menschen → `review`, nachträglich
+  verkürzte Aktionsfrist → `bon_too_old`, verkürzter Aktionszeitraum →
+  `no_active_campaign`; alle mit Tests in `__tests__/bestandsschutz.test.js`).
+  **Auch der Betrag (Nachprüfung 05.10.2026):** eine erneute Zustellung
+  rechnet einen bezahlten Bon OHNE Deckel neu (alreadyCredited überspringt
+  Kopf-, Wochen-, Tageslimit, Budget). `amount_correction` buchte so nach oben
+  über `maxPerUserCents` und ein leeres Budget hinaus und war nach unten
+  (Aktion geändert) ein Teil-Storno ohne Menschen. Mit `bestandsschutz` bleibt
+  der Betrag (`betragGeschuetzt`, Log `bestandsschutz-betrag`); Korrekturen
+  nur über Resolver oder Mensch (`__tests__/nachpruefung0510.test.js`).
+  Einen bezahlten Bon storniert nur ein Mensch: Resolver reject/no_reward oder
+  `reviewDecision` am Bon setzen und neu zustellen. Neue Gates brauchen damit
+  keinen eigenen `alreadyCredited`-Guard fürs Geld — wohl aber für die
+  Anzeige, wenn sie vor der Buchung etwas Sichtbares tun.
 - **Ledger-Precheck ist fail-CLOSED** (`ledger_precheck_failed` → Retry, nach
   MAX_PROCESS_ATTEMPTS `review`, nie `rejected`). Infrastrukturfehler sind
   keine Aussage über den Bon.
@@ -4242,7 +4361,8 @@ Gotchas:
   `cashback_status` + `purchased_products` + `cashback_ledger` + `cashback_days`
   (Tageszähler samt `eintraege` — sonst bleibt der Tag für den User gesperrt) +
   `cashback_bon_schluessel` mit `uid` des Users und seine Einträge in
-  `cashback_bon_tage` und `cashback_bon_summen` (Doppel-Schutz seit 04.10.2026; sperren ohne Ledger nichts
+  `cashback_bon_tage` und `cashback_bon_summen` sowie `cashback_bon_person/{uid}`
+  (Doppel-Schutz seit 04.10.2026; sperren ohne Ledger nichts
   mehr, sind aber Altlast) löschen +
   User-Cashback-Felder zurücksetzen + `budgetRemainingCents` je Kampagne um den
   vom User verbrauchten Betrag (Ledger `earn`−`reverse` je `campaignId`) zurückgeben.

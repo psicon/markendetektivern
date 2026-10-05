@@ -178,6 +178,9 @@ const BON_URTEIL = {
   ocr_zeitbudget: 'hold',
   ocr_confidence_none: 'hold',
   mensch_hat_entschieden: 'hold',
+  // Nachprüfung 05.10.2026 (cashback-pipeline Regel bild): Bild ähnelt einem
+  // bezahlten Bon derselben Person — ein Mensch vergleicht die beiden.
+  bild_aehnlich_bezahlt: 'hold',
 };
 const bonUrteil = (row) => BON_URTEIL[row.reviewReason] || (row.reconOk === false ? 'hold' : 'ok');
 

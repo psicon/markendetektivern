@@ -297,6 +297,7 @@
         bon_date_future: { titel: 'Bon-Datum liegt in der Zukunft', tun: 'Datum auf dem Bild prüfen — meist ein Lesefehler bei der Jahreszahl' },
         duplicate_content_self: { titel: 'Derselbe Bon wurde schon eingereicht', tun: 'Beide Einreichungen vergleichen; die frühere zählt' },
         duplicate_content_cross_user: { titel: 'Derselbe Bon kam von einem anderen Konto', tun: 'Beide vergleichen — gleicher Markt, gleicher Tag, gleiche Summe' },
+        bild_aehnlich_bezahlt: { titel: 'Bild ähnelt einem schon bezahlten Bon dieser Person', tun: 'Mit dem verlinkten Bon vergleichen (Doppel-Prüfung): beschnitten, Datum, Uhrzeit oder Preise geändert? Derselbe Einkauf → ablehnen als „bereits eingereicht"; ein anderer Einkauf → freigeben' },
         mensch_hat_entschieden: { titel: 'Wurde bereits von Hand entschieden', tun: 'Der frühere Beschluss steht; erneut zustellen ändert daran nichts' },
         support_kulanz_unknown_merchant: { titel: 'Kulanzfall aus dem Support', tun: 'Wie mit dem Support besprochen entscheiden' },
       };
@@ -306,11 +307,12 @@
         summe: 'gleiche Summe am selben Tag',
         konten: 'gleicher Bon in einem anderen Konto (Uhrzeit + Summe)',
         bestellung: 'gleiche Bestellnummer',
-        seite: 'weitere Seite derselben Online-Rechnung',
+        seite: 'weiterer Teil desselben Belegs (Online-Rechnung oder App-Bon)',
         artikel: 'gleiche Artikel am selben Tag',
         datum: 'gleicher Bon mit anderem Datum',
         kontenArtikel: 'gleiche Artikel in einem anderen Konto',
         kontenDatum: 'gleicher Bon in einem anderen Konto, anderes Datum',
+        bild: 'Bild ähnelt einem bezahlten Bon (gleicher Markt, ±8 Tage) — zur Prüfung',
       };
       function doppelZeile(dp) {
         const t = (dp && dp.treffer) || [];
