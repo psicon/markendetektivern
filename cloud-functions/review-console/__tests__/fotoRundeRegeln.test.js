@@ -613,7 +613,7 @@ describe('Bildschirmfoto als Preisbeleg (Patrick 04.10.2026: „ja, bau das")', 
   it('scharf: Befund eines früheren Laufs hält weiter, mit Hinweis auf den Lauf', () => {
     const { preisBildschirmMitVorbefund } = require('../src/preisBildschirm');
     const heute = pb(true, 'laden', false); // heute unauffällig gelesen
-    const e = entscheideFall(fall({ preisBildschirm: preisBildschirmMitVorbefund(heute, { befund: 'halten', seit: 'L1' }, true) }));
+    const e = entscheideFall(fall({ preisBildschirm: preisBildschirmMitVorbefund(heute, { befund: 'halten', seit: 'L1' }, { bildschirm: true, beleg: true }) }));
     expect(e).toMatchObject({ entscheidung: 'offen', grund: 'preis_bildschirm_unsicher', preisBildschirmFall: { befund: 'halten', vorbefund: true } });
     expect(e.ctx.hinweis).toMatch(/Befund vom L1/);
   });
@@ -739,14 +739,14 @@ describe('Bildschirmfoto als Preisbeleg (Patrick 04.10.2026: „ja, bau das")', 
       const p = plan({ preisBildschirm: { ...pb(true, 'laden', true), kopf: { format: 'jpg', breite: 900, hoehe: 900, kameraHersteller: null } } });
       const e = rundeOffenEintrag(p, { lauf: 'L' });
       expect(e).toMatchObject({ grund: 'preis_bildschirm_unsicher', sperrend: [] });
-      expect(e.preisBildschirm).toEqual({ modus: true, befund: 'halten', seit: 'L' });
+      expect(e.preisBildschirm).toEqual({ modus: true, befund: 'halten', seit: 'L', regeln: ['bildschirm'] });
       expect(JSON.stringify(e)).not.toMatch(/Statusleiste|jpg|900|merkmal|"quelle"|kamera/i);
     });
     it('Notbremse hält einen Ablehn-Befund zurück → steht als Befund am Dokument (der nächste Lauf übernimmt ihn)', () => {
       const p = { ...plan({ preisBildschirm: pb(true, 'bildschirm', true) }) };
       notbremse([p, ...Array.from({ length: 60 }, () => ({ entscheidung: 'freigeben', grund: null, audit: echt })), ...Array.from({ length: 3 }, () => ({ entscheidung: 'ablehnen', grund: 'preis_bildschirm', audit: echt }))], { schnittQuote: null });
       expect(p).toMatchObject({ entscheidung: 'offen', grund: 'notbremse_preis_bildschirm' });
-      expect(rundeOffenEintrag(p, { lauf: 'L' }).preisBildschirm).toEqual({ modus: true, befund: 'ablehnen', seit: 'L' });
+      expect(rundeOffenEintrag(p, { lauf: 'L' }).preisBildschirm).toEqual({ modus: true, befund: 'ablehnen', seit: 'L', regeln: ['bildschirm'] });
     });
     it('ohne Befund kein Eintrag dafür', () => {
       const p = plan({ ortAuffaellig: 'Ausland', preisBildschirm: pb(true, 'kassenbon', true) });
@@ -756,5 +756,85 @@ describe('Bildschirmfoto als Preisbeleg (Patrick 04.10.2026: „ja, bau das")', 
       expect(RUNDE_SPERREND).not.toContain('preis_bildschirm_unsicher');
       expect(RUNDE_SPERREND).not.toContain('preis_bildschirm');
     });
+  });
+});
+
+describe('Preisbeleg „Kassenbon" (Entscheidung Claude im Auftrag Patricks, 04.10.2026)', () => {
+  const { preisBildschirmBefund, preisBildschirmMitVorbefund } = require('../src/preisBildschirm');
+  // Schalter des Preisbelegs (`belegModus`); die Bildschirm-Regel ist scharf
+  // und hat hier nichts zu sagen (Kamerafoto, Lesedienst sah den Bon).
+  const kb = (belegModus, belegGrund, extra = {}) => {
+    const e = { modus: true, belegModus, quelle: 'kassenbon', merkmal: false, lesedienstBon: true, belegGrund, ...extra };
+    return { ...e, befund: preisBildschirmBefund(e) };
+  };
+  it('Beobachtung: freigegeben, der Befund reist mit', () => {
+    for (const g of ['ohne_merkmale', 'fremder_haendler']) {
+      expect(entscheideFall(fall({ preisBildschirm: kb('shadow', g) }))).toMatchObject({ entscheidung: 'freigeben', preisBildschirmFall: { befund: 'halten', ohneRegel: 'freigeben' } });
+    }
+  });
+  it('scharf: liegen lassen mit preis_beleg_unsicher und neutralem Hinweis — nie abgelehnt', () => {
+    for (const g of ['ohne_merkmale', 'fremder_haendler']) {
+      const e = entscheideFall(fall({ preisBildschirm: kb(true, g) }));
+      expect(e).toMatchObject({ entscheidung: 'offen', grund: 'preis_beleg_unsicher' });
+      expect(e.ctx.hinweis).toMatch(/^Preisbeleg unsicher/);
+      expect(e.ctx.hinweis).not.toMatch(/warenkorb|händler|amazon|merkmal/i);
+    }
+    // „Preis fehlt" bleibt eine Ablehnung, ein schon offener Fall behält seinen Grund
+    const ohnePreis = { preisVorhanden: false, audit: { ...echt, preisSichtbar: false } };
+    expect(entscheideFall(fall({ ...ohnePreis, preisBildschirm: kb(true, 'ohne_merkmale') }))).toMatchObject({ entscheidung: 'ablehnen', grund: 'preis_fehlt' });
+    expect(entscheideFall(fall({ ortAuffaellig: 'Ausland', preisBildschirm: kb(true, 'fremder_haendler') }))).toMatchObject({ entscheidung: 'offen', grund: 'ort_auffaellig' });
+    // ohne Befund: Kassenbon zählt
+    expect(entscheideFall(fall({ preisBildschirm: kb(true, null) }))).toEqual({ entscheidung: 'freigeben', grund: null, ctx: {} });
+  });
+  it('rundeOffenEintrag: `art: beleg` am Dokument, der nächste Lauf übernimmt den Halt', () => {
+    const eingabe = fall({ preisBildschirm: kb(true, 'fremder_haendler') });
+    const e = rundeOffenEintrag({ ...entscheideFall(eingabe), eingabe }, { lauf: 'L1' });
+    expect(e).toMatchObject({ grund: 'preis_beleg_unsicher', sperrend: [], preisBildschirm: { modus: true, befund: 'halten', seit: 'L1', regeln: ['beleg'], art: 'beleg' } });
+    const morgen = preisBildschirmMitVorbefund(kb(true, null), { befund: 'halten', seit: 'L1', art: 'beleg' }, { bildschirm: true, beleg: true });
+    expect(entscheideFall(fall({ preisBildschirm: morgen }))).toMatchObject({ entscheidung: 'offen', grund: 'preis_beleg_unsicher' });
+  });
+});
+
+// Nachprüfung 05.10.2026: Bildschirm-Regel und Preisbeleg haben je einen
+// eigenen Schalter. Das Zurücknehmen der einen Regel darf die Halte der
+// anderen nie aufheben — sonst würden angehaltene Fälle ungesehen bezahlt.
+describe('Zwei Schalter in der Entscheidung (Nachprüfung 05.10.2026)', () => {
+  const { preisBildschirmMitVorbefund, preisBildschirmVorbefund } = require('../src/preisBildschirm');
+  const korb = (modus, belegModus) => ({ modus, belegModus, quelle: 'kassenbon', merkmal: false, lesedienstBon: true, belegGrund: 'ohne_merkmale' });
+  const schirm = (modus, belegModus) => ({ modus, belegModus, quelle: 'bildschirm', merkmal: true, lesedienstOhneBon: true, belegGrund: null });
+  // Heute unauffällig gelesen (Kamerafoto „laden") — nur ein Vorbefund kann halten.
+  const unauffaellig = (modus, belegModus) => ({ modus, belegModus, quelle: 'laden', merkmal: false, belegGrund: null });
+  const naechsterMorgen = (vorEintrag, modi) => entscheideFall(fall({
+    preisBildschirm: preisBildschirmMitVorbefund(unauffaellig(modi.bildschirm, modi.beleg), preisBildschirmVorbefund({ review: { rundeOffen: { lauf: 'L1', preisBildschirm: vorEintrag } } }), modi),
+  }));
+
+  it('jede Regel wirkt nur unter ihrem eigenen Schalter; `wirkt` sagt dem Bericht, ob sich etwas änderte', () => {
+    expect(entscheideFall(fall({ preisBildschirm: korb(true, 'shadow') }))).toMatchObject({ entscheidung: 'freigeben', preisBildschirmFall: { befund: 'halten', wirkt: false } });
+    expect(entscheideFall(fall({ preisBildschirm: korb('shadow', true) }))).toMatchObject({ entscheidung: 'offen', grund: 'preis_beleg_unsicher', preisBildschirmFall: { wirkt: true } });
+    expect(entscheideFall(fall({ preisBildschirm: korb(true, false) }))).toEqual({ entscheidung: 'freigeben', grund: null, ctx: {} });
+    expect(entscheideFall(fall({ preisBildschirm: schirm('shadow', true) }))).toMatchObject({ entscheidung: 'freigeben', preisBildschirmFall: { befund: 'ablehnen', wirkt: false } });
+    expect(entscheideFall(fall({ preisBildschirm: schirm(true, false) }))).toMatchObject({ entscheidung: 'ablehnen', grund: 'preis_bildschirm', preisBildschirmFall: { wirkt: true } });
+    expect(entscheideFall(fall({ preisBildschirm: schirm(false, true) }))).toEqual({ entscheidung: 'freigeben', grund: null, ctx: {} });
+  });
+  it('Preisbeleg zurückgenommen → gestern angehaltene Bildschirmfotos und zurückgehaltene Ablehnungen bleiben liegen', () => {
+    for (const befund of ['halten', 'ablehnen']) {
+      for (const beleg of ['shadow', false]) {
+        expect([befund, beleg, naechsterMorgen({ modus: true, befund, seit: 'L1', regeln: ['bildschirm'] }, { bildschirm: true, beleg })])
+          .toMatchObject([befund, beleg, { entscheidung: 'offen', grund: 'preis_bildschirm_unsicher' }]);
+      }
+    }
+  });
+  it('Bildschirm-Regel zurückgenommen → gestern angehaltene Preisbelege bleiben liegen', () => {
+    for (const bildschirm of ['shadow', false]) {
+      expect(naechsterMorgen({ modus: true, befund: 'halten', seit: 'L1', regeln: ['beleg'], art: 'beleg' }, { bildschirm, beleg: true }))
+        .toMatchObject({ entscheidung: 'offen', grund: 'preis_beleg_unsicher' });
+    }
+  });
+  it('nur die zurückgenommene Regel gibt IHRE Fälle frei (dokumentierter Rückweg)', () => {
+    expect(naechsterMorgen({ modus: true, befund: 'halten', seit: 'L1', regeln: ['beleg'] }, { bildschirm: true, beleg: 'shadow' }).entscheidung).toBe('freigeben');
+    expect(naechsterMorgen({ modus: true, befund: 'halten', seit: 'L1', regeln: ['bildschirm'] }, { bildschirm: 'shadow', beleg: true }).entscheidung).toBe('freigeben');
+    // von beiden gehalten: liegt, solange eine der beiden scharf ist
+    expect(naechsterMorgen({ modus: true, befund: 'halten', seit: 'L1', regeln: ['bildschirm', 'beleg'] }, { bildschirm: 'shadow', beleg: true }))
+      .toMatchObject({ entscheidung: 'offen', grund: 'preis_beleg_unsicher' });
   });
 });

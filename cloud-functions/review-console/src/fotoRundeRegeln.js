@@ -14,7 +14,7 @@
  */
 
 const { REASON } = require('./duplicatePolicy');
-const { PREIS_BILDSCHIRM, preisBildschirmHalteGrund, preisBildschirmHinweis, preisBildschirmEintrag } = require('./preisBildschirm');
+const { PREIS_BILDSCHIRM, preisBildschirmLage, preisBildschirmHinweis, preisBildschirmEintrag } = require('./preisBildschirm');
 
 const PENDING_OLDER = REASON.PENDING_OLDER;
 const KONTO_GESPERRT = 'konto_gesperrt';
@@ -98,9 +98,10 @@ const AUSSER_GESAMTQUOTE = new Set([...EIGENE_BREMSEN.flatMap((b) => b.gruende),
  * @param {boolean} [f.preisBildDefekt]  Preisfoto kam beim Hochladen beschädigt an (unser Fehler, nicht der Einreichung)
  * @param {string|null} [f.ortAuffaellig]  Aufnahmeort passt nicht zum Markt (Ausland, anderes Land, Simulator)
  * @param {boolean} [f.namerLaeuft]  Der Lesedienst liest die Einreichung noch nach (namerNachlesenAb)
- * @param {{modus:'shadow'|true, quelle:string|null, grund?:string|null, merkmal:boolean|null, lesedienstBon?:boolean, kopfGescheitert?:boolean, befund:'ablehnen'|'halten'|null, vorbefund?:{befund:string, seit:string|null}}|null} [f.preisBildschirm]
- *   Bildschirmfoto als Preisbeleg (src/preisBildschirm.js) — null, wenn der Schalter aus ist oder weder eine Bildprüfung noch ein scharfer Befund eines früheren Laufs vorliegt
- * @returns {{entscheidung:'freigeben'|'ablehnen'|'offen', grund:string|null, ctx:object, loseWare?:boolean, preisBildschirmFall?:{befund:string, ohneRegel:string, vorbefund?:boolean}}}
+ * @param {{modus:false|'shadow'|true, belegModus:false|'shadow'|true, quelle:string|null, grund?:string|null, merkmal:boolean|null, lesedienstBon?:boolean, kopfGescheitert?:boolean, belegGrund?:string|null, befund:'ablehnen'|'halten'|null, vorbefund?:{befund:string, seit:string|null, regeln:string[]}}|null} [f.preisBildschirm]
+ *   Bildschirmfoto bzw. Preisbeleg als Preisfoto (src/preisBildschirm.js), `modus` = Schalter der Bildschirm-Regel,
+ *   `belegModus` = Schalter des Preisbelegs — null, wenn beide aus sind oder weder eine Bildprüfung noch ein scharfer Befund eines früheren Laufs vorliegt
+ * @returns {{entscheidung:'freigeben'|'ablehnen'|'offen', grund:string|null, ctx:object, loseWare?:boolean, preisBildschirmFall?:{befund:string, ohneRegel:string, wirkt:boolean, vorbefund?:boolean}}}
  */
 function entscheideFall(f) {
   const comp = f.comp || { ok: true, problems: [], missing: [] };
@@ -349,7 +350,12 @@ function vorbefundHinweis(bild) {
  *  - Aufnahmeort passt nicht zum Markt → Mensch (kann harmlos sein, etwa Aldi
  *    Süd statt Hofer in Österreich; 3 von 1.973 Freigaben seit 01.09.).
  *  - Bildschirmfoto als Preisbeleg (04.10.2026) — über dem Ergebnis der
- *    übrigen Hürden, siehe unten und src/preisBildschirm.js.
+ *    übrigen Hürden, siehe unten und src/preisBildschirm.js. Dieselbe
+ *    Mechanik trägt den Preisbeleg „Kassenbon" (ohne Kassenbon-Merkmale,
+ *    fremder Händler; Entscheidung Claude im Auftrag Patricks 04.10.2026):
+ *    nur „halten", Grund `preis_beleg_unsicher`. Jede der beiden Regeln wirkt
+ *    nur unter IHREM Schalter (`preisBildschirmRegel` bzw. `preisBelegRegel`,
+ *    preisBildschirm.preisBildschirmLage — Nachprüfung 05.10.2026).
  */
 function freigabe(f, audit, extra = {}) {
   const e = freigabeOhneBildschirm(f, audit, extra);
@@ -373,14 +379,20 @@ function freigabe(f, audit, extra = {}) {
   //    hängt. `halten` → nur eine sonst fällige FREIGABE wird
   //    zum offenen Fall; eine Ablehnung (Preis fehlt) oder ein schon offener
   //    Fall bleibt, wie er ist — der Befund steht trotzdem in review.rundeOffen.
+  // Zwei Regeln, zwei Schalter (Nachprüfung 05.10.2026): beobachtet wird jede
+  // Regel, deren Schalter nicht aus ist; WIRKEN darf nur eine Regel mit
+  // scharfem Schalter — auch ein Befund eines früheren Laufs hält nur unter
+  // dem Schalter seiner eigenen Regel (preisBildschirmLage). `wirkt` sagt dem
+  // Bericht, ob der Befund heute etwas geändert hat.
   const pb = f.preisBildschirm || null;
-  const befund = pb && (pb.befund === 'ablehnen' || pb.befund === 'halten') ? pb.befund : null;
-  if (!befund) return e;
-  const fallDazu = (x) => ({ ...x, preisBildschirmFall: { befund, ohneRegel: e.entscheidung, ...(pb.vorbefund ? { vorbefund: true } : {}) } });
-  if (pb.modus !== true) return fallDazu(e);
+  const beob = preisBildschirmLage(pb);
+  if (!beob.befund) return e;
+  const wirkt = preisBildschirmLage(pb, { scharf: true });
+  const fallDazu = (x) => ({ ...x, preisBildschirmFall: { befund: beob.befund, ohneRegel: e.entscheidung, wirkt: !!wirkt.befund, ...(pb.vorbefund ? { vorbefund: true } : {}) } });
+  if (!wirkt.befund) return fallDazu(e);
   const hinweis = preisBildschirmHinweis(pb);
-  if (befund === 'ablehnen') return fallDazu(ablehnen(PREIS_BILDSCHIRM, { hinweis }));
-  return fallDazu(e.entscheidung === 'freigeben' ? offen(preisBildschirmHalteGrund(pb), { hinweis }) : e);
+  if (wirkt.befund === 'ablehnen') return fallDazu(ablehnen(PREIS_BILDSCHIRM, { hinweis }));
+  return fallDazu(e.entscheidung === 'freigeben' ? offen(wirkt.grund, { hinweis }) : e);
 }
 
 function freigabeOhneBildschirm(f, audit, extra = {}) {
@@ -514,9 +526,10 @@ function rundeBefunde(eingabe) {
  *  - `fotoSeit`: Lauf, seit dem der Foto-Befund steht (nur mit Foto-Befund).
  *  - `eanFoto`: Halte-Befund der Barcode-Nummer als Rückfall für die nächste
  *    Runde, falls `eanFotoOcr` nicht gespeichert werden konnte (eanFotoVorbefund).
- *  - `preisBildschirm`: Befund der Bildschirm-Regel `{modus, befund, seit}`
- *    (src/preisBildschirm.js) — Hinweis in der Konsole, und ein scharfer
- *    Befund gilt im nächsten Lauf weiter (preisBildschirmVorbefund). Keine
+ *  - `preisBildschirm`: Befund der Bildschirm-Regel bzw. des Preisbelegs
+ *    `{modus, befund, seit, regeln?, art?}` (src/preisBildschirm.js) — Hinweis
+ *    in der Konsole, und ein scharfer Befund gilt im nächsten Lauf weiter,
+ *    je Regel unter deren Schalter (preisBildschirmVorbefund). Keine
  *    Sperre: die Konsole gibt ohne Notiz frei, wer hinsieht, entscheidet.
  *  - Im Trockenlauf (`trocken`) bleibt auch ein geplanter Entscheid offen —
  *    `geplant` sagt, was die Runde getan hätte. Eine geplante Freigabe ohne
@@ -559,10 +572,11 @@ function rundeOffenEintrag(p, { lauf, trocken = false } = {}) {
       ...(ef.art === 'abweichend' ? { bestaetigt: ef.bestaetigt === true } : { zweit: ef.zweit || null }),
     } : null,
     // Bildschirmfoto als Preisbeleg (04.10.2026) — nur mit Befund, und nur
-    // Modus, Befund und `seit` (preisBildschirm.preisBildschirmEintrag: was
-    // das Urteil trägt, steht nur im Tagesbericht). Die Konsole zeigt daraus
-    // einen Hinweis (einreichung.precheckOf), der nächste Lauf übernimmt einen
-    // scharfen Befund (preisBildschirmVorbefund).
+    // Modus, Befund, `seit` und die tragenden Regeln
+    // (preisBildschirm.preisBildschirmEintrag: was das Urteil trägt, steht nur
+    // im Tagesbericht). Die Konsole zeigt daraus einen Hinweis
+    // (einreichung.precheckOf), der nächste Lauf übernimmt einen scharfen
+    // Befund je Regel (preisBildschirmVorbefund).
     ...(pbEintrag ? { preisBildschirm: pbEintrag } : {}),
     lauf: lauf || null,
     trocken: !!trocken,

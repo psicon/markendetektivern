@@ -22,7 +22,11 @@
  *   oder Nachlesen am Google-Limit gescheitert, beschädigte Datei — alles,
  *   was die Notbremse zurückhält, und jede Abweichung der Barcode-Nummer.
  *   Mit `preisBildschirmRegel: true` auch ein Preisfoto, das vielleicht ein
- *   Bildschirmfoto ist (src/preisBildschirm.js, Patrick 04.10.2026).
+ *   Bildschirmfoto ist (src/preisBildschirm.js, Patrick 04.10.2026), und mit
+ *   `preisBelegRegel: true` einen „Kassenbon" ohne jedes Kassenbon-Merkmal
+ *   oder von einem Händler, der keiner unserer Märkte ist (Entscheidung
+ *   Claude im Auftrag Patricks, 04.10.2026; eigener Schalter seit der
+ *   Nachprüfung 05.10.2026).
  *   Einreichungen gesperrter Konten liegen STUMM (eigener Zähler im Bericht,
  *   nicht in `wartetAufDich`).
  * WAS ER NIE TUT
@@ -65,9 +69,11 @@ const { bildDefektOf } = require('./einreichung');
 const { warnungen } = require('./warnungen');
 const { mitWiederholung, arbeite, schlafe } = require('./ki');
 const {
-  modusPreisBildschirm, schalterRohOf, preisQuelleOf, lesedienstBonOf, lesedienstOhneBonOf, bildKopf, bildschirmMerkmal, preisBildschirmBefund,
+  modusPreisBildschirm, modusPreisBeleg, schalterRohOf, preisQuelleOf, lesedienstBonOf, lesedienstOhneBonOf, bildKopf, bildschirmMerkmal, preisBildschirmLage,
   preisBildschirmVorbefund, preisBildschirmMitVorbefund,
   PREIS_QUELLEN, PREIS_BILDSCHIRM, PREIS_BILDSCHIRM_UNSICHER, KOPF_BYTES,
+  BELEG_MERKMALE, PREIS_BELEG_UNSICHER, BELEG_OHNE_MERKMALE, BELEG_FREMDER_HAENDLER,
+  belegMerkmaleOf, belegHaendlerOf, lesedienstKopfOf, preisBelegBefund, marktSchluessel, preisBildschirmHalteGrund, keinBonVon,
 } = require('./preisBildschirm');
 
 const COL = 'crowd_uploads';
@@ -168,7 +174,12 @@ const AUDIT_ANWEISUNG = AUDIT_ZEILEN.join('\n');
 // 0 von 311 Nicht-Bildschirmen, 167 von 167 Kassenbons richtig. Wer hier ein
 // Wort ändert, misst neu. Kostet ~440 Eingabe- und ~25 Ausgabe-Token je Fall
 // im ohnehin laufenden Aufruf (~3 $ im Monat zum Listenpreis).
-// Nur mit eingeschaltetem Schalter (`preisBildschirmRegel` ≠ false) gefragt.
+// Gefragt, sobald einer der beiden Schalter (`preisBildschirmRegel`,
+// `preisBelegRegel`) nicht aus ist — der Preisbeleg braucht die Antwort
+// „kassenbon".
+// Mit den Unterfragen zum Kassenbon (unten) am 05.10.2026 neu gemessen: die
+// Antworten auf preisQuelle blieben stabil (Bildschirmfotos 40/40, Laden
+// 22/22, kein Preis 8/8, Kassenbons 166/167), siehe WISSEN-FOTORUNDE.md.
 const PREIS_QUELLE_JSON = `"preisQuelle":"${PREIS_QUELLEN.join('|')}","preisQuelleGrund":"kurz"`;
 const PREIS_QUELLE_FRAGE = Object.freeze([
   'preisQuelle: Woher stammt der Preis auf dem Foto "preis"? Genau einer dieser Werte:',
@@ -180,10 +191,33 @@ const PREIS_QUELLE_FRAGE = Object.freeze([
   'Ein e-Bon oder eine Rechnung ist immer "kassenbon", auch als Bildschirmfoto. Ein elektronisches Preisschild im Regal ist immer "laden".',
   'preisQuelleGrund: woran du die Quelle erkennst, höchstens zehn Wörter.',
 ]);
-/** Prüfanweisung mit der Zusatzfrage: JSON-Zeile erweitert, Frage am Ende — wie gemessen. */
+// 05.10.2026 (Entscheidung Claude im Auftrag Patricks, 04.10.: „Kannst du
+// selbst entscheiden?"): zwei Unterfragen zum Kassenbon im SELBEN Aufruf —
+// zeigt der Beleg Merkmale eines abgeschlossenen Einkaufs (Warenkorb-Lücke),
+// und von welchem Händler stammt er (Rechnungen fremder Händler)? Ausgewertet
+// in src/preisBildschirm.js (preisBelegBefund), nur bei „kassenbon"; beide
+// Befunde lassen nur liegen, nie ab. Wortgleich die Fassung, die am 05.10.
+// gemessen wurde (scratchpad pb-beleg/) — wer hier ein Wort ändert, misst neu.
+// Nur gefragt, wenn `preisBelegRegel` nicht aus ist.
+const PREIS_BELEG_JSON = `"belegHaendler":"…","belegMerkmale":["${BELEG_MERKMALE.join('|')}"]`;
+const PREIS_BELEG_FRAGE = Object.freeze([
+  'Nur wenn preisQuelle "kassenbon" ist — sonst belegHaendler leer und belegMerkmale eine leere Liste:',
+  'belegHaendler: von welchem Geschäft bzw. welcher Handelskette stammt der Beleg — nach Name, Logo oder Kopf (z. B. "REWE", "EDEKA", "Lidl", "dm", "Amazon")? Bei einem inhabergeführten Markt die Kette, nicht den Inhaber. Nicht erkennbar → leer. Nichts raten.',
+  'belegMerkmale: welche dieser Merkmale eines abgeschlossenen Einkaufs sind auf dem Foto "preis" zu sehen? Jedes zutreffende aus: "haendler" (Name oder Logo des Geschäfts), "datum" (Kaufdatum oder Uhrzeit), "summe" (Summe, Gesamtbetrag oder „zu zahlen"), "nummer" (Bon-, Kassen-, Beleg-, Rechnungs- oder Bestellnummer, TSE-Angaben), "zahlung" (bar, Karte, EC, Rückgeld), "steuer" (MwSt.-Aufstellung oder Steuerkennzeichen wie A/B hinter den Preisen). Ist keines davon zu sehen — etwa nur Artikelzeilen mit Preisen, ein Warenkorb oder eine Einkaufsliste —, dann eine leere Liste.',
+]);
+/**
+ * Prüfanweisungen mit den Zusatzfragen: JSON-Zeile erweitert, Fragen am Ende —
+ * je wortgleich wie gemessen:
+ *  - nur Preisquelle (Preisbeleg aus): die Fassung vom 04.10.2026;
+ *  - Preisquelle + Unterfragen zum Kassenbon: die Fassung vom 05.10.2026.
+ */
 const AUDIT_ANWEISUNG_PREISQUELLE = AUDIT_ZEILEN
   .map((z) => (z.startsWith('JSON: {') ? z.replace('"grund":"kurz"}', `"grund":"kurz",${PREIS_QUELLE_JSON}}`) : z))
   .concat(PREIS_QUELLE_FRAGE)
+  .join('\n');
+const AUDIT_ANWEISUNG_PREISBELEG = AUDIT_ZEILEN
+  .map((z) => (z.startsWith('JSON: {') ? z.replace('"grund":"kurz"}', `"grund":"kurz",${PREIS_QUELLE_JSON},${PREIS_BELEG_JSON}}`) : z))
+  .concat(PREIS_QUELLE_FRAGE, PREIS_BELEG_FRAGE)
   .join('\n');
 
 /* ─────────────────────────── Bilder lesen ─────────────────────────── */
@@ -300,9 +334,10 @@ async function preisUndHersteller(ai, bucket, x, { preis, hersteller }) {
 /**
  * Bildprüfung: sieht alle sieben Fotos an. Mit `preisQuelle` beantwortet sie
  * im selben Aufruf, woher der Preis stammt (Bildschirmfoto als Preisbeleg,
- * 04.10.2026) — kein zusätzlicher Aufruf.
+ * 04.10.2026), mit `beleg` zusätzlich die Unterfragen zum Kassenbon
+ * (05.10.2026) — kein zusätzlicher Aufruf.
  */
-async function bildAudit(ai, bucket, x, { preisQuelle = false } = {}) {
+async function bildAudit(ai, bucket, x, { preisQuelle = false, beleg = false } = {}) {
   const parts = [];
   for (const s of REQUIRED) if (x.images?.[s]) parts.push(...teil(bucket, s, x.images[s]));
   parts.push({
@@ -311,15 +346,26 @@ async function bildAudit(ai, bucket, x, { preisQuelle = false } = {}) {
       // Ohne gespeicherte EAN: das Modell liest sie selbst (eanFoto) — mit der
       // erwarteten Nummer im Auftrag schriebe es sie ab (02.10.2026).
       `Erwartet: echtes Einzelhandels-Produkt "${nameOf(x) || 'unbekannt'}".`,
-      preisQuelle ? AUDIT_ANWEISUNG_PREISQUELLE : AUDIT_ANWEISUNG,
+      !preisQuelle ? AUDIT_ANWEISUNG : beleg ? AUDIT_ANWEISUNG_PREISBELEG : AUDIT_ANWEISUNG_PREISQUELLE,
     ].join('\n'),
   });
   const r = await mitWiederholung(() => ai.models.generateContent({
     model: MODELL, contents: [{ role: 'user', parts }],
     config: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 8000, thinkingConfig: { thinkingLevel: 'LOW' } },
   }));
-  const p = JSON.parse(String(r.text ?? '').replace(/^```json\s*|```\s*$/g, ''));
-  if (typeof p.echt !== 'boolean') throw new Error('Bildprüfung ohne verwertbare Antwort');
+  return bildAuditAntwort(JSON.parse(String(r.text ?? '').replace(/^```json\s*|```\s*$/g, '')), { preisQuelle, beleg: preisQuelle && beleg });
+}
+
+/**
+ * Antwort der Bildprüfung → bereinigte Felder (rein, für Runde, Tests und
+ * Messskripte). Wirft, wenn `echt` fehlt — dann gibt es kein Urteil.
+ */
+function bildAuditAntwort(roh, { preisQuelle = false, beleg = false } = {}) {
+  // Gelegentlich kommt das Objekt in eine Liste verpackt zurück (gemessen
+  // 05.10.2026: 1 von 272 Antworten) — derselbe Inhalt, kein Grund für einen
+  // gescheiterten Fall. Mehr als ein Element ist keine eindeutige Antwort.
+  const p = Array.isArray(roh) && roh.length === 1 ? roh[0] : roh;
+  if (!p || typeof p !== 'object' || Array.isArray(p) || typeof p.echt !== 'boolean') throw new Error('Bildprüfung ohne verwertbare Antwort');
   return {
     echt: p.echt !== false, loseWare: p.loseWare === true, traegtAngaben: p.traegtAngaben !== false, gleicheAnsicht: p.gleicheAnsicht === true,
     // null = nicht beurteilt → die Runde lässt den Fall liegen, statt zu raten.
@@ -329,7 +375,16 @@ async function bildAudit(ai, bucket, x, { preisQuelle = false } = {}) {
     grund: String(p.grund || '').slice(0, 140),
     // Fehlt die Antwort oder ist sie unbekannt → null. Das ist kein Freispruch:
     // passen die Bildmerkmale, bleibt der Fall liegen (preisBildschirmBefund).
-    ...(preisQuelle ? { preisQuelle: preisQuelleOf(p.preisQuelle), preisQuelleGrund: String(p.preisQuelleGrund || '').slice(0, 80) || null } : {}),
+    ...(preisQuelle ? {
+      preisQuelle: preisQuelleOf(p.preisQuelle), preisQuelleGrund: String(p.preisQuelleGrund || '').slice(0, 80) || null,
+    } : {}),
+    // Unterfragen zum Kassenbon (05.10.2026, src/preisBildschirm.js
+    // preisBelegBefund) — nur, wenn gefragt (`preisBelegRegel` nicht aus).
+    // belegMerkmale null = keine verwertbare Antwort — das ist kein Freispruch
+    // (ohne Händlerkopf des Lesedienstes bleibt ein „Kassenbon" dann liegen).
+    ...(preisQuelle && beleg ? {
+      belegHaendler: belegHaendlerOf(p.belegHaendler), belegMerkmale: belegMerkmaleOf(p.belegMerkmale),
+    } : {}),
   };
 }
 
@@ -360,7 +415,25 @@ async function preisFotoKopf(storage, x, zeitgrenzeMs = KOPF_ZEIT_MS) {
 
 /* ─────────────────────────── Hilfen ─────────────────────────── */
 
-function regelVersion(preisBildschirmModus) {
+/**
+ * Namen unserer Märkte (Collection `discounter`, ~20 Dokumente) für den
+ * Händler-Abgleich des Preisbelegs. Nicht lesbar → `unlesbar`, und der
+ * Abgleich nimmt nur die Ketten im Code (preisBildschirm.UNSERE_KETTEN — sie
+ * decken alle heutigen Märkte ab). Kein Abbruch: der Abgleich lässt höchstens
+ * liegen, und ein neu aufgenommener Markt bliebe nur bis zum nächsten Lauf
+ * „fremd".
+ */
+async function ladeMaerkte(db) {
+  try {
+    const q = await db.collection('discounter').get();
+    return { namen: q.docs.map((d) => d.get('name')).filter((n) => typeof n === 'string' && n.trim()), unlesbar: false };
+  } catch (e) {
+    logger.warn('discounter nicht lesbar — Händler-Abgleich nur mit festen Ketten', { fehler: String(e && e.message).slice(0, 160) });
+    return { namen: null, unlesbar: true };
+  }
+}
+
+function regelVersion(preisBildschirmModus, preisBelegModus) {
   const h = crypto.createHash('sha1');
   // werte.js gehört dazu: es bestimmt, welche EAN, welcher Preis und welcher
   // Hersteller in die Regeln eingehen; ort.js, wann der Aufnahmeort auffällt.
@@ -368,10 +441,11 @@ function regelVersion(preisBildschirmModus) {
   // preisBildschirm.js: Bildschirmfoto als Preisbeleg (04.10.2026).
   for (const f of ['duplicatePolicy.js', 'fotoRundeRegeln.js', 'werte.js', 'ort.js', 'kontoSperre.js', 'preisBildschirm.js']) h.update(fs.readFileSync(path.join(__dirname, f)));
   // Ebenso die Anweisungen an das Modell: sie entscheiden mit (Gegenprüfung 26.09.).
-  h.update([PROMPT_NAME, PROMPT_EAN, PROMPT_PREIS, AUDIT_ANWEISUNG, AUDIT_ANWEISUNG_PREISQUELLE].join('\n'));
-  // Und der Schalter der Bildschirm-Regel: von 'shadow' auf true entscheidet
-  // die Runde anders — der Bericht meldet das wie eine geänderte Regel.
-  h.update(`preisBildschirmRegel=${String(preisBildschirmModus)}`);
+  h.update([PROMPT_NAME, PROMPT_EAN, PROMPT_PREIS, AUDIT_ANWEISUNG, AUDIT_ANWEISUNG_PREISQUELLE, AUDIT_ANWEISUNG_PREISBELEG].join('\n'));
+  // Und die Schalter der Bildschirm-Regel und des Preisbelegs: von 'shadow'
+  // auf true entscheidet die Runde anders — der Bericht meldet das wie eine
+  // geänderte Regel.
+  h.update(`preisBildschirmRegel=${String(preisBildschirmModus)};preisBelegRegel=${String(preisBelegModus)}`);
   return h.digest('hex').slice(0, 10);
 }
 
@@ -484,11 +558,13 @@ async function dateiListe(storage) {
  * @param {number} [opts.arbeitszeitMs]  Nach dieser Zeit beginnt die Runde nichts Neues mehr.
  * @param {*} [opts.preisBildschirmRegel]  Rohwert des Schalters der Bildschirm-Regel
  *   (`cashback_config/v1.preisBildschirmRegel`; false | 'shadow' | true, fehlt = null).
- *   index.js reicht ihn aus seinem eigenen Lesen von cashback_config/v1 durch;
- *   nur ohne Angabe (undefined) liest die Runde selbst — scheitert das, bricht
- *   sie ab (src/preisBildschirm.js modusPreisBildschirm).
+ * @param {*} [opts.preisBelegRegel]  Rohwert des Schalters des Preisbelegs
+ *   (`cashback_config/v1.preisBelegRegel`; ebenso). index.js reicht beide aus
+ *   seinem eigenen Lesen von cashback_config/v1 durch; fehlt einer
+ *   (undefined), liest die Runde selbst — scheitert das, bricht sie ab
+ *   (src/preisBildschirm.js modusPreisBildschirm, modusPreisBeleg).
  */
-async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser = 'zeitplan', vergleich = null, nurLesen = false, arbeitszeitMs = ARBEITSZEIT_MS, preisBildschirmRegel } = {}) {
+async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser = 'zeitplan', vergleich = null, nurLesen = false, arbeitszeitMs = ARBEITSZEIT_MS, preisBildschirmRegel, preisBelegRegel } = {}) {
   if (vergleich || nurLesen) dryRun = true;
   // Nachgelesene Angaben und die Foto-Nummer sind Tatsachen über die Fotos und
   // werden auch im normalen Trockenlauf gespeichert — nur nicht beim reinen Rechnen.
@@ -510,15 +586,31 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   // 04.10.2026). index.js reicht den Wert aus seinem eigenen Lesen durch
   // (scheitert das, läuft gar nichts); liest die Runde selbst und scheitert,
   // bricht sie ab — wie bei jedem anderen Fehler beim Laden.
+  // Preisbeleg „Kassenbon": EIGENER Schalter `preisBelegRegel`, gleiche Werte
+  // (Nachprüfung 05.10.2026) — wer eine der beiden Regeln zurücknimmt, gibt
+  // nur deren angehaltene Fälle frei, nie die der anderen
+  // (preisBildschirm.preisBildschirmLage). Gelesen im selben Zug.
   let pbRoh = preisBildschirmRegel;
-  if (pbRoh === undefined) {
-    try { pbRoh = ((await db.doc('cashback_config/v1').get()).data() || {}).preisBildschirmRegel ?? null; }
-    catch (e) { throw new Error(`Schalter preisBildschirmRegel nicht lesbar — Lauf abgebrochen (${String(e && e.message).slice(0, 120)})`); }
+  let belegRoh = preisBelegRegel;
+  if (pbRoh === undefined || belegRoh === undefined) {
+    let cfg;
+    try { cfg = (await db.doc('cashback_config/v1').get()).data() || {}; }
+    catch (e) { throw new Error(`Schalter preisBildschirmRegel/preisBelegRegel nicht lesbar — Lauf abgebrochen (${String(e && e.message).slice(0, 120)})`); }
+    if (pbRoh === undefined) pbRoh = cfg.preisBildschirmRegel ?? null;
+    if (belegRoh === undefined) belegRoh = cfg.preisBelegRegel ?? null;
   }
   const pbModus = modusPreisBildschirm(pbRoh);
   const pbSchalter = schalterRohOf(pbRoh);
+  const belegModus = modusPreisBeleg(belegRoh);
+  const belegSchalter = schalterRohOf(belegRoh);
+  // Die Frage nach der Preisquelle braucht jede der beiden Regeln (der
+  // Preisbeleg greift nur bei „kassenbon"); den Bildkopf nur die Bildschirm-Regel.
+  const preisFrage = pbModus !== false || belegModus !== false;
 
-  const [alleSnap, sperren] = await Promise.all([db.collection(COL).get(), ladeSperren(db)]);
+  // Märkte aus `discounter` für den Händler-Abgleich des Preisbelegs (05.10.2026,
+  // preisBildschirm.preisBelegBefund) — nur mit eingeschaltetem Preisbeleg.
+  const [alleSnap, sperren, maerkte] = await Promise.all([db.collection(COL).get(), ladeSperren(db), belegModus !== false ? ladeMaerkte(db) : Promise.resolve({ namen: null, unlesbar: false })]);
+  const marktSchluesselHeute = marktSchluessel(maerkte.namen);
   // `zeit`: Server-Zeitpunkt des Dokuments (createTime) — die Regeln rechnen
   // damit, nicht mit dem vom Client geschriebenen `createdAt` (werte.einreichZeit).
   const alle = alleSnap.docs.map((d) => ({ id: d.id, ref: d.ref, x: d.data(), zeit: einreichZeit(d.data(), d.createTime) }));
@@ -626,7 +718,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   const zuPruefen = zuBearbeiten.filter((d) => { const v = vor.get(d.id); return !v.comp.problems.includes('unvollstaendig') && !v.leer.length && !v.unlesbar.length; });
   const audit = new Map(); const auditFehler = new Map();
   const nichtGeprueft = await arbeite(zuPruefen, async (d) => {
-    try { audit.set(d.id, await bildAudit(ai, bucket, d.x, { preisQuelle: pbModus !== false })); }
+    try { audit.set(d.id, await bildAudit(ai, bucket, d.x, { preisQuelle: preisFrage, beleg: belegModus !== false })); }
     catch (e) { auditFehler.set(d.id, String(e.message).slice(0, 140)); }
   }, PARALLEL_KI, frist);
   nichtGeprueft.forEach((d) => auditFehler.set(d.id, 'zeit_abgelaufen'));
@@ -649,24 +741,45 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   //     (oder ohne abrufbaren Kopf), den der Lesedienst las und nicht als Bon
   //     sah, wird nicht bezahlt, sondern liegen gelassen (lesedienstOhneBonOf,
   //     Prüfrunde 2).
+  //     Den Bildkopf liest die Runde nur für die Bildschirm-Regel; ist nur der
+  //     Preisbeleg an, bleibt er ungelesen (kein Abruf, kein Technikfehler).
+  //     Jede Eingabe trägt beide Schalter (`modus`, `belegModus`) — was davon
+  //     wirkt, entscheidet preisBildschirmLage je Regel (Nachprüfung 05.10.2026).
   const pbVon = new Map();
-  if (pbModus !== false) {
+  if (preisFrage) {
     const mitKopf = (d, k) => {
       const a = audit.get(d.id);
       // Auch was die Preis-Nachlesung dieses Laufs sah, ohne dass der Preis
       // übernommen wurde (Prüfrunde 3, 04.10.2026): ein Bon-Zeichen dort zählt.
       const zusatz = nachleseArten.get(d.id) || [];
+      // Preisbeleg „Kassenbon" (Entscheidung Claude im Auftrag Patricks,
+      // 04.10.2026): ohne jedes Kassenbon-Merkmal (Warenkorb-Lücke) oder von
+      // einem fremden Händler → liegen lassen (preisBelegBefund). Nur mit
+      // eingeschaltetem Preisbeleg — sonst wurde nicht gefragt.
+      const lesedienstHaendler = d.x.priceReceipt && typeof d.x.priceReceipt.merchant === 'string' ? d.x.priceReceipt.merchant.slice(0, 80) : null;
+      const beleg = belegModus === false ? null : preisBelegBefund({
+        quelle: a.preisQuelle ?? null, merkmale: a.belegMerkmale ?? null, haendler: a.belegHaendler ?? null,
+        lesedienstKopf: lesedienstKopfOf(d.x), lesedienstHaendler, schluessel: marktSchluesselHeute,
+      });
       const e = {
-        modus: pbModus, quelle: a.preisQuelle ?? null, grund: a.preisQuelleGrund ?? null,
+        modus: pbModus, belegModus, quelle: a.preisQuelle ?? null, grund: a.preisQuelleGrund ?? null,
         merkmal: k.merkmal, kopf: k.kopf, kopfFehler: k.fehler, kopfGescheitert: !!k.fehler,
         lesedienstBon: lesedienstBonOf(d.x, zusatz), lesedienstOhneBon: lesedienstOhneBonOf(d.x, zusatz),
+        belegGrund: beleg ? beleg.grund : null,
+        beleg: beleg ? { haendler: a.belegHaendler ?? null, merkmale: a.belegMerkmale ?? null, lesedienstHaendler, unser: beleg.unser, ohneMerkmale: beleg.ohneMerkmale, fremd: beleg.fremd } : null,
       };
-      pbVon.set(d.id, { ...e, befund: preisBildschirmBefund(e) });
+      // Beobachteter Befund (beide Regeln, sofern ihr Schalter nicht aus ist).
+      pbVon.set(d.id, { ...e, befund: preisBildschirmLage(e).befund });
     };
-    const ohneKopf = await arbeite(zuPruefen.filter((d) => audit.has(d.id)), async (d) => {
-      mitKopf(d, await preisFotoKopf(storage, d.x));
-    }, 20, Date.now() + KOPF_SCHRITT_MS);
-    ohneKopf.forEach((d) => mitKopf(d, { kopf: null, merkmal: null, fehler: 'zeit_abgelaufen' }));
+    const geprueft = zuPruefen.filter((d) => audit.has(d.id));
+    if (pbModus !== false) {
+      const ohneKopf = await arbeite(geprueft, async (d) => {
+        mitKopf(d, await preisFotoKopf(storage, d.x));
+      }, 20, Date.now() + KOPF_SCHRITT_MS);
+      ohneKopf.forEach((d) => mitKopf(d, { kopf: null, merkmal: null, fehler: 'zeit_abgelaufen' }));
+    } else {
+      geprueft.forEach((d) => mitKopf(d, { kopf: null, merkmal: null, fehler: null }));
+    }
   }
 
   // 4b) Nummer vom Barcode-Foto gegen die gespeicherte (Entscheidung Patrick
@@ -808,8 +921,9 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       preisVorhanden: !!preisOf(d.x), preisHinweis: preisHinweisOf(d.x), ortAuffaellig: ort ? ort.text : null,
       namerLaeuft: namerAb != null && namerAb > start - NAMER_HAENGT_MS, preisBildDefekt,
       // Ein scharfer Befund eines früheren Laufs gilt weiter, auch ohne
-      // heutige Bildprüfung (preisBildschirm.preisBildschirmMitVorbefund).
-      preisBildschirm: preisBildschirmMitVorbefund(pbVon.get(d.id) || null, preisBildschirmVorbefund(d.x), pbModus),
+      // heutige Bildprüfung — je Regel nur unter IHREM Schalter
+      // (preisBildschirm.preisBildschirmMitVorbefund, Nachprüfung 05.10.2026).
+      preisBildschirm: preisBildschirmMitVorbefund(pbVon.get(d.id) || null, preisBildschirmVorbefund(d.x), { bildschirm: pbModus, beleg: belegModus }),
     };
     const e = entscheideFall(eingabe);
     plan.push({ ...d, ...e, comp: v.comp, dup, audit: audit.get(d.id) || null, eingabe });
@@ -1021,7 +1135,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     });
   }
   if (bonNachgereicht) bonRundeHeute = bonRundeRoh(bonNachgereicht);
-  const version = regelVersion(pbModus);
+  const version = regelVersion(pbModus, belegModus);
   const zaehle = (liste, feld) => liste.reduce((a, p) => { const k = p[feld] || '?'; a[k] = (a[k] || 0) + 1; return a; }, {});
   const abgelehnt = plan.filter((p) => p.entscheidung === 'ablehnen' && !p.uebersprungen);
   // Gesperrte Konten liegen stumm und dauerhaft — sie warten NICHT auf eine
@@ -1048,9 +1162,16 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   // Gemessen 0 von 167 Kassenbons; die Zahl zeigt, ob der Weg genutzt wird.
   const pbKassenbonOhneBon = plan.filter((p) => {
     const e = pbVon.get(p.id);
-    return e && e.quelle === 'kassenbon' && e.lesedienstOhneBon === true && e.lesedienstBon !== true;
+    return e && e.quelle === 'kassenbon' && keinBonVon(e);
   });
+  // Preisbeleg „Kassenbon" (05.10.2026): Befunde je Fall, unabhängig davon,
+  // ob sie etwas ändern (Beobachtung = Messung). Nur mit eingeschaltetem
+  // Preisbeleg — sonst wurde nicht gefragt, und jeder „Kassenbon" sähe aus
+  // wie einer ohne Antwort.
+  const pbKassenbon = belegModus === false ? [] : pbAlle.filter((e) => e.quelle === 'kassenbon');
+  const pbBelegFaelle = plan.filter((p) => { const e = pbVon.get(p.id); return e && e.belegGrund; });
   const preisBildschirm = {
+    // Schalter der Bildschirm-Regel; der des Preisbelegs steht unter `beleg.modus`.
     modus: pbModus,
     // Rohwert, wenn er nicht false/'shadow'/true ist (gilt als Beobachtung, gelbe Warnung).
     ...(pbSchalter.art === 'unbekannt' ? { schalterUnbekannt: pbSchalter.roh } : {}),
@@ -1065,11 +1186,16 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     // Bildprüfung „Bildschirm", Lesedienst „Kassenbon" — gemessen 0 von 167
     // Kassenbons; mehr deutet auf eine geänderte Lesart des Modells (Warnung).
     bildschirmTrotzBon: pbAlle.filter((e) => e.quelle === 'bildschirm' && e.lesedienstBon).length,
-    // Bildprüfung „Kassenbon" (mit Merkmalen), der Lesedienst las das Foto
-    // und sah KEINEN Bon — gemessen 0 von 126; die Fälle bleiben liegen
-    // (Prüfrunde 2, 04.10.2026). Mehr deutet auf eine geänderte Lesart oder
-    // auf Warenkörbe/Bestellübersichten als „Bon" (Warnung).
-    kassenbonOhneLesedienstBon: pbAlle.filter((e) => e.quelle === 'kassenbon' && e.befund === 'halten').length,
+    // Bildprüfung „Kassenbon", der Lesedienst las das Foto und sah KEINEN
+    // Bon, und der Fall bleibt liegen — gemessen 0 von 126 (Prüfrunde 2,
+    // 04.10.2026). Mehr deutet auf eine geänderte Lesart oder auf
+    // Warenkörbe/Bestellübersichten als „Bon" (Warnung
+    // preisquelle_bon_widerspruch). NUR mit diesem Widerspruch: seit dem
+    // Preisbeleg (05.10.2026) liegt ein „Kassenbon" auch ohne Merkmale oder
+    // von einem fremden Händler, obwohl der Lesedienst den Bon sah — das zählt
+    // `beleg` (Nachprüfung 05.10.: sonst 11 von 189 Kassenbons hier, alle mit
+    // Lesedienst-Bon, und eine Warnung etwa einmal pro Woche ohne Grund).
+    kassenbonOhneLesedienstBon: pbAlle.filter((e) => e.quelle === 'kassenbon' && e.befund === 'halten' && keinBonVon(e)).length,
     // Alle davon, auch ohne Merkmale (bezahlt) — mit Fällen zum Ansehen.
     kassenbonLesedienstOhneBon: pbKassenbonOhneBon.length,
     kassenbonLesedienstOhneBonFaelle: pbKassenbonOhneBon.slice(0, 20).map((p) => {
@@ -1082,6 +1208,36 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       };
     }),
     kopfNichtAbrufbar: pbAlle.filter((e) => e.kopfGescheitert).length,
+    // Preisbeleg „Kassenbon" (Entscheidung Claude im Auftrag Patricks,
+    // 04.10.2026): ohne Kassenbon-Merkmale (Warenkorb?) bzw. Beleg eines
+    // Händlers, der keiner unserer Märkte ist (Amazon …). Gemessen 05.10.:
+    // 3 von 166 echten Bons ohne Merkmale (eng zugeschnittene e-Bons), 5 von
+    // 23 Bons inhabergeführter Märkte ohne Kettenlogo als „fremd";
+    // Nachmessung: 4 von 41 Papierbon-Fotos ohne Lesedienst-Kopf (Ausschnitte).
+    beleg: {
+      // Eigener Schalter `preisBelegRegel` (Nachprüfung 05.10.2026).
+      modus: belegModus,
+      ...(belegSchalter.art === 'unbekannt' ? { schalterUnbekannt: belegSchalter.roh } : {}),
+      kassenbon: pbKassenbon.length,
+      ohneMerkmale: pbKassenbon.filter((e) => e.belegGrund === BELEG_OHNE_MERKMALE).length,
+      fremderHaendler: pbKassenbon.filter((e) => e.belegGrund === BELEG_FREMDER_HAENDLER).length,
+      // Ohne Regel freigegeben, mit scharfer Regel liegen geblieben.
+      stattFreigabe: pbFaelle.filter((p) => p.preisBildschirmFall.ohneRegel === 'freigeben' && preisBildschirmHalteGrund(p.eingabe.preisBildschirm) === PREIS_BELEG_UNSICHER).length,
+      // Keine verwertbare Antwort auf „belegMerkmale" — ohne Händlerkopf des Lesedienstes bleibt der Fall dann liegen.
+      merkmaleOhneAntwort: pbKassenbon.filter((e) => !e.beleg || e.beleg.merkmale === null).length,
+      // Liste `discounter` nicht lesbar → Abgleich nur gegen die Ketten im Code (UNSERE_KETTEN).
+      maerkteUnlesbar: !!maerkte.unlesbar,
+      faelle: pbBelegFaelle.slice(0, 30).map((p) => {
+        const e = pbVon.get(p.id);
+        return {
+          id: p.id, name: String(nameOf(p.x) || '?').slice(0, 60), markt: p.x.marketName || null,
+          befund: e.belegGrund, entscheidung: p.uebersprungen ? 'uebersprungen' : p.entscheidung,
+          ohneRegel: p.preisBildschirmFall ? p.preisBildschirmFall.ohneRegel : null,
+          haendler: e.beleg.haendler, lesedienstHaendler: e.beleg.lesedienstHaendler, merkmale: e.beleg.merkmale,
+          quelleGrund: e.grund || null,
+        };
+      }),
+    },
     vorbefund: pbFaelle.filter((p) => p.preisBildschirmFall.vorbefund).length,
     befundAblehnen: pbFaelle.filter((p) => p.preisBildschirmFall.befund === 'ablehnen').length,
     // `halten` ändert nur etwas, wo sonst freigegeben würde.
@@ -1092,7 +1248,11 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       return {
         id: p.id, name: String(nameOf(p.x) || '?').slice(0, 60), markt: p.x.marketName || null,
         befund: p.preisBildschirmFall.befund, ohneRegel: p.preisBildschirmFall.ohneRegel, entscheidung: p.uebersprungen ? 'uebersprungen' : p.entscheidung,
+        // Hat ein scharfer Schalter gewirkt? (je Regel, preisBildschirmLage)
+        wirkt: !!p.preisBildschirmFall.wirkt,
         quelle: e.quelle, quelleGrund: e.grund || null, merkmal: e.merkmal, lesedienstBon: !!e.lesedienstBon,
+        // Preisbeleg (05.10.2026): welcher Befund, und welcher Händler genannt wurde.
+        beleg: e.belegGrund || null, belegHaendler: (e.beleg && (e.beleg.haendler || e.beleg.lesedienstHaendler)) || null,
         vorbefund: e.vorbefund ? e.vorbefund.seit || 'früherer Lauf' : null,
         datei: pbDatei(e),
       };
@@ -1119,9 +1279,15 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     preisQuelleBefragt: pbAlle.length,
     preisQuelleOhneAntwort: pbAlle.filter((e) => !e.quelle).length,
     preisBildschirmHalten: pbFrischGehalten(PREIS_BILDSCHIRM_UNSICHER),
+    // Preisbeleg (05.10.2026): heute NEU liegen gelassen, Antworten ohne Merkmal-Liste, Märkte-Liste.
+    preisBelegHalten: pbFrischGehalten(PREIS_BELEG_UNSICHER),
+    preisBelegKassenbon: preisBildschirm.beleg.kassenbon,
+    preisBelegOhneAntwort: preisBildschirm.beleg.merkmaleOhneAntwort,
+    preisBelegMaerkteUnlesbar: preisBildschirm.beleg.maerkteUnlesbar,
     preisBildschirmTrotzBon: preisBildschirm.bildschirmTrotzBon,
     preisBildschirmBonWiderspruch: preisBildschirm.kassenbonOhneLesedienstBon,
     preisBildschirmSchalterUnbekannt: pbSchalter.art === 'unbekannt' ? pbSchalter.roh : null,
+    preisBelegSchalterUnbekannt: belegSchalter.art === 'unbekannt' ? belegSchalter.roh : null,
     preisKopfNichtAbrufbar: preisBildschirm.kopfNichtAbrufbar,
     // Nur scharf hält ein nicht abrufbarer Kopf Freigaben an (Prüfrunde 3).
     preisBildschirmScharf: pbModus === true,
@@ -1191,4 +1357,8 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   return { ...bericht, laufAt: new Date().toISOString() };
 }
 
-module.exports = { taeglicheRunde, noteFor, preisFotoKopf };
+module.exports = {
+  taeglicheRunde, noteFor, preisFotoKopf,
+  // Für Tests und für Messskripte, die die Anweisung WORTGLEICH brauchen.
+  AUDIT_ANWEISUNG, AUDIT_ANWEISUNG_PREISQUELLE, AUDIT_ANWEISUNG_PREISBELEG, bildAuditAntwort,
+};

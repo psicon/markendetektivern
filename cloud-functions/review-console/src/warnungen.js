@@ -23,7 +23,7 @@ const TAG_MS = 24 * 60 * 60 * 1000;
  * @param {Array<{id:string, kind:string, active:boolean, startAt:number, endAt:number, budgetRemainingCents?:number, budgetTotalCents?:number}>} k.aktionen
  * @param {{eingeschaltet:boolean, laeufeLetzte48h:number}} k.zweitpruefung
  * @param {{inPruefung:number, aeltesteTage:number|null, letzte24h:{gesamt:number, ohneAktion:number}}} k.bons
- * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number, aeltesteOffenTage?:number|null, fotoAbgleichGescheitert?:boolean, kontoSperrenUnlesbar?:boolean, eanHaltenNeu?:number, haltBefundNichtGespeichert?:number, eanFotoNichtGespeichert?:number, preisQuelleBefragt?:number, preisQuelleOhneAntwort?:number, preisBildschirmHalten?:number, preisBildschirmTrotzBon?:number, preisBildschirmBonWiderspruch?:number, preisBildschirmSchalterUnbekannt?:string|null, preisKopfNichtAbrufbar?:number, preisBildschirmScharf?:boolean}} k.runde
+ * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number, aeltesteOffenTage?:number|null, fotoAbgleichGescheitert?:boolean, kontoSperrenUnlesbar?:boolean, eanHaltenNeu?:number, haltBefundNichtGespeichert?:number, eanFotoNichtGespeichert?:number, preisQuelleBefragt?:number, preisQuelleOhneAntwort?:number, preisBildschirmHalten?:number, preisBildschirmTrotzBon?:number, preisBildschirmBonWiderspruch?:number, preisBildschirmSchalterUnbekannt?:string|null, preisBelegSchalterUnbekannt?:string|null, preisKopfNichtAbrufbar?:number, preisBildschirmScharf?:boolean, preisBelegHalten?:number, preisBelegKassenbon?:number, preisBelegOhneAntwort?:number, preisBelegMaerkteUnlesbar?:boolean}} k.runde
  * @param {{bild:boolean, gesamt:boolean, text:string[]}} k.notbremse
  * @param {{alt:string|null, neu:string}} k.regelVersion
  * @param {{scharf:boolean, bericht:object|null, abgebrochen?:boolean, laeuftNoch?:boolean, unbekannt?:boolean}} [k.bonRunde]
@@ -138,7 +138,9 @@ function warnungen(k) {
     }
     // Gegenrichtung (Prüfrunde 2, 04.10.2026): die Bildprüfung nennt das
     // Preisfoto „Kassenbon", der Lesedienst las es und sah keinen — dort
-    // würde bezahlt. Gemessen 0 von 126; die Fälle bleiben liegen.
+    // würde bezahlt. Gemessen 0 von 126; die Fälle bleiben liegen. Ein
+    // Preisbeleg-Halt mit Lesedienst-Bon zählt hier nicht (taeglicheRunde,
+    // kassenbonOhneLesedienstBon — Nachprüfung 05.10.2026).
     const bonWiderspruch = Number(r.preisBildschirmBonWiderspruch) || 0;
     if (bonWiderspruch >= 2) {
       gelb('preisquelle_bon_widerspruch', `Bei ${bonWiderspruch} Einreichungen nannte die Bildprüfung das Preisfoto „Kassenbon", der Lesedienst sah dort keinen (normal nie) — die Fälle bleiben liegen. Preisfotos ansehen: Warenkorb oder Bestellübersicht statt Bon? Sonst Lesung des Modells prüfen.`);
@@ -148,6 +150,29 @@ function warnungen(k) {
     // sonst nicht (Prüfrunde 2, 04.10.2026).
     if (r.preisBildschirmSchalterUnbekannt) {
       gelb('preisbildschirm_schalter_unbekannt', `Schalter preisBildschirmRegel hat den Wert ${r.preisBildschirmSchalterUnbekannt} — gilt als Beobachtung. Scharf nur mit true (Typ boolean), aus mit false.`);
+    }
+    // Ebenso der eigene Schalter des Preisbelegs (Nachprüfung 05.10.2026).
+    if (r.preisBelegSchalterUnbekannt) {
+      gelb('preisbeleg_schalter_unbekannt', `Schalter preisBelegRegel hat den Wert ${r.preisBelegSchalterUnbekannt} — gilt als Beobachtung. Scharf nur mit true (Typ boolean), aus mit false.`);
+    }
+    // Preisbeleg „Kassenbon" (Entscheidung Claude im Auftrag Patricks,
+    // 04.10.2026): ein „Kassenbon" ohne Kassenbon-Merkmal oder von einem
+    // fremden Händler bleibt liegen. Gemessen 05.10.: ~4–8 pro Woche. Viele
+    // auf einmal deuten auf eine geänderte Lesart des Modells — dann lägen
+    // echte Bons bei Patrick.
+    const belegHalten = Number(r.preisBelegHalten) || 0;
+    if (r.auditVersucht > 0 && belegHalten >= 5 && belegHalten / r.auditVersucht > 0.05) {
+      gelb('preisbeleg_haelt_viele', `${belegHalten} von ${r.auditVersucht} geprüften Einreichungen hält die Runde wegen eines unsicheren Preisbelegs an (Kassenbon ohne Kassenbon-Merkmale oder von einem fremden Händler) — normal etwa vier bis acht pro Woche. Preisfotos und Lesung des Modells prüfen.`);
+    }
+    // Beantwortet die Bildprüfung die Merkmal-Frage nicht mehr, bleibt jeder
+    // „Kassenbon" ohne gelesenen Händlerkopf liegen (gemessen 0 von 189).
+    const kbBefragt = Number(r.preisBelegKassenbon) || 0;
+    const kbOhne = Number(r.preisBelegOhneAntwort) || 0;
+    if (kbBefragt >= 8 && kbOhne / kbBefragt > 0.25) {
+      gelb('preisbeleg_ohne_antwort', `Bei ${kbOhne} von ${kbBefragt} Kassenbon-Preisfotos hat die Bildprüfung nicht gesagt, welche Kassenbon-Merkmale zu sehen sind — mit scharfer Regel bleiben sie liegen, wenn der Lesedienst keinen Bon-Kopf las. Modell bzw. Anweisung prüfen.`);
+    }
+    if (r.preisBelegMaerkteUnlesbar) {
+      gelb('preisbeleg_maerkte_unlesbar', 'Die Liste unserer Märkte (discounter) war nicht lesbar — der Händler-Abgleich der Preisbelege lief nur gegen die Ketten im Code. Ein neu aufgenommener Markt gilt heute als fremd.');
     }
     // Kopf des Preisfotos nicht abrufbar (Storage): ohne ihn gibt die Regel
     // keine Freigabe — mehrere auf einmal deuten auf eine Störung bei uns.

@@ -21,6 +21,7 @@ hat, steht hier als Regel. Wer die Runde ändert, ändert zuerst diese Datei.
 | Morgen-Chat | geplante Aufgabe `morgenrunde-bericht` in der Claude-App (08:35/08:48), postet in ClickUp |
 | Schalter | `cashback_config/v1.fotoWorker === true` → scharf, sonst Trockenlauf |
 | Bildschirmfoto als Preisbeleg | `src/preisBildschirm.js` (+ Tests), Schalter `cashback_config/v1.preisBildschirmRegel`: `false` \| `'shadow'` (Standard) \| `true` |
+| Preisbeleg „Kassenbon" (Warenkorb, fremder Händler) | dieselbe Datei, EIGENER Schalter `cashback_config/v1.preisBelegRegel`: `false` \| `'shadow'` (Standard) \| `true` (Nachprüfung 05.10.2026) |
 | Von Hand anstoßen | HTTP `fotoRundeManuell?key=…` (europe-west1) — ohne Schlüssel 403; scharf nur mit `scharf=1` und eingeschaltetem Schalter |
 
 Die Runde liegt bewusst in der Prüfkonsole und nicht in einer eigenen
@@ -47,9 +48,10 @@ Notbremse zurückhält — das steht im Bericht unter `wartetAufDich`.
    für 28.741 Dateien, 02.10.2026).
 4. **Bildprüfung** aller Fälle, denen kein Foto fehlt. Sie liest im selben
    Aufruf die Nummer unter dem Strichcode des Barcode-Fotos mit (`eanFoto`)
-   und — ist der Schalter `preisBildschirmRegel` nicht aus — woher der Preis
-   stammt (`preisQuelle`); danach liest die Runde den Kopf des Preisfotos
-   (192 KB: Format, Maße, Kamerahersteller, EXIF-Datum/Software);
+   und — ist einer der Schalter `preisBildschirmRegel` / `preisBelegRegel`
+   nicht aus — woher der Preis stammt (`preisQuelle`; mit Preisbeleg auch die
+   Unterfragen zum Kassenbon); mit Bildschirm-Regel liest die Runde danach den
+   Kopf des Preisfotos (192 KB: Format, Maße, Kamerahersteller, EXIF-Datum/Software);
    wo nötig folgt eine zweite Lesung nur dieses Fotos (innerhalb der
    Arbeitszeit). Ein Halte-Befund eines früheren Laufs gilt weiter, bis ein
    Mensch in der Konsole entscheidet. Die Runde
@@ -370,19 +372,45 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   Bildschirmfoto lehnt die Runde nicht mehr selbst ab, es wartet auf die
   Konsole (gemessen selten: unklar 3 von 351, ohne Antwort 0 von 448).
   Aufheben: jede Entscheidung in der Konsole
-  (ersetzt `review`), oder der Schalter (`false` nimmt alles weg, in
-  `'shadow'` hält der Befund nichts mehr). Ein Befund aus der Beobachtung wird
-  nie übernommen.
+  (ersetzt `review`), oder der Schalter DER REGEL, die den Befund trägt
+  (`false` nimmt ihn weg, in `'shadow'` hält er nichts mehr). Ein Befund aus
+  der Beobachtung wird nie übernommen.
+  **Zwei Schalter, getrennt (Nachprüfung 05.10.2026):** Bildschirm-Regel
+  `preisBildschirmRegel` und Preisbeleg `preisBelegRegel`. Bis dahin hing der
+  Preisbeleg am Schalter der Bildschirm-Regel — wer ihn zurücknehmen wollte
+  (etwa weil er zu viele Bons inhabergeführter Märkte anhält), gab am nächsten
+  Morgen auch jedes angehaltene Bildschirmfoto und jede von der Notbremse
+  zurückgehaltene Bildschirm-Ablehnung ohne Menschen frei (nachgestellt).
+  Jetzt wirkt jede Regel nur unter IHREM Schalter (`preisBildschirmLage`), und
+  der Eintrag am Fall nennt, welche Regeln ihn halten
+  (`preisBildschirm.regeln`, z. B. `['bildschirm']`, `['beleg']` oder beide);
+  ältere Einträge ohne `regeln` gelten über `art: 'beleg'` als Preisbeleg,
+  sonst als Bildschirm-Regel, ein „ablehnen" immer als Bildschirm-Regel.
+  Ein Fall, den beide Regeln halten, liegt, solange eine der beiden scharf ist.
+  **Rückweg je Regel — und was er freigibt:**
+  `preisBildschirmRegel` auf `'shadow'` oder `false` gibt am nächsten Morgen
+  alle von der Bildschirm-Regel angehaltenen Fälle frei (auch zurückgehaltene
+  Bildschirm-Ablehnungen), sofern nichts anderes sie hält — sie werden bezahlt.
+  `preisBelegRegel` auf `'shadow'` oder `false` ebenso für die Preisbeleg-Halte.
+  Wer das nicht will, entscheidet die angehaltenen Fälle VOR dem Umschalten in
+  der Konsole (Liste: Tagesbericht bzw. Konsole mit Hinweis
+  `preis_bildschirm_unsicher` / `preis_beleg_unsicher`).
   **Schalter** `cashback_config/v1.preisBildschirmRegel`: `false` = aus
-  (keine Zusatzfrage, kein Bildkopf, nichts am Dokument); `'shadow'` =
+  (kein Bildkopf, kein Bildschirm-Befund, nichts am Dokument — die Frage nach
+  der Preisquelle entfällt erst, wenn auch `preisBelegRegel` aus ist, denn der
+  Preisbeleg braucht die Antwort „kassenbon"); `'shadow'` =
   Beobachtung, entschieden wird wie bisher; `true` = scharf (wirkt nur, wenn
-  auch `fotoWorker` scharf ist). Fehlt der Schalter oder hat er einen anderen
+  auch `fotoWorker` scharf ist). `preisBelegRegel` genauso: `false` = keine
+  Unterfragen zum Kassenbon (die Anweisung ist dann wortgleich die vom
+  04.10.), kein Beleg-Befund; `'shadow'` = Beobachtung; `true` = scharf (nur
+  liegen lassen). Fehlt ein Schalter oder hat er einen anderen
   Wert (Tippfehler, `"true"` als Text — so legt die Firebase-Konsole ein neues
   Feld standardmäßig an!) → `'shadow'`: ein Tippfehler schaltet weder still
   scharf noch die Beobachtung ab, steht aber gelb im Bericht
-  (`preisbildschirm_schalter_unbekannt`, mit Wert und Typ; Prüfrunde 2).
-  Gelesen wird der Schalter EINMAL, zusammen mit `fotoWorker` (index.js reicht
-  ihn durch): ein eigenes zweites Lesen konnte allein scheitern, und als
+  (`preisbildschirm_schalter_unbekannt` bzw. `preisbeleg_schalter_unbekannt`,
+  mit Wert und Typ; Prüfrunde 2).
+  Gelesen werden beide Schalter EINMAL, zusammen mit `fotoWorker` (index.js reicht
+  sie durch): ein eigenes zweites Lesen konnte allein scheitern, und als
   `'shadow'` hätte dann kein scharfer Befund mehr gehalten — angehaltene Fälle
   wären ohne Menschen frei geworden (Prüfrunde 2). Scheitert das Lesen, läuft
   die Runde gar nicht. Ein Wechsel ändert die Regelversion (gelbe Warnung
@@ -391,7 +419,8 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   wie möglich, denn das Dokument liest der Einreicher selbst (firestore.rules
   `crowd_uploads` read für den Eigentümer, die App lädt es ganz): NUR bei einem
   nach dem Lauf offenen Fall mit Befund `review.rundeOffen.preisBildschirm` =
-  `{modus, befund, seit}` und ein neutraler Hinweis („Preisquelle unsicher …
+  `{modus, befund, seit, regeln}` (`regeln` nur bei scharfem Befund) und ein
+  neutraler Hinweis („Preisquelle unsicher …
   Einzelheiten im Tagesbericht"). Nicht am Dokument (Gegenprüfung 04.10.2026):
   die Antwort und Begründung des Modells (`preisQuelle`, `preisQuelleGrund`),
   das Merkmal, Format, Maße, Gerätemarke — das wäre eine Anleitung zum
@@ -421,7 +450,9 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   **Nach der Beobachtungswoche:** im Dashboard jeden „wäre abgelehnt"-Fall
   am Preisfoto ansehen (Ziel: 0 echte Preisschilder/Bons darunter), dazu
   jeden „Kassenbon, Lesedienst sah keinen" (Ziel: nur echte Bons), dann
-  `preisBildschirmRegel: true` setzen. Rückweg: `'shadow'` oder `false`.
+  `preisBildschirmRegel: true` setzen. Rückweg: `'shadow'` oder `false` —
+  gibt die angehaltenen Fälle DIESER Regel frei (siehe „Rückweg je Regel").
+  Den Preisbeleg schaltet `preisBelegRegel` getrennt scharf.
   Nichts wirkt rückwirkend: in der Beobachtung freigegebene Fälle bleiben
   bezahlt, zurückgefordert wird nichts.
   **Vor dem Ausrollen gemessen (04.10.2026, nur lesend):** die Zusatzfrage
@@ -431,6 +462,125 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   gleich (Preis sichtbar „unsicher" → „ja" bei einem freigegebenen Fall);
   die Regel hätte dort nichts angehalten. Der Bildkopf-Parser lieferte an
   627 Preisfotos dieselbe Klasse wie die Messung (0 Abweichungen).
+- **Preisbeleg „Kassenbon": Warenkorb und fremde Händler (Entscheidung
+  Claude im Auftrag Patricks, 04.10.2026 — Patrick: „Kannst du selbst
+  entscheiden?").** Beide Befunde lassen nur LIEGEN, nie ab, und hängen am
+  EIGENEN Schalter `preisBelegRegel` (Nachprüfung 05.10.2026; bis dahin am
+  Schalter der Bildschirm-Regel, siehe „Zwei Schalter"): Beobachtung zählt
+  nur, scharf wird aus einer sonst fälligen Freigabe ein offener Fall. Nur bei
+  der Antwort „kassenbon" (`preisBelegBefund` in `src/preisBildschirm.js`).
+  **(1) Ohne Kassenbon-Merkmale (Warenkorb-Lücke aus Prüfrunde 3):** ein auf
+  Artikelzeilen zugeschnittener Online-Warenkorb oder eine Bestellliste hieß
+  „kassenbon" und wurde still bezahlt. Jetzt braucht der Beleg mindestens EIN
+  Merkmal eines abgeschlossenen Einkaufs — laut Bildprüfung (`belegMerkmale`:
+  `haendler` Name/Logo, `datum` Kaufdatum/Uhrzeit, `summe`, `nummer` Bon-/
+  Kassen-/Beleg-/Rechnungs-/Bestell-Nr. oder TSE, `zahlung`, `steuer`
+  MwSt.-Aufstellung oder Kennzeichen A/B hinter den Preisen) ODER laut
+  Lesedienst (gelesener Bon-Kopf in `priceReceipt`: Name oder Anschrift).
+  Sonst → liegen. Ein Bon-Kopf des Lesedienstes allein genügt (kein echter
+  Bon hängt an EINER Modellantwort); keine verwertbare Antwort auf die
+  Merkmal-Frage ist dagegen kein Freispruch. Eine von der Bildprüfung
+  genannte Kette zählt NICHT als Merkmal — das Modell kann sie aus dem
+  Produkt („K-Classic") erschließen. Die Steuer-Kennzeichen gehören dazu,
+  weil zugeschnittene echte Bons sie meist tragen und ein Warenkorb nie.
+  **(2) Fremder Händler** (wie für Bons seit 04.10.: „nur unsere Märkte,
+  Amazon nein", CLAUDE.md): die Bildprüfung nennt die KETTE nach Name/Logo
+  (`belegHaendler`; „bei inhabergeführten Märkten die Kette, nicht den
+  Inhaber"). Löst kein genannter Name — weder dieser noch der vom Lesedienst
+  gelesene Filialname — auf einen unserer Märkte auf → liegen. Nennt die
+  Bildprüfung keinen, zählt der Filialname des Lesedienstes allein (TK Maxx).
+  Unsere Märkte = erstes Wort jedes Namens in `discounter` (täglich gelesen,
+  ~20 Dokumente; ein neu aufgenommener Markt wie Picnic gilt sofort) plus feste
+  Ketten und Vertriebslinien im Code (`UNSERE_KETTEN`: nahkauf, Marktkauf,
+  E center, Neukauf, nah & gut, diska, Eurospar/Interspar) — die sind auch der
+  Rückfall, wenn `discounter` nicht lesbar ist (gelbe Warnung). Ganze Wörter
+  („R E W E" wird zusammengezogen), Komposita nur mit Schlüsseln ab fünf
+  Buchstaben („Edekamarkt"), KEINE Tippfehler-Toleranz (die Bon-Pipeline
+  machte damit aus „Das" dm). dm-, Rossmann-, REWE-Online usw. gelten.
+  **Am Dokument** nur `review.rundeOffen.grund: 'preis_beleg_unsicher'`,
+  `preisBildschirm: {modus, befund: 'halten', seit, regeln: ['beleg'], art: 'beleg'}` und der
+  Hinweis „Preisbeleg unsicher — …" — bewusst ohne „Warenkorb", „Händler",
+  Merkmale: wer liest, woran es hing, schneidet sonst den Kopf ab oder die
+  Summenzeile dazu. Welcher der beiden Befunde, steht nur im Tagesbericht.
+  Ein scharfer Halt wird wie jeder andere nie automatisch frei
+  (`preisBildschirmVorbefund` trägt `regeln` weiter) — außer man nimmt
+  `preisBelegRegel` zurück; die Bildschirm-Regel berührt ihn nicht. Konsole:
+  Hinweis `preis_beleg_unsicher`, keine Sperre.
+  **Bericht** `preisBildschirm.beleg`: `modus` (Schalter `preisBelegRegel`),
+  `schalterUnbekannt`, Zahlen und Fälle wie unten; mit `preisBelegRegel: false`
+  alle 0 (nicht gefragt). Je Fall in `preisBildschirm.faelle` sagt `wirkt`, ob
+  ein scharfer Schalter etwas geändert hat.
+  **Gemessen 05.10.2026** (nur lesend, 272 Aufrufe im vollen Aufruf der
+  Runde mit der neuen Anweisung, 4,05 $; scratchpad `pb-beleg/`):
+  - Echte Kassenbons (Wahrheit der Messung vom 04.10.): 166 von 167
+    „kassenbon". (1) hält 3 — e-Bons eines Nutzers, eng auf Artikelzeilen
+    OHNE Kennzeichen zugeschnitten, von einem Warenkorb nicht zu
+    unterscheiden. (1) kann nur greifen, wo der Lesedienst KEINEN Bon-Kopf
+    las: das waren 41 der 166 (34 e-Bons, 19 davon von einem Nutzer, nur 5
+    Papierbons) — „0 von 40 Papierbons" sagte deshalb wenig (35 der 40 hatten
+    einen Kopf). Ohne die Steuer-Kennzeichen als
+    Merkmal wären es 25 gewesen, mit „Summe allein zählt nicht" 6, nur mit
+    Nummer/Zahlung/Steuer 8 (von 41 echten Bons ohne Lesedienst-Kopf). (2) hält die Amazon-Rechnung
+    (zu einem Netto-Produkt, bezahlt) — gewollt.
+  - **Nachmessung Papierbons (Nachprüfung 05.10.2026, nur lesend, 81
+    Aufrufe, 1,20 $; scratchpad `pb-pruef/`):** Im Bestand vom 04.10. sind 155
+    Kassenbon-Preisfotos Kamerafotos ohne Lesedienst-Kopf (ungemessen 150).
+    41 davon gemessen (alle 18 Aldi Nord, 23 andere Märkte, gleiche
+    Anweisung): 4 bleiben liegen, alle echt und bezahlt — eine
+    Aldi-Süd-Nahaufnahme mit abgeschnittenen Preisen (nur Artikelnummern), ein
+    Aldi-Nord-Ausschnitt aus zwei Artikelzeilen (dasselbe Foto zweimal
+    eingereicht), ein Kaufland-Ausschnitt. Ein Mensch sieht diesen Fotos den
+    Kauf auch nur am Thermopapier an. Aldi Nord druckt Ziffern („€ 1"/„€ 2")
+    statt A/B: als `steuer` erkannt in 16 von 18, auch bei Ausschnitten nur
+    aus Artikelzeilen — die Anweisung bleibt deshalb wortgleich.
+    Stabilität: dieselben 40 Fälle mit genau einem oder keinem Merkmal ein
+    zweites Mal gefragt (identische Eingabe, gleiche Token-Zahl): 0 Wechsel
+    zwischen „mit Merkmal" und „ohne", ein Wechsel der Quelle (kassenbon →
+    keiner, beide ohne Merkmal). Die 22 Bons, die nur über `steuer` bestehen,
+    hängen damit nicht an einer zufälligen Antwort; eine zweite Bildprüfung
+    vor dem Liegenlassen änderte nichts und ist deshalb nicht gebaut.
+  - Alle 27 Preisbelege, deren gelesener Händlername nicht auf einen unserer
+    Märkte auflöst (24 inhabergeführte REWE/EDEKA, Amazon, Wreesmann,
+    TK Maxx): fremd erkannt 3 von 3; bei den Inhaber-Bons nannte die
+    Bildprüfung 18-mal die Kette, 5-mal den Namen eines REWE-Markts ohne Logo
+    auf dem Bon („Krummenerl") → liegen (Mensch sieht es dem Bon auch nicht
+    an, nur am gewählten Markt).
+  - Die Zusatzfragen verschieben die übrigen Antworten nicht messbar:
+    Bildschirmfotos 40 von 40 „bildschirm" (Regel: 39 abgelehnt, 1 liegt —
+    wie vorher), Laden 22/22, kein Preis 8/8, eine Antwort „keiner" wurde
+    richtig „kassenbon". Ein e-Bon-Ausschnitt aus einer einzigen Zeile hieß
+    „laden" (vorher nur im Modus „nur Preisfoto" gemessen) und bleibt über die
+    Bildschirm-Regel liegen.
+  - Synthetische Warenkörbe (auf Artikelzeilen zugeschnitten, 4:3 ohne EXIF,
+    je zweimal): 7 von 8 „bildschirm" (liegen über die Bildschirm-Regel), 1
+    MIT Zwischensumme „kassenbon" + `summe` → bezahlt (Lücke, siehe unten).
+    Bon-Zeilen mit Kennzeichen 2/2 „kassenbon" + `steuer`.
+  - Eine Antwort kam als Liste verpackt zurück (`[{…}]`) — wird jetzt
+    ausgepackt (vorher: „Bildprüfung gescheitert").
+  - Erwartet im Betrieb: (1) etwa 3–5 pro Woche (rund jeder zehnte
+    „Kassenbon" ohne Lesedienst-Kopf, 7 von 83 gemessen; davon kamen im
+    September ~30, Anfang Oktober ~45 pro Woche, überwiegend Papierbons),
+    (2) etwa 1–3 pro Woche (0,7 % der Bons mit gelesenem Kopf, gut die Hälfte
+    davon Inhaber-Märkte ohne Logo). Zusammen ~4–8 Fälle pro Woche
+    Mehrarbeit, nur scharf (vor der Nachmessung hier: ~3–5).
+  **Bericht** `preisBildschirm.beleg`: `kassenbon` (befragt), `ohneMerkmale`,
+  `fremderHaendler`, `stattFreigabe`, `merkmaleOhneAntwort`,
+  `maerkteUnlesbar`, bis 30 `faelle` (Befund, Händler laut Bildprüfung und
+  Lesedienst, Merkmale, Begründung); je Fall in `preisBildschirm.faelle`
+  zusätzlich `beleg`/`belegHaendler`. **Kosten:** ~300 Eingabe- und ~40
+  Ausgabe-Token mehr je Fall im ohnehin laufenden Aufruf (gemessen an 97
+  gleichen Fällen; ~3 $ im Monat zum Listenpreis), ~20 Lesevorgänge
+  `discounter` am Tag.
+  **Nach der Beobachtungswoche** (zusammen mit der Bildschirm-Regel): jeden
+  Fall der Liste „Preisbeleg" am Preisfoto ansehen — Ziel: bei „ohne
+  Merkmale" nur Warenkörbe/Bestelllisten oder Ausschnitte ohne jedes Merkmal,
+  bei „fremder Händler" nur Händler außerhalb unserer Märkte bzw. Inhaber-
+  Märkte ohne Logo. Steht dort ein normaler Bon unserer Märkte, erst die
+  Ursache klären, dann scharf schalten. Liegen bei „ohne Merkmale" vor allem
+  Kamerafotos von Papierbons (Spalte Datei: 4:3, kein Bildschirm-Merkmal),
+  wäre eine Möglichkeit, (1) nur auf Dateien MIT Bildschirm-Merkmal
+  anzuwenden — das öffnet aber den mit der App-Kamera abfotografierten
+  Warenkorb; Entscheidung mit den Fällen der Woche, nicht vorher.
 - **Aufnahmeort passt nicht zum Markt** (anderes Land, Ausland, Simulator-
   Standort; `ort.auffaelligkeiten`) → bleibt für Patrick liegen (`ort_auffaellig`).
   Selten (3 von 1.973 Freigaben seit 01.09.) und oft harmlos (Aldi Süd/Hofer).
@@ -542,7 +692,11 @@ gesperrten Konten), dort als „Vorprüfung ok" mit Freigabe-Taste.
   Notiz möglich (wer hinsieht, entscheidet; Ablehnen mit A, dann 2 = „Fotos
   passen nicht", derselbe Code wie in der Runde). Nachrechnen kann sie ihn
   nicht: woran er hängt, steht bewusst nicht am Dokument, sondern im
-  Tagesbericht des Laufs (`seit`).
+  Tagesbericht des Laufs (`seit`). Ebenso der Preisbeleg (05.10.2026):
+  `art: 'beleg'` → Hinweis `preis_beleg_unsicher`, Zeile „Preisbeleg:
+  unsicher — selbst ansehen" (zählt: Kassenbon, e-Bon, Online-Rechnung eines
+  unserer Märkte; nicht: Warenkorb/Bestellliste ohne Kauf, Rechnung eines
+  fremden Händlers).
 
 ## Rettungsläufe vor dem Urteil
 
@@ -647,16 +801,16 @@ Freigaben laufen IMMER — sie sind die harmlose Richtung. Zurückgehalten
   wörtlichen Vorgabe und deshalb Patrick vorzulegen: die Regel lehnt nicht ab,
   wenn der Lesedienst einen Kassenbon erkannte (strenger als „Bildschirm UND
   Merkmale"; gibt keinen gemessenen Bildschirmfall frei).
-  (f) **Rechnungen fremder Händler, offen:** die Anweisung zählt jede
-  Rechnung als „kassenbon" — auch eine Amazon-Rechnung als Preisbeleg zu einem
-  Netto-Produkt (Fall `otzruvTyXmQjDj9dv0RnXTzEETt1_1963faab…`, freigegeben).
-  Für Bons gilt seit 04.10.: Online-Bestellungen nur bei UNSEREN Märkten,
-  „Amazon nein" (CLAUDE.md). Ob das auch für den Preisbeleg gilt, entscheidet
-  Patrick; heute selten (1 von 1.172 Preisfotos mit gelesenem Bon-Händler),
-  nach dem Scharfschalten aber der naheliegende Ausweg für Online-Preise.
-  Umsetzung wäre: gelesenen Händler (`priceReceipt.merchant`) gegen
-  `discounter` auflösen wie `cashback-pipeline/lib/merchant.js`, fremd →
-  liegen lassen. Die gemessene Anweisung nicht ohne neue Messung umschreiben.
+  (f) **Rechnungen fremder Händler — ENTSCHIEDEN (Claude im Auftrag
+  Patricks, 04.10.2026):** gleiche Regel wie für Bons, „nur unsere Märkte,
+  Amazon nein" — ein Preisbeleg eines Händlers außerhalb `discounter` bleibt
+  scharf liegen (nicht abgelehnt). Umgesetzt und gemessen 05.10., siehe
+  „Preisbeleg ‚Kassenbon'" oben. Anlass war Fall
+  `otzruvTyXmQjDj9dv0RnXTzEETt1_1963faab…` (Amazon-Rechnung zu einem
+  Netto-Produkt, freigegeben); zurückgefordert wird nichts.
+  (g) **Warenkorb als „Kassenbon" — ENTSCHIEDEN (Claude im Auftrag Patricks,
+  04.10.2026):** ein „Kassenbon" ohne jedes Kassenbon-Merkmal bleibt scharf
+  liegen, auch ohne Bildschirm-Merkmale. Siehe oben.
 - **Bildschirmfoto als Preisbeleg, Lücken:** ein mit der App-Kamera
   abfotografierter Bildschirm hat keine Bildschirm-Merkmale (immer 4:3, ohne
   Datum und Software). Sagt das Modell „bildschirm", bleibt er liegen (nie automatisch
@@ -687,9 +841,16 @@ Freigaben laufen IMMER — sie sind die harmlose Richtung. Zurückgehalten
   (Punkt f) schließt das nicht — ein REWE-Warenkorb ginge durch. Messbar
   gemacht: der Bericht zählt und listet jeden „Kassenbon", den der Lesedienst
   las und nicht als Bon sah (`kassenbonLesedienstOhneBon`, gemessen 0 von 167
-  Kassenbons). Offene Frage an Patrick: diese Fälle auch OHNE Merkmale liegen
-  lassen (kostet gemessen nichts, schließt aber nur den Teil, bei dem der
-  Lesedienst den Warenkorb nicht für einen Bon hält)?
+  Kassenbons). **Seit 05.10. teilweise geschlossen** (Punkt g): ohne jedes
+  Kassenbon-Merkmal bleibt ein „Kassenbon" liegen. **Weiter offen:** (a) ein
+  Warenkorb, der seine Summen- oder Lieferdatumszeile zeigt, hat ein
+  Merkmal und wird bezahlt (synthetisch 1 von 8 als „kassenbon" + `summe`;
+  „Summe allein zählt nicht" kostete 3 weitere echte e-Bons, die nur
+  Artikel und Summe zeigen). (b) Eine Rechnung eines fremden Händlers, deren
+  Kopf und Logo abgeschnitten sind, nennt keinen Händler — dann greift nur
+  noch der gelesene Filialname, und fehlt der, wird sie bezahlt (ungemessen).
+  (c) Ein Bon eines Inhaber-Markts ohne Kettenlogo („Krummenerl", REWE)
+  bleibt liegen, obwohl er gilt (5 von 23 Inhaber-Bons gemessen).
   **Zuschneiden kann zur Bezahlung führen** (Prüfrunde 2; die frühere Aussage
   „nie eine Bezahlung" war falsch): ein Zuschnitt ändert nicht nur die
   Dateimerkmale, er entfernt auch die Zeichen, an denen das Modell den
@@ -741,10 +902,20 @@ erkannte (gelb; gemessen nie — Fingerabdruck einer geänderten Lesart, die
 Fälle bleiben liegen), mindestens 2 Preisfotos „Kassenbon", obwohl der
 Lesedienst das Foto las und keinen Bon sah (gelb, `preisquelle_bon_widerspruch`;
 gemessen nie — Warenkorb statt Bon, oder geänderte Lesart; die Fälle bleiben
-liegen), ein unbekannter Wert des Schalters `preisBildschirmRegel` (gelb, mit
+liegen; ein Preisbeleg-Halt zählt hier NUR mit diesem Widerspruch — ohne die
+Einschränkung zählten 11 von 189 Kassenbons mit Lesedienst-Bon mit, und die
+Warnung käme etwa wöchentlich ohne Grund, Nachprüfung 05.10.2026), ein unbekannter Wert des Schalters `preisBildschirmRegel` (gelb, mit
 Wert und Typ — gilt als Beobachtung), mindestens 3 Preisfotos, deren Kopf
 nicht abrufbar war (gelb; Storage-Störung — scharf und bei mehr als 25 % der
-befragten, mind. 8, rot: ein Tag fast ohne Freigaben, Prüfrunde 3). Ein scharfer Halt der
+befragten, mind. 8, rot: ein Tag fast ohne Freigaben, Prüfrunde 3). Preisbeleg
+(05.10.2026): mehr als 5 % (mind. 5) heute NEU wegen eines unsicheren
+Preisbelegs angehalten (gelb, `preisbeleg_haelt_viele`; normal ~4–8 pro
+Woche), Merkmal-Frage bei mehr als 25 % (mind. 8) der „Kassenbons" ohne
+Antwort (gelb, `preisbeleg_ohne_antwort` — dann bliebe jeder Bon ohne
+Lesedienst-Kopf liegen; gemessen 0 von 189), Liste `discounter` nicht lesbar
+(gelb, `preisbeleg_maerkte_unlesbar`), ein unbekannter Wert des Schalters
+`preisBelegRegel` (gelb, `preisbeleg_schalter_unbekannt`, mit Wert und Typ —
+gilt als Beobachtung). Ein scharfer Halt der
 Bildschirm-Regel, der nicht gespeichert werden konnte, zählt zur roten
 Warnung `befund_nicht_gespeichert` (ohne Eintrag kennt der nächste Lauf ihn
 nicht). Dass die Runde gar nicht lief, erkennen

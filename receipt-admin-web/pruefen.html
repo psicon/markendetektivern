@@ -268,6 +268,8 @@
         ['preis_bildschirm', 'Preisfoto ist ein Bildschirmfoto (App, Online-Shop, Prospekt)'],
         ['preis_bildschirm_unsicher', 'Preisfoto vielleicht ein Bildschirmfoto — selbst ansehen'],
         ['preis_kopf_nicht_lesbar', 'Preisfoto-Datei war nicht abrufbar (Technik) — selbst ansehen'],
+        // Preisbeleg „Kassenbon" (Entscheidung Claude im Auftrag Patricks, 04.10.2026)
+        ['preis_beleg_unsicher', 'Preisbeleg unsicher (Warenkorb? fremder Händler?) — selbst ansehen'],
         ['notbremse_preis_bildschirm', 'Notbremse (Bildschirmfoto als Preis)'],
       ]]);
       /** Was die Barcode-Lesung der Morgenrunde ergab (row.eanFoto, src/einreichung.js eanFotoZeile). */
@@ -675,10 +677,18 @@
       function preisQuelleZeile(p, r) {
         const h = p.hinweise || [];
         const sicher = h.includes('preis_bildschirm');
-        if (!sicher && !h.includes('preis_bildschirm_unsicher')) return '';
         const pb = (r.rundeOffen && r.rundeOffen.preisBildschirm) || {};
         const beob = pb.modus !== true ? ' (Beobachtung)' : '';
         const seit = pb.seit ? ` Befund seit ${esc(pb.seit)}, Einzelheiten im Tagesbericht.` : ' Einzelheiten im Tagesbericht.';
+        // Preisbeleg (05.10.2026): ein „Kassenbon" ohne jedes Kassenbon-Merkmal
+        // (Warenkorb, Bestellliste?) oder von einem Händler, der keiner unserer
+        // Märkte ist. Welcher der beiden, steht im Tagesbericht (das Dokument
+        // liest der Einreicher selbst).
+        if (h.includes('preis_beleg_unsicher')) {
+          return `<div class="folge zahlt-nicht">Preisbeleg: <b>unsicher — selbst ansehen</b>${beob}
+            <br><small>${seit} Zählt: Kassenbon (auch e-Bon, Online-Rechnung) eines unserer Märkte. Nicht: Warenkorb oder Bestellliste ohne Kauf, Rechnung eines fremden Händlers (z. B. Amazon). Ablehnen: A, dann 2.</small></div>`;
+        }
+        if (!sicher && !h.includes('preis_bildschirm_unsicher')) return '';
         return `<div class="folge zahlt-nicht">Preisfoto: <b>${sicher ? 'Bildschirmfoto' : 'vielleicht ein Bildschirmfoto — selbst ansehen'}</b>${beob}
           <br><small>${seit} Der Preis zählt aus dem Markt (Preisschild, Kassenbon, auch e-Bon). Ablehnen: A, dann 2.</small></div>`;
       }

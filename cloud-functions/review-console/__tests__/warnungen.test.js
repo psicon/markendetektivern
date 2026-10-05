@@ -188,3 +188,23 @@ describe('Bildschirmfoto als Preisbeleg (04.10.2026)', () => {
     expect(w[0].text).toMatch(/"true" \(Text\).*Beobachtung.*boolean/);
   });
 });
+
+describe('Preisbeleg „Kassenbon" (Entscheidung Claude im Auftrag Patricks, 04.10.2026)', () => {
+  const runde = (over) => ({ ...basis().runde, ...over });
+  it('viele Fälle wegen unsicheren Preisbelegs angehalten (≥ 5 und > 5 %) → gelb; normal 4–8 pro Woche', () => {
+    expect(warnungen(basis({ runde: runde({ auditVersucht: 120, preisBelegHalten: 2 }) }))).toEqual([]);
+    expect(codes(warnungen(basis({ runde: runde({ auditVersucht: 80, preisBelegHalten: 5 }) })))).toEqual(['gelb:preisbeleg_haelt_viele']);
+    expect(warnungen(basis({ runde: runde({ auditVersucht: 120, preisBelegHalten: 5 }) }))).toEqual([]);
+  });
+  it('Merkmal-Frage bei „Kassenbon" ohne Antwort (> 25 %, mind. 8) → gelb', () => {
+    expect(warnungen(basis({ runde: runde({ preisBelegKassenbon: 40, preisBelegOhneAntwort: 10 }) }))).toEqual([]);
+    const w = warnungen(basis({ runde: runde({ preisBelegKassenbon: 40, preisBelegOhneAntwort: 11 }) }));
+    expect(codes(w)).toEqual(['gelb:preisbeleg_ohne_antwort']);
+    expect(w[0].text).toMatch(/11 von 40/);
+    expect(warnungen(basis({ runde: runde({ preisBelegKassenbon: 6, preisBelegOhneAntwort: 6 }) }))).toEqual([]); // kleiner Tag
+  });
+  it('Liste unserer Märkte nicht lesbar → gelb', () => {
+    expect(warnungen(basis({ runde: runde({ preisBelegMaerkteUnlesbar: false }) }))).toEqual([]);
+    expect(codes(warnungen(basis({ runde: runde({ preisBelegMaerkteUnlesbar: true }) })))).toEqual(['gelb:preisbeleg_maerkte_unlesbar']);
+  });
+});

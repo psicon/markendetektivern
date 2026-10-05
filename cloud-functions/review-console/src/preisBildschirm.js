@@ -39,6 +39,18 @@
  * lassen"), siehe preisBildschirmBefund. Dazu ein drittes, unabhängiges
  * Zeichen, das schon am Dokument liegt: hat der Lesedienst einen Kassenbon
  * erkannt (lesedienstBonOf), wird nie abgelehnt — Gegenprüfung 04.10.2026.
+ *
+ * PREISBELEG „KASSENBON" (Entscheidung Claude im Auftrag Patricks,
+ * 04.10.2026): ein „Kassenbon" ohne jedes Kassenbon-Merkmal (Warenkorb-Lücke)
+ * oder von einem Händler, der keiner unserer Märkte ist, bleibt liegen —
+ * siehe preisBelegBefund (Abschnitt „Preisbeleg") und WISSEN-FOTORUNDE.md.
+ *
+ * ZWEI SCHALTER (Nachprüfung 05.10.2026): Bildschirm-Regel
+ * (`preisBildschirmRegel`) und Preisbeleg (`preisBelegRegel`) werden getrennt
+ * geschaltet und getrennt weitergetragen (preisBildschirmLage). Hingen beide
+ * an einem Schalter, gäbe das Zurücknehmen des Preisbelegs (etwa weil er zu
+ * viele Bons inhabergeführter Märkte anhält) am nächsten Morgen auch jedes
+ * angehaltene Bildschirmfoto frei — ohne dass ein Mensch es gesehen hat.
  */
 
 /** Antworten der Bildprüfung auf „Woher stammt der Preis?" */
@@ -57,8 +69,10 @@ const PREIS_KOPF_NICHT_LESBAR = 'preis_kopf_nicht_lesbar';
 const KOPF_BYTES = 192 * 1024;
 
 /**
- * Schalter `cashback_config/v1.preisBildschirmRegel`:
- *  - `false`     → aus: keine Zusatzfrage an das Modell, kein Bildkopf, nichts am Dokument.
+ * Schalter `cashback_config/v1.preisBildschirmRegel` (Bildschirm-Regel):
+ *  - `false`     → aus: kein Bildkopf, kein Befund der Bildschirm-Regel; die
+ *                  Frage nach der Preisquelle entfällt nur, wenn auch der
+ *                  Preisbeleg aus ist (er braucht die Antwort „kassenbon").
  *  - `'shadow'`  → Beobachtung (Standard): Befund am Dokument und im Bericht, entschieden wird wie bisher.
  *  - `true`      → scharf: Ablehnung bzw. Liegenlassen nach preisBildschirmBefund.
  * Jeder andere Wert (fehlt, Tippfehler, 'true' als Text) gilt als 'shadow' —
@@ -71,6 +85,19 @@ function modusPreisBildschirm(v) {
   if (v === true) return true;
   if (v === false) return false;
   return 'shadow';
+}
+
+/**
+ * Schalter `cashback_config/v1.preisBelegRegel` (Preisbeleg „Kassenbon",
+ * Nachprüfung 05.10.2026 — eigener Schalter, siehe Kopf der Datei). Werte
+ * wie bei der Bildschirm-Regel: `false` aus (keine Unterfragen zum Kassenbon,
+ * kein Befund), `'shadow'` Beobachtung (Standard), `true` scharf (nur liegen
+ * lassen, nie ablehnen). Unbekannt → `'shadow'`, gelb im Bericht
+ * (`preisbeleg_schalter_unbekannt`).
+ * @returns {false|'shadow'|true}
+ */
+function modusPreisBeleg(v) {
+  return modusPreisBildschirm(v);
 }
 
 /**
@@ -143,6 +170,181 @@ function lesedienstArten(x) {
 function lesedienstOhneBonOf(x, zusatzArten = []) {
   if (lesedienstBonOf(x, zusatzArten)) return false;
   return lesedienstArten(x).some((a) => a === 'preisschild' || a === 'produktfoto' || a === 'sonstiges');
+}
+
+/* ─────────────────────── Preisbeleg „Kassenbon" ─────────────────────── */
+/*
+ * Zwei Lücken der Antwort „kassenbon" (Entscheidung Claude im Auftrag
+ * Patricks, 04.10.2026 — Patrick: „Kannst du selbst entscheiden?"). Beide
+ * lassen einen Fall NUR für einen Menschen liegen (scharf: aus einer sonst
+ * fälligen Freigabe wird ein offener Fall), in der Beobachtung werden sie nur
+ * gezählt — abgelehnt wird darauf hin nie. Eigener Schalter
+ * `preisBelegRegel` (modusPreisBeleg; bis zur Nachprüfung 05.10.2026 hing der
+ * Preisbeleg am Schalter der Bildschirm-Regel).
+ *
+ *  1. Warenkorb-Lücke (Prüfrunde 3, 04.10.2026): ein auf Artikelzeilen
+ *     zugeschnittener Online-Warenkorb oder eine Bestellliste hieß „kassenbon"
+ *     und wurde still bezahlt — ob gekauft wurde, prüfte niemand. Jetzt muss
+ *     der Beleg mindestens EIN Merkmal eines abgeschlossenen Einkaufs zeigen
+ *     (Händler, Datum, Summe, Bon-/Beleg-Nr., Zahlung, Steuer-Kennzeichen) —
+ *     laut Bildprüfung (`belegMerkmale`) ODER laut Lesedienst (gelesener
+ *     Händlerkopf `priceReceipt`). Ein Händlerkopf des Lesedienstes allein
+ *     genügt, damit kein echter Bon an EINER Modellantwort hängt; eine
+ *     fehlende Antwort der Bildprüfung ist dagegen kein Freispruch.
+ *     Die Steuer-Kennzeichen (A/B hinter den Preisen) gehören dazu: echte
+ *     Bons, auf die Artikelzeilen zugeschnitten, tragen sie meist, ein
+ *     Warenkorb nie. Gemessen 05.10.2026 (166 echte Bons mit „kassenbon",
+ *     WISSEN-FOTORUNDE.md): 3 blieben liegen — eng auf Artikelzeilen ohne
+ *     Kennzeichen zugeschnittene e-Bons, von einem Warenkorb nicht zu
+ *     unterscheiden; ohne die Kennzeichen als Merkmal wären es 25 gewesen.
+ *     Nachmessung (Nachprüfung 05.10.2026, 41 Kamerafotos von Papierbons
+ *     ohne Lesedienst-Kopf): 4 bleiben liegen — Ausschnitte ohne jedes
+ *     Merkmal (Preise abgeschnitten, zwei Artikelzeilen). Aldi Nords
+ *     Kennzeichen „1"/„2" statt A/B erkennt die Bildprüfung als „steuer"
+ *     (16 von 18); dieselbe Frage zweimal gestellt: 0 von 40 Wechseln
+ *     zwischen „mit" und „ohne Merkmal" — eine Wiederholung vor dem Halt
+ *     änderte nichts. Erwartet ~3–5 Halte pro Woche (WISSEN-FOTORUNDE.md).
+ *     Eine Summe zählt als Merkmal (Vorgabe); ein Warenkorb,
+ *     der seine Summenzeile zeigt, wird darum bezahlt (Lücke, gemessen 1 von
+ *     2 synthetischen Fällen als „kassenbon").
+ *  2. Rechnungen fremder Händler: für Bons gilt seit 04.10.2026 „nur unsere
+ *     Märkte (Collection `discounter`), Amazon nein" (CLAUDE.md). Dieselbe
+ *     Regel für den Preisbeleg: nennt die Bildprüfung als Händler
+ *     (`belegHaendler`, die KETTE nach Name/Logo) einen, der keiner unserer
+ *     Märkte ist — oder nennt sie keinen und der vom Lesedienst gelesene
+ *     Filialname ist keiner —, und löst kein genannter Name auf einen unserer
+ *     Märkte auf → liegen lassen. dm-, Rossmann-, REWE-Online usw. sind unsere
+ *     Märkte und gelten. Der Lesedienst liest den FILIALNAMEN; inhabergeführte
+ *     Märkte heißen dort „Krummenerl" oder „NK Südfilialen GmbH" (im Bestand
+ *     24 von 1.172 gelesenen Händlernamen, alle REWE/EDEKA). Die Bildprüfung
+ *     nennt dort meist die Kette (18 von 23 gemessen); ein Bon OHNE Kettenlogo
+ *     („Krummenerl", REWE) bleibt liegen (5 von 23, ein Markt) — ein Mensch
+ *     sieht es dem Bon auch nicht an. Erkannt: Amazon, Wreesmann, TK Maxx
+ *     (3 von 3).
+ */
+
+/** Merkmale eines abgeschlossenen Einkaufs (Bildprüfung, `belegMerkmale`). */
+const BELEG_MERKMALE = Object.freeze(['haendler', 'datum', 'summe', 'nummer', 'zahlung', 'steuer']);
+const MERKMAL_SET = new Set(BELEG_MERKMALE);
+/** Offen-Grund (review.reason / rundeOffen.grund) — EIN neutraler Code; welcher Befund, steht nur im Tagesbericht. */
+const PREIS_BELEG_UNSICHER = 'preis_beleg_unsicher';
+/** Welcher Befund (nur Tagesbericht — das Dokument liest der Einreicher selbst). */
+const BELEG_OHNE_MERKMALE = 'ohne_merkmale';
+const BELEG_FREMDER_HAENDLER = 'fremder_haendler';
+
+/**
+ * Antwort `belegMerkmale` → bekannte Merkmale (ohne Doppel) oder null = keine
+ * verwertbare Antwort (fehlt, kein Liste, nur unbekannte Werte). Eine leere
+ * Liste ist eine Antwort („keines zu sehen"). Werte wie `"haendler|summe"`
+ * in einem Element werden zerlegt (die Vorlage in der Anweisung trennt mit |).
+ */
+function belegMerkmaleOf(v) {
+  if (!Array.isArray(v)) return null;
+  const roh = v.flatMap((m) => String(m == null ? '' : m).toLowerCase().split(/[|,;\s]+/)).filter(Boolean);
+  const out = [...new Set(roh.filter((m) => MERKMAL_SET.has(m)))];
+  if (!out.length && roh.length) return null;
+  return out;
+}
+
+/** Antwort `belegHaendler` → Name oder null (leer, „unbekannt", „nicht erkennbar" …). */
+function belegHaendlerOf(v) {
+  const s = typeof v === 'string' ? v.trim().replace(/\s+/g, ' ').slice(0, 60) : '';
+  if (!s || /^(?:-+|…|\.\.\.|keine?r?|unbekannt|nicht erkennbar|nicht lesbar|n\/?a|none|null)$/i.test(s)) return null;
+  return s;
+}
+
+/** Hat der Lesedienst auf dem Preisfoto einen Bon-Kopf gelesen (Händlername oder Anschrift)? */
+function lesedienstKopfOf(x) {
+  const b = x && typeof x === 'object' ? x.priceReceipt : null;
+  return !!(b && typeof b === 'object' && (b.merchant || b.street || b.zip || b.city));
+}
+
+/** Kleinschreibung ohne Akzente, ß→ss, „R E W E" → „rewe", in Wörter zerlegt. */
+function haendlerWoerter(s) {
+  return String(s || '').toLowerCase().replace(/ß/g, 'ss').normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/(?<![a-z0-9])(?:[a-z][\s.]){2,}[a-z](?![a-z0-9])/g, (m) => m.replace(/[\s.]/g, ''))
+    .split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+/**
+ * Ketten unserer Märkte, fest im Code — der Rückfall, wenn die Collection
+ * `discounter` nicht lesbar ist, und die Vertriebslinien, unter denen unsere
+ * Märkte auf dem Bon stehen (wie cashback-pipeline/lib/merchant.js ALIASES).
+ * Stand 05.10.2026: 20 Einträge in `discounter` (DE/AT/CH).
+ */
+const UNSERE_KETTEN = Object.freeze([
+  'aldi', 'hofer', 'lidl', 'kaufland', 'rewe', 'edeka', 'penny', 'netto', 'norma', 'globus', 'dm', 'rossmann', 'muller', 'mueller', 'spar', 'billa',
+  // REWE-Gruppe
+  'nahkauf',
+  // EDEKA-Gruppe: Marktkauf, E center, Neukauf, nah & gut, diska (EDEKA Nordbayern)
+  'marktkauf', 'ecenter', 'neukauf', 'diska',
+  // SPAR Österreich
+  'eurospar', 'interspar',
+]);
+/** Mehrteilige Linien (Wortfolgen): „E center", „E aktiv", „nah & gut". */
+const UNSERE_FOLGEN = Object.freeze([['e', 'center'], ['e', 'aktiv'], ['nah', 'gut']]);
+/** Wörter aus `discounter`-Namen, die keine Kette bezeichnen. */
+const NAME_STOPP = new Set(['markt', 'maerkte', 'markendiscount', 'discount', 'nord', 'sud', 'sued', 'suisse', 'schweiz', 'osterreich', 'de', 'at', 'ch', 'gmbh', 'kg', 'online']);
+
+/**
+ * Schlüssel unserer Märkte: das erste Wort jedes `discounter`-Namens, das
+ * keine Gattung ist („Netto Markendiscount" → netto, „Aldi Süd" → aldi),
+ * dazu UNSERE_KETTEN. Kommt ein Markt in `discounter` dazu (etwa Picnic),
+ * gilt er ohne Codeänderung.
+ * @param {string[]|null} namen  Namen aus `discounter` (null = nicht lesbar → nur der feste Teil)
+ * @returns {Set<string>}
+ */
+function marktSchluessel(namen) {
+  const s = new Set(UNSERE_KETTEN);
+  for (const n of Array.isArray(namen) ? namen : []) {
+    const w = haendlerWoerter(n).find((x) => !NAME_STOPP.has(x) && x.length >= 2);
+    if (w) s.add(w);
+  }
+  return s;
+}
+
+/**
+ * Ist `name` einer unserer Märkte? true / false / null (kein Name).
+ * Ganze Wörter (auch „R E W E"), dazu Komposita, die mit einem Schlüssel ab
+ * fünf Buchstaben BEGINNEN („Edekamarkt", „Kauflandmarkt"); kürzere nur als
+ * ganzes Wort („Spar" nicht in „Sparkasse", „dm" nicht in „Admiral"). Keine
+ * Tippfehler-Toleranz: die Bon-Pipeline machte damit aus „Das" dm und aus
+ * „denns" Penny (Bericht Bon-Doppelzahlung, 04.10.2026).
+ */
+function unserMarkt(name, schluessel = marktSchluessel(null)) {
+  const w = haendlerWoerter(name);
+  if (!w.length) return null;
+  if (w.some((x) => schluessel.has(x))) return true;
+  if (w.some((x) => [...schluessel].some((k) => k.length >= 5 && x.length > k.length && x.startsWith(k)))) return true;
+  return UNSERE_FOLGEN.some(([a, b]) => w.some((x, i) => x === a && w[i + 1] === b));
+}
+
+/**
+ * Befund zum Preisbeleg — nur bei der Antwort „kassenbon", sonst nichts.
+ * @param {{quelle:string|null, merkmale:string[]|null, haendler:string|null, lesedienstKopf:boolean, lesedienstHaendler:string|null, schluessel?:Set<string>}} e
+ * @returns {{grund:'ohne_merkmale'|'fremder_haendler'|null, ohneMerkmale:boolean, fremd:boolean, unser:boolean|null}}
+ *   `unser`: true = ein genannter Name löst auf einen unserer Märkte auf;
+ *   false = die Bildprüfung nennt einen fremden — oder nennt keinen, und der
+ *   Filialname des Lesedienstes ist keiner unserer Märkte; null = kein
+ *   Händler genannt.
+ */
+function preisBelegBefund({ quelle, merkmale = null, haendler = null, lesedienstKopf = false, lesedienstHaendler = null, schluessel } = {}) {
+  const leer = { grund: null, ohneMerkmale: false, fremd: false, unser: null };
+  if (preisQuelleOf(quelle) !== 'kassenbon') return leer;
+  const s = schluessel instanceof Set ? schluessel : marktSchluessel(null);
+  const uModell = belegHaendlerOf(haendler) ? unserMarkt(haendler, s) : null;
+  const uLese = typeof lesedienstHaendler === 'string' && lesedienstHaendler.trim() ? unserMarkt(lesedienstHaendler, s) : null;
+  // Ein auflösender Name genügt (der Lesedienst liest inhabergeführte Märkte
+  // mit dem Inhaber, die Bildprüfung nennt dort meist die Kette). Fremd ist
+  // ein Beleg nur, wenn KEIN Name auflöst: die Bildprüfung nennt einen
+  // fremden, oder sie nennt keinen und der Lesedienst einen fremden.
+  const unser = uModell === true || uLese === true ? true : uModell === false || (uModell === null && uLese === false) ? false : null;
+  const fremd = unser === false;
+  // Ein genannter Händler (belegHaendler) zählt NICHT als Merkmal: das Modell
+  // kann die Kette auch aus dem Produkt („K-Classic") oder dem Layout
+  // erschließen — ein Kaufland-Warenkorb hätte dann ein „Merkmal".
+  const ohneMerkmale = !lesedienstKopf && !(Array.isArray(merkmale) && merkmale.length);
+  return { grund: fremd ? BELEG_FREMDER_HAENDLER : ohneMerkmale ? BELEG_OHNE_MERKMALE : null, ohneMerkmale, fremd, unser };
 }
 
 /* ─────────────────────────── Bildkopf ─────────────────────────── */
@@ -365,52 +567,179 @@ function bildschirmMerkmal(kopf) {
  *    „Bon", oder ein Modellwechsel) — ohne dieses Gegenzeichen hinge die
  *    Bezahlung an EINER Antwort. Gemessen kostet das nichts: 0 von 167
  *    Kassenbons trägt der Lesedienst als „kein Bon" (164 als Bon, 3 ungelesen).
- *    LÜCKE (Prüfrunde 3): ein auf Bon-Zeilen zugeschnittener Warenkorb, als
- *    4:3 ohne EXIF, wird bezahlt, wenn das Modell „kassenbon" sagt — auch mit
- *    Merkmalen, wenn der Lesedienst ebenfalls einen Bon liest. Der Bericht
- *    zählt und listet jeden „Kassenbon", den der Lesedienst nicht als Bon las
- *    (`kassenbonLesedienstOhneBon`), damit der Weg messbar ist
- *    (WISSEN-FOTORUNDE.md, Lücken). OFFEN: dieselbe Entscheidung lässt
- *    Online-Bestellungen nur bei UNSEREN Märkten gelten („Amazon nein") — ob
- *    das auch für den Preisbeleg gilt (Amazon-Rechnung zu einem
- *    Netto-Produkt), entscheidet Patrick; heute zählt jede Rechnung
- *    (WISSEN-FOTORUNDE.md, offene Punkte). Wörtlich genommen („nur eins von
- *    beiden → liegen lassen") lägen ~34 e-Bons pro Woche bei Patrick — diese
- *    Lesart ist ihm zur Entscheidung vorgelegt, der Bericht zählt die Fälle
- *    (`kassenbonMitMerkmal`).
+ *    Dazu der Befund zum Preisbeleg (`belegGrund`, preisBelegBefund —
+ *    Entscheidung Claude im Auftrag Patricks 04.10.2026): ein „Kassenbon"
+ *    ohne jedes Kassenbon-Merkmal (Warenkorb-Lücke aus Prüfrunde 3) oder von
+ *    einem Händler, der keiner unserer Märkte ist (Amazon …) → `halten`, nie
+ *    `ablehnen`. Der Bericht zählt weiter jeden „Kassenbon", den der
+ *    Lesedienst nicht als Bon las (`kassenbonLesedienstOhneBon`).
+ *    Wörtlich genommen („nur eins von beiden → liegen lassen") lägen ~34
+ *    e-Bons pro Woche bei Patrick — diese Lesart ist ihm zur Entscheidung
+ *    vorgelegt, der Bericht zählt die Fälle (`kassenbonMitMerkmal`).
  *  - sonst („laden"/„keiner" ohne Merkmale, Kopf gelesen) → kein Befund.
  *
- * @param {{quelle:string|null, merkmal:boolean|null, lesedienstBon?:boolean, lesedienstOhneBon?:boolean, kopfGescheitert?:boolean}} e
+ * Der Befund BEIDER Regeln zusammen, ohne Blick auf die Schalter. Was davon
+ * wirkt, entscheidet preisBildschirmLage — je Regel unter ihrem eigenen
+ * Schalter (Nachprüfung 05.10.2026).
+ *
+ * @param {{quelle:string|null, merkmal:boolean|null, lesedienstBon?:boolean, lesedienstOhneBon?:boolean, kopfGescheitert?:boolean, belegGrund?:string|null}} e
  * @returns {'ablehnen'|'halten'|null}
  */
-function preisBildschirmBefund({ quelle, merkmal, lesedienstBon = false, lesedienstOhneBon = false, kopfGescheitert = false } = {}) {
+function preisBildschirmBefund({ quelle, merkmal, lesedienstBon = false, lesedienstOhneBon = false, kopfGescheitert = false, belegGrund = null } = {}) {
   const q = preisQuelleOf(quelle);
   const m = merkmal === true;
   const ohneKopf = kopfGescheitert === true;
   // Der Lesedienst hat das Preisfoto gelesen und KEINEN Bon gesehen — das
   // einzige Lesedienst-Zeichen, auf das hin abgelehnt bzw. ein „Kassenbon"
   // angezweifelt wird. Fehlt die Lesung, hat er nichts gesagt.
-  const keinBon = lesedienstOhneBon === true && lesedienstBon !== true;
-  if (q === 'kassenbon') return (m || ohneKopf) && keinBon ? 'halten' : null;
+  const keinBon = keinBonVon({ lesedienstBon, lesedienstOhneBon });
+  if (q === 'kassenbon') return ((m || ohneKopf) && keinBon) || belegGrundOf(belegGrund) ? 'halten' : null;
   if (q === 'bildschirm') return m && keinBon ? 'ablehnen' : 'halten';
   if (q === 'unklar') return 'halten';
   // „laden", „keiner" und fehlende Antwort: halten bei passenden Merkmalen oder ohne lesbaren Kopf.
   return m || ohneKopf ? 'halten' : null;
 }
 
+/** Der Lesedienst hat das Preisfoto gelesen und keinen Bon gesehen (siehe preisBildschirmBefund). */
+function keinBonVon(pb) {
+  return !!pb && pb.lesedienstOhneBon === true && pb.lesedienstBon !== true;
+}
+
+/** Bekannter Befund zum Preisbeleg oder null. */
+function belegGrundOf(v) {
+  return v === BELEG_OHNE_MERKMALE || v === BELEG_FREMDER_HAENDLER ? v : null;
+}
+
+/* ──────────────── Zwei Regeln, zwei Schalter (Nachprüfung 05.10.2026) ──────────────── */
+
+/** Die Regeln, je mit eigenem Schalter. Reihenfolge = Vorrang beim Halte-Grund. */
+const REGEL_BILDSCHIRM = 'bildschirm';
+const REGEL_BELEG = 'beleg';
+const REGELN = Object.freeze([REGEL_BILDSCHIRM, REGEL_BELEG]);
+
 /**
- * Grund eines offenen Falls mit Halte-Befund: nur der fehlende Bildkopf
+ * Schalter einer Regel aus der Eingabe der Runde: `modus` (Bildschirm-Regel)
+ * bzw. `belegModus` (Preisbeleg). Fehlt der Wert oder ist er unbekannt →
+ * 'shadow': ohne ausdrücklich scharfen Schalter wirkt keine Regel, und nie
+ * schaltet der Schalter der einen Regel die andere mit.
+ * @returns {false|'shadow'|true}
+ */
+function schalterVon(pb, regel) {
+  return modusPreisBildschirm(pb ? (regel === REGEL_BELEG ? pb.belegModus : pb.modus) : undefined);
+}
+
+/**
+ * Befund je Regel, aus den Feldern der Eingabe (nie aus einem gespeicherten
+ * Gesamtbefund). Eine Regel mit Schalter `false` liefert null.
+ *  - `bildschirm`: preisBildschirmBefund ohne den Preisbeleg
+ *    (auch „Kassenbon" + Bildschirm-Merkmale + Lesedienst ohne Bon, Prüfrunde 2);
+ *  - `beleg`: 'halten' bei einem Preisbeleg-Befund (nur „kassenbon").
+ * @returns {{bildschirm:'ablehnen'|'halten'|null, beleg:'halten'|null}}
+ */
+function preisBildschirmTeile(pb) {
+  if (!pb || typeof pb !== 'object') return { bildschirm: null, beleg: null };
+  const bildschirm = schalterVon(pb, REGEL_BILDSCHIRM) === false ? null : preisBildschirmBefund({ ...pb, belegGrund: null });
+  const beleg = schalterVon(pb, REGEL_BELEG) !== false && preisQuelleOf(pb.quelle) === 'kassenbon' && belegGrundOf(pb.belegGrund) ? 'halten' : null;
+  return { bildschirm, beleg };
+}
+
+/**
+ * Grund eines heutigen Halts der Bildschirm-Regel: nur der fehlende Bildkopf
  * (Technik) → PREIS_KOPF_NICHT_LESBAR, damit ein Storage-Ausfall nicht als
- * „Modell liest anders" gemeldet wird; sonst PREIS_BILDSCHIRM_UNSICHER.
- * „Nur der Kopf" heißt: die Antwort allein hätte nicht gehalten (laden,
- * keiner, kassenbon, keine Antwort) — bei „bildschirm" und „unklar" hält die
- * Antwort selbst.
+ * „Modell liest anders" gemeldet wird. „Nur der Kopf" heißt: die Antwort
+ * allein hätte nicht gehalten (laden, keiner, kassenbon, keine Antwort) — bei
+ * „bildschirm" und „unklar" hält die Antwort selbst. Sonst PREIS_BILDSCHIRM_UNSICHER.
+ */
+function bildschirmGrundHeute(pb) {
+  const q = preisQuelleOf(pb.quelle);
+  return q !== 'bildschirm' && q !== 'unklar' && pb.merkmal !== true && pb.kopfGescheitert === true ? PREIS_KOPF_NICHT_LESBAR : PREIS_BILDSCHIRM_UNSICHER;
+}
+
+/**
+ * Regeln eines Befunds aus einem früheren scharfen Lauf. `regeln` am Eintrag
+ * (seit 05.10.2026); ältere Einträge kennen nur `art: 'beleg'` (Preisbeleg)
+ * bzw. nichts (Bildschirm-Regel). Ein „ablehnen" kommt immer aus der
+ * Bildschirm-Regel — der Preisbeleg lehnt nie ab.
+ * @returns {string[]}
+ */
+function vorbefundRegeln(v) {
+  if (!v || typeof v !== 'object') return [];
+  if (v.befund === 'ablehnen') return [REGEL_BILDSCHIRM];
+  const r = Array.isArray(v.regeln) ? REGELN.filter((x) => v.regeln.includes(x)) : [];
+  if (r.length) return r;
+  return [v.art === 'beleg' ? REGEL_BELEG : REGEL_BILDSCHIRM];
+}
+
+/**
+ * Was der Befund bedeutet — JE REGEL unter ihrem eigenen Schalter
+ * (Nachprüfung 05.10.2026: hingen beide an einem Schalter, gab das
+ * Zurücknehmen der einen Regel am nächsten Morgen auch die Halte der anderen
+ * frei, ohne dass ein Mensch sie gesehen hatte).
+ *
+ *  - `scharf: false` (Standard): was beobachtet wird — jede Regel, deren
+ *    Schalter nicht `false` ist. Für den Bericht und den Beobachtungs-Eintrag.
+ *  - `scharf: true`: was WIRKT — nur Regeln mit Schalter `true`.
+ *
+ * Ein Befund eines früheren scharfen Laufs (`vorbefund`, aus
+ * preisBildschirmMitVorbefund) hält nur für die Regeln, deren Schalter heute
+ * scharf ist; nimmt man eine Regel zurück, endet nur IHR Halt. Mit Vorbefund
+ * wird nie abgelehnt (ein haltender Vorbefund verschärft höchstens zu
+ * „halten", preisBildschirmMitVorbefund) — auch nicht, wenn die Regel des
+ * Vorbefunds zurückgenommen ist und heute die Bildschirm-Regel „ablehnen"
+ * liest: der Fall liegt schon, und jeder weitere Morgen wäre eine neue
+ * Chance auf eine Ablehnung, die an EINER Modellantwort hängt.
+ *
+ * Grund des Halts: ein übernommener Befund behält seine Art (Bildschirm geht
+ * vor Preisbeleg); sonst Bildschirm-Verdacht vor Preisbeleg vor nicht
+ * abrufbarem Bildkopf. `regeln` sind die Regeln, deren Befund über das FOTO
+ * den Halt trägt — sie werden weitergetragen (preisBildschirmEintrag); ein
+ * Halt nur wegen des nicht abrufbaren Bildkopfs gehört nicht dazu (morgen
+ * neu prüfen, wie foto_abgleich_gescheitert).
+ *
+ * @param {object|null} pb  Eingabe der Runde (pbVon) bzw. preisBildschirmMitVorbefund
+ * @param {{scharf?:boolean}} [o]
+ * @returns {{befund:'ablehnen'|'halten'|null, regeln:string[], grund:string|null, ausVorbefund:boolean}}
+ */
+function preisBildschirmLage(pb, { scharf = false } = {}) {
+  const leer = { befund: null, regeln: [], grund: null, ausVorbefund: false };
+  if (!pb || typeof pb !== 'object') return leer;
+  const gilt = (r) => (scharf ? schalterVon(pb, r) === true : schalterVon(pb, r) !== false);
+  const t = preisBildschirmTeile(pb);
+  if (!pb.vorbefund && t.bildschirm === 'ablehnen' && gilt(REGEL_BILDSCHIRM)) {
+    return { befund: 'ablehnen', regeln: [REGEL_BILDSCHIRM], grund: PREIS_BILDSCHIRM, ausVorbefund: false };
+  }
+  const vor = pb.vorbefund ? vorbefundRegeln(pb.vorbefund).filter(gilt) : [];
+  const regeln = new Set(vor);
+  let nurKopf = false;
+  if (t.bildschirm && gilt(REGEL_BILDSCHIRM)) {
+    if (t.bildschirm === 'halten' && bildschirmGrundHeute(pb) === PREIS_KOPF_NICHT_LESBAR) nurKopf = true;
+    else regeln.add(REGEL_BILDSCHIRM);
+  }
+  if (t.beleg && gilt(REGEL_BELEG)) regeln.add(REGEL_BELEG);
+  if (!regeln.size && !nurKopf) return leer;
+  const geordnet = REGELN.filter((r) => regeln.has(r));
+  let grund;
+  if (vor.length) grund = vor.includes(REGEL_BILDSCHIRM) ? PREIS_BILDSCHIRM_UNSICHER : PREIS_BELEG_UNSICHER;
+  else if (regeln.has(REGEL_BILDSCHIRM)) grund = PREIS_BILDSCHIRM_UNSICHER;
+  else if (regeln.has(REGEL_BELEG)) grund = PREIS_BELEG_UNSICHER;
+  else grund = PREIS_KOPF_NICHT_LESBAR;
+  return { befund: 'halten', regeln: geordnet, grund, ausVorbefund: vor.length > 0 };
+}
+
+/**
+ * Grund eines offenen Falls mit Halte-Befund (beobachtet, preisBildschirmLage):
+ *  - ein „Kassenbon", der nur wegen des Preisbelegs liegt (ohne Merkmale,
+ *    fremder Händler — preisBelegBefund) → PREIS_BELEG_UNSICHER. Das gilt
+ *    auch, wenn zusätzlich der Bildkopf fehlte: der Beleg-Befund ist ein
+ *    Urteil über das Foto und wird weitergetragen, der fehlende Kopf nicht.
+ *    Passen dagegen die Dateimerkmale UND widerspricht der Lesedienst, ist es
+ *    der Bildschirm-Verdacht (PREIS_BILDSCHIRM_UNSICHER);
+ *  - nur der fehlende Bildkopf (Technik) → PREIS_KOPF_NICHT_LESBAR;
+ *  - sonst PREIS_BILDSCHIRM_UNSICHER.
+ * Ein übernommener Befund behält seine Art.
  */
 function preisBildschirmHalteGrund(pb) {
-  if (!pb || pb.vorbefund) return PREIS_BILDSCHIRM_UNSICHER;
-  const q = preisQuelleOf(pb.quelle);
-  if (q !== 'bildschirm' && q !== 'unklar' && pb.merkmal !== true && pb.kopfGescheitert === true) return PREIS_KOPF_NICHT_LESBAR;
-  return PREIS_BILDSCHIRM_UNSICHER;
+  return preisBildschirmLage(pb).grund || PREIS_BILDSCHIRM_UNSICHER;
 }
 
 /**
@@ -422,13 +751,23 @@ function preisBildschirmHalteGrund(pb) {
  * Begründung des Modells) — sonst lädt der Hinweis zum Umgehen ein
  * (Gegenprüfung 04.10.2026; vgl. kontoSperre). Die Einzelheiten stehen nur
  * im Tagesbericht (`preisBildschirm.faelle`, nur für Admins).
+ * Beschrieben wird, was WIRKT (preisBildschirmLage scharf); wirkt nichts,
+ * das Beobachtete.
  */
 function preisBildschirmHinweis(pb = {}) {
-  if (pb.vorbefund) {
-    return `Preisquelle unsicher (vielleicht ein Bildschirmfoto) — Befund vom ${pb.vorbefund.seit || 'früheren Lauf'}, gilt bis zur Entscheidung in der Konsole`;
+  const wirkt = preisBildschirmLage(pb, { scharf: true });
+  const l = wirkt.befund ? wirkt : preisBildschirmLage(pb);
+  if (l.befund === 'ablehnen') return 'Preisfoto zeigt einen Bildschirm (App, Online-Shop, Prospekt) — Einzelheiten im Tagesbericht';
+  // Preisbeleg (05.10.2026): bewusst ohne „Warenkorb" oder „Händler" — wer
+  // liest, woran es hing, schneidet beim nächsten Mal den Kopf ab bzw. eine
+  // Summenzeile dazu. Welcher Befund, steht nur im Tagesbericht.
+  if (l.ausVorbefund) {
+    const seit = (pb.vorbefund && pb.vorbefund.seit) || 'früheren Lauf';
+    if (l.grund === PREIS_BELEG_UNSICHER) return `Preisbeleg unsicher — Befund vom ${seit}, gilt bis zur Entscheidung in der Konsole`;
+    return `Preisquelle unsicher (vielleicht ein Bildschirmfoto) — Befund vom ${seit}, gilt bis zur Entscheidung in der Konsole`;
   }
-  if (pb.befund === 'ablehnen') return 'Preisfoto zeigt einen Bildschirm (App, Online-Shop, Prospekt) — Einzelheiten im Tagesbericht';
-  if (preisBildschirmHalteGrund(pb) === PREIS_KOPF_NICHT_LESBAR) return 'Preisfoto-Datei war nicht abrufbar (Technik) — Preisfoto bitte selbst ansehen';
+  if (l.grund === PREIS_BELEG_UNSICHER) return 'Preisbeleg unsicher — Preisfoto bitte selbst ansehen, Einzelheiten im Tagesbericht';
+  if (l.grund === PREIS_KOPF_NICHT_LESBAR) return 'Preisfoto-Datei war nicht abrufbar (Technik) — Preisfoto bitte selbst ansehen';
   return 'Preisquelle unsicher (vielleicht ein Bildschirmfoto) — Preisfoto bitte selbst ansehen, Einzelheiten im Tagesbericht';
 }
 
@@ -436,11 +775,19 @@ function preisBildschirmHinweis(pb = {}) {
  * Was am Dokument landet (`review.rundeOffen.preisBildschirm`, nur bei einem
  * nach dem Lauf offenen Fall mit Befund). `review` steht in der Sperrliste
  * von firestore.rules — die App darf es beim Anlegen nicht mitschicken, also
- * kann sich niemand einen Befund vorgeben. Nur Modus, Befund und seit wann er
- * steht: OHNE Antwort und Begründung des Modells, ohne Dateimerkmale — das
- * Dokument liest der Einreicher selbst (siehe preisBildschirmHinweis).
- * `seit`: Lauf, in dem der Befund zuerst stand — der nächste Lauf übernimmt
- * einen scharfen Befund damit (preisBildschirmVorbefund).
+ * kann sich niemand einen Befund vorgeben. Nur Modus, Befund, seit wann er
+ * steht und welche Regeln ihn tragen: OHNE Antwort und Begründung des
+ * Modells, ohne Dateimerkmale — das Dokument liest der Einreicher selbst
+ * (siehe preisBildschirmHinweis).
+ *  - `modus: true` + `regeln`: Regeln, deren SCHARFER Befund den Fall hält
+ *    bzw. ablehnt (preisBildschirmLage scharf) — der nächste Lauf übernimmt
+ *    sie je Regel (preisBildschirmVorbefund), und nur der Schalter der
+ *    jeweiligen Regel hebt sie wieder auf (Nachprüfung 05.10.2026).
+ *  - `modus: 'shadow'`: wirkt nichts, das Beobachtete — nur Hinweis in der
+ *    Konsole, nie übernommen.
+ *  - `seit`: Lauf, in dem der übernommene Befund zuerst stand, sonst dieser Lauf.
+ *  - `art: 'beleg'`: der Halt-Grund ist der Preisbeleg — für den Hinweis in
+ *    der Konsole. Bewusst nur „beleg", nicht welcher der beiden Befunde.
  * Ein Halt NUR wegen des nicht abrufbaren Bildkopfs landet hier nicht: er ist
  * kein Befund über das Foto, sondern ein Technikfehler — der Grund steht in
  * `review.rundeOffen.grund` (PREIS_KOPF_NICHT_LESBAR), und der nächste Lauf
@@ -449,14 +796,18 @@ function preisBildschirmHinweis(pb = {}) {
  */
 function preisBildschirmEintrag(pb, { lauf = null } = {}) {
   if (!pb) return null;
-  const befund = pb.befund === 'ablehnen' || pb.befund === 'halten' ? pb.befund : null;
-  if (!befund) return null;
-  if (befund === 'halten' && preisBildschirmHalteGrund(pb) === PREIS_KOPF_NICHT_LESBAR) return null;
+  const wirkt = preisBildschirmLage(pb, { scharf: true });
+  const scharf = wirkt.regeln.length > 0;
+  const l = scharf ? wirkt : preisBildschirmLage(pb);
+  if (!l.regeln.length) return null;
   const s = (v) => (typeof v === 'string' && v ? v.slice(0, 40) : null);
+  const seitVor = l.ausVorbefund ? s(pb.vorbefund && pb.vorbefund.seit) : l.befund === 'ablehnen' ? s(pb.vorbefundSeit) : null;
   return {
-    modus: pb.modus === true ? true : 'shadow',
-    befund,
-    seit: s(pb.vorbefund && pb.vorbefund.seit) || s(lauf),
+    modus: scharf ? true : 'shadow',
+    befund: l.befund,
+    seit: seitVor || s(lauf),
+    ...(scharf ? { regeln: l.regeln } : {}),
+    ...(l.grund === PREIS_BELEG_UNSICHER ? { art: 'beleg' } : {}),
   };
 }
 
@@ -464,14 +815,16 @@ function preisBildschirmEintrag(pb, { lauf = null } = {}) {
  * Befund eines FRÜHEREN, SCHARFEN Laufs aus `review.rundeOffen.preisBildschirm`
  * (Gegenprüfung 04.10.2026, analog fotoRundeRegeln.fotoVorbefund und
  * werte.eanFotoVorbefund). Ein Befund aus der Beobachtung hält nichts.
- * @returns {{befund:'ablehnen'|'halten', seit:string|null}|null}
+ * `regeln`: welche Regeln ihn tragen (vorbefundRegeln) — er hält je Regel nur
+ * unter deren Schalter (preisBildschirmLage).
+ * @returns {{befund:'ablehnen'|'halten', seit:string|null, regeln:string[]}|null}
  */
 function preisBildschirmVorbefund(x) {
   const ro = x && x.review && typeof x.review === 'object' && x.review.rundeOffen && typeof x.review.rundeOffen === 'object' ? x.review.rundeOffen : null;
   const pb = ro && ro.preisBildschirm && typeof ro.preisBildschirm === 'object' ? ro.preisBildschirm : null;
   if (!pb || pb.modus !== true || !(pb.befund === 'ablehnen' || pb.befund === 'halten')) return null;
   const s = (v) => (typeof v === 'string' && v ? v.slice(0, 40) : null);
-  return { befund: pb.befund, seit: s(pb.seit) || s(ro.lauf) };
+  return { befund: pb.befund, seit: s(pb.seit) || s(ro.lauf), regeln: vorbefundRegeln(pb) };
 }
 
 /**
@@ -489,30 +842,42 @@ function preisBildschirmVorbefund(x) {
  * der Fall auf Patrick wartet; die Antwort des Vortags steht bewusst nicht am
  * Dokument (preisBildschirmEintrag), ginge also verloren. Nur ein Vorbefund
  * „ablehnen" (von der Notbremse zurückgehalten) darf bei heutiger
- * Ablehn-Lesung abgelehnt werden. Aufheben kann nur ein Mensch in der Konsole
- * (jede Entscheidung dort ersetzt `review`) — oder der Schalter (`false`
- * nimmt alles weg; in `'shadow'` hält der Befund nichts mehr).
+ * Ablehn-Lesung abgelehnt werden.
+ *
+ * Aufheben kann nur ein Mensch in der Konsole (jede Entscheidung dort ersetzt
+ * `review`) — oder der Schalter DER REGEL, die den Befund trägt
+ * (Nachprüfung 05.10.2026): `false` nimmt ihren Befund weg, in `'shadow'`
+ * reist er nur noch zur Beobachtung mit und hält nichts mehr
+ * (preisBildschirmLage). Der Schalter der anderen Regel berührt ihn nie.
  *
  * @param {object|null} heute  Eingabe der Runde (pbVon) oder null (keine Bildprüfung heute)
- * @param {{befund:string, seit:string|null}|null} vorher  preisBildschirmVorbefund
- * @param {false|'shadow'|true} modus  heutiger Schalter
+ * @param {{befund:string, seit:string|null, regeln?:string[]}|null} vorher  preisBildschirmVorbefund
+ * @param {{bildschirm:false|'shadow'|true, beleg:false|'shadow'|true}} modi  heutige Schalter je Regel
  */
-function preisBildschirmMitVorbefund(heute, vorher, modus) {
-  if (modus === false) return null;
-  if (!vorher) return heute;
-  if (heute && heute.befund === 'ablehnen' && vorher.befund === 'ablehnen') return { ...heute, vorbefundSeit: vorher.seit };
+function preisBildschirmMitVorbefund(heute, vorher, modi) {
+  if (!modi || typeof modi !== 'object') throw new TypeError('preisBildschirmMitVorbefund: Schalter je Regel erwartet ({bildschirm, beleg})');
+  const m = { [REGEL_BILDSCHIRM]: modusPreisBildschirm(modi.bildschirm), [REGEL_BELEG]: modusPreisBeleg(modi.beleg) };
+  if (m[REGEL_BILDSCHIRM] === false && m[REGEL_BELEG] === false) return null;
+  const vor = vorher ? vorbefundRegeln(vorher).filter((r) => m[r] !== false) : [];
+  if (!vor.length) return heute;
+  const heuteBefund = heute ? preisBildschirmLage(heute).befund : null;
+  if (heuteBefund === 'ablehnen' && vorher.befund === 'ablehnen') return { ...heute, vorbefundSeit: vorher.seit };
   return {
-    ...(heute || { quelle: null, grund: null, merkmal: null, lesedienstBon: false, lesedienstOhneBon: false, kopfGescheitert: false }),
-    modus,
+    ...(heute || { quelle: null, grund: null, merkmal: null, lesedienstBon: false, lesedienstOhneBon: false, kopfGescheitert: false, belegGrund: null }),
+    modus: m[REGEL_BILDSCHIRM],
+    belegModus: m[REGEL_BELEG],
     befund: 'halten',
-    vorbefund: { befund: vorher.befund, seit: vorher.seit },
-    heute: heute ? heute.befund : null,
+    vorbefund: { befund: vorher.befund, seit: vorher.seit, regeln: vor },
+    heute: heuteBefund,
   };
 }
 
 module.exports = {
   PREIS_QUELLEN, PREIS_BILDSCHIRM, PREIS_BILDSCHIRM_UNSICHER, PREIS_KOPF_NICHT_LESBAR, KOPF_BYTES,
-  modusPreisBildschirm, schalterRohOf, preisQuelleOf, lesedienstBonOf, lesedienstOhneBonOf, bildKopf, tiffKennung, bildschirmMerkmal, kameraFormat,
-  preisBildschirmBefund, preisBildschirmHalteGrund, preisBildschirmHinweis, preisBildschirmEintrag,
+  modusPreisBildschirm, modusPreisBeleg, schalterRohOf, preisQuelleOf, lesedienstBonOf, lesedienstOhneBonOf, bildKopf, tiffKennung, bildschirmMerkmal, kameraFormat,
+  preisBildschirmBefund, keinBonVon, preisBildschirmHalteGrund, preisBildschirmHinweis, preisBildschirmEintrag,
   preisBildschirmVorbefund, preisBildschirmMitVorbefund,
+  REGEL_BILDSCHIRM, REGEL_BELEG, REGELN, preisBildschirmTeile, preisBildschirmLage, vorbefundRegeln,
+  BELEG_MERKMALE, PREIS_BELEG_UNSICHER, BELEG_OHNE_MERKMALE, BELEG_FREMDER_HAENDLER, UNSERE_KETTEN,
+  belegMerkmaleOf, belegHaendlerOf, lesedienstKopfOf, haendlerWoerter, marktSchluessel, unserMarkt, preisBelegBefund, belegGrundOf,
 };

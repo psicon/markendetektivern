@@ -408,3 +408,20 @@ describe('Bildschirmfoto als Preisbeleg: Befund der Runde als Hinweis in der Kon
     expect(rundeOffenOf({ review: { rundeOffen: { grund: 'x' } } })).not.toHaveProperty('preisBildschirm');
   });
 });
+
+describe('Preisbeleg „Kassenbon" in der Konsole (Entscheidung Claude im Auftrag Patricks, 04.10.2026)', () => {
+  const sauber = (extra = {}) => rowOf(doc('k', basis({ ean: GUELTIG, productNameOcr: 'Skyr', priceOcr: { priceCents: 129 }, ...extra })));
+  const mitBefund = (pb) => sauber({ review: { rundeOffen: { grund: 'preis_beleg_unsicher', sperrend: [], lauf: 'L', preisBildschirm: pb } } });
+  it('Befund „halten" aus dem Preisbeleg → Hinweis preis_beleg_unsicher (keine Sperre), auch aus der Beobachtung', () => {
+    for (const modus of [true, 'shadow']) {
+      expect(precheckOf(mitBefund({ modus, befund: 'halten', art: 'beleg' }), [])).toMatchObject({ verdict: 'ok', reasons: [], hinweise: ['preis_beleg_unsicher'] });
+    }
+  });
+  it('rundeOffenOf übernimmt `art` nur als „beleg" und nur bei „halten"', () => {
+    expect(rundeOffenOf({ review: { rundeOffen: { grund: 'x', preisBildschirm: { befund: 'halten', modus: true, art: 'beleg' } } } }).preisBildschirm)
+      .toEqual({ befund: 'halten', modus: true, seit: null, art: 'beleg' });
+    expect(rundeOffenOf({ review: { rundeOffen: { grund: 'x', preisBildschirm: { befund: 'halten', modus: true, art: '<b>' } } } }).preisBildschirm).not.toHaveProperty('art');
+    expect(rundeOffenOf({ review: { rundeOffen: { grund: 'x', preisBildschirm: { befund: 'ablehnen', modus: true, art: 'beleg' } } } }).preisBildschirm).not.toHaveProperty('art');
+    expect(precheckOf(mitBefund({ modus: true, befund: 'ablehnen', art: 'beleg' }), []).hinweise).toEqual(['preis_bildschirm']);
+  });
+});

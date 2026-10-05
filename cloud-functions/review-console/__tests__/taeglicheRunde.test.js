@@ -24,6 +24,9 @@ const mockCreate = new Map(); // Dokumentpfad → Server-Zeitpunkt (createTime),
 const mockKopf = new Map(); // Pfad → Buffer (Anfang der Datei), 'FEHLER' (wirft) oder Funktion (liefert den Buffer); sonst ein Kamerafoto 4:3
 const mockQuelle = new Map(); // Pfad des Preisfotos → Antwort preisQuelle der Bildprüfung
 const mockNachlese = new Map(); // Pfad des Preisfotos → Antworten der Preis-Nachlesung, der Reihe nach ('FEHLER' = wirft)
+// Pfad des Preisfotos → Antwort auf die Unterfragen zum Kassenbon ({belegHaendler, belegMerkmale}, 05.10.2026).
+// Ohne Eintrag und bei „kassenbon": ein vollständiger REWE-Bon — so antwortete das Modell bei 100 von 189 Bons.
+const mockBeleg = new Map();
 const mockDownloads = [];
 /** Ohne Angabe: Anfang eines Fotos aus der App-Kamera (JPEG 4:3, ohne EXIF) — die Regel findet nichts. */
 function mockKameraKopf() { return require('./helpers/bildKopfDaten').jpeg(3000, 4000); }
@@ -85,6 +88,7 @@ function query(sammlung, filter = []) {
     limit: () => query(sammlung, filter),
     get: async () => {
       if (sammlung === 'cashback_sperren' && mockLage.sperrenFehler) throw new Error('UNAVAILABLE');
+      if (sammlung === 'discounter' && mockLage.discounterFehler) throw new Error('UNAVAILABLE discounter');
       const docs = [...mockStore.entries()]
         .filter(([p]) => p.startsWith(`${sammlung}/`) && p.split('/').length === 2)
         .filter(([, d]) => filter.every(([f, op, v]) => (op === '==' ? d[f] === v : ms(d[f]) >= ms(v))))
@@ -167,7 +171,12 @@ jest.mock('@google/genai', () => ({
           // Zusatzfrage „Woher stammt der Preis?" (04.10.2026) nur, wenn sie gestellt wurde.
           const preisPfad = pfade.find((p) => p.endsWith('/preis.jpg'));
           const quelle = text.includes('"preisQuelle":') && mockQuelle.has(preisPfad) ? { preisQuelle: mockQuelle.get(preisPfad), preisQuelleGrund: 'Statusleiste' } : {};
-          return { text: JSON.stringify({ echt: true, loseWare: false, traegtAngaben: true, gleicheAnsicht: false, preisSichtbar: true, eanFoto, grund: 'ok', ...quelle }) };
+          const voll = { belegHaendler: 'REWE', belegMerkmale: ['haendler', 'datum', 'summe', 'nummer', 'zahlung', 'steuer'] };
+          const beleg = !text.includes('"belegMerkmale":') ? {} : mockBeleg.has(preisPfad) ? mockBeleg.get(preisPfad)
+            : quelle.preisQuelle === 'kassenbon' ? voll : { belegHaendler: '', belegMerkmale: [] };
+          const antwort = { echt: true, loseWare: false, traegtAngaben: true, gleicheAnsicht: false, preisSichtbar: true, eanFoto, grund: 'ok', ...quelle, ...beleg };
+          // 'IN_LISTE': das Objekt in eine Liste verpackt (gemessen 1 von 272 Antworten, 05.10.2026).
+          return { text: JSON.stringify(mockLage.antwortInListe ? [antwort] : antwort) };
         },
       },
     };
@@ -218,6 +227,9 @@ beforeEach(() => {
   mockKopf.clear();
   mockQuelle.clear();
   mockNachlese.clear();
+  mockBeleg.clear();
+  mockLage.antwortInListe = false;
+  mockLage.discounterFehler = false;
   mockDownloads.length = 0;
   dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => T0);
   mockStore.set('cashback_config/v1', { fotoWorker: true });
@@ -976,8 +988,8 @@ describe('Bildschirmfoto als Preisbeleg (Patrick 04.10.2026: „ja, bau das")', 
     expect(doc('alt').status).toBe('approved');
   });
 
-  it('Schalter aus (false): keine Zusatzfrage, kein Bildkopf, nichts am Dokument', async () => {
-    schalter(false);
+  it('beide Schalter aus (false): keine Zusatzfrage, kein Bildkopf, nichts am Dokument', async () => {
+    mockStore.set('cashback_config/v1', { fotoWorker: true, preisBildschirmRegel: false, preisBelegRegel: false });
     mitPreisfoto('schirm', 'bildschirm', png(1080, 2400));
     const b = await scharf();
     expect(mockLage.auditTexte[0]).not.toContain('preisQuelle');
@@ -985,7 +997,19 @@ describe('Bildschirmfoto als Preisbeleg (Patrick 04.10.2026: „ja, bau das")', 
     expect(doc('schirm').status).toBe('approved');
     expect(doc('schirm').review.preisBildschirm).toBeUndefined();
     expect(doc('schirm').review.bildAudit).not.toHaveProperty('preisQuelle');
-    expect(b.preisBildschirm).toMatchObject({ modus: false, befragt: 0, faelle: [] });
+    expect(b.preisBildschirm).toMatchObject({ modus: false, befragt: 0, faelle: [], beleg: { modus: false } });
+  });
+  // Nachprüfung 05.10.2026: der Preisbeleg hat einen eigenen Schalter — die
+  // Bildschirm-Regel aus heißt nicht „alles aus".
+  it('nur die Bildschirm-Regel aus: kein Bildkopf, kein Bildschirm-Befund — die Preisquelle wird für den Preisbeleg weiter gefragt', async () => {
+    schalter(false);
+    mitPreisfoto('schirm', 'bildschirm', png(1080, 2400));
+    const b = await scharf();
+    expect(mockLage.auditTexte[0]).toContain('"preisQuelle":');
+    expect(mockLage.auditTexte[0]).toContain('belegMerkmale');
+    expect(mockDownloads).toEqual([]);
+    expect(doc('schirm').status).toBe('approved');
+    expect(b.preisBildschirm).toMatchObject({ modus: false, befragt: 1, befundAblehnen: 0, befundHalten: 0, faelle: [], beleg: { modus: 'shadow' } });
   });
 
   it('unbekannter Schalterwert („ja") gilt als Beobachtung — nie still scharf', async () => {
@@ -1027,32 +1051,47 @@ describe('Bildschirmfoto als Preisbeleg (Patrick 04.10.2026: „ja, bau das")', 
     mockQuelle.set(preisPfad('halt'), 'laden');
     mockWrites.length = 0;
     mockLage.configFehler = 1;
-    await expect(scharf()).rejects.toThrow(/preisBildschirmRegel nicht lesbar/);
+    await expect(scharf()).rejects.toThrow(/Schalter preisBildschirmRegel\/preisBelegRegel nicht lesbar/);
     expect(doc('halt').status).toBe('pending');
     expect(doc('neu').status).toBe('pending');
     expect(mockWrites.filter((w) => w.path.startsWith('crowd_uploads/'))).toEqual([]);
   });
-  it('index.js-Weg: der Schalter kommt als Wert mit → die Runde liest ihn nicht ein zweites Mal', async () => {
+  it('index.js-Weg: die Schalter kommen als Werte mit → die Runde liest sie nicht ein zweites Mal', async () => {
     schalter('shadow'); // stünde im Dokument — gilt nicht, der übergebene Wert gilt
     mitPreisfoto('schirm', 'bildschirm', png(1080, 2400));
-    const b = await scharf({ preisBildschirmRegel: true });
-    // nur das Lesen der Bon-Lage (bonWorker) — kein eigenes für den Schalter
+    const b = await scharf({ preisBildschirmRegel: true, preisBelegRegel: false });
+    // nur das Lesen der Bon-Lage (bonWorker) — kein eigenes für die Schalter
     expect(mockLage.configLesungen).toBe(1);
     expect(b.preisBildschirm.modus).toBe(true);
+    expect(b.preisBildschirm.beleg.modus).toBe(false);
+    expect(mockLage.auditTexte[0]).not.toContain('belegMerkmale');
     expect(doc('schirm')).toMatchObject({ status: 'rejected', review: { reason: 'preis_bildschirm' } });
     // null (Feld fehlt im Dokument) = Beobachtung
     mockStore.clear(); mockListe.clear(); mockKopf.clear(); mockQuelle.clear(); schalter(true);
     mitPreisfoto('s2', 'bildschirm', png(1080, 2400));
-    expect((await scharf({ preisBildschirmRegel: null })).preisBildschirm.modus).toBe('shadow');
+    const b2 = await scharf({ preisBildschirmRegel: null, preisBelegRegel: null });
+    expect(b2.preisBildschirm.modus).toBe('shadow');
+    expect(b2.preisBildschirm.beleg.modus).toBe('shadow');
     expect(doc('s2').status).toBe('approved');
+    // fehlt einer der beiden Werte, liest die Runde den Schalter selbst — einmal
+    mockStore.clear(); mockListe.clear(); mockKopf.clear(); mockQuelle.clear();
+    mockStore.set('cashback_config/v1', { fotoWorker: true, preisBelegRegel: true });
+    mockLage.configLesungen = 0;
+    einreichung('s3');
+    const b3 = await scharf({ preisBildschirmRegel: true });
+    expect(mockLage.configLesungen).toBe(2); // Bon-Lage + Schalter
+    expect(b3.preisBildschirm).toMatchObject({ modus: true, beleg: { modus: true } });
   });
 
-  it('Schalter-Wechsel ändert die Regelversion (der Bericht meldet ihn wie eine Regeländerung)', async () => {
+  it('Schalter-Wechsel ändert die Regelversion (der Bericht meldet ihn wie eine Regeländerung) — auch beim Preisbeleg', async () => {
     einreichung('a');
     const v1 = (await scharf()).regelVersion;
     mockStore.clear(); mockListe.clear(); schalter(true); einreichung('b');
     const v2 = (await scharf()).regelVersion;
     expect(v1).not.toBe(v2);
+    mockStore.clear(); mockListe.clear(); mockStore.set('cashback_config/v1', { fotoWorker: true, preisBildschirmRegel: true, preisBelegRegel: true }); einreichung('c');
+    const v3 = (await scharf()).regelVersion;
+    expect(v3).not.toBe(v2);
   });
 
   it('hängender Abruf des Bildkopfs → nach der Zeitgrenze „Merkmale unbekannt", kein Urteil', async () => {
@@ -1224,5 +1263,301 @@ describe('Bildschirmfoto als Preisbeleg (Patrick 04.10.2026: „ja, bau das")', 
     const b = await scharf();
     expect(b.preisBildschirm.quellen).toEqual({ ohne_antwort: 8 });
     expect(b.warnungen.map((w) => w.code)).toContain('preisquelle_ohne_antwort');
+  });
+});
+
+// ───────── Preisbeleg „Kassenbon" (Entscheidung Claude im Auftrag Patricks, 04.10.2026) ─────────
+describe('Preisbeleg „Kassenbon": ohne Kassenbon-Merkmale oder fremder Händler → nur liegen lassen', () => {
+  const { jpeg, png } = require('./helpers/bildKopfDaten');
+  const { rowOf, precheckOf } = require('../src/einreichung');
+  const preisPfad = (id, uid = 'u1') => `crowduploads/${uid}/${id}/preis.jpg`;
+  /** „Kassenbon" laut Bildprüfung, Kamerafoto 4:3 (kein Bildschirm-Merkmal), Lesedienst: Kassenbon ohne Kopf. */
+  function bon(id, beleg, extra = {}) {
+    einreichung(id, { priceImageKind: 'kassenbon', ...extra });
+    mockQuelle.set(preisPfad(id, extra.uid), 'kassenbon');
+    if (beleg) mockBeleg.set(preisPfad(id, extra.uid), beleg);
+    mockKopf.set(preisPfad(id, extra.uid), jpeg(3000, 4000));
+  }
+  // Beide Regeln mit demselben Wert — wie sie getrennt wirken, prüft der Block
+  // „Zwei Schalter" unten (Nachprüfung 05.10.2026).
+  const schalter = (v) => mockStore.set('cashback_config/v1', { fotoWorker: true, ...(v === undefined ? {} : { preisBildschirmRegel: v, preisBelegRegel: v }) });
+  const VOLL = ['haendler', 'datum', 'summe', 'nummer', 'zahlung', 'steuer'];
+  const VERRAET = /warenkorb|händler|haendler|amazon|merkmal|summe|logo/i;
+
+  it('die Unterfragen stehen wortgleich in der Anweisung — nur mit eingeschaltetem Preisbeleg', async () => {
+    const { AUDIT_ANWEISUNG_PREISQUELLE, AUDIT_ANWEISUNG_PREISBELEG } = require('../src/taeglicheRunde');
+    einreichung('a');
+    await scharf();
+    expect(mockLage.auditTexte[0]).toContain('"belegHaendler":"…","belegMerkmale":["haendler|datum|summe|nummer|zahlung|steuer"]');
+    expect(mockLage.auditTexte[0]).toContain('belegMerkmale: welche dieser Merkmale eines abgeschlossenen Einkaufs');
+    expect(mockLage.auditTexte[0]).toContain(AUDIT_ANWEISUNG_PREISBELEG);
+    // Preisbeleg aus, Bildschirm-Regel an: die Fassung vom 04.10. (nur Preisquelle), wortgleich
+    mockLage.auditTexte = [];
+    mockStore.set('cashback_config/v1', { fotoWorker: true, preisBelegRegel: false });
+    mockBeleg.set(preisPfad('c'), { belegHaendler: 'Amazon', belegMerkmale: [] });
+    einreichung('c', { ean: '4000417025005', priceImageKind: 'kassenbon' });
+    mockQuelle.set(preisPfad('c'), 'kassenbon');
+    const bOhne = await taeglicheRunde({ dryRun: true, projekt: 'p', bucketName: 'b', ausloeser: 'manuell' });
+    expect(mockLage.auditTexte[0]).toContain(AUDIT_ANWEISUNG_PREISQUELLE);
+    expect(mockLage.auditTexte[0]).not.toContain('belegMerkmale');
+    expect(bOhne.preisBildschirm.beleg).toMatchObject({ modus: false, kassenbon: 0, ohneMerkmale: 0, fremderHaendler: 0, merkmaleOhneAntwort: 0, faelle: [] });
+    expect(bOhne.warnungen.map((w) => w.code)).not.toContain('preisbeleg_ohne_antwort');
+    // beide aus: gar keine Zusatzfrage
+    mockLage.auditTexte = [];
+    schalter(false);
+    einreichung('b', { ean: '4000000000017' });
+    const b = await taeglicheRunde({ dryRun: true, projekt: 'p', bucketName: 'b', ausloeser: 'manuell' });
+    expect(mockLage.auditTexte).toHaveLength(2); // b und das im Trockenlauf offene c
+    for (const t of mockLage.auditTexte) {
+      expect(t).not.toContain('belegMerkmale');
+      expect(t).not.toContain('preisQuelle');
+    }
+    expect(b.preisBildschirm.beleg).toMatchObject({ kassenbon: 0, maerkteUnlesbar: false });
+  });
+
+  it('Beobachtung (Schalter fehlt): Warenkorb und Amazon werden freigegeben, gezählt und gelistet — nichts am Dokument', async () => {
+    bon('korb', { belegHaendler: '', belegMerkmale: [] });
+    bon('amazon', { belegHaendler: 'Amazon', belegMerkmale: VOLL }, { ean: '4000000000017', priceReceipt: { merchant: 'Amazon EU S.à r.l.' } });
+    bon('rewe', { belegHaendler: 'REWE', belegMerkmale: ['steuer'] }, { ean: '4000417025005' });
+    const b = await scharf();
+    for (const id of ['korb', 'amazon', 'rewe']) expect(doc(id).status).toBe('approved');
+    expect(JSON.stringify(doc('korb'))).not.toMatch(VERRAET);
+    expect(b.preisBildschirm.beleg).toMatchObject({
+      kassenbon: 3, ohneMerkmale: 1, fremderHaendler: 1, stattFreigabe: 2, merkmaleOhneAntwort: 0, maerkteUnlesbar: false,
+    });
+    expect(b.preisBildschirm.beleg.faelle).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'korb', befund: 'ohne_merkmale', entscheidung: 'freigeben', ohneRegel: 'freigeben', merkmale: [] }),
+      expect.objectContaining({ id: 'amazon', befund: 'fremder_haendler', haendler: 'Amazon', lesedienstHaendler: 'Amazon EU S.à r.l.' }),
+    ]));
+    expect(b.preisBildschirm.faelle.find((f) => f.id === 'amazon')).toMatchObject({ beleg: 'fremder_haendler', belegHaendler: 'Amazon' });
+    // Nachprüfung 05.10.2026: ein Beleg-Befund ist KEIN Widerspruch zum
+    // Lesedienst — der sah hier jeweils einen Kassenbon. Die Zahl „Kassenbon,
+    // aber Lesedienst sah keinen" und ihre Warnung bleiben stumm.
+    expect(b.preisBildschirm.kassenbonOhneLesedienstBon).toBe(0);
+    expect(b.warnungen.map((w) => w.code)).not.toContain('preisquelle_bon_widerspruch');
+  });
+
+  // Nachprüfung 05.10.2026: der Zähler `kassenbonOhneLesedienstBon` (Warnung
+  // preisquelle_bon_widerspruch) zählt nur, was der Lesedienst las und NICHT
+  // als Bon sah — auch wenn der Fall über den Preisbeleg liegt, aber nie bloß,
+  // weil er über den Preisbeleg liegt.
+  it('Zähler „Kassenbon, Lesedienst sah keinen": Beleg-Befund nur mit Lesedienst-Widerspruch; Warnung erst ab 2 echten', async () => {
+    schalter(true);
+    // Warenkorb: Lesedienst las ein Preisschild → echter Widerspruch, liegt über den Beleg
+    bon('korb', { belegHaendler: '', belegMerkmale: [] }, { priceImageKind: 'preisschild' });
+    // Amazon und Inhaber-Markt ohne Logo: Lesedienst sah den Bon (Kopf gelesen)
+    bon('amazon', { belegHaendler: 'Amazon', belegMerkmale: VOLL }, { ean: '4000000000017', priceReceipt: { merchant: 'Amazon EU S.à r.l.' } });
+    bon('krummenerl', { belegHaendler: 'Krummenerl', belegMerkmale: VOLL }, { ean: '4000417025005', priceReceipt: { merchant: 'Krummenerl EH OHG' } });
+    const b = await scharf();
+    for (const id of ['korb', 'amazon', 'krummenerl']) expect([id, doc(id).status]).toEqual([id, 'pending']);
+    expect(b.preisBildschirm).toMatchObject({ kassenbonOhneLesedienstBon: 1, kassenbonLesedienstOhneBon: 1 });
+    expect(b.preisBildschirm.beleg).toMatchObject({ ohneMerkmale: 1, fremderHaendler: 2 });
+    expect(b.warnungen.map((w) => w.code)).not.toContain('preisquelle_bon_widerspruch');
+  });
+
+  it('scharf: beide bleiben liegen (preis_beleg_unsicher, art beleg, neutraler Hinweis); Konsole zeigt den Hinweis; nie abgelehnt', async () => {
+    schalter(true);
+    bon('korb', { belegHaendler: '', belegMerkmale: [] });
+    bon('amazon', { belegHaendler: 'Amazon', belegMerkmale: VOLL }, { ean: '4000000000017', priceReceipt: { merchant: 'Amazon EU S.à r.l.' } });
+    const b = await scharf();
+    for (const id of ['korb', 'amazon']) {
+      const d = doc(id);
+      expect(d.status).toBe('pending');
+      expect(d.review.rundeOffen).toMatchObject({ grund: 'preis_beleg_unsicher', sperrend: [], preisBildschirm: { modus: true, befund: 'halten', art: 'beleg' } });
+      expect(d.review.rundeOffen.hinweis).toMatch(/^Preisbeleg unsicher/);
+      expect(JSON.stringify(d.review)).not.toMatch(VERRAET);
+      expect(d.holdReasons).toBeUndefined();
+      expect(precheckOf(rowOf({ id, data: () => d }), [])).toMatchObject({ verdict: 'ok', hinweise: ['preis_beleg_unsicher'] });
+    }
+    expect(b).toMatchObject({ abgelehnt: 0, freigegeben: 0, offenGruende: { preis_beleg_unsicher: 2 } });
+  });
+
+  it('scharf: echte Bons zählen — Händlerkopf des Lesedienstes, Steuer-Kennzeichen, unsere Märkte online, Inhaber-Name mit Kette', async () => {
+    schalter(true);
+    // Bildprüfung sah kein Merkmal, der Lesedienst aber den Bon-Kopf
+    bon('kopf', { belegHaendler: '', belegMerkmale: [] }, { priceReceipt: { merchant: 'Kaufland', zip: '44534', city: 'Lünen' } });
+    // eng zugeschnittener Bon mit Steuer-Kennzeichen
+    bon('zeilen', { belegHaendler: '', belegMerkmale: ['steuer'] }, { ean: '4000000000017' });
+    bon('dm', { belegHaendler: 'dm', belegMerkmale: ['haendler', 'summe', 'nummer'] }, { ean: '4000417025005', priceReceipt: { merchant: 'dm-drogerie markt GmbH + Co. KG' } });
+    bon('inhaber', { belegHaendler: 'REWE', belegMerkmale: VOLL }, { ean: '4061464833838', priceReceipt: { merchant: 'Krummenerl EH OHG' } });
+    const b = await scharf();
+    for (const id of ['kopf', 'zeilen', 'dm', 'inhaber']) expect([id, doc(id).status]).toEqual([id, 'approved']);
+    expect(b.preisBildschirm.beleg).toMatchObject({ ohneMerkmale: 0, fremderHaendler: 0, faelle: [] });
+  });
+
+  it('scharf: keine verwertbare Antwort auf die Merkmal-Frage ist kein Freispruch (ohne Bon-Kopf liegt der Fall); Warnung bei vielen', async () => {
+    schalter(true);
+    for (let i = 0; i < 8; i++) bon(`k${i}`, { belegHaendler: 'REWE' }, { ean: String(4000000000000 + i * 97) });
+    const b = await scharf();
+    for (let i = 0; i < 8; i++) expect(doc(`k${i}`).status).toBe('pending');
+    expect(b.preisBildschirm.beleg).toMatchObject({ kassenbon: 8, merkmaleOhneAntwort: 8, ohneMerkmale: 8 });
+    expect(b.warnungen.map((w) => w.code)).toEqual(expect.arrayContaining(['preisbeleg_ohne_antwort', 'preisbeleg_haelt_viele']));
+  });
+
+  it('scharf: ein liegender Preisbeleg wird am nächsten Morgen nicht automatisch frei, auch wenn das Modell dann „REWE, alle Merkmale" sagt', async () => {
+    schalter(true);
+    bon('amazon', { belegHaendler: 'Amazon', belegMerkmale: VOLL });
+    await scharf();
+    const tag1 = doc('amazon').review.rundeOffen;
+    expect(tag1.preisBildschirm).toMatchObject({ befund: 'halten', art: 'beleg' });
+    mockBeleg.set(preisPfad('amazon'), { belegHaendler: 'REWE', belegMerkmale: VOLL });
+    await scharf();
+    expect(doc('amazon').status).toBe('pending');
+    expect(doc('amazon').review.rundeOffen).toMatchObject({ grund: 'preis_beleg_unsicher', preisBildschirm: { befund: 'halten', art: 'beleg', seit: tag1.lauf } });
+    expect(doc('amazon').review.rundeOffen.hinweis).toMatch(/^Preisbeleg unsicher — Befund vom/);
+  });
+
+  it('Märkte aus `discounter`: ein neu aufgenommener Markt gilt sofort; nicht lesbar → feste Ketten + gelbe Warnung', async () => {
+    schalter(true);
+    mockStore.set('discounter/picnic', { name: 'Picnic' });
+    bon('picnic', { belegHaendler: 'Picnic', belegMerkmale: VOLL });
+    await scharf();
+    expect(doc('picnic').status).toBe('approved');
+    mockStore.clear(); mockListe.clear(); mockQuelle.clear(); mockBeleg.clear(); mockKopf.clear(); schalter(true);
+    mockLage.discounterFehler = true;
+    bon('picnic2', { belegHaendler: 'Picnic', belegMerkmale: VOLL });
+    bon('rewe2', { belegHaendler: 'REWE', belegMerkmale: VOLL }, { ean: '4000000000017' });
+    const b = await scharf();
+    expect(doc('picnic2').status).toBe('pending');
+    expect(doc('rewe2').status).toBe('approved');
+    expect(b.preisBildschirm.beleg.maerkteUnlesbar).toBe(true);
+    expect(b.warnungen.find((w) => w.code === 'preisbeleg_maerkte_unlesbar')).toMatchObject({ stufe: 'gelb' });
+  });
+
+  it('Antwort der Bildprüfung in einer Liste verpackt (gemessen 1 von 272) → wird ausgewertet, kein Bildprüfungs-Fehler', async () => {
+    schalter(true);
+    mockLage.antwortInListe = true;
+    bon('liste', { belegHaendler: 'Lidl', belegMerkmale: VOLL });
+    const b = await scharf();
+    expect(doc('liste').status).toBe('approved');
+    expect(b.bildpruefung).toMatchObject({ gescheitert: 0 });
+  });
+
+  it('Bildschirm-Regel bleibt unberührt: „bildschirm" + Merkmale → abgelehnt; die Beleg-Fragen gelten nur für „kassenbon"', async () => {
+    schalter(true);
+    einreichung('schirm', { priceImageKind: 'preisschild' });
+    mockQuelle.set(preisPfad('schirm'), 'bildschirm');
+    mockKopf.set(preisPfad('schirm'), png(1080, 2400));
+    mockBeleg.set(preisPfad('schirm'), { belegHaendler: 'Amazon', belegMerkmale: [] });
+    const b = await scharf();
+    expect(doc('schirm')).toMatchObject({ status: 'rejected', rejectReason: 'fotos_unpassend' });
+    expect(b.preisBildschirm.beleg).toMatchObject({ kassenbon: 0, ohneMerkmale: 0, fremderHaendler: 0 });
+  });
+});
+
+// ───────── Zwei Schalter (Nachprüfung 05.10.2026) ─────────
+// Hingen Bildschirm-Regel und Preisbeleg an EINEM Schalter, gab das
+// Zurücknehmen des Preisbelegs (zu viele Bons inhabergeführter Märkte?) am
+// nächsten Morgen auch jedes angehaltene Bildschirmfoto frei — ohne Menschen.
+describe('Zwei Schalter: preisBildschirmRegel und preisBelegRegel wirken und enden getrennt', () => {
+  const { jpeg, png } = require('./helpers/bildKopfDaten');
+  const preisPfad = (id, uid = 'u1') => `crowduploads/${uid}/${id}/preis.jpg`;
+  const VOLL = ['haendler', 'datum', 'summe', 'nummer', 'zahlung', 'steuer'];
+  const schalter = (bildschirm, beleg) => mockStore.set('cashback_config/v1', {
+    fotoWorker: true, ...(bildschirm === undefined ? {} : { preisBildschirmRegel: bildschirm }), ...(beleg === undefined ? {} : { preisBelegRegel: beleg }),
+  });
+  /** Abfotografierter Bildschirm (Kamerafoto 4:3, „bildschirm") → Bildschirm-Halt. */
+  function kamera(id, ean) {
+    einreichung(id, { ean, priceImageKind: 'preisschild' });
+    mockQuelle.set(preisPfad(id), 'bildschirm');
+    mockKopf.set(preisPfad(id), jpeg(3000, 4000));
+  }
+  /** Warenkorb als „Kassenbon" ohne jedes Merkmal → Preisbeleg-Halt. */
+  function korb(id, ean) {
+    einreichung(id, { ean, priceImageKind: 'kassenbon' });
+    mockQuelle.set(preisPfad(id), 'kassenbon');
+    mockBeleg.set(preisPfad(id), { belegHaendler: '', belegMerkmale: [] });
+    mockKopf.set(preisPfad(id), jpeg(3000, 4000));
+  }
+  /** Am nächsten Morgen liest das Modell beide unauffällig. */
+  function unauffaellig() {
+    mockQuelle.set(preisPfad('kamera'), 'laden');
+    mockQuelle.set(preisPfad('korb'), 'kassenbon');
+    mockBeleg.set(preisPfad('korb'), { belegHaendler: 'REWE', belegMerkmale: VOLL });
+  }
+  async function tag1() {
+    schalter(true, true);
+    kamera('kamera', '4000417025005');
+    korb('korb', '4000000000017');
+    await scharf();
+    expect(doc('kamera').review.rundeOffen).toMatchObject({ grund: 'preis_bildschirm_unsicher', preisBildschirm: { modus: true, befund: 'halten', regeln: ['bildschirm'] } });
+    expect(doc('korb').review.rundeOffen).toMatchObject({ grund: 'preis_beleg_unsicher', preisBildschirm: { modus: true, befund: 'halten', regeln: ['beleg'], art: 'beleg' } });
+    return doc('kamera').review.rundeOffen.lauf;
+  }
+
+  it('Preisbeleg zurück auf Beobachtung oder aus → angehaltene Bildschirmfotos bleiben liegen; nur die Preisbelege werden frei', async () => {
+    for (const beleg of ['shadow', false]) {
+      mockStore.clear(); mockListe.clear(); mockQuelle.clear(); mockBeleg.clear(); mockKopf.clear();
+      const lauf1 = await tag1();
+      unauffaellig();
+      schalter(true, beleg);
+      const b = await scharf();
+      expect([beleg, doc('kamera').status]).toEqual([beleg, 'pending']);
+      expect(doc('kamera').review.rundeOffen).toMatchObject({ grund: 'preis_bildschirm_unsicher', preisBildschirm: { modus: true, befund: 'halten', seit: lauf1, regeln: ['bildschirm'] } });
+      // dokumentierter Rückweg: die eigene Regel zurückgenommen → ihre Fälle frei
+      expect([beleg, doc('korb').status]).toEqual([beleg, 'approved']);
+      expect(b.preisBildschirm).toMatchObject({ modus: true, beleg: { modus: beleg } });
+    }
+  });
+
+  it('Bildschirm-Regel zurück auf Beobachtung oder aus → angehaltene Preisbelege bleiben liegen; nur die Bildschirmfotos werden frei', async () => {
+    for (const bildschirm of ['shadow', false]) {
+      mockStore.clear(); mockListe.clear(); mockQuelle.clear(); mockBeleg.clear(); mockKopf.clear();
+      const lauf1 = await tag1();
+      unauffaellig();
+      schalter(bildschirm, true);
+      mockDownloads.length = 0;
+      await scharf();
+      expect([bildschirm, doc('korb').status]).toEqual([bildschirm, 'pending']);
+      expect(doc('korb').review.rundeOffen).toMatchObject({ grund: 'preis_beleg_unsicher', preisBildschirm: { modus: true, befund: 'halten', seit: lauf1, regeln: ['beleg'] } });
+      expect(doc('korb').review.rundeOffen.hinweis).toMatch(/^Preisbeleg unsicher — Befund vom/);
+      expect([bildschirm, doc('kamera').status]).toEqual([bildschirm, 'approved']);
+      // ohne Bildschirm-Regel kein Bildkopf
+      if (bildschirm === false) expect(mockDownloads).toEqual([]);
+    }
+  });
+
+  it('nur der Preisbeleg scharf, Bildschirm-Regel aus: Preisbeleg hält, Bildschirmfotos werden wie vor der Regel freigegeben', async () => {
+    schalter(false, true);
+    korb('korb', '4000000000017');
+    einreichung('schirm', { ean: '4000417025005', priceImageKind: 'preisschild' });
+    mockQuelle.set(preisPfad('schirm'), 'bildschirm');
+    mockKopf.set(preisPfad('schirm'), png(1080, 2400));
+    const b = await scharf();
+    expect(doc('korb')).toMatchObject({ status: 'pending', review: { rundeOffen: { grund: 'preis_beleg_unsicher' } } });
+    expect(doc('schirm').status).toBe('approved');
+    expect(mockDownloads).toEqual([]);
+    expect(b.preisBildschirm).toMatchObject({ modus: false, befundAblehnen: 0, beleg: { modus: true, ohneMerkmale: 1, stattFreigabe: 1 } });
+  });
+
+  it('nur die Bildschirm-Regel scharf: Preisbeleg wird beobachtet, nicht angehalten; Bildschirmfotos werden abgelehnt', async () => {
+    schalter(true, 'shadow');
+    korb('korb', '4000000000017');
+    einreichung('schirm', { ean: '4000417025005', priceImageKind: 'preisschild' });
+    mockQuelle.set(preisPfad('schirm'), 'bildschirm');
+    mockKopf.set(preisPfad('schirm'), png(1080, 2400));
+    const b = await scharf();
+    expect(doc('korb').status).toBe('approved');
+    expect(doc('schirm')).toMatchObject({ status: 'rejected', review: { reason: 'preis_bildschirm' } });
+    expect(b.preisBildschirm.beleg).toMatchObject({ modus: 'shadow', ohneMerkmale: 1, stattFreigabe: 1 });
+    expect(b.preisBildschirm.faelle.find((f) => f.id === 'korb')).toMatchObject({ wirkt: false, entscheidung: 'freigeben' });
+    expect(b.preisBildschirm.faelle.find((f) => f.id === 'schirm')).toMatchObject({ wirkt: true, entscheidung: 'ablehnen' });
+  });
+
+  it('unbekannter Wert von preisBelegRegel ("true" als Text) → Beobachtung, gelbe Warnung mit dem Wert; gültige Werte warnen nicht', async () => {
+    schalter(true, 'true');
+    korb('korb', '4000000000017');
+    const b = await scharf();
+    expect(doc('korb').status).toBe('approved');
+    expect(b.preisBildschirm.beleg).toMatchObject({ modus: 'shadow', schalterUnbekannt: '"true" (Text)' });
+    expect(b.warnungen.find((w) => w.code === 'preisbeleg_schalter_unbekannt')).toMatchObject({ stufe: 'gelb' });
+    expect(b.warnungen.map((w) => w.code)).not.toContain('preisbildschirm_schalter_unbekannt');
+    for (const v of [undefined, 'shadow', true, false]) {
+      mockStore.clear(); mockListe.clear(); mockKopf.clear(); mockQuelle.clear(); mockBeleg.clear(); schalter(true, v);
+      einreichung('a');
+      const w = await scharf();
+      expect(w.preisBildschirm.beleg).not.toHaveProperty('schalterUnbekannt');
+      expect(w.warnungen.map((x) => x.code)).not.toContain('preisbeleg_schalter_unbekannt');
+    }
   });
 });
