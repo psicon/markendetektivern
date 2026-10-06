@@ -52,6 +52,8 @@
  */
 
 const BELEGARTEN = new Set(['kassenbon', 'app_kassenbon', 'online_bestellung', 'sonstiges']);
+// Felder, die erst Prompt v1.5 liefert (lib/prompt.js).
+const V15_FELDER = ['belegart', 'bestellnummer', 'bonComplete'];
 // Belegarten, bei denen ein fehlender Endbetrag aus den Artikeln kommt: eine
 // Rechnungsseite ohne Summe und ein App-Screenshot, auf dem sie weggescrollt ist.
 const SUMME_AUS_ARTIKELN = new Set(['online_bestellung', 'app_kassenbon']);
@@ -95,13 +97,19 @@ function onlineMerkmal(parsed) {
 function belegBereinigen(parsed) {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return parsed;
   const out = { ...parsed };
-  const art = typeof out.belegart === 'string' ? out.belegart.trim().toLowerCase() : null;
-  out.belegart = art && BELEGARTEN.has(art) ? art : null;
-  // Bestellnummer nur bei einer Bestellung — auf einem Ladenbon wäre jede
-  // Nummer eine Kassen-, Bon- oder Kundennummer.
-  const nr = typeof out.bestellnummer === 'string' ? out.bestellnummer.trim().slice(0, 40) : null;
-  out.bestellnummer = out.belegart === 'online_bestellung' && nr ? nr : null;
-  out.bonComplete = out.bonComplete === true ? true : out.bonComplete === false ? false : null;
+  // Eine Lesung ohne jedes v1.5-Feld (Prompt v1.4 hinter dem Schalter
+  // cashback_config/v1.ocrPrompt, Bestand, cv-hybrid, DocAI) bekommt keine
+  // neuen Felder dazu — sie bleibt, wie v1.4 sie gespeichert hätte. Die
+  // Anschrift-Bereinigung über Stichworte unten gilt trotzdem (Datenschutz).
+  if (V15_FELDER.some((k) => Object.prototype.hasOwnProperty.call(out, k))) {
+    const art = typeof out.belegart === 'string' ? out.belegart.trim().toLowerCase() : null;
+    out.belegart = art && BELEGARTEN.has(art) ? art : null;
+    // Bestellnummer nur bei einer Bestellung — auf einem Ladenbon wäre jede
+    // Nummer eine Kassen-, Bon- oder Kundennummer.
+    const nr = typeof out.bestellnummer === 'string' ? out.bestellnummer.trim().slice(0, 40) : null;
+    out.bestellnummer = out.belegart === 'online_bestellung' && nr ? nr : null;
+    out.bonComplete = out.bonComplete === true ? true : out.bonComplete === false ? false : null;
+  }
   if (SUMME_AUS_ARTIKELN.has(out.belegart) && !Number.isFinite(out.totalCents) && Array.isArray(out.items)) {
     // Dieselbe Summe wie reconcile() in lib/ocr.js.
     const summe = out.items.reduce((acc, it) => acc + (it && Number.isFinite(it.priceCents) ? it.priceCents : 0), 0);

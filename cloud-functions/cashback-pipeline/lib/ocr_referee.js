@@ -31,7 +31,7 @@
  */
 
 const { extractReceipt } = require('./ocr');
-const PROMPT = require('./prompt_referee');
+const { refereePromptFuer } = require('./prompt_referee');
 const { refereeFingerprint, decideReferee } = require('./refereePolicy');
 const { istGemini3, ausweichStandort, ESKALATION_MODELL_STANDARD } = require('./geminiModelle');
 
@@ -101,6 +101,9 @@ function temperatureFor(model) {
  * @param {string} ctx.reason                 Ablehngrund aus Durchlauf 1.
  * @param {Array} ctx.prior                   Erstlesungen (robust.reads) für plausibel().
  * @param {(name: string|null, country: string|null) => Promise<string|null>} ctx.merchantKeyFor
+ * @param {string|null} [ctx.erstlesungVersion] ocr.promptVersion der Erstlesung — wählt
+ *                                            den Prompt (lib/prompt_referee.js); ohne
+ *                                            Angabe der Live-Stand v1.4.
  * @param {Function} [ctx.extract]            Testnaht; Standard extractReceipt.
  * @param {() => number} [ctx.clock]          Testnaht; Standard Date.now.
  * @returns {Promise<{result: object, chosen: object|null}>}
@@ -108,6 +111,9 @@ function temperatureFor(model) {
 async function runReferee(imageBytes, mimeType, ctx) {
   const extract = ctx.extract || extractReceipt;
   const clock = ctx.clock || Date.now;
+  // Prompt zur Version der Erstlesung (05.10.2026): die Zweitprüfung ersetzt
+  // deren Lesung — sie liest mit derselben Fassung, nicht mit dem Schalter.
+  const PROMPT = refereePromptFuer(ctx.erstlesungVersion);
   const started = clock();
   const lesungen = [];
   const fps = [];

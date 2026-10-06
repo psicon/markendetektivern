@@ -65,6 +65,7 @@ const CASHBACK_ADMIN_KEY = defineSecret('NUTRITION_SCRAPER_TRIGGER_KEY');
 const { extractReceipt, reconcile, countEligibleItems, tierFor, isPfandItem, DEFAULT_MODEL } = require('./lib/ocr');
 const { extractReceiptCVHybrid } = require('./lib/ocr_cvhybrid');
 const { extractReceiptRobust } = require('./lib/ocr_robust');
+const { promptVersionAus } = require('./lib/prompt');
 const { uebernehmeClientKontext, logZusammenfassung: clientKontextLog } = require('./lib/clientKontext');
 const { moneyFieldAgreement, normMerchant } = require('./lib/fieldAgreement');
 const { refereeMode, shouldRequestReferee, infraVerhindert: refereeInfraVerhindert, einheitlicheUhrzeit } = require('./lib/refereePolicy');
@@ -579,7 +580,15 @@ const DEFAULT_CONFIG = {
   minItemsForPayout: 4,
   eligibleMerchants: ['aldi', 'lidl', 'edeka', 'rewe', 'kaufland', 'penny', 'netto', 'dm', 'rossmann'],
   ocrModel: DEFAULT_MODEL,
+  // Altes, nirgends gelesenes Feld (steht so auch in cashback_config/v1) —
+  // NICHT der Prompt-Schalter. Der heißt `ocrPrompt` (unten).
   ocrPromptVersion: 'v1.0',
+  // Prompt der Bon-OCR (lib/prompt.js, 05.10.2026): 'v1.4' | 'v1.5'. Fehlt
+  // der Wert oder ist er ungültig, gilt v1.4 — der Live-Stand bis zum
+  // Umschalten. Wirkt beim nächsten Bon, ohne Deploy; gelesene Bons behalten
+  // ihre Version (OCR-Cache), eine angefangene Leiter der anderen Version
+  // wird frisch gelesen.
+  ocrPrompt: 'v1.4',
   manualReviewThreshold: 0.65,
   autoApproveThreshold: 0.85,
   kycRequiredAt: 2000,
@@ -2468,6 +2477,8 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
           try {
             ocr = await extractReceiptRobust(bytes, mimeType, {
               model: config.ocrModel,
+              // Schalter cashback_config/v1.ocrPrompt — ungültig/fehlend → v1.4.
+              promptVersion: promptVersionAus(config.ocrPrompt),
               escalationGate,
               laufStart,
               zwischenstand: receipt.ocrZwischenstand || null,
@@ -2626,6 +2637,10 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
           const { result, chosen } = await runReferee(bytes, mimeType, {
             reason: anfrage.reason,
             prior: erstlesungen,
+            // Prompt-Fassung der ERSTLESUNG (v1.4/v1.5), nicht der aktuelle
+            // Schalter: die Prüfung ersetzt diese Lesung und wird an ihr
+            // gemessen — zwei Fassungen werden nicht gemischt (05.10.2026).
+            erstlesungVersion: ocr.promptVersion ?? null,
             // Marktnamen über den Resolver vergleichen, wie im Gate 6w.
             merchantKeyFor: async (name, land) => {
               const roh = normMerchant(name);

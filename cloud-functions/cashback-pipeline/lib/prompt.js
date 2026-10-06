@@ -2,6 +2,26 @@
  * Gemini system prompt for DACH receipt OCR.
  * Ported 1:1 from tools/cashback-ocr-validation/prompts.py (v1.0).
  *
+ * ═══ Zwei Versionen hinter einem Schalter (05.10.2026) ═══
+ * `cashback_config/v1.ocrPrompt` = 'v1.4' | 'v1.5' wählt den Prompt der
+ * Bon-OCR (Robust-Leiter in lib/ocr_robust.js). Fehlt der Wert oder ist er
+ * ungültig, gilt v1.4 — der Deploy ändert an der Texterkennung also nichts.
+ * Umschalten wirkt ohne Deploy beim nächsten Bon (loadConfig je Lauf).
+ * Regeln, die beim Umschalten gelten (index.js, lib/ocr_robust.js):
+ *   • Jede Lesung trägt ihre Version (`ocr.promptVersion`); ein am Bon
+ *     gespeichertes OCR-Ergebnis wird mit SEINER Version weiterverwendet und
+ *     nicht neu gelesen.
+ *   • Ein Zwischenstand der Leiter (`ocrZwischenstand`) aus der anderen
+ *     Version wird verworfen — Lesungen zweier Versionen werden nie
+ *     gemeinsam bewertet.
+ *   • Die Zweitprüfung liest mit der Version der Erstlesung
+ *     (lib/prompt_referee.js), nicht mit dem aktuellen Schalter.
+ *   • cv-hybrid (Rückweg) nutzt immer das v1.4-Schema.
+ * Was v1.5 zusätzlich liefert (belegart, bestellnummer, bonComplete,
+ * Rabattzeilen mit category 'Warenkorbrabatt'), fehlt in v1.4-Lesungen; alle
+ * Stellen, die es auswerten (lib/belegart.js, lib/doppelBon.js, reconcile in
+ * lib/ocr.js), verhalten sich ohne diese Felder wie vor v1.5.
+ *
  * VERSION HISTORY
  * v1.0 (2026-05-03) — initial.
  * v1.1 (2026-05-04) — Gemini schema fix: nullability via `nullable: true`
@@ -37,8 +57,9 @@
  *   Artikelsumme als Endbetrag eingesetzt und bezahlt. Damit das bleibt
  *   (Patrick: Online-Bestellungen unserer Märkte zählen, dm ja), setzt
  *   lib/belegart.js bei einer Online-Bestellung ohne Endbetrag die
- *   Artikelsumme ein und vermerkt `summeAusArtikeln: true`. Eingabe +~600
- *   Token je Lesung.
+ *   Artikelsumme ein und vermerkt `summeAusArtikeln: true`. Eingabe +844
+ *   Token je Lesung (gemessen 05.10. an 57 Bons, gepaart gegen v1.4; vor dem
+ *   Coupon-Fix — dessen Zuschlag steht unten).
  *   Prüfrunde 04.10.: Regel 7 verbietet, den Händler aus Eigenmarken zu
  *   schließen — mit geschwärztem Logo las das Modell eine Picnic-Rechnung als
  *   „Edeka" (aus G&G), und das trifft im Resolver schon die Namensstufe.
@@ -53,13 +74,33 @@
  *   beide Picnic-Belege (ohne Kopf, geschwärzt) → merchant null →
  *   unknown_merchant, 4 Kontroll-Bons (Kaufland, ALDI SÜD, Penny, Lidl)
  *   unverändert.
+ *   Coupon-Fix (05.10.2026, Regel 16): Messung an 57 Bons zeigte, dass v1.5
+ *   bei Coupons auf den ganzen Einkauf (Rossmann „10% COUPONAKTION", dm
+ *   „Rabatt") die Artikelpreise wie gedruckt las und die Coupon-Zeile wegließ
+ *   — der Abgleich scheiterte. v1.4 hatte den Coupon in Artikelpreise
+ *   eingerechnet (5,6 % aller Bons in 14 Tagen tragen einen solchen Coupon).
+ *   Jetzt: jede solche Zeile als eigenes Item mit NEGATIVEM Preis und
+ *   category 'Warenkorbrabatt', Artikelpreise wie gedruckt. Sie zählt nicht
+ *   als Artikel (countEligibleItems: Preis ≤ 0), der Abgleich rechnet sie mit
+ *   und verlangt die Belegkette des Warenkorb-Rabatts (lib/ocr.js reconcile).
+ *   Nachgemessen 05.10. (je 2 Flash-Lesungen v1.4 und v1.5 am selben Tag,
+ *   scratchpad coupon-fix/mess.js): 15 Coupon-Bons (Rossmann, dm, Kaufland) —
+ *   Abgleich ok 24/30 Lesungen (v1.4: 23/30), Bons ohne aufgehende Lesung 2
+ *   (v1.4: 3), Einigung nach zwei Lesungen 10/15 (v1.4: 8/15); Markt und
+ *   Datum 30/30 gleich. Beide v1.5-Fehlschläge sind die Grenze (Coupon ≥ 25 %
+ *   der Zwischensumme, Kette sonst exakt), einer davon ein bezahlter dm-Bon.
+ *   Eingabe +1.301 Token je Lesung gegenüber v1.4 (+457 durch Regel 16).
  */
 
 'use strict';
 
-const VERSION = 'v1.5';
+/** Ohne gültigen Schalter gilt v1.4 — der Live-Prompt bis zum Umschalten. */
+const STANDARD_VERSION = 'v1.4';
 
-const SYSTEM_PROMPT = `\
+// ═══ v1.4 — Live-Prompt seit 05.09.2026. NICHT ÄNDERN. ═══
+// Byte-gleich mit dem ausgerollten Stand (7220a7c5, processCashback vom
+// 03.10.2026); __tests__/promptVersion.test.js prüft das über SHA-256.
+const SYSTEM_PROMPT_V14 = `\
 Du bist ein OCR-Spezialist für deutsche Kassenbons (DACH-Raum: DE, AT,
 CH). Deine Aufgabe: aus dem Foto eines Kassenbons strukturierte Daten
 extrahieren.
@@ -82,6 +123,82 @@ extrahieren.
    nach Rabatt aufnehmen. (Pfand-Zeilen als eigene Items mit
    category='Pfand' aufnehmen — die Zuordnung weiter unten gilt auch
    für sie.) Beachte zwingend die Sektion „Zeilen-/Preis-Zuordnung".
+7. **Merchant** = Filialname wie er ganz oben auf dem Bon steht.
+   **merchantSubtitle** = die wörtliche(n) Zusatzzeile(n) direkt unter dem
+   Filialnamen (Anschrift, Filialnummer), unverändert wie gedruckt.
+   **storeAddress** = die Anschrift der FILIALE aus dem Bon-Kopf, aufgeteilt:
+   street = Straße + Hausnummer, zip = Postleitzahl (DE 5-stellig, AT/CH
+   4-stellig), city = Ort OHNE Postleitzahl. Nur übernehmen, was gedruckt
+   ist; fehlt ein Teil → null. Filial-, Markt-, Kassen- oder Bonnummern
+   (z. B. „Filiale 6100", „Markt 8068") sind KEINE Postleitzahl. Steht im
+   Fußbereich zusätzlich ein Firmensitz (GmbH-Anschrift, Impressum), zählt
+   die Filialadresse oben, nicht der Firmensitz.
+8. **Total** = der ENDBETRAG nach Rabatten.
+9. Wenn das Bild kein Kassenbon ist, setze isReceipt=false und gib
+   einen Grund in notReceiptReason.
+10. Bei Manipulationsverdacht setze suspiciousManipulation=true und
+    beschreibe in manipulationNotes.
+11. **bonCountry**: setze 'DE' / 'AT' / 'CH' wenn das Land erkennbar
+    ist. Starke Signale (in dieser Priorität):
+    - UID-Nr / Steuer-ID Präfix: 'DE...' = DE, 'ATU...' = AT, 'CHE-...' = CH
+    - Postleitzahl: 5-stellig (DE), 4-stellig (AT/CH)
+    - Adresse mit Bundesland-Hinweis
+    - Währung CHF = CH (sonst EUR)
+    Wenn unklar: null lassen.
+
+## Zeilen-/Preis-Zuordnung (KRITISCH — häufigste Fehlerquelle)
+
+A. **Lies den Bon strikt Zeile für Zeile von OBEN nach UNTEN und gib die
+   Items in GENAU dieser Reihenfolge zurück.** Niemals sortieren, niemals
+   umgruppieren, niemals zwei benachbarte Artikel vertauschen.
+B. **Ordne Preise der REIHE NACH zu, NICHT nach pixel-genauer horizontaler
+   Höhe.** Viele Thermo-Bons drucken die Preis-Spalte vertikal VERSETZT — der
+   Preis eines Artikels steht oft eine halbe bis ganze Zeile TIEFER als sein
+   Name (die 'EUR'-Kopfzeile sitzt dann auf Höhe des 1. Artikelnamens, der
+   1. Preis auf Höhe des 2. Namens usw., der letzte Preis steht UNTER dem
+   letzten Namen). Verlasse dich daher NIE auf gleiche Pixel-Höhe: der n-te
+   Preis der Preis-Spalte gehört zum n-ten Artikel (1.→1., 2.→2., …). Anzahl
+   Produkt-/Pfand-Preise = Anzahl Items.
+C. **Preisvorteil/Rabatt-Zeilen** (z. B. 'Preisvorteil -0,17', 'Rabatt')
+   gehören zum unmittelbar DAVOR stehenden Artikel und verringern dessen
+   Preis — NICHT als eigenen Artikel ausgeben, sondern vom vorherigen Artikel
+   abziehen und dessen finalen Preis ausgeben.
+D. **Gewichtsware** (z. B. 'Zucchini  0,418 kg x 1,39'): der Preis ist
+   Gewicht × Kilopreis (ggf. minus Preisvorteil).
+E. **Selbstkontrolle:** Σ aller item.priceCents (inkl. Pfand) muss dem
+   Endbetrag (totalCents) entsprechen. Stimmt es nicht, hast du sehr
+   wahrscheinlich wegen des Spalten-Versatzes Preise falsch zugeordnet —
+   korrigiere die ZUORDNUNG (verschiebe die Preis-Spalte um eine Zeile),
+   erfinde KEINE Werte, bis die Summe passt.
+F. **raw** pro Item: gib die wörtliche Bon-Zeile an (Name + Preis genau wie
+   gedruckt), damit Name und Preis garantiert aus DERSELBEN Zeile stammen.`;
+
+// ═══ v1.5 — Belegart, Bestellnummer, bonComplete, Coupon-Zeilen. ═══
+const SYSTEM_PROMPT_V15 = `\
+Du bist ein OCR-Spezialist für deutsche Kassenbons (DACH-Raum: DE, AT,
+CH). Deine Aufgabe: aus dem Foto eines Kassenbons strukturierte Daten
+extrahieren.
+
+## Regeln
+
+1. **Antworte NUR mit gültigem JSON** — kein Fließtext, kein Markdown,
+   keine Code-Fences. Das Antwortformat wird über response_schema
+   erzwungen.
+2. **Nichts erfinden.** Wenn ein Feld nicht lesbar ist, setze es auf
+   null (für Strings) oder lass den entsprechenden Eintrag aus.
+3. **Beträge immer in Cents als Integer** (z. B. €1,29 → 129).
+4. **Datum immer ISO-8601** (YYYY-MM-DD). Zweistellige Jahre auf dem Bon
+   (z. B. „24.08.26") sind IMMER 20YY → 2026-08-24, nie 2020. Enthält der
+   Bon einen TSE-/Signatur-Block mit vollständigem Datum (z. B.
+   „2026-08-24T09:55…"), hat dieses Datum Vorrang vor der Kopfzeile.
+5. **Uhrzeit als HH:MM** (24h).
+6. **Items**: nur tatsächliche Produkt-Zeilen, keine Gesamt-/Steuer-
+   Zeilen und keine Rabatt-Zeilen — einzige Ausnahme sind Rabatte und
+   Coupons auf den GANZEN Einkauf (Regel 16). Mehrfachzeilen pro Produkt
+   einmal mit finalem Preis nach Rabatt aufnehmen. (Pfand-Zeilen als
+   eigene Items mit category='Pfand' aufnehmen — die Zuordnung weiter
+   unten gilt auch für sie.) Beachte zwingend die Sektion „Zeilen-/Preis-
+   Zuordnung".
 7. **Merchant** = Filialname wie er ganz oben auf dem Bon steht. Nur einen
    sichtbar GEDRUCKTEN Händler-, Filial- oder Shopnamen übernehmen (Kopf,
    Logo, Absender, Fußzeile) — NIE aus Artikel- oder Eigenmarkennamen
@@ -145,6 +262,28 @@ extrahieren.
     ist bei einer Bestellung der Name des Händlers bzw. Shops, wie er
     gedruckt ist (Regel 7) — nie aus den Artikeln geschlossen.
 
+## Rabatte und Coupons auf den ganzen Einkauf
+
+16. Rabatt-, Coupon- und Gutscheinzeilen, die NACH der Artikelliste stehen
+    (meist unter der Zwischensumme, vor dem Endbetrag) und NICHT unmittelbar
+    unter einem einzelnen Artikel — z. B. „10% COUPONAKTION", „Coupon 20%
+    Bio Lebensmittel", „Rabatt", „Coupon 10€", „5€ Rabatt Warenkorb",
+    „K Card XTRA Rabatt", „Mitarbeiterrabatt" — nimmst du als EIGENE Zeile
+    in items auf:
+    - name und raw wie gedruckt, priceCents NEGATIV (9,69 € Rabatt → -969),
+      category='Warenkorbrabatt'. Jede gedruckte Rabattzeile einzeln, auch
+      wenn ihr Betrag ohne Minuszeichen gedruckt ist.
+    - Die Artikel darüber behalten ihren Preis WIE GEDRUCKT. Einen solchen
+      Rabatt NIE auf Artikel verteilen und NIE von einem Artikelpreis
+      abziehen.
+    - subtotalCents = die gedruckte Zwischensumme VOR diesen Zeilen (z. B.
+      „Zwischensumme", „SUMME"), nur wenn sie gedruckt ist.
+    - KEINE Rabattzeilen sind: Zahlungszeilen (BAR, EC- oder Kreditkarte,
+      Gutschein- oder Geschenkkarte als Zahlungsmittel, eingelöste Punkte
+      oder Guthaben, Rückgeld), Storno- und Rückgabezeilen (bleiben normale
+      Items, wie gedruckt) und Hinweise, die den Endbetrag nicht verringern
+      („Sie haben … gespart").
+
 ## Zeilen-/Preis-Zuordnung (KRITISCH — häufigste Fehlerquelle)
 
 A. **Lies den Bon strikt Zeile für Zeile von OBEN nach UNTEN und gib die
@@ -161,24 +300,27 @@ B. **Ordne Preise der REIHE NACH zu, NICHT nach pixel-genauer horizontaler
 C. **Preisvorteil/Rabatt-Zeilen** (z. B. 'Preisvorteil -0,17', 'Rabatt')
    gehören zum unmittelbar DAVOR stehenden Artikel und verringern dessen
    Preis — NICHT als eigenen Artikel ausgeben, sondern vom vorherigen Artikel
-   abziehen und dessen finalen Preis ausgeben.
+   abziehen und dessen finalen Preis ausgeben. Das gilt nur für Zeilen direkt
+   unter einem Artikel; Rabatte auf den ganzen Einkauf regelt Regel 16.
 D. **Gewichtsware** (z. B. 'Zucchini  0,418 kg x 1,39'): der Preis ist
    Gewicht × Kilopreis (ggf. minus Preisvorteil).
-E. **Selbstkontrolle:** Σ aller item.priceCents (inkl. Pfand) muss dem
-   Endbetrag (totalCents) entsprechen. Stimmt es nicht, hast du sehr
+E. **Selbstkontrolle:** Σ aller item.priceCents (inkl. Pfand und der
+   negativen Rabattzeilen nach Regel 16) muss dem Endbetrag (totalCents)
+   entsprechen. Stimmt es nicht, hast du sehr
    wahrscheinlich wegen des Spalten-Versatzes Preise falsch zugeordnet —
    korrigiere die ZUORDNUNG (verschiebe die Preis-Spalte um eine Zeile),
    erfinde KEINE Werte, bis die Summe passt.
 F. **raw** pro Item: gib die wörtliche Bon-Zeile an (Name + Preis genau wie
    gedruckt), damit Name und Preis garantiert aus DERSELBEN Zeile stammen.`;
 
+// Für beide Versionen gleich (v1.4 unverändert).
 const USER_PROMPT =
   'Extrahiere alle strukturierten Daten aus diesem Kassenbon-Foto gemäß dem JSON-Schema. Antworte ausschließlich mit dem JSON-Objekt.';
 
 // Gemini structured-output schema. Note: Gemini does NOT accept
 // `type: ['string', 'null']` (JSON-Schema syntax). Optional fields
 // must use `nullable: true` and a single concrete type.
-const RESPONSE_SCHEMA = {
+const RESPONSE_SCHEMA_V14 = {
   type: 'object',
   properties: {
     isReceipt: { type: 'boolean' },
@@ -222,6 +364,15 @@ const RESPONSE_SCHEMA = {
     manipulationNotes: { type: 'string', nullable: true },
     ocrConfidence: { type: 'number', nullable: true },
     bonCountry: { type: 'string', nullable: true },
+  },
+  required: ['isReceipt', 'items'],
+};
+
+// v1.5 = v1.4 + drei Felder am Ende (Reihenfolge der v1.4-Felder unverändert).
+const RESPONSE_SCHEMA_V15 = {
+  ...RESPONSE_SCHEMA_V14,
+  properties: {
+    ...RESPONSE_SCHEMA_V14.properties,
     // v1.5: Belegart, Bestellnummer (nur Online-Bestellung), Vollständigkeit.
     belegart: {
       type: 'string',
@@ -232,7 +383,47 @@ const RESPONSE_SCHEMA = {
     bestellnummer: { type: 'string', nullable: true },
     bonComplete: { type: 'boolean', nullable: true },
   },
-  required: ['isReceipt', 'items'],
 };
 
-module.exports = { VERSION, SYSTEM_PROMPT, USER_PROMPT, RESPONSE_SCHEMA };
+const PROMPTS = Object.freeze({
+  'v1.4': Object.freeze({ VERSION: 'v1.4', SYSTEM_PROMPT: SYSTEM_PROMPT_V14, USER_PROMPT, RESPONSE_SCHEMA: RESPONSE_SCHEMA_V14 }),
+  'v1.5': Object.freeze({ VERSION: 'v1.5', SYSTEM_PROMPT: SYSTEM_PROMPT_V15, USER_PROMPT, RESPONSE_SCHEMA: RESPONSE_SCHEMA_V15 }),
+});
+const VERSIONEN = Object.freeze(Object.keys(PROMPTS));
+
+/**
+ * Wert des Schalters `cashback_config/v1.ocrPrompt` → gültige Version.
+ * Fehlt er, ist er falsch geschrieben oder unbekannt: v1.4. Kein Trimmen,
+ * keine Groß-/Kleinschreibung — nur die exakten Werte schalten um.
+ * @param {*} wert
+ * @returns {'v1.4'|'v1.5'}
+ */
+function promptVersionAus(wert) {
+  return typeof wert === 'string' && Object.prototype.hasOwnProperty.call(PROMPTS, wert) ? wert : STANDARD_VERSION;
+}
+
+/** Prompt-Satz {VERSION, SYSTEM_PROMPT, USER_PROMPT, RESPONSE_SCHEMA} einer Version. */
+function promptFuer(wert) {
+  return PROMPTS[promptVersionAus(wert)];
+}
+
+/**
+ * Aufruf-Optionen für extractReceipt (lib/ocr.js): Prompt, Schema und das
+ * Versions-Etikett der Lesung gehören zusammen — nie einzeln setzen.
+ */
+function promptOptionen(wert) {
+  const p = promptFuer(wert);
+  return { systemInstruction: p.SYSTEM_PROMPT, userPrompt: p.USER_PROMPT, responseSchema: p.RESPONSE_SCHEMA, promptVersion: p.VERSION };
+}
+
+// Die bisherigen Einzel-Exporte bleiben der STANDARD (v1.4): cv-hybrid
+// (lib/prompt_text.js teilt das Schema), Skripte und alle Aufrufer ohne Schalter.
+module.exports = {
+  ...PROMPTS[STANDARD_VERSION],
+  STANDARD_VERSION,
+  VERSIONEN,
+  PROMPTS,
+  promptVersionAus,
+  promptFuer,
+  promptOptionen,
+};

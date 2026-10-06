@@ -167,6 +167,14 @@ const { onlineMerkmal } = require('./belegart');
 const NICHT_ARTIKEL_RE = /pfand|leergut|leerg\b|leerg\.|einweg.?leer|eingel(ö|o)ste punkte|billa bon|rabatt|gutschein|coupon/i;
 const MAX_ARTIKEL = 150;
 const MAX_SCHLUESSEL_LAENGE = 60;
+// Rabatt auf den ganzen Einkauf als eigene Zeile (Prompt v1.5, Regel 16 —
+// lib/prompt.js). v1.4 rechnete denselben Coupon in die Artikelpreise ein.
+const RABATT_KATEGORIE_RE = /^warenkorbrabatt$/i;
+// Namensvergleich (Nachprüfung 05.10.2026, Runde 2): Name ohne Preis, auf
+// diese Länge gekürzt — der Artikel-Schlüssel kürzt lange Namen je nach
+// Stellenzahl des Preises verschieden.
+const NAMEN_LAENGE = 40;
+const MAX_PERSON_NAMEN = 40;
 
 const SCHLUESSEL_SAMMLUNG = 'cashback_bon_schluessel';
 const EINTRAG_VERSION = 1;
@@ -215,6 +223,12 @@ const MAX_PERSON_EINTRAEGE = 300;
 const MAX_PERSON_LESUNGEN = 2;
 const MAX_PERSON_ARTIKEL = 80;
 const PERSON_AUFBEWAHRUNG_TAGE = SUMMEN_AUFBEWAHRUNG_TAGE;
+// Größenbremse (Nachprüfung 05.10.2026, Runde 2): seit dem Namensvergleich
+// trägt jede Lesung zusätzlich bis zu 40 Namens-Hashes — rechnerisch bis
+// ~720 KB bei 300 Bons mit je 2 Lesungen. Bleibt die geschätzte Größe über
+// dieser Grenze, fallen die ältesten Bons heraus (1 MB wäre das Ende jeder
+// Buchung dieser Person).
+const MAX_PERSON_BYTES = 700_000;
 
 /** Wie in der Messung: klein, nur a–z, 0–9, äöüß. */
 function normName(s) {
@@ -364,12 +378,103 @@ function artikelSummeVon(items) {
 }
 
 /**
+ * Summe der POSITIVEN Artikelzeilen — ohne Pfand, Leergut, Rabatt-, Coupon-
+ * und Gutscheinzeilen (derselbe Filter wie artikelSchluessel). Nachprüfung
+ * 05.10.2026, Runde 2: die Artikelsumme oben zählt negative Zeilen mit; wer
+ * in eine Kopie nur eine Zeile „Coupon −1,50" oder „Leergut −0,75" einfügt
+ * und die Endsumme anpasst, ändert sie, ohne einen Artikel anzufassen — und
+ * unter v1.5 ist die Couponzeile sogar die vorgesehene Lesart (Regel 16).
+ * Gegenprobe an 6.421 bezahlten Bons (29.519 Paare gleiche Person, 1–95
+ * Tage, jeder Markt, scratchpad/bild-r2/mess.js): 5 Paare mit gleicher
+ * Positivsumme, alle mit Artikelanteil 0 — keines mit Anteil ≥ 0,6.
+ * null ohne positive Artikel.
+ */
+function positivSummeVon(items) {
+  if (!Array.isArray(items) || !items.length) return null;
+  let s = 0;
+  for (const it of items) {
+    if (!it || typeof it !== 'object') continue;
+    const p = it.priceCents;
+    if (!Number.isInteger(p) || p <= 0) continue;
+    if (RABATT_KATEGORIE_RE.test(String(it.category ?? ''))) continue;
+    if (NICHT_ARTIKEL_RE.test(String(it.name ?? it.raw ?? ''))) continue;
+    s += p;
+  }
+  return s > 0 ? s : null;
+}
+
+/** Trägt die Lesung einen Rabatt auf den ganzen Einkauf als eigene Zeile (v1.5)? */
+function hatWarenkorbRabatt(items) {
+  return Array.isArray(items) && items.some((it) => it && RABATT_KATEGORIE_RE.test(String(it.category ?? '')));
+}
+
+/**
+ * Artikelnamen ohne Preis aus den Artikel-Schlüsseln („name#preis"), jeder
+ * nur einmal, auf NAMEN_LAENGE gekürzt.
+ */
+function artikelNamen(artikel) {
+  if (!Array.isArray(artikel)) return [];
+  const out = new Set();
+  for (const k of artikel) {
+    if (typeof k !== 'string') continue;
+    const i = k.lastIndexOf('#');
+    const n = (i >= 0 ? k.slice(0, i) : k).slice(0, NAMEN_LAENGE);
+    if (n.length >= 2) out.add(n);
+  }
+  return [...out];
+}
+
+/**
+ * Anteil gemeinsamer Einträge am KLEINEREN von zwei Listen; null, wenn eine
+ * weniger als `min` Einträge hat.
+ */
+function anteilAus(a, b, min) {
+  const x = Array.isArray(a) ? a : [];
+  const y = new Set(Array.isArray(b) ? b : []);
+  if (x.length < min || y.size < min) return null;
+  let g = 0;
+  for (const k of x) if (y.has(k)) g++;
+  return g / Math.min(x.length, y.size);
+}
+
+/**
+ * Anteil der Einträge von `teil` (≥ min), die in `ganz` stehen — für einen
+ * Belegabschnitt, dessen Artikel im ganzen Beleg enthalten sind.
+ */
+function enthaltenAus(teil, ganz, min) {
+  const x = Array.isArray(teil) ? teil : [];
+  if (x.length < min) return null;
+  const y = new Set(Array.isArray(ganz) ? ganz : []);
+  let g = 0;
+  for (const k of x) if (y.has(k)) g++;
+  return g / x.length;
+}
+
+/**
+ * Prompt-Wechsel (Nachprüfung 05.10.2026, Runde 2): v1.4 rechnete einen
+ * Coupon auf den ganzen Einkauf in die Artikelpreise ein, v1.5 liest die
+ * gedruckten Preise und den Coupon als eigene Zeile. Dieselben Artikel tragen
+ * dann verschiedene Schlüssel „name#preis" (gemessen an echten Rossmann-
+ * Lesungen: Anteil 0,00–0,06 zwischen den Versionen). Trägt eine der beiden
+ * Lesungen einen solchen Rabatt, zählt darum zusätzlich der Anteil gleicher
+ * NAMEN — der größere Wert gilt. Gegenprobe an 6.421 bezahlten Bons
+ * (scratchpad/bild-r2/mess.js): 48.577 Paare verschiedener Konten, gleicher
+ * Markt und Tag — kein Paar mit Namensanteil ≥ 0,6 (höchster 0,57); 29.519
+ * Paare gleiche Person, 1–95 Tage, mit gleicher Summe oder Uhrzeit — keines.
+ * @returns {number|null}
+ */
+function mitNamen(preisAnteil, namenAnteil, rabatt) {
+  if (!rabatt || namenAnteil == null) return preisAnteil;
+  return preisAnteil == null ? namenAnteil : Math.max(preisAnteil, namenAnteil);
+}
+
+/**
  * Identität eines Bons für die Doppel-Prüfung.
  * @returns {{markt:string|null, tag:string|null, summe:number|null, uhrzeit:string|null,
  *            artikel:string[], artikelSumme:number|null, bestellHash:string|null,
  *            kontenId:string|null, tagesIndex:string|null}}
  */
-function identitaet({ merchantId, bonDate, totalCents, bonTime, items, bestellnummer, online, summeAusArtikeln, belegart } = {}) {
+function identitaet({ merchantId, bonDate, totalCents, bonTime, items, bestellnummer, online, summeAusArtikeln, belegart, bonComplete } = {}) {
   const markt = merchantId && merchantId !== 'unknown' ? String(merchantId).toLowerCase() : null;
   const tag = tagNormal(bonDate);
   const summe = Number.isInteger(totalCents) && totalCents > 0 ? totalCents : null;
@@ -381,6 +486,13 @@ function identitaet({ merchantId, bonDate, totalCents, bonTime, items, bestellnu
     uhrzeit,
     artikel: artikelSchluessel(items),
     artikelSumme: artikelSummeVon(items),
+    // Nachprüfung 05.10.2026, Runde 2: Summe der positiven Artikel (Regel
+    // datum ohne Uhrzeit) und ob die Lesung einen Warenkorb-Rabatt als eigene
+    // Zeile führt (Namensvergleich über den Prompt-Wechsel).
+    positivSumme: positivSummeVon(items),
+    rabatt: hatWarenkorbRabatt(items),
+    // Laut Modell nicht vollständig im Bild (v1.5 `bonComplete: false`).
+    teil: bonComplete === false,
     bestellHash: bestellSchluessel(markt, bestellnummer),
     kontenId: markt && tag && summe ? kontenSchluessel(markt, tag, uhrzeit, summe) : null,
     tagesIndex: tagesIndexId(markt, tag),
@@ -415,6 +527,7 @@ function identitaetAusBon(bon) {
     online: Boolean(onlineMerkmal(parsed)),
     summeAusArtikeln: parsed.summeAusArtikeln === true,
     belegart: parsed.belegart ?? b.belegart ?? null,
+    bonComplete: typeof parsed.bonComplete === 'boolean' ? parsed.bonComplete : b.bonVollstaendig,
   });
 }
 
@@ -427,11 +540,15 @@ function eintragAus(id) {
     artikel: Array.isArray(id.artikel) ? id.artikel.slice(0, MAX_ARTIKEL) : [],
     // Regel datum ohne Uhrzeit (Prüfrunde 3); fehlt in Einträgen davor.
     ...(Number.isInteger(id.artikelSumme) ? { artikelSumme: id.artikelSumme } : {}),
+    // Nachprüfung 05.10.2026, Runde 2; fehlt in Einträgen davor.
+    ...(Number.isInteger(id.positivSumme) ? { positivSumme: id.positivSumme } : {}),
     bestellHash: id.bestellHash ?? null,
     // Nur gesetzt, wenn wahr (Regel seite) — spart Platz am Tageszähler.
     ...(id.online ? { online: true } : {}),
     ...(id.ohneSumme ? { ohneSumme: true } : {}),
     ...(id.app ? { app: true } : {}),
+    ...(id.teil ? { teil: true } : {}),
+    ...(id.rabatt ? { rabatt: true } : {}),
     v: EINTRAG_VERSION,
   };
 }
@@ -439,22 +556,23 @@ function eintragAus(id) {
 /**
  * Gleiche Person (das stellt der Aufrufer sicher): wie ähnlich sind zwei Bons?
  * Seit Prüfrunde 3 auch über Märkte hinweg — ob ein anderer Markt reicht,
- * entscheidet doppelUrteil (`gleicherMarkt`).
- * @returns {{summe:boolean, artikelSumme:boolean, anteil:number|null, gleicherMarkt:boolean}}
+ * entscheidet doppelUrteil (`gleicherMarkt`). Trägt eine Lesung einen
+ * Warenkorb-Rabatt, zählt auch der Anteil gleicher Namen (mitNamen).
+ * @returns {{summe:boolean, artikelSumme:boolean, positivSumme:boolean, anteil:number|null, gleicherMarkt:boolean}}
  */
 function vergleiche(neu, alt, { minArtikel = 5 } = {}) {
-  const out = { summe: false, artikelSumme: false, anteil: null, gleicherMarkt: false };
+  const out = { summe: false, artikelSumme: false, positivSumme: false, anteil: null, gleicherMarkt: false };
   if (!neu || !alt || !neu.markt || !alt.markt) return out;
   out.gleicherMarkt = neu.markt === alt.markt;
   out.summe = Number.isInteger(neu.summe) && neu.summe > 0 && neu.summe === alt.summe;
   out.artikelSumme = Number.isInteger(neu.artikelSumme) && neu.artikelSumme > 0 && neu.artikelSumme === alt.artikelSumme;
-  const a = Array.isArray(neu.artikel) ? neu.artikel : [];
-  const b = new Set(Array.isArray(alt.artikel) ? alt.artikel : []);
-  if (a.length >= minArtikel && b.size >= minArtikel) {
-    let gemeinsam = 0;
-    for (const k of a) if (b.has(k)) gemeinsam++;
-    out.anteil = gemeinsam / Math.min(a.length, b.size);
-  }
+  out.positivSumme = Number.isInteger(neu.positivSumme) && neu.positivSumme > 0 && neu.positivSumme === alt.positivSumme;
+  const rabatt = Boolean(neu.rabatt || alt.rabatt);
+  out.anteil = mitNamen(
+    anteilAus(neu.artikel, alt.artikel, minArtikel),
+    rabatt ? anteilAus(artikelNamen(neu.artikel), artikelNamen(alt.artikel), minArtikel) : null,
+    rabatt,
+  );
   return out;
 }
 
@@ -480,7 +598,13 @@ function schalterModusStandardAn(v) {
 function doppelModi(config = {}) {
   const schwelle = Number(config.doppelArtikelSchwelle);
   const minArtikel = Number(config.doppelArtikelMin);
+  // Regel seite, Abschnitt: so viele Artikel braucht ein Abschnitt ohne Summe,
+  // damit er verglichen wird — die Untergrenze der Auszahlung (ein kürzerer
+  // Abschnitt wird ohnehin nicht bezahlt), nicht doppelArtikelMin (5).
+  const minAuszahlung = Number(config.minItemsForPayout);
   return {
+    // Mindestens 3: darunter träfe ein Zweitkauf zweier gleicher Artikel.
+    abschnittMin: Number.isInteger(minAuszahlung) && minAuszahlung > 0 ? Math.max(3, minAuszahlung) : 4,
     summe: schalterModus(config.doppelSumme),
     konten: schalterModus(config.doppelKonten),
     artikel: schalterModus(config.doppelArtikel),
@@ -557,27 +681,42 @@ function kontenArtikelKandidaten({ bonId, uid, neu, eintraege, modi = {} }) {
   const schwelle = modi.schwelle ?? 0.6;
   const a = artikelHashes(neu && neu.artikel);
   if (a.length < minArtikel || !eintraege || typeof eintraege !== 'object') return [];
+  const n = namenHashes(neu && neu.artikel);
   const out = [];
   for (const [id, e] of Object.entries(eintraege)) {
     if (!e || id === bonId || !e.u || e.u === uid) continue;
-    const b = new Set(Array.isArray(e.a) ? e.a : []);
-    if (b.size < minArtikel) continue;
-    let gemeinsam = 0;
-    for (const k of a) if (b.has(k)) gemeinsam++;
-    const anteil = gemeinsam / Math.min(a.length, b.size);
-    if (anteil >= schwelle) out.push({ id, uid: e.u, anteil: Math.round(anteil * 1000) / 1000 });
+    const rabatt = Boolean((neu && neu.rabatt) || e.k);
+    const anteil = mitNamen(anteilAus(a, e.a, minArtikel), rabatt ? anteilAus(n, e.n, minArtikel) : null, rabatt);
+    if (anteil != null && anteil >= schwelle) out.push({ id, uid: e.u, anteil: Math.round(anteil * 1000) / 1000 });
   }
   return out.sort((x, y) => y.anteil - x.anteil);
 }
 
+/** Namens-Hashes (ohne Preis) für die Indizes; höchstens MAX_ARTIKEL. */
+function namenHashes(artikel, max = MAX_ARTIKEL) {
+  return artikelHashes(artikelNamen(artikel)).slice(0, max);
+}
+
+/**
+ * Felder für den Namensvergleich in den Indizes (Nachprüfung 05.10.2026,
+ * Runde 2): `n` = Namens-Hashes, `k` = die Lesung führt einen Warenkorb-
+ * Rabatt. Einträge davor haben `n` nicht — dort bleibt es beim Preisvergleich.
+ */
+function namenFelder(id, max = MAX_PERSON_ARTIKEL) {
+  return {
+    n: namenHashes(id && id.artikel, max),
+    ...(id && id.rabatt ? { k: true } : {}),
+  };
+}
+
 /** Eintrag eines Bons im Tages-Index (Regel kontenArtikel). */
 function tagesEintragAus(uid, id) {
-  return { u: uid, a: artikelHashes(id && id.artikel) };
+  return { u: uid, a: artikelHashes(id && id.artikel), ...namenFelder(id) };
 }
 
 /** Eintrag eines Bons im Summen-Index (Regel kontenDatum). */
 function summenEintragAus(uid, id) {
-  return { u: uid, t: (id && id.tag) || null, z: (id && id.uhrzeit) || null, a: artikelHashes(id && id.artikel) };
+  return { u: uid, t: (id && id.tag) || null, z: (id && id.uhrzeit) || null, a: artikelHashes(id && id.artikel), ...namenFelder(id) };
 }
 
 /**
@@ -602,6 +741,7 @@ function kontenDatumKandidaten({ bonId, uid = null, neu, eintraege, modi = {}, g
   const schwelle = modi.schwelle ?? 0.6;
   if (!neu || !neu.tag || !eintraege || typeof eintraege !== 'object') return [];
   const a = artikelHashes(neu.artikel);
+  const n = namenHashes(neu.artikel);
   const out = [];
   for (const [id, e] of Object.entries(eintraege)) {
     if (!e || id === bonId || !e.u || !e.t || e.t === neu.tag) continue;
@@ -610,13 +750,9 @@ function kontenDatumKandidaten({ bonId, uid = null, neu, eintraege, modi = {}, g
     const selbe = Boolean(uid) && e.u === uid;
     if (selbe ? !gleichePerson : !fremde) continue;
     const gleicheZeit = Boolean(neu.uhrzeit) && neu.uhrzeit === e.z;
-    let anteil = null;
-    const b = new Set(Array.isArray(e.a) ? e.a : []);
-    if (a.length >= minArtikel && b.size >= minArtikel) {
-      let gemeinsam = 0;
-      for (const k of a) if (b.has(k)) gemeinsam++;
-      anteil = Math.round((gemeinsam / Math.min(a.length, b.size)) * 1000) / 1000;
-    }
+    const rabatt = Boolean(neu.rabatt || e.k);
+    const roh = mitNamen(anteilAus(a, e.a, minArtikel), rabatt ? anteilAus(n, e.n, minArtikel) : null, rabatt);
+    const anteil = roh == null ? null : Math.round(roh * 1000) / 1000;
     const artikelPasst = anteil != null && anteil >= schwelle;
     const trifft = selbe || abstand <= DATUM_FENSTER_TAGE ? gleicheZeit || artikelPasst : artikelPasst;
     if (trifft) out.push({ id, uid: e.u, tag: e.t, abstand, anteil, gleicheZeit });

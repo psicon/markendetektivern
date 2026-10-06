@@ -262,6 +262,9 @@ const RECON_TOLERANCE_OVERSHOOT_CENTS = 50;   // Σ > total: tight, missed-disco
 // Zwischensumme und Zwischensumme − Rabatte = Endbetrag, jeweils ±2 ct.
 // Das Haupt-Schema (v1.4) kennt `basketDiscounts` nicht — der Zweig wirkt
 // daher ausschließlich auf Lesungen der Zweitprüfung (lib/prompt_referee.js).
+// Prompt v1.5 (Coupon-Fix 05.10.2026) liest solche Zeilen in der HAUPT-Lesung
+// als Items mit negativem Preis und category 'Warenkorbrabatt' — für sie gilt
+// dieselbe Belegkette mit denselben Grenzen (reconcileMitRabattZeilen unten).
 const BASKET_DISCOUNT_TOLERANCE_CENTS = 2;
 // Plausibilitätsgrenzen (Review 14.09.): ohne sie besteht auch eine Lesung,
 // die jeden Artikel doppelt aufführt und die Differenz als erfundenen
@@ -275,6 +278,25 @@ const BASKET_DISCOUNT_MAX_CENTS = 2000;
 // ist kein Beleg.
 const BASKET_DISCOUNT_LABEL = /rabatt|gutschein|coupon|kupon|nachlass|prozent|%|vorteil|ersparnis|abzug|aktion|discount|bonus/i;
 
+// Kennzeichen einer Rabattzeile auf den ganzen Einkauf in `items` (Prompt v1.5,
+// Regel 16). v1.4 kennt die Kategorie nicht — in 3.982 gespeicherten
+// v1.4-Lesungen (21.09.–04.10.2026) kam sie kein einziges Mal vor (negative
+// Zeilen trugen 'Pfand', 'Rabatt', 'Discount' oder nichts). Daran hängt, dass
+// v1.4-Lesungen exakt wie bisher abgeglichen werden.
+const WARENKORB_RABATT_KATEGORIE = 'warenkorbrabatt';
+
+/** Trägt die Zeile die Kategorie einer Warenkorb-Rabattzeile (egal welches Vorzeichen)? */
+function istRabattKategorie(it) {
+  return Boolean(it)
+    && typeof it.category === 'string'
+    && it.category.trim().toLowerCase().replace(/[\s_-]+/g, '') === WARENKORB_RABATT_KATEGORIE;
+}
+
+/** Rabattzeile auf den ganzen Einkauf nach Prompt v1.5: Kategorie UND negativer Preis. */
+function istWarenkorbRabattZeile(it) {
+  return istRabattKategorie(it) && Number.isFinite(it.priceCents) && it.priceCents < 0;
+}
+
 /** Summe der benannten Warenkorb-Rabatte in Cent (unbenannte zählen nicht). */
 function basketDiscountCents(parsed) {
   if (!parsed || !Array.isArray(parsed.basketDiscounts)) return 0;
@@ -286,6 +308,58 @@ function basketDiscountCents(parsed) {
     ),
     0,
   );
+}
+
+/**
+ * Abgleich einer Lesung mit Rabattzeilen auf den ganzen Einkauf (Prompt v1.5,
+ * Coupon-Fix 05.10.2026). Die Zeilen stehen mit negativem Preis in `items`;
+ * die Summe aller Items enthält sie also schon. Weil damit eine einzige
+ * erfundene Rabattzeile jede Überzahl doppelt gelesener Artikel ausgleichen
+ * könnte, gelten dieselben Regeln wie für `basketDiscounts` der Zweitprüfung:
+ *   • jede Rabattzeile ist als solche benannt (BASKET_DISCOUNT_LABEL, Name oder
+ *     raw),
+ *   • Rabatt < 25 % der Zwischensumme (ohne eigene gedruckte: der Summe der
+ *     übrigen Items) und höchstens 20 € — diese Grenzen bleiben auch hier
+ *     bestehen,
+ *   • steht eine eigene Zwischensumme auf dem Bon (gedruckt, ≠ Endbetrag):
+ *     Belegkette — Σ übrige Items = Zwischensumme und Zwischensumme − Rabatt =
+ *     Endbetrag, jeweils ±2 ct,
+ *   • sonst (keine oder gleich dem Endbetrag gedruckt — die Rabatte stehen
+ *     dann zwischen den Artikeln): der bisherige Abgleich der Summe aller
+ *     Items, wie v1.4 negative Zeilen schon immer abgleicht. Strenger als v1.4
+ *     ist dort nur die Grenze.
+ * Die Zeilen zählen nie als Artikel (countEligibleItems).
+ */
+function reconcileMitRabattZeilen(parsed, zeilen, sumItemsCents, total) {
+  const rabatt = zeilen.reduce((acc, z) => acc + Math.abs(z.priceCents), 0);
+  const brutto = sumItemsCents + rabatt; // Σ aller übrigen Items
+  const signedDeltaCents = total - sumItemsCents;
+  const deltaCents = Math.abs(signedDeltaCents);
+  const subtotal = Number.isFinite(parsed.subtotalCents) && parsed.subtotalCents > 0 ? parsed.subtotalCents : null;
+  const benannt = zeilen.every((z) => BASKET_DISCOUNT_LABEL.test(`${z.name ?? ''} ${z.raw ?? ''}`));
+  const eigeneZwischensumme = subtotal != null && Math.abs(subtotal - total) > BASKET_DISCOUNT_TOLERANCE_CENTS;
+  // Bezug der Grenze: die Zwischensumme VOR den Rabatten — ohne eigene
+  // gedruckte (fehlt oder = Endbetrag) die Summe der übrigen Items.
+  const basis = eigeneZwischensumme ? subtotal : brutto;
+  const inGrenzen = basis > 0 && rabatt < basis * BASKET_DISCOUNT_MAX_SHARE && rabatt <= BASKET_DISCOUNT_MAX_CENTS;
+  let belegt;
+  if (eigeneZwischensumme) {
+    belegt = Math.abs(brutto - subtotal) <= BASKET_DISCOUNT_TOLERANCE_CENTS
+      && Math.abs(subtotal - rabatt - total) <= BASKET_DISCOUNT_TOLERANCE_CENTS;
+  } else {
+    belegt = signedDeltaCents >= 0
+      ? deltaCents <= RECON_TOLERANCE_UNDERSHOOT_CENTS
+      : deltaCents <= RECON_TOLERANCE_OVERSHOOT_CENTS;
+  }
+  const ok = benannt && inGrenzen && belegt;
+  return {
+    ok,
+    sumItemsCents,
+    deltaCents,
+    signedDeltaCents,
+    direction: ok ? 'basket_discount' : 'basket_discount_unbelegt',
+    basketDiscountCents: rabatt,
+  };
 }
 
 function reconcile(parsed) {
@@ -312,6 +386,9 @@ function reconcile(parsed) {
       direction: 'unknown',
     };
   }
+  // Prompt v1.5: Rabattzeilen in items → eigene Prüfung (Belegkette, Grenzen).
+  const rabattZeilen = parsed.items.filter(istWarenkorbRabattZeile);
+  if (rabattZeilen.length) return reconcileMitRabattZeilen(parsed, rabattZeilen, sumItemsCents, total);
   const signedDeltaCents = total - sumItemsCents;
   const deltaCents = Math.abs(signedDeltaCents);
   let direction;
@@ -375,7 +452,10 @@ function countEligibleItems(parsed) {
       typeof it.name === 'string' &&
       Number.isFinite(it.priceCents) &&
       it.priceCents > 0 &&
-      !isPfandItem(it),
+      !isPfandItem(it) &&
+      // Rabattzeile (Prompt v1.5) ist nie ein Artikel — auch nicht, wenn das
+      // Modell sie entgegen Regel 16 mit positivem Preis liefert.
+      !istRabattKategorie(it),
   ).length;
 }
 
@@ -390,4 +470,4 @@ function tierFor(eligibleItemCount, tiers) {
   return 0;
 }
 
-module.exports = { extractReceipt, reconcile, basketDiscountCents, countEligibleItems, tierFor, isPfandItem, DEFAULT_MODEL };
+module.exports = { extractReceipt, reconcile, basketDiscountCents, countEligibleItems, tierFor, isPfandItem, istWarenkorbRabattZeile, istRabattKategorie, DEFAULT_MODEL };

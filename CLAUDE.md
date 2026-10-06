@@ -3472,6 +3472,22 @@ siehe unten — beide sichern nur Zahlwege ab, die ohne sie neu entstünden).
   Bon behält sie, sonst stornierte die erneute Zustellung. Neue
   Online-Stichwörter nur mit Gegenprobe: „Onlineshop" stand auf einem
   BILLA-Ladenbon und zählt deshalb nur ohne Uhrzeit.
+- **Prompt-Schalter `cashback_config/v1.ocrPrompt` (05.10.2026):** `'v1.4'` |
+  `'v1.5'`; fehlt oder ungültig → v1.4, der Deploy ändert die Texterkennung
+  also nicht. NICHT mit `ocrPromptVersion` verwechseln (Altfeld `'v1.0'`, liest
+  niemand). v1.4 ist byte-gleich zum Live-Stand vom 03.10. (SHA-256 in
+  `__tests__/promptVersion.test.js`) — v1.4-Texte nie ändern, neue Regeln nur
+  in einer neuen Version. Gespeicherte OCR behält ihre Version (kein
+  Neu-Lesen), ein Zwischenstand der anderen Version wird verworfen, die
+  Zweitprüfung liest mit der Version der Erstlesung. Coupon-Fix v1.5 (Regel
+  16): Rabatte auf den ganzen Einkauf als Item mit negativem Preis und
+  `category: 'Warenkorbrabatt'`, Artikel brutto; `reconcile` verlangt dafür
+  Belegkette + Grenzen (< 25 %, ≤ 20 €). v1.4 rechnete Coupons in
+  Artikelpreise ein. Die Grenzen treffen korrekt gelesene Bons (dm
+  „Partner-Rabatte" mit Gratisartikel 37 %; im Bestand 18 bezahlte von 320
+  Coupon-Bons in 14 Tagen) — **offene Entscheidung Patrick** vor dem
+  Umschalten. Picnic läuft auch unter v1.5 als EDEKA (Eigenmarken-Stufe),
+  solange `eigenmarkeNurLadenbon` nicht `true` ist.
 - **Ausrollen (Reihenfolge, Nachtrag 05.10.2026):** nach dem Deploy der
   Pipeline `.backfill-doppel-person.js` laufen lassen (Trockenlauf →
   `SCHREIBEN=1` → `VERIFY=1 SCHALTER=1`, setzt `doppelBestandIndexiert`), erst

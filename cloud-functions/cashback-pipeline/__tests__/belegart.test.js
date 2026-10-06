@@ -68,7 +68,18 @@ describe('belegBereinigen', () => {
 
   test('Bestand ohne Belegart: Stichwort „Lieferadresse" im Kopf genügt', () => {
     const p = belegBereinigen({ merchant: 'dm-drogerie markt GmbH + Co. KG', merchantSubtitle: 'Deine Lieferadresse: Musterweg 1, 12345 Musterstadt' });
-    expect(p).toMatchObject({ belegart: null, onlineMerkmal: 'stichwort', merchantSubtitle: null, storeAddress: null });
+    expect(p).toMatchObject({ onlineMerkmal: 'stichwort', merchantSubtitle: null, storeAddress: null });
+    // v1.4-Lesung (ohne jedes v1.5-Feld) bekommt keine v1.5-Felder dazu.
+    for (const k of ['belegart', 'bestellnummer', 'bonComplete', 'summeAusArtikeln']) expect(p).not.toHaveProperty(k);
+  });
+
+  test('v1.4-Lesung ohne Online-Stichwort bleibt unverändert (Schalter ocrPrompt = v1.4)', () => {
+    const v14 = {
+      isReceipt: true, merchant: 'Lidl', merchantSubtitle: 'Hüttenweg 50, 14195 Berlin', bonTime: null, totalCents: null,
+      storeAddress: { street: 'Hüttenweg 50', zip: '14195', city: 'Berlin' }, items: [{ name: 'Milch', priceCents: 119 }],
+    };
+    // Auch ohne Summe: keine Artikelsumme als Endbetrag — das gibt es nur mit v1.5-Belegart.
+    expect(belegBereinigen(v14)).toEqual(v14);
   });
 
   test('„Onlineshop" im Kopf zählt nur ohne Uhrzeit (BILLA-Ladenbon wirbt damit)', () => {
@@ -157,20 +168,27 @@ describe('resolveMerchant: Eigenmarken-Stufe bei Online-Bestellungen', () => {
   });
 });
 
-describe('Prompt v1.5', () => {
+describe('Prompt v1.5 (hinter dem Schalter ocrPrompt)', () => {
+  const V15 = PROMPT.promptFuer('v1.5');
   test('Schema: Belegart (Aufzählung), Bestellnummer, Vollständigkeit', () => {
-    expect(PROMPT.VERSION).toBe('v1.5');
-    expect(PROMPT.RESPONSE_SCHEMA.properties.belegart).toMatchObject({ type: 'string', nullable: true, enum: ['kassenbon', 'app_kassenbon', 'online_bestellung', 'sonstiges'] });
-    expect(PROMPT.RESPONSE_SCHEMA.properties.bestellnummer).toEqual({ type: 'string', nullable: true });
-    expect(PROMPT.RESPONSE_SCHEMA.properties.bonComplete).toEqual({ type: 'boolean', nullable: true });
-    expect(PROMPT.SYSTEM_PROMPT).toMatch(/online_bestellung/);
-    expect(PROMPT.SYSTEM_PROMPT).toMatch(/storeAddress und merchantSubtitle IMMER\s+null/);
+    expect(V15.VERSION).toBe('v1.5');
+    expect(V15.RESPONSE_SCHEMA.properties.belegart).toMatchObject({ type: 'string', nullable: true, enum: ['kassenbon', 'app_kassenbon', 'online_bestellung', 'sonstiges'] });
+    expect(V15.RESPONSE_SCHEMA.properties.bestellnummer).toEqual({ type: 'string', nullable: true });
+    expect(V15.RESPONSE_SCHEMA.properties.bonComplete).toEqual({ type: 'boolean', nullable: true });
+    expect(V15.SYSTEM_PROMPT).toMatch(/online_bestellung/);
+    expect(V15.SYSTEM_PROMPT).toMatch(/storeAddress und merchantSubtitle IMMER\s+null/);
   });
   test('Zweitprüfung erbt bonComplete aus dem Haupt-Prompt, Version referee-v2+v1.5', () => {
-    expect(REFEREE.VERSION).toBe('referee-v2+v1.5');
-    expect(REFEREE.SYSTEM_PROMPT.match(/\*\*bonComplete\*\*/g)).toHaveLength(1);
-    expect(REFEREE.RESPONSE_SCHEMA.properties.bonComplete).toEqual({ type: 'boolean', nullable: true });
-    expect(REFEREE.RESPONSE_SCHEMA.properties.basketDiscounts).toBeDefined();
+    const R15 = REFEREE.refereePromptFuer('v1.5');
+    expect(R15.VERSION).toBe('referee-v2+v1.5');
+    expect(R15.SYSTEM_PROMPT.match(/\*\*bonComplete\*\*/g)).toHaveLength(1);
+    expect(R15.RESPONSE_SCHEMA.properties.bonComplete).toEqual({ type: 'boolean', nullable: true });
+    expect(R15.RESPONSE_SCHEMA.properties.basketDiscounts).toBeDefined();
+  });
+  test('Standard-Export ist v1.4 (Live-Stand), nicht v1.5', () => {
+    expect(PROMPT.VERSION).toBe('v1.4');
+    expect(PROMPT.RESPONSE_SCHEMA.properties.belegart).toBeUndefined();
+    expect(REFEREE.VERSION).toBe('referee-v2+v1.4');
   });
 });
 
