@@ -23,7 +23,7 @@ const TAG_MS = 24 * 60 * 60 * 1000;
  * @param {Array<{id:string, kind:string, active:boolean, startAt:number, endAt:number, budgetRemainingCents?:number, budgetTotalCents?:number}>} k.aktionen
  * @param {{eingeschaltet:boolean, laeufeLetzte48h:number}} k.zweitpruefung
  * @param {{inPruefung:number, aeltesteTage:number|null, letzte24h:{gesamt:number, ohneAktion:number}}} k.bons
- * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number, aeltesteOffenTage?:number|null, fotoAbgleichGescheitert?:boolean, kontoSperrenUnlesbar?:boolean, eanHaltenNeu?:number, haltBefundNichtGespeichert?:number, eanFotoNichtGespeichert?:number, korrekturGebremst?:{anzahl:number, geprueft:number, alle?:number, vermerkt?:boolean}|null, korrekturNichtGespeichert?:number, korrekturGebremstWartet?:number, korrekturAufgeschoben?:number, korrekturSchalterUnbekannt?:string|null}} k.runde
+ * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number, aeltesteOffenTage?:number|null, fotoAbgleichGescheitert?:boolean, kontoSperrenUnlesbar?:boolean, eanHaltenNeu?:number, haltBefundNichtGespeichert?:number, eanFotoNichtGespeichert?:number, korrekturGebremst?:{anzahl:number, geprueft:number, alle?:number, vermerkt?:boolean}|null, korrekturNichtGespeichert?:number, korrekturGebremstWartet?:number, korrekturAufgeschoben?:number, korrekturSchalterUnbekannt?:string|null, korrekturAltcodeWartet?:number, korrekturLeserFehler?:number}} k.runde
  * @param {{bild:boolean, gesamt:boolean, text:string[]}} k.notbremse
  * @param {{alt:string|null, neu:string}} k.regelVersion
  * @param {{scharf:boolean, bericht:object|null, abgebrochen?:boolean, laeuftNoch?:boolean, unbekannt?:boolean}} [k.bonRunde]
@@ -126,6 +126,19 @@ function warnungen(k) {
     // nie automatisch korrigiert, Prüfrunde 06.10.2026) — erinnern, bis entschieden.
     if (r.korrekturGebremstWartet > 0) {
       gelb('barcode_korrektur_gebremst_wartet', `${r.korrekturGebremstWartet} Fälle hat eine frühere Notbremse der Barcode-Korrektur angehalten — die Runde korrigiert sie nicht mehr selbst, sie warten auf dich.`);
+    }
+    // Befunde des ALTEN Codes ohne Vermerk (werte.eanFotoHalteQuellen,
+    // Prüfrunde 06.10.2026): er lief nach dem 06.10. noch einmal. Diese Fälle
+    // korrigiert die Runde nie selbst — ob ein früheres `unsicher` überschrieben
+    // wurde, ist nicht mehr zu sehen.
+    if (r.korrekturAltcodeWartet > 0) {
+      gelb('barcode_altcode_wartet', `${r.korrekturAltcodeWartet} Fälle tragen einen Barcode-Befund des alten Codes ohne Vermerk (er lief nach dem 06.10. noch einmal) — die Runde korrigiert sie nicht selbst, sie warten auf dich.`);
+    }
+    // Strichcode-Leser (Pflicht-Zeuge der Korrektur) gescheitert: Download,
+    // Laden der WASM-Datei oder Zeit. Dort keine Korrektur — fällt er ganz
+    // aus, korrigiert die Runde still gar nichts mehr.
+    if (r.korrekturLeserFehler > 0) {
+      gelb('barcode_leser_fehler', `Der Strichcode-Leser ist bei ${r.korrekturLeserFehler} Korrektur-Kandidaten gescheitert — dort keine Barcode-Korrektur, die Fälle liegen wie vorher. Häuft sich das: Logs von fotoRundeTaeglich ansehen.`);
     }
     if (r.korrekturNichtGespeichert > 0) {
       gelb('barcode_korrektur_nicht_gespeichert', `${r.korrekturNichtGespeichert} Barcode-Korrekturen konnten nicht gespeichert werden — diese Fälle bleiben wie vor der Korrektur liegen und sind morgen wieder dran.`);

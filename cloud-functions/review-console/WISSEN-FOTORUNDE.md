@@ -13,7 +13,7 @@ hat, steht hier als Regel. Wer die Runde ändert, ändert zuerst diese Datei.
 | Doppel-Regel | `src/duplicatePolicy.js` — DIESELBE Datei wie die Prüfkonsole |
 | Gesperrte Konten | `src/kontoSperre.js` — liest `cashback_sperren/{uid}` (server-only), Runde UND Konsole |
 | Nummer vom Barcode-Foto | `src/werte.js` (`eanFotoBefund`, `eanFotoMitVorbefund`), gelesen in der Bildprüfung, abgelegt in `eanFotoOcr` |
-| Barcode-Korrektur (06.10.2026) | `src/werte.js` (`eanKorrekturAus`, `eanKorrekturOf`, `eanOf`), abgelegt in `eanKorrektur`; Notbremse `fotoRundeRegeln.korrekturBremse` |
+| Barcode-Korrektur (06.10.2026) | `src/werte.js` (`eanKorrekturKandidat`, `eanKorrekturAus`, `strichcodeUrteil`, `eanKorrekturOf`, `eanOf`), abgelegt in `eanKorrektur`; Pflicht-Zeuge `src/strichcode.js` (Strichcode-Leser zxing-wasm 2.2.4); Notbremse `fotoRundeRegeln.korrekturBremse` |
 | Halte-Grund für die Prüfkonsole | `review.rundeOffen` (`fotoRundeRegeln.rundeOffenEintrag`), gelesen in `einreichung.precheckOf`; Foto-Befunde früherer Läufe: `fotoRundeRegeln.bildMitVorbefund` |
 | Warnungen | `src/warnungen.js` (+ Tests) |
 | Buchung + Push | `crowd-upload-reward` (Trigger bei `approved` bucht; der Sammler `crowd_push_sammler` verschickt EINE Nachricht pro Person) |
@@ -52,12 +52,13 @@ Notbremse zurückhält — das steht im Bericht unter `wartetAufDich`.
    Mensch in der Konsole entscheidet — außer der Halt erfüllt das Kriterium
    der Barcode-Korrektur (siehe dort). Die Runde
    legt das Ergebnis in `eanFotoOcr` ab (als Ganzes ersetzt), auch im Trockenlauf.
-   **Barcode korrigieren** (seit 06.10.2026): eine zweimal gleich gelesene,
-   gültige Foto-Nummer (kein Waagen-Code) wird zur EAN der Einreichung
-   (`eanKorrektur`, zusammen mit `eanFotoOcr` in EINEM Schreibvorgang — NUR im
-   scharfen Lauf, nie im Trockenlauf, und nur mit eingeschaltetem Schalter
-   `cashback_config/v1.barcodeKorrektur === true`); alle weiteren Schritte
-   rechnen mit ihr.
+   **Barcode korrigieren** (seit 06.10.2026): eine vom Modell zweimal gleich
+   gelesene, gültige Foto-Nummer (kein Waagen-Code), die der feste
+   Strichcode-Leser auf dem ORIGINAL des Barcode-Fotos bestätigt, wird zur EAN
+   der Einreichung (`eanKorrektur`, zusammen mit `eanFotoOcr` in EINEM
+   Schreibvorgang — NUR im scharfen Lauf, nie im Trockenlauf, und nur mit
+   eingeschaltetem Schalter `cashback_config/v1.barcodeKorrektur === true`);
+   alle weiteren Schritte rechnen mit ihr.
 5. **Chronologisch entscheiden** (`entscheideFall`) — eine im selben Lauf
    entschiedene Einreichung ist für die nächste derselben EAN Referenz bzw.
    kein offener Vorgänger mehr. „Dieselbe EAN" heißt dieselbe GTIN in jeder
@@ -193,13 +194,56 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   ohnehin laufenden Aufruf (Eingabe ~8.200 Token für 7 Fotos), dazu eine
   Lesung eines einzelnen Fotos je Abweichung (~3 % der Fälle).
 - **Barcode-Korrektur (Entscheidung Patrick 06.10.2026: „ja").** Eindeutige
-  Fälle korrigiert die Runde selbst, statt sie liegen zu lassen. Eindeutig
-  heißt: das Barcode-Foto wurde von ZWEI unabhängigen Lesungen gleich gelesen
-  (Bildprüfung + zweite Lesung nur des Barcode-Fotos, `abweichend` +
-  `bestaetigt`), die Nummer ist eine gültige GTIN (Prüfziffer, 8/12/13/14
-  Stellen) und kein Waagen-/Händlercode (`istHandelsCode`: GTIN-13 mit 02/04/
-  20–29, UPC-A mit 2/4 — strenger als „02/20–29 bei 13 Stellen"; EAN-8 bleibt
-  korrigierbar). Dann gilt die Foto-Nummer als EAN der Einreichung
+  Fälle korrigiert die Runde selbst, statt sie liegen zu lassen. Das
+  tatsächliche Verfahren (Stand Prüfrunde 06.10.2026, Runde 3):
+  1. **Zwei Modell-Lesungen** derselben Nummer F: die Bildprüfung und eine
+     zweite Lesung nur des Barcode-Fotos (`abweichend` + `bestaetigt`). Das
+     sind zwei Aufrufe DESSELBEN Modells (gemini-3.5-flash, Temperatur 0) auf
+     demselben Bild — NICHT unabhängig. Gemessen am 06.10.2026: auf
+     Barcode-Fotos ohne lesbare Ziffern erfindet das Modell Nummern mit
+     GÜLTIGER Prüfziffer (G&G Fusilli: 4 von 4 Lesungen 4311501358917; das
+     Vollkornbrot derselben Person, Barcode verdeckt, 3 von 4 Lesungen
+     erfunden, einmal dieselbe Nummer; Delverde: die zweite Lesung erfand
+     „sicher" gültige Nummern). Die Prüfziffer schützt davor nicht. In 17
+     gemessenen Paaren stimmten die beiden Lesungen bei einer erfundenen
+     Nummer nie überein — aber das ist Glück, keine Unabhängigkeit.
+  2. F ist eine gültige GTIN (Prüfziffer, 8/12/13/14 Stellen), kein
+     Waagen-/Händlercode (`istHandelsCode`: GTIN-13 mit 02/04/20–29, UPC-A mit
+     2/4 — strenger als „02/20–29 bei 13 Stellen"; EAN-8 bleibt korrigierbar)
+     und keine Kartonnummer (GTIN-14 mit Packungsindikator 1–9).
+  3. **Pflicht-Zeuge: der feste Strichcode-Leser** (`src/strichcode.js`,
+     ZXing-C++ als WebAssembly, npm `zxing-wasm` exakt 2.2.4) liest HEUTE auf
+     dem ORIGINAL des Barcode-Fotos (volle Auflösung, nicht die Kachel) F und
+     NICHT die gespeicherte Nummer S (`werte.strichcodeUrteil` →
+     `bestaetigt`). Er arbeitet auf den Strichen statt auf den gedruckten
+     Ziffern — eine andere Fehlerquelle als das Modell — und erfindet keine
+     Nummer ohne Striche. Liest er nichts, etwas anderes, beide Nummern (zwei
+     Codes auf dem Foto, darunter S) oder scheitert er (Download, Laden,
+     Zeit) → KEINE Korrektur, der Fall liegt wie vor dem 06.10.
+     (`ean_abweichend`), und der Hinweis nennt, was der Leser las. Das gilt
+     für Korrekturen aus heutigen Lesungen UND aus alten Befunden.
+     Messung 06.10.2026 an 127 echten Barcode-Fotos (Android): 96 gelesen,
+     Median 86 ms, höchstens 249 ms je 12-MP-Foto; 91× dieselbe Nummer wie
+     OpenCV/Apple Vision, 5× eine andere (bei schlechten Fotos verliest er
+     sich wie der Android-Scanner, typisch in der linken Hälfte — deshalb
+     Zeuge, nicht Richter). An den 19 offenen Barcode-Fällen vom 06.10.:
+     von den 9 geplanten Korrekturen bestätigt er 6, bei 3 (verwackelte bzw.
+     angeschnittene Striche, auch mit Vorverarbeitung) liest er nichts — sie
+     bleiben beim Menschen. Bei Fusilli, Vollkornbrot, Melitta (4002720001219)
+     und Delverde Farfalle (8000270011319) liest er die GESPEICHERTE Nummer:
+     dort hatte das Modell erfunden bzw. sich verlesen.
+     Nur für die Korrektur-Kandidaten (Kosten), höchstens zwei gleichzeitig,
+     mit Zeitgrenze (Download 30 s, Lesen 15 s, Arbeitszeit der Runde);
+     auch bei ausgeschaltetem Schalter (der Vorschlag im Bericht zählt nur,
+     was er bestätigt). Die Notbremse zählt weiter die Kandidaten nach den
+     Modell-Lesungen (die strengere Wahl). Speicher: der WASM-Speicher wächst
+     beim Lesen eines 12-MP-Fotos um rund 200 MB und schrumpft nicht (gemessen
+     über 127 Fotos: Prozess höchstens 284 MB); die Runde lag zuletzt bei
+     höchstens 29 % von 1 GiB.
+     Bibliotheks-Fallen: Formatnamen MIT Bindestrich (`'EAN-13'`; `'EAN13'`
+     liefert stumm nichts); die WASM-Datei IMMER aus dem Paket laden (ohne
+     `wasmBinary` holt die Bibliothek sie zur Laufzeit von einem CDN).
+  Dann gilt die Foto-Nummer als EAN der Einreichung
   (`werte.eanOf`: korrigiert → `ean` → nachgelesen), und ALLE weiteren Regeln
   rechnen mit ihr — Wochen-Sperre (eine Sperre unter der korrigierten Nummer
   lehnt ab), md5-Abgleich, Preis-Pflicht, Kontosperre, Notbremsen.
@@ -212,7 +256,12 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   letzten 5–6 Ziffern. 8 davon zweimal gleich gelesen → korrigierbar, 10
   `ean_unsicher` → bleiben.
   - **Gespeichert** in `eanKorrektur` = `{ean, vorher, lesungen[2], aus:
-    'heute'|'vorbefund', befundVom?, regel, lauf, at, quelle}` — nur Server
+    'heute'|'vorbefund', befundVom?, zeuge: {art: 'striche', gelesen[],
+    leser}, regel, lauf, at, quelle}` — nur Server. Eine Korrektur OHNE
+    Zeugen (oder deren Zeuge die neue Nummer nicht oder auch die gespeicherte
+    las) gilt nicht (`werte.eanKorrekturOf`, fail-closed; im Bestand standen
+    am 06.10. keine Korrekturen). Die Prüfkonsole zeigt unter der korrigierten
+    Nummer „Strichcode-Leser bestätigt …" — nur Server
     (firestore.rules-Sperrliste, Rules-Test). `ean` bleibt UNVERÄNDERT: die
     ursprüngliche Nummer für Audit und Scanner-Messung (dieselbe Regel wie bei
     den *RescueOcr-Feldern). `eanFotoOcr.befund` wird `korrigiert` (hält nicht
@@ -243,7 +292,14 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
     wieder (`eanKorrekturAus`). `eanKorrektur` bleibt fürs Audit stehen, die
     Konsole zeigt „Korrektur auf … verworfen". Entscheidet nichts: eine offene
     Einreichung bleibt offen; weil das Foto weiter die andere Nummer zeigt,
-    hält sie mit `ean_abweichend` (Freigabe mit force + Notiz). Gerade nach
+    hält sie mit `ean_abweichend` (Freigabe mit force + Notiz). Die RUNDE hält
+    ebenso (Prüfrunde 06.10.2026, Runde 3): nach einer Korrektur steht in
+    `eanFotoOcr` `korrigiert` (kein Halte-Befund) und `review.rundeOffen` ist
+    leer — der gespeicherte Vermerk `eanKorrekturVerworfen` ist deshalb selbst
+    eine Halte-Quelle (bestätigte Abweichung mit der verworfenen Nummer, nie
+    vertraut, `werte.eanFotoHalteQuellen`). Vorher gab die Runde den Fall am
+    nächsten Morgen frei, wenn das Foto unlesbar war oder die zweite Lesung die
+    gespeicherte Nummer las — während die Konsole ihn anhielt. Gerade nach
     einer FREIGABE wichtig: ohne Rückweg blieb eine falsch korrigierte Nummer
     für immer die EAN dieser Einreichung in der Wochen-Sperre — auch das
     Löschen von `eanKorrektur` von Hand half nicht (der Befund `korrigiert`
@@ -258,12 +314,24 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
     `eanFotoOcr` den Befund DAVOR ab (`abweichend` + `bestaetigt`) und lässt
     den Halt in `review.rundeOffen` stehen (`sperrend: ['ean_abweichend']`,
     `geplant`). Der nächste scharfe Lauf korrigiert dann aus diesem Befund.
-  - **Leser der EAN:** ausschließlich `review-console` (Runde + Konsole) —
-    crowd-upload-reward, -namer, -location und die App lesen sie nicht
-    (geprüft 06.10.2026). Wer künftig die EAN einer Einreichung braucht
-    (Katalog-Übernahme, Auswertung, Export), nimmt `werte.eanOf`, NIE `ean`
-    allein. Die Konsole fragt Nachbarn über alle drei Felder ab (`ean`,
-    `eanRescueOcr`, `eanKorrektur.ean`) und zählt nach effektiver EAN.
+  - **Leser der EAN:** für Entscheidungen ausschließlich `review-console`
+    (Runde + Konsole) — crowd-upload-reward, -namer und -location lesen sie
+    nicht (geprüft 06.10.2026 per grep). Die APP zeigt sie an: „Meine
+    Einreichungen" → Detail zeigt `EAN: {detailRow.ean}`
+    (`app/product-submit/index.tsx`, Daten aus
+    `subscribeUserProductSubmissions`), also die gescannte Nummer — auch nach
+    einer Korrektur. Bekannte Grenze, für das Geld folgenlos: wird ein
+    korrigierter Fall unter der korrigierten Nummer als `doppelt_eingereicht`
+    abgelehnt, steht daneben eine Nummer, die mit der Sperre nichts zu tun
+    hat. Behebung nur mit einem App-Build (`eanKorrektur.ean` anzeigen, wenn
+    vorhanden und nicht verworfen; der Eigentümer darf das Feld lesen, an den
+    Rules ist nichts nötig) — offen, nicht Teil dieser Änderung. Wer künftig
+    die EAN einer Einreichung braucht (Katalog-Übernahme, Auswertung, Export),
+    nimmt `werte.eanOf`, NIE `ean` allein. Die Konsole fragt Nachbarn über
+    die Felder `ean`, `eanRescueOcr`, `eanKorrektur.ean` und (seit Runde 3)
+    `eanFotoOcr.ean` ab (Einzelfeld-Index ist Standard, geprüft 06.10.: keine
+    Ausnahme für `crowd_uploads`) und zählt nach effektiver EAN bzw. nach
+    geteilter Nummer (verwandte).
   - **Abgleich danach** gegen die korrigierte Nummer (`werte.eanAbgleichOf`):
     eine spätere Bildprüfung soll sie bestätigen. Höchstens EINE Korrektur je
     Einreichung — eine bestätigte Abweichung gegen die korrigierte Nummer hält
@@ -302,6 +370,22 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
     nie aus einem nicht vertrauten einen vertrauten. Ein Befund des alten
     Codes ohne `zweit` gilt beim Übernehmen als zweimal dieselbe Nummer
     („bestätigt" hieß dort genau das).
+    **Code-Schutz (Prüfrunde 06.10.2026, Runde 3, Befund „hoch"):** eine
+    Abweichung OHNE Vermerk aus einem anderen Lauf als `2026-10-06_080038`
+    kann nur der ALTE Code geschrieben haben, nachdem er noch einmal lief
+    (Zeitplan 08:00, solange nicht ausgerollt, oder ein manueller
+    Trockenlauf). Sie gilt jetzt als dauerhaft gebremst (`gebremst:
+    'altcode_<lauf>'`, wie die Notbremse): nie automatisch korrigiert, auch
+    nicht, wenn heute zweimal dieselbe Nummer gelesen wird — ob der Fall
+    vorher `unsicher` war oder N zweimal gelesen hatte, steht nirgends mehr.
+    Der Vermerk wandert beim Neuschreiben mit (`korrekturGebremst`), Hinweis
+    „Befund des alten Codes ohne Vermerk", gelbe Warnung
+    `barcode_altcode_wartet`. Der Weg „heute selbst zweimal" (`heuteBestaetigt`)
+    bleibt nur für Befunde des NEUEN Codes mit ausdrücklichem
+    `korrekturfaehig: false` (gebremste Runde ohne Speichern, Trockenlauf) und
+    deren Rückfall. Am besten trotzdem vor dem nächsten Lauf des alten Codes
+    ausrollen: läuft er doch, bleiben auch die 8 echten Fälle vom 06.10. beim
+    Menschen (ihr Stand steht in `ops_tagesberichte/2026-10-06_080038`).
   - **Tagesgrenze:** höchstens 25 Korrekturen aus alten Befunden je Lauf
     (`KORREKTUR_ALT_MAX`, die ältesten zuerst); der Rest wartet ohne Vermerk
     auf den nächsten Lauf, gelbe Warnung `barcode_korrektur_aufgeschoben`.
@@ -321,6 +405,15 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
     Lesungen (`ean_unsicher` bleibt beim Menschen); bis dahin ersetzte eine
     heute bestätigte Abweichung JEDEN alten Befund und machte ihn am Folgetag
     korrigierbar. Bericht: `eanKorrektur.uneinigUeberTage`.
+    Dasselbe gilt OHNE haltenden alten Befund (`werte.eanFotoGegenFrueher`,
+    Runde 3): las ein früherer Lauf das Foto als eine andere gültige Nummer —
+    typisch `gleich` (Scanner und Foto stimmten überein), der Fall lag aus
+    anderem Grund weiter — und liest das Modell heute zweimal F, wird der
+    Befund `unsicher` (`lesungen_uneinig_tage`), nie korrigiert. Ein
+    `return null` in der Korrektur reichte nicht: dann würde `abweichend` mit
+    `korrekturfaehig: true` gespeichert und am Folgetag korrigiert. Auch nach
+    einer Korrektur (früher `korrigiert` F, heute zweimal eine dritte Nummer)
+    hält das jetzt als `ean_unsicher` statt `ean_abweichend`.
   - **Doppel-Regel über ALLE zugehörigen Nummern, an JEDEM Tag.** Unter der
     korrigierten (effektiven) wie immer (sperrt → ablehnen). Zusätzlich
     (`dupAlt`) über alle VERWANDTEN Einreichungen: solche, die mit dieser eine
@@ -339,7 +432,15 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
        neue trägt wieder die falsche Nummer und das Foto ist unlesbar
        (dieselbe Person, systematische Fehllesung des Scanners);
     3. beide wurden von derselben alten Nummer weg auf VERSCHIEDENE Nummern
-       korrigiert.
+       korrigiert;
+    4. (Runde 3) eine eigene FREIGABE, deren Barcode-Foto bestätigt eine
+       andere Nummer zeigt, die aber nie korrigiert wurde (ein Mensch gab den
+       `ean_abweichend`-Fall mit force frei — gebremst, verworfen, Karton-
+       oder Waagen-Code). Ihre Foto-Nummer zählt zu ihren Nummern
+       (`werte.eanFotoFreigegebenOf`, `policyOf.eanFotoFrei`). Anlass: K-Classic
+       Kartoffel Knödel (ecL21IfZ…_1, gespeichert 070012398358, Foto zweimal
+       4012448397358, am 05.10. mit force freigegeben) — eine Einreichung mit
+       der echten Nummer in derselben Woche wäre bezahlt worden.
     Die Prüfung hängt an der GESPEICHERTEN Korrektur, nicht am heutigen
     Befund: bis zur Prüfrunde rechnete die Runde sie nur am Tag der Korrektur
     — am nächsten Morgen (Foto bestätigt die korrigierte Nummer, „gleich")
@@ -384,8 +485,11 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   - **Bericht:** `eanKorrektur` = `{korrigiert, ausHeute, ausVorbefund,
     nichtGespeichert, gebremst, gebremstAnzahl, quote, gebremstVermerkt,
     aufgeschoben, schalter, schalterUnbekannt?, vorgeschlagen,
-    vorgeschlagenFaelle[], gespeichert, uneinigUeberTage, gebremstHaelt,
-    faelle[{id, vorher, neu, aus, entscheidung, grund}]}`,
+    vorgeschlagenFaelle[{…, zeuge}], gespeichert, uneinigUeberTage,
+    gebremstHaelt, kandidaten, leser: {bestaetigt, widerspricht,
+    nicht_gelesen, fehler}, leserFaelle[{id, vorher, neu, aus, urteil,
+    gelesen, fehler?}], faelle[{id, vorher, neu, aus, zeuge, entscheidung,
+    grund}]}`,
     `notbremse.korrektur`, `eanFoto.korrigiert`; im Dashboard „Barcode
     automatisch korrigiert" mit Liste alt → neu (im Trockenlauf „nur geplant").
   - **Übertragbare Lehre (Prüfrunde 06.10.2026, vier Funde derselben Art):**
@@ -581,7 +685,10 @@ Fotos (am 13./19./20.09. je zweistellig viele Fälle).
 - Ergebnisse landen IMMER in eigenen Feldern (`productNameRescueOcr`,
   `eanRescueOcr`, `priceRescueOcr`, `manufacturerRescueOcr`), nie in den
   Originalfeldern — sonst ist die Qualitätsmessung der Ersterkennung verfälscht.
-- Übernommen wird nur, was **zwei unabhängige Lesungen gleich lesen**.
+- Übernommen wird nur, was **zwei Lesungen gleich lesen**. Das sind zwei
+  Aufrufe desselben Modells auf denselben Fotos, also NICHT unabhängig (auf
+  Fotos ohne lesbare Ziffern erfindet es gültige GTINs, siehe
+  Barcode-Korrektur) — für die EAN-Rettung ein bekanntes Restrisiko.
 - Bei EANs zusätzlich die Prüfziffer verlangen. Lose Ware verleitet das Modell
   sonst dazu, die Nummer vom Waage-Etikett zu liefern.
 
@@ -668,7 +775,10 @@ gespeichert (rot) bzw. nur der Barcode-Befund nicht (gelb, steht ersatzweise
 am Halte-Grund), Barcode-Korrektur gebremst (rot, siehe Barcode-Korrektur;
 Zahlen der frischen Fälle, im Trockenlauf „nichts dauerhaft vermerkt"),
 Korrekturen aus alten Befunden über der Tagesgrenze (gelb), Schalter
-`barcodeKorrektur` unbekannt oder nicht lesbar (gelb)
+`barcodeKorrektur` unbekannt oder nicht lesbar (gelb), Strichcode-Leser bei
+Korrektur-Kandidaten gescheitert (gelb `barcode_leser_fehler` — fällt er
+ganz aus, korrigiert die Runde still gar nichts mehr), Barcode-Befunde des
+alten Codes ohne Vermerk warten (gelb `barcode_altcode_wartet`)
 bzw. eine Korrektur nicht gespeichert (gelb). Dass die Runde gar nicht lief, erkennen
 Dashboard und Morgen-Chat selbst (Bericht älter als 26 h bzw. nicht von heute).
 

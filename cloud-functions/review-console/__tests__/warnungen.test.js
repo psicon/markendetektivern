@@ -155,6 +155,16 @@ describe('Barcode-Korrektur (06.10.2026)', () => {
     expect(w.find((x) => x.code === 'barcode_korrektur_gebremst_wartet')).toMatchObject({ stufe: 'gelb' });
     expect(w.find((x) => x.code === 'barcode_korrektur_gebremst_wartet').text).toMatch(/^8 Fälle/);
   });
+  it('Prüfrunde 06.10. (Runde 3): Befunde des alten Codes warten → gelb; Strichcode-Leser gescheitert → gelb', () => {
+    const w = warnungen(basis({ runde: { geprueft: 50, offen: 3, auditFehler: 0, auditVersucht: 49, nichtGeschafft: 0, korrekturAltcodeWartet: 2, korrekturLeserFehler: 3 } }));
+    expect(w.find((x) => x.code === 'barcode_altcode_wartet')).toMatchObject({ stufe: 'gelb' });
+    expect(w.find((x) => x.code === 'barcode_altcode_wartet').text).toMatch(/^2 Fälle/);
+    expect(w.find((x) => x.code === 'barcode_leser_fehler')).toMatchObject({ stufe: 'gelb' });
+    expect(w.find((x) => x.code === 'barcode_leser_fehler').text).toMatch(/bei 3 Korrektur-Kandidaten/);
+    const ruhig = warnungen(basis({ runde: { geprueft: 50, offen: 0, auditFehler: 0, auditVersucht: 49, nichtGeschafft: 0, korrekturAltcodeWartet: 0, korrekturLeserFehler: 0 } }));
+    expect(ruhig.map((x) => x.code)).not.toEqual(expect.arrayContaining(['barcode_altcode_wartet']));
+    expect(ruhig.map((x) => x.code)).not.toEqual(expect.arrayContaining(['barcode_leser_fehler']));
+  });
   it('ohne Bremse und ohne Fehler → nichts', () => {
     const w = warnungen(basis({ runde: { geprueft: 50, offen: 1, auditFehler: 0, auditVersucht: 49, nichtGeschafft: 0, korrekturGebremst: null, korrekturNichtGespeichert: 0 } }));
     expect(w.map((x) => x.code)).not.toEqual(expect.arrayContaining(['barcode_korrektur_gebremst']));

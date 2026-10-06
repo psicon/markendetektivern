@@ -3244,8 +3244,21 @@ Patrick, 02.10.: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche",
   am ersten Tag (Patrick 04.10.: „ja"): liest die zweite Lesung die
   gespeicherte Nummer, war die erste eine Fehllesung → weiter.
 - **Eindeutige Barcode-Fälle korrigiert die Morgenrunde selbst** (Patrick
-  06.10.2026: „ja"). Eindeutig = das Barcode-Foto zweimal unabhängig gleich
-  gelesen UND gültige GTIN UND kein Waagen-/Händlercode. Dann gilt die
+  06.10.2026: „ja"). Tatsächliches Verfahren: das Modell liest das
+  Barcode-Foto zweimal gleich (Bildprüfung + zweite Lesung — zwei Aufrufe
+  DESSELBEN Modells, also NICHT unabhängig: auf Fotos ohne lesbare Ziffern
+  erfindet es gültige GTINs, gemessen 06.10.) UND gültige GTIN UND kein
+  Waagen-/Händlercode/Karton UND — Pflicht-Zeuge — der feste Strichcode-Leser
+  (`src/strichcode.js`, zxing-wasm 2.2.4, liest die Striche, nicht die
+  Ziffern) liest HEUTE auf dem Original-Foto die neue Nummer und NICHT die
+  gespeicherte. Liest er nichts, etwas anderes oder scheitert er → keine
+  Korrektur, ein Mensch entscheidet. Gemessen 06.10.: 96 von 127 echten
+  Barcode-Fotos gelesen (Median 86 ms), 5 Abweichungen zu OpenCV/Apple Vision;
+  von 9 geplanten Korrekturen bestätigt 6, 3 bleiben beim Menschen; bei
+  Fusilli/Vollkornbrot/Melitta/Farfalle las er die gespeicherte Nummer (das
+  Modell hatte erfunden). Eine gespeicherte Korrektur ohne Zeugen gilt nicht
+  (`eanKorrekturOf`). WASM IMMER aus dem Paket laden (sonst CDN),
+  Formatnamen mit Bindestrich (`'EAN-13'`). Dann gilt die
   Foto-Nummer als EAN (`eanKorrektur`, nur Server; `ean` bleibt die
   gespeicherte für Audit), alle weiteren Regeln rechnen mit ihr. Das gilt auch
   für schon angehaltene `ean_abweichend`-Fälle, deren gespeicherte Lesungen das
@@ -3266,10 +3279,18 @@ Patrick, 02.10.: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche",
   falsche Korrektur nimmt die Prüfkonsole einzeln zurück („Korrektur
   verwerfen", `eanKorrekturVerworfen`, danach nie wieder korrigiert). Der
   Trockenlauf speichert weder Korrektur noch Bremsvermerk. Befunde des
-  ALTEN Codes nach dessen letztem Lauf `2026-10-06_080038` tragen allein
-  keine Korrektur (er verschluckt Widersprüche) — dort muss die Runde die
-  Nummer heute selbst zweimal lesen. Die EAN einer
-  Einreichung IMMER über `werte.eanOf` lesen, nie `ean` allein. Lehre der
+  ALTEN Codes ohne Vermerk aus einem Lauf nach `2026-10-06_080038` werden
+  NIE automatisch korrigiert (er verschluckt Widersprüche und überschreibt
+  `unsicher`; gebremst `altcode_<lauf>`, gelbe Warnung) — trotzdem vor dem
+  nächsten 08:00-Lauf ausrollen. Eine verworfene Korrektur hält auch in der
+  Runde (Vermerk ist selbst Halte-Quelle); eine frühere andere Foto-Lesung
+  (etwa `gleich`) gegen heute zweimal F → `unsicher`; eine eigene Freigabe mit
+  bestätigt abweichender Foto-Nummer zählt mit dieser Nummer zu den
+  verwandten (`ean_alt_doppelt`, nur Halt). Die EAN einer
+  Einreichung IMMER über `werte.eanOf` lesen, nie `ean` allein — die App
+  zeigt in „Meine Einreichungen" weiter die gescannte `ean`
+  (`app/product-submit/index.tsx`), auch nach einer Korrektur (offen, braucht
+  einen App-Build). Lehre der
   Prüfrunde: ein Schutz, der an einem Zustand hängt, wird aus dem
   GESPEICHERTEN Zustand gerechnet, nie aus dem heutigen Ereignis — sonst
   gilt er nur einen Lauf; und eine Vertrauensregel muss kennen, was der alte

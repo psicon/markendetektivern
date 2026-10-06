@@ -325,7 +325,7 @@ describe('Schlussprüfung 03.10.2026: Zurückholen und Referenz-ID', () => {
 
 describe('Barcode-Korrektur der Morgenrunde in der Konsole (Entscheidung Patrick 06.10.2026)', () => {
   // gespeichert EAN (Scanner), korrigiert ANDERE (Foto, zweimal gleich)
-  const korrektur = { eanKorrektur: { ean: ANDERE, vorher: EAN, lesungen: [ANDERE, ANDERE], aus: 'heute', lauf: 'L1' }, eanFotoOcr: { ean: ANDERE, befund: 'korrigiert', vorher: EAN } };
+  const korrektur = { eanKorrektur: { ean: ANDERE, vorher: EAN, lesungen: [ANDERE, ANDERE], aus: 'heute', lauf: 'L1', zeuge: { art: 'striche', gelesen: [ANDERE] } }, eanFotoOcr: { ean: ANDERE, befund: 'korrigiert', vorher: EAN } };
 
   it('korrigierte Einreichung ohne Doppel → Freigabe ohne force', async () => {
     lege('k', korrektur);
@@ -344,7 +344,7 @@ describe('Barcode-Korrektur der Morgenrunde in der Konsole (Entscheidung Patrick
   });
 
   it('eigene Freigabe, deren EAN NUR über eine Korrektur stimmt (eanKorrektur.ean), sperrt die Freigabe unter der korrigierten Nummer', async () => {
-    lege('frueher', { ean: '4001382088125', eanKorrektur: { ean: ANDERE, vorher: '4001382088125' }, status: 'approved', createdAt: ts(T0 - 2 * TAG_MS) });
+    lege('frueher', { ean: '4001382088125', eanKorrektur: { ean: ANDERE, vorher: '4001382088125', zeuge: { art: 'striche', gelesen: [ANDERE] } }, status: 'approved', createdAt: ts(T0 - 2 * TAG_MS) });
     lege('k', { ean: ANDERE });
     const r = await entscheide({ ids: ['k'], decision: 'approve' });
     expect(r.results[0]).toMatchObject({ outcome: 'blocked', reason: 'sperre_woche_gleicher_nutzer' });
@@ -353,7 +353,7 @@ describe('Barcode-Korrektur der Morgenrunde in der Konsole (Entscheidung Patrick
   it('… eine eigene, von DIESER Nummer weg korrigierte Freigabe dieser Woche sperrt nicht unter der effektiven EAN, hält aber an (ean_alt_doppelt, Prüfrunde 06.10.)', async () => {
     // frueher: gespeichert EAN, korrigiert auf eine andere — k: wieder EAN, Foto ohne Befund.
     // Ohne die Korrektur von `frueher` wäre k gesperrt; durch sie darf k nicht durchrutschen.
-    lege('frueher', { ean: EAN, eanKorrektur: { ean: '4001382088125', vorher: EAN }, status: 'approved', createdAt: ts(T0 - 2 * TAG_MS) });
+    lege('frueher', { ean: EAN, eanKorrektur: { ean: '4001382088125', vorher: EAN, zeuge: { art: 'striche', gelesen: ['4001382088125'] } }, status: 'approved', createdAt: ts(T0 - 2 * TAG_MS) });
     lege('k');
     const r = await entscheide({ ids: ['k'], decision: 'approve' });
     expect(r.results[0]).toMatchObject({ outcome: 'blocked', reason: 'ean_alt_doppelt', precheck: { dup: { verdict: 'ok' }, dupAlt: { verdict: 'locked', priorId: 'frueher' } } });
@@ -361,13 +361,13 @@ describe('Barcode-Korrektur der Morgenrunde in der Konsole (Entscheidung Patrick
   });
 
   it('… dieselbe Lage bei einem FREMDEN Konto → frei (fremde Einreichungen sperren nicht, 20.09.)', async () => {
-    lege('frueher', { userId: 'u2', ean: EAN, eanKorrektur: { ean: '4001382088125', vorher: EAN }, status: 'approved', createdAt: ts(T0 - 2 * TAG_MS) });
+    lege('frueher', { userId: 'u2', ean: EAN, eanKorrektur: { ean: '4001382088125', vorher: EAN, zeuge: { art: 'striche', gelesen: ['4001382088125'] } }, status: 'approved', createdAt: ts(T0 - 2 * TAG_MS) });
     lege('k');
     expect((await entscheide({ ids: ['k'], decision: 'approve' })).results[0].outcome).toBe('approved');
   });
 
   it('… beide von derselben alten Nummer weg korrigiert (auf VERSCHIEDENE Nummern) → hält an (ean_alt_doppelt)', async () => {
-    lege('frueher', { ean: EAN, eanKorrektur: { ean: '4001382088125', vorher: EAN }, status: 'approved', createdAt: ts(T0 - 2 * TAG_MS) });
+    lege('frueher', { ean: EAN, eanKorrektur: { ean: '4001382088125', vorher: EAN, zeuge: { art: 'striche', gelesen: ['4001382088125'] } }, status: 'approved', createdAt: ts(T0 - 2 * TAG_MS) });
     lege('k', korrektur);
     const r = await entscheide({ ids: ['k'], decision: 'approve' });
     expect(r.results[0]).toMatchObject({ outcome: 'blocked', reason: 'ean_alt_doppelt' });
@@ -392,7 +392,7 @@ describe('Barcode-Korrektur der Morgenrunde in der Konsole (Entscheidung Patrick
 });
 
 describe('Rückweg: Barcode-Korrektur verwerfen (Prüfrunde 06.10.2026)', () => {
-  const korrektur = { eanKorrektur: { ean: ANDERE, vorher: EAN, lesungen: [ANDERE, ANDERE], aus: 'heute', lauf: 'L1' }, eanFotoOcr: { ean: ANDERE, befund: 'korrigiert', vorher: EAN } };
+  const korrektur = { eanKorrektur: { ean: ANDERE, vorher: EAN, lesungen: [ANDERE, ANDERE], aus: 'heute', lauf: 'L1', zeuge: { art: 'striche', gelesen: [ANDERE] } }, eanFotoOcr: { ean: ANDERE, befund: 'korrigiert', vorher: EAN } };
   const verwerfen = (id, note = 'Scanner-Nummer stimmt, Foto zeigt Umverpackung') => entscheide({ ids: [id], decision: 'ean_korrektur_verwerfen', note });
 
   it('offene Einreichung: setzt nur den Vermerk (Audit bleibt), entscheidet nichts; danach hält die Konsole an der Foto-Abweichung (force + Notiz)', async () => {
@@ -443,5 +443,62 @@ describe('Rückweg: Barcode-Korrektur verwerfen (Prüfrunde 06.10.2026)', () => 
       // unter ANDERE gibt es keine eigene Freigabe mehr — die Korrektur von `frei` ist verworfen
       expect(q.rows.find((x) => x.id === 'neu')).toMatchObject({ ean: ANDERE, verdict: 'ok' });
     } finally { spy.mockRestore(); }
+  });
+});
+
+describe('Prüfrunde 06.10.2026 (Runde 3): Freigabe mit bestätigt abweichender Foto-Nummer, Strichcode-Zeuge', () => {
+  // Kartoffel Knödel (ecL21IfZ…_1): gespeichert 070012398358, Foto zweimal 4012448397358, am 05.10. mit force freigegeben.
+  const K = '070012398358';
+  const FK = '4012448397358';
+  const frei = (extra = {}) => lege('frei', {
+    ean: K, status: 'approved', createdAt: ts(T0 - 2 * TAG_MS),
+    eanFotoOcr: { ean: FK, befund: 'abweichend', bestaetigt: true, lauf: '2026-10-05_080000' }, ...extra,
+  });
+
+  it('neue eigene Einreichung mit der Foto-Nummer binnen 7 Tagen → angehalten (ean_alt_doppelt), nie abgelehnt; mit force + Notiz frei', async () => {
+    frei();
+    lege('k', { ean: FK });
+    const ohne = await entscheide({ ids: ['k'], decision: 'approve' });
+    expect(ohne.results[0]).toMatchObject({ outcome: 'blocked', reason: 'ean_alt_doppelt', precheck: { dup: { verdict: 'ok' }, dupAlt: { verdict: 'locked', priorId: 'frei' } } });
+    expect(doc('k').status).toBe('pending');
+    const f = await konsole.reviewGetUpload({ ...admin, data: { id: 'k' } });
+    expect(f.precheck).toMatchObject({ verdict: 'hold', reasons: ['ean_alt_doppelt'] });
+    const mit = await entscheide({ ids: ['k'], decision: 'approve', force: true, note: 'anderes Produkt geprüft' });
+    expect(mit.results[0].outcome).toBe('approved');
+  });
+
+  it('… fremdes Konto, Foto-Nummer unbestätigt oder Einreichung nicht freigegeben → kein Halt', async () => {
+    for (const extra of [
+      { userId: 'u2' },
+      { eanFotoOcr: { ean: FK, befund: 'abweichend', bestaetigt: false, lauf: 'L' } },
+      { status: 'pending' },
+    ]) {
+      mockStore.clear();
+      frei(extra);
+      lege('k', { ean: FK, createdAt: ts(T0 + 1000) });
+      const r = await entscheide({ ids: ['k'], decision: 'approve' });
+      expect(r.results[0].outcome).not.toBe('blocked');
+    }
+  });
+
+  it('Warteschlange hält ebenso (Index liest eanFotoOcr mit)', async () => {
+    frei();
+    lege('k', { ean: FK });
+    // Am EAN-Zwischenspeicher (2 min) der früheren Tests vorbei — die stellen die Uhr bis +20 min.
+    const spy = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 60 * 60 * 1000);
+    try {
+      const q = await konsole.reviewQueue({ ...admin, data: { type: 'photos' } });
+      expect(q.rows.find((x) => x.id === 'k')).toMatchObject({ verdict: 'hold', reasons: ['ean_alt_doppelt'] });
+    } finally { spy.mockRestore(); }
+  });
+
+  it('Fallansicht zeigt den Strichcode-Zeugen der Korrektur; eine Korrektur ohne Zeugen gilt nicht', async () => {
+    const korr = { ean: ANDERE, vorher: EAN, lesungen: [ANDERE, ANDERE], aus: 'heute', lauf: 'L1' };
+    lege('k', { eanKorrektur: { ...korr, zeuge: { art: 'striche', gelesen: [ANDERE], leser: 'zxing-wasm 2.2.4' } } });
+    const f = await konsole.reviewGetUpload({ ...admin, data: { id: 'k' } });
+    expect(f.row).toMatchObject({ anzeigeEan: ANDERE, eanKorrektur: { ean: ANDERE, vorher: EAN, zeuge: { gelesen: [ANDERE], leser: 'zxing-wasm 2.2.4' } } });
+    lege('ohne', { eanKorrektur: korr });
+    const g = await konsole.reviewGetUpload({ ...admin, data: { id: 'ohne' } });
+    expect(g.row).toMatchObject({ anzeigeEan: EAN, eanKorrektur: null });
   });
 });

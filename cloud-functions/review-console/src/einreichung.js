@@ -87,12 +87,18 @@ function eanKorrekturZeile(x) {
   const neu = eanKorrekturOf(x);
   if (!neu) return null;
   const k = x.eanKorrektur;
+  // Strichcode-Leser (Pflicht-Zeuge, Prüfrunde 06.10.2026) — ohne ihn gäbe es `neu` nicht (eanKorrekturOf).
+  const z = k.zeuge && typeof k.zeuge === 'object' ? k.zeuge : null;
   return {
     ean: neu,
     vorher: String(x.ean).replace(/\D/g, '').slice(0, 14),
     aus: k.aus === 'heute' || k.aus === 'vorbefund' ? k.aus : null,
     lauf: typeof k.lauf === 'string' ? k.lauf.slice(0, 40) : null,
     at: ms(k.at),
+    zeuge: z ? {
+      gelesen: (Array.isArray(z.gelesen) ? z.gelesen : []).map((g) => String(g).replace(/\D/g, '').slice(0, 14)).filter(Boolean).slice(0, 4),
+      leser: typeof z.leser === 'string' ? z.leser.slice(0, 40) : null,
+    } : null,
   };
 }
 
@@ -421,7 +427,8 @@ function verwandteVon(byEan, row) {
 /** Felder, die der EAN-Index der Warteschlange aus dem Bestand liest (select). */
 // `eanKorrekturVerworfen` gehört dazu: ohne es hielte der Index eine verworfene
 // Korrektur für gültig (werte.eanKorrekturOf) und gruppierte falsch.
-const INDEX_FELDER = ['userId', 'ean', 'eanRescueOcr', 'eanKorrektur', 'eanKorrekturVerworfen', 'marketId', 'status', 'createdAt', 'priceOcr', 'priceRescueOcr', 'manufacturerOcr'];
+// `eanFotoOcr`: bestätigt abweichende Foto-Nummer einer Freigabe (werte.eanFotoFreigegebenOf, Prüfrunde 06.10.2026).
+const INDEX_FELDER = ['userId', 'ean', 'eanRescueOcr', 'eanKorrektur', 'eanKorrekturVerworfen', 'eanFotoOcr', 'marketId', 'status', 'createdAt', 'priceOcr', 'priceRescueOcr', 'manufacturerOcr'];
 
 /**
  * EAN-Nachbarschafts-Index der Warteschlange aus dem schlanken Bestand.

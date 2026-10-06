@@ -283,7 +283,10 @@
         const k = r.eanKorrektur;
         const v = r.eanKorrekturVerworfen;
         if (k && k.vorher) {
-          return `<br><small style="color:var(--warn)">korrigiert vom Barcode-Foto (zweimal gleich gelesen) — gespeichert war ${esc(k.vorher)}</small>
+          // Strichcode-Leser (Pflicht-Zeuge, Prüfrunde 06.10.2026): eine Korrektur gilt nur mit ihm.
+          const z = k.zeuge && (k.zeuge.gelesen || []).length
+            ? `<br><small style="color:var(--fg3)">Strichcode-Leser bestätigt ${esc(k.zeuge.gelesen.join(', '))} (liest die Striche, nicht die Ziffern)</small>` : '';
+          return `<br><small style="color:var(--warn)">korrigiert vom Barcode-Foto (zweimal gleich gelesen) — gespeichert war ${esc(k.vorher)}</small>${z}
             <button class="rchip" data-korr-verwerfen="${esc(r.id)}" style="margin-left:8px;font-size:11px;padding:2px 8px">Korrektur verwerfen</button>`;
         }
         if (v) return `<br><small style="color:var(--fg3)">Korrektur auf ${esc(v.ean || '?')} verworfen${v.at ? ` am ${esc(fmtDate(v.at))}` : ''} — es gilt die gespeicherte Nummer${v.notiz ? ` („${esc(v.notiz)}")` : ''}</small>`;

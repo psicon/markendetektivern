@@ -114,13 +114,18 @@ function noteFor(reason, ctx = {}) {
 }
 
 /**
- * Die drei Felder, in denen die EAN einer Einreichung stehen kann: gescannt/
+ * Die Felder, in denen eine Nummer einer Einreichung stehen kann: gescannt/
  * getippt (`ean`), nachgelesen (`eanRescueOcr`), von der Morgenrunde
- * korrigiert (`eanKorrektur.ean`, 06.10.2026). Gezählt wird danach nur, wessen
- * EFFEKTIVE EAN passt (werte.eanOf, nachbarnAus) — eine korrigierte Einreichung
- * gehört zur korrigierten Nummer, nicht mehr zur gespeicherten.
+ * korrigiert (`eanKorrektur.ean`, 06.10.2026) — und die Nummer vom
+ * Barcode-Foto (`eanFotoOcr.ean`, Prüfrunde 06.10.2026): eine FREIGEGEBENE
+ * Einreichung mit bestätigt abweichender Foto-Nummer ist mit dieser Nummer
+ * verwandt (werte.eanFotoFreigegebenOf, nur Halt `ean_alt_doppelt`). Gezählt
+ * wird danach nur, wessen EFFEKTIVE EAN passt (werte.eanOf, nachbarnAus) bzw.
+ * wer eine Nummer teilt (verwandteAus) — ein Treffer nur über `eanFotoOcr.ean`
+ * ist kein Nachbar. Index: Einzelfeld-Index auf `eanFotoOcr.ean` ist Standard
+ * (geprüft 06.10.2026: keine Ausnahme für crowd_uploads).
  */
-const EAN_FELDER = ['ean', 'eanRescueOcr', 'eanKorrektur.ean'];
+const EAN_FELDER = ['ean', 'eanRescueOcr', 'eanKorrektur.ean', 'eanFotoOcr.ean'];
 
 /**
  * Alle Einreichungen zu einer EAN-Menge (Chunks à 30 für `in`-Queries), über
@@ -162,8 +167,8 @@ async function nachbarnInTx(tx, ean, ohneId) {
   return nachbarnAus(await eanDocsInTx(tx, [ean]), ean, ohneId);
 }
 
-/** Alle Nummern einer Zeile für die Abfragen: effektive und — nach einer Korrektur — die gespeicherte. */
-const nummernVon = (row) => [row.anzeigeEan, row.eanKorrektur ? row.eanKorrektur.vorher : null].filter(Boolean);
+/** Alle Nummern einer Zeile für die Abfragen: effektive, nach einer Korrektur die gespeicherte, bei einer Freigabe die bestätigte Foto-Nummer (werte.eanNummern). */
+const nummernVon = (row) => [row.anzeigeEan, row.eanKorrektur ? row.eanKorrektur.vorher : null, row._policy ? row._policy.eanFotoFrei : null].filter(Boolean);
 
 /**
  * Zusatz-Eingaben der Vorprüfung für EINEN Fall außerhalb einer Transaktion:

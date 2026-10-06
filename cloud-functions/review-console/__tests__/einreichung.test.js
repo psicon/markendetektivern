@@ -378,7 +378,7 @@ describe('Barcode-Korrektur der Morgenrunde (06.10.2026)', () => {
   const X = ANDERE;
   const korrigiert = (extra = {}) => basis({
     ean: S, productNameOcr: 'Skyr', priceOcr: { priceCents: 129 },
-    eanKorrektur: { ean: X, vorher: S, lesungen: [X, X], aus: 'heute', lauf: 'L1', at: T0 },
+    eanKorrektur: { ean: X, vorher: S, lesungen: [X, X], aus: 'heute', lauf: 'L1', at: T0, zeuge: { art: 'striche', gelesen: [X] } },
     eanFotoOcr: { ean: X, befund: 'korrigiert', vorher: S },
     ...extra,
   });
@@ -390,8 +390,8 @@ describe('Barcode-Korrektur der Morgenrunde (06.10.2026)', () => {
     expect(r.eanFoto).toMatchObject({ art: 'gleich', gelesen: X });
   });
   it('eanKorrekturZeile: ungültige Korrektur → null (die Konsole sieht dann die gespeicherte Nummer und den Barcode-Befund)', () => {
-    expect(eanKorrekturZeile(korrigiert({ eanKorrektur: { ean: '4000417025006', vorher: S } }))).toBeNull();
-    const r = rowOf(doc('k', korrigiert({ eanKorrektur: { ean: '4000417025006', vorher: S } })));
+    expect(eanKorrekturZeile(korrigiert({ eanKorrektur: { ean: '4000417025006', vorher: S, zeuge: { art: 'striche', gelesen: ['4000417025006'] } } }))).toBeNull();
+    const r = rowOf(doc('k', korrigiert({ eanKorrektur: { ean: '4000417025006', vorher: S, zeuge: { art: 'striche', gelesen: ['4000417025006'] } } })));
     expect(r.anzeigeEan).toBe(S);
     // `befund: korrigiert` ohne gültige Korrektur: gegen die gespeicherte gerechnet → abweichend (fail-closed)
     expect(r.eanFoto).toMatchObject({ art: 'abweichend' });
@@ -437,7 +437,7 @@ describe('Barcode-Korrektur der Morgenrunde (06.10.2026)', () => {
 
   it('… beide von derselben alten Nummer weg korrigiert, auf verschiedene Nummern → hält an', () => {
     const Y = '4001382088125';
-    const frueher = doc('frueher', korrigiert({ status: 'approved', createdAt: T0 - 48 * STUNDE, eanKorrektur: { ean: Y, vorher: S }, eanFotoOcr: { ean: Y, befund: 'korrigiert', vorher: S } }));
+    const frueher = doc('frueher', korrigiert({ status: 'approved', createdAt: T0 - 48 * STUNDE, eanKorrektur: { ean: Y, vorher: S, zeuge: { art: 'striche', gelesen: [Y] } }, eanFotoOcr: { ean: Y, befund: 'korrigiert', vorher: S } }));
     const k = doc('k', korrigiert());
     const rk = rowOf(k);
     expect(verwandteAus([frueher], rk, 'k').map((x) => x.id)).toEqual(['frueher']);
@@ -468,7 +468,7 @@ describe('Rückweg: verworfene Barcode-Korrektur in der Konsole (Prüfrunde 06.1
   const { INDEX_FELDER, eanKorrekturVerworfenZeile } = require('../src/einreichung');
   const S = GUELTIG; // gespeichert
   const verworfen = (extra = {}) => basis({
-    ean: S, productNameOcr: 'Skyr', priceOcr: { priceCents: 129 }, eanKorrektur: { ean: ANDERE, vorher: S, aus: 'heute' }, eanFotoOcr: { ean: ANDERE, befund: 'korrigiert', vorher: S },
+    ean: S, productNameOcr: 'Skyr', priceOcr: { priceCents: 129 }, eanKorrektur: { ean: ANDERE, vorher: S, aus: 'heute', zeuge: { art: 'striche', gelesen: [ANDERE] } }, eanFotoOcr: { ean: ANDERE, befund: 'korrigiert', vorher: S },
     eanKorrekturVerworfen: { by: 'patrick', at: { toMillis: () => T0 }, notiz: 'Scanner-Nummer stimmt', ean: ANDERE, vorher: S }, ...extra,
   });
 
