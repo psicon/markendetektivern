@@ -444,6 +444,21 @@ werden sollten. Andere "Don't"-Regeln stehen verteilt im File
 `USE_FLYING_TABS`-Legacy etc.) — hier nur die Learnings aus
 Recent-Sessions.
 
+- **Eine Live-Barcode-Lesung ungeprüft übernehmen (Vorfall Juni–06.10.2026,
+  Foto-Assistent).** Der Assistent nahm die ERSTE Nummer, die expo-camera
+  meldete, und löste sofort aus. Android (ML Kit, je Kamerabild nur
+  `barcodes.first()`) lieferte dabei in 111 von 1.888 lesbaren Fällen (5,9 %)
+  eine falsche Nummer MIT gültiger Prüfziffer (iPhone 0,5 %); die Prüfziffer
+  allein schützt also nicht. Regel: Live-Lesungen IMMER über
+  `lib/utils/barcodeBestaetigung.ts` (Zähler je Nummer im Fenster, Prüfziffer,
+  Risikoformen strenger, zwei Codes im Bild ⇒ Nutzer wählt) — nie „erste
+  Lesung" und nie „n-mal hintereinander" (zwei Codes liefern A,B,A,B und
+  bestätigen nie). Weicht das Foto ab, die Nummer bestätigen lassen, nicht
+  ohne Nummer speichern (endet serverseitig oft in `ean_fehlt`). Die
+  abgefragte Schreibweise nie still auf 13 Stellen umformen —
+  `vergleichsform` nur zum Vergleichen. Wirkt nur mit neuem Build; die
+  Barcode-Prüfung der Morgenrunde bleibt für alte Builds Pflicht.
+
 - **Den Patch `patches/react-native+0.79.7.patch` beim RN-Upgrade still
   verlieren (Vorfall 01.10.2026, iOS 6.0.20).** Onboarding zeigte statt des
   Einkaufswagen-Fotos das riesige Splash-Logo — nur iOS, zufällig. Ursache ist

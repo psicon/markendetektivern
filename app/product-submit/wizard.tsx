@@ -8,7 +8,7 @@
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { Camera, CameraType, CameraView, scanFromURLAsync, useCameraPermissions } from 'expo-camera';
+import { Camera, CameraType, CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { Image as ExpoImage } from 'expo-image';
@@ -33,12 +33,12 @@ import {
   BonScanner,
   DEFAULT_SCANNER_TUNING,
   isBonScannerAvailable,
-  scanBarcodeFromImage,
   type BonScannerHandle,
   type BonScannerQuality,
   type ScannerTuning,
 } from 'bon-edge-detector';
 
+import { EanEingabe } from '@/components/product-submit/EanEingabe';
 import {
   LocationConfirmStep,
   type ConfirmedPlace,
@@ -47,6 +47,7 @@ import { MarketSelector } from '@/components/ui/MarketSelector';
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { useBildschirmAktiv } from '@/hooks/useBildschirmAktiv';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useEanSchritt } from '@/hooks/useEanSchritt';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import {
@@ -60,6 +61,7 @@ import {
   type ProductPhotoStep,
 } from '@/lib/services/productSubmit';
 import { BILDSCHIRM_WEG, aufnahmeMitGrenze } from '@/lib/services/kameraAufnahme';
+import { PRODUKT_BARCODE_TYPEN } from '@/lib/services/barcodeFoto';
 import { isOnline } from '@/lib/services/network';
 import { StandortPflichtHinweis } from '@/components/rewards/StandortPflichtHinweis';
 import { useStandortPflicht } from '@/hooks/useStandortPflicht';
@@ -76,6 +78,10 @@ const SCREEN_W = Dimensions.get('window').width;
 // ohne Grenze an einem nativen await. Großzügig, damit langsame Geräte mit
 // Nachbearbeitung kein gutes Foto verlieren.
 const EXPO_AUFNAHME_LIMIT_MS = 30_000;
+
+// Barcode-Typen des EAN-Schritts als stabile Referenz (statt eines neuen
+// Objekts je Render).
+const EAN_SCANNER_SETTINGS = { barcodeTypes: [...PRODUKT_BARCODE_TYPEN] };
 
 // Readability tuning for PRODUCT LABELS (not receipts). The shipped defaults
 // only accept tall, receipt-shaped documents (docMaxWHRatio 0.85) and demand
@@ -109,7 +115,6 @@ export default function ProductWizardScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
   const docScannerRef = useRef<BonScannerHandle>(null);
-  const barcodeHandledRef = useRef(false);
   const chipsScrollRef = useRef<ScrollView>(null);
   const chipXRef = useRef<number[]>([]);
 
@@ -177,11 +182,6 @@ export default function ProductWizardScreen() {
   const [campaign, setCampaign] = useState<ActiveProductCampaign | null>(null);
   const [quality, setQuality] = useState<BonScannerQuality>('none');
   const [eanCode, setEanCode] = useState<string | null>(null);
-  // Galerie-EAN: iOS kann Strichcodes NICHT aus einem Standbild lesen
-  // (expo-camera scanFromURLAsync = QR-only). Schlägt die Auto-Erkennung fehl,
-  // hält dieser State das gewählte Bild + öffnet ein Zahlenfeld für die EAN.
-  const [eanEntryUri, setEanEntryUri] = useState<string | null>(null);
-  const [eanEntryValue, setEanEntryValue] = useState('');
   // True when the capture screen was opened to RE-shoot one photo from the
   // review grid — capturing then returns straight to review (no advancing),
   // and the top-left button reads "Abbrechen".
@@ -243,13 +243,6 @@ export default function ProductWizardScreen() {
   // ist (Stale-Frame-Schutz). Beim nativen Scanner (iOS non-EAN) irrelevant —
   // der hat seine eigene Bereitschaft, expo-cameraReady bleibt dort ungenutzt.
   const expoNotReady = showExpoCam && !cameraReady;
-
-  // Re-arm the barcode scanner + reset the live hint whenever the step
-  // changes (so re-entering the EAN step can scan again).
-  useEffect(() => {
-    barcodeHandledRef.current = false;
-    setQuality('none');
-  }, [stepIdx]);
 
   // Kamera-Bereitschaft zurücksetzen, sobald die expo-CameraView abgebaut
   // wird (iOS: nativ↔expo-Handoff pro EAN-Step; beim Verlassen der
@@ -388,13 +381,14 @@ export default function ProductWizardScreen() {
     [step, stepIdx, photos, editingFromReview],
   );
 
-  const shootCamera = useCallback(async () => {
-    if (!cameraRef.current) return;
+  // Ein Foto mit expo-camera. `null` = kein Bild (Fehlerhinweis schon gezeigt,
+  // oder der Screen ist weg). Ohne Capturing-State — den setzt der Aufrufer.
+  const fotoAufnehmen = useCallback(async (): Promise<string | null> => {
+    if (!cameraRef.current) return null;
     // HART: nie auslösen, bevor CameraX bereit ist (Stale-Frame-Schutz).
     // Ohne diese Zeile liefert takePictureAsync den letzten Frame der
     // vorherigen Kamera-Session zurück → vertauschte Produktfotos.
-    if (!cameraReady) return;
-    setCapturing(true);
+    if (!cameraReady) return null;
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
       // Zeitgrenze → BonScannerFehler('timeout_bild'). Ein Foto, das danach
@@ -406,16 +400,47 @@ export default function ProductWizardScreen() {
         EXPO_AUFNAHME_LIMIT_MS,
         bildschirm.aktiv,
       );
-      if (photo === BILDSCHIRM_WEG) return;
+      if (photo === BILDSCHIRM_WEG) return null;
       if (!photo?.uri) throw new Error('no-uri');
-      onCaptured(photo.uri);
+      return photo.uri;
     } catch (e) {
-      if (!bildschirm.aktiv()) return;
-      zeigeAufnahmeFehler(e);
+      if (bildschirm.aktiv()) zeigeAufnahmeFehler(e);
+      return null;
+    }
+  }, [cameraReady, bildschirm]);
+
+  const shootCamera = useCallback(async () => {
+    if (!cameraRef.current || !cameraReady) return;
+    setCapturing(true);
+    try {
+      const uri = await fotoAufnehmen();
+      if (uri) onCaptured(uri);
     } finally {
       if (bildschirm.gemountet()) setCapturing(false);
     }
-  }, [onCaptured, cameraReady, bildschirm]);
+  }, [onCaptured, cameraReady, fotoAufnehmen, bildschirm]);
+
+  // EAN-Schritt: Live-Lesung bestätigen, Foto, Nummer übernehmen oder erfragen
+  // (hooks/useEanSchritt.ts — Android-Fehllesungen, 06.10.2026).
+  const ean = useEanSchritt({
+    aktiv: phase === 'capture' && step.mode === 'barcode' && showExpoCam && cameraReady && !capturing,
+    kameraBereit: cameraReady,
+    fotoAufnehmen,
+    onCaptured,
+    setEanCode,
+    setCapturing,
+    bildschirm,
+  });
+
+  // Re-arm the barcode scanner + reset the live hint whenever the step
+  // changes (so re-entering the EAN step can scan again). Auch beim
+  // Phasenwechsel: eine Neuaufnahme aus der Übersicht kehrt mit demselben
+  // stepIdx zurück — ohne Reset bliebe der Auto-Scan dort gesperrt.
+  const eanNeuStarten = ean.neuStarten;
+  useEffect(() => {
+    eanNeuStarten();
+    setQuality('none');
+  }, [stepIdx, phase, eanNeuStarten]);
 
   // Shutter dispatches by capture mode: document → native doc scanner
   // (flat OCR-friendly crop), else the plain camera.
@@ -439,34 +464,31 @@ export default function ProductWizardScreen() {
       } finally {
         if (bildschirm.gemountet()) setCapturing(false);
       }
+    } else if (step.mode === 'barcode') {
+      // Selbst ausgelöst im EAN-Schritt: Nummer vom Foto lesen bzw. erfragen —
+      // ohne Nummer lehnte der Server oft mit `ean_fehlt` ab.
+      await ean.erfassen('ausloeser');
     } else {
       await shootCamera();
     }
-  }, [capturing, useNativeCam, onCaptured, shootCamera, bildschirm]);
+  }, [capturing, useNativeCam, onCaptured, shootCamera, ean.erfassen, step.mode, bildschirm]);
 
-  // EAN/barcode auto-capture: on the first valid scan of the EAN step,
-  // store the code + grab the frame (the code rides into the filename).
+  // EAN/barcode auto-capture: erst wenn die Live-Lesung BESTÄTIGT ist
+  // (mehrere gleiche Lesungen, gültige Prüfziffer — lib/utils/barcodeBestaetigung.ts).
+  // Vorher übernahm der Assistent die erste Lesung; auf Android waren damit
+  // 5,9 % der Nummern falsch (06.10.2026).
   const handleBarcode = useCallback(
-    async (e: { data?: string }) => {
-      if (step.key !== 'ean' || barcodeHandledRef.current || capturing) return;
-      // Kamera noch nicht bereit → Scan NICHT konsumieren (Ref nicht setzen),
-      // damit der nächste Frame ihn erneut liefern kann, sobald bereit.
-      if (!cameraReady) return;
-      const code = (e?.data || '').trim();
-      if (!code) return;
-      barcodeHandledRef.current = true;
-      setEanCode(code);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      await shootCamera();
+    (e: { data?: string }) => {
+      if (step.key !== 'ean' || capturing) return;
+      ean.lesung(e?.data);
     },
-    [step.key, capturing, cameraReady, shootCamera],
+    [step.key, capturing, ean.lesung],
   );
 
   // Bild aus der Galerie wählen — Alternative zur Live-Aufnahme (war in der
   // alten App möglich). VOLLE Qualität, keine Kompression (CLAUDE.md: die
   // Server-Analyse braucht scharfe Labels für OCR/EAN). Für den EAN-Schritt
-  // wird der Barcode aus dem gewählten Bild gelesen (scanFromURLAsync); ist
-  // keiner lesbar, bleibt der Live-Scan die Option.
+  // wird der Barcode aus dem gewählten Bild gelesen (useEanSchritt).
   const pickFromGallery = useCallback(async () => {
     if (capturing) return;
     try {
@@ -486,59 +508,18 @@ export default function ProductWizardScreen() {
       });
       if (result.canceled || !result.assets?.[0]?.uri) return;
       const uri = result.assets[0].uri;
-      // EAN-Schritt: Barcode aus dem gewählten Bild lesen. Klappt auf Android
-      // (ML Kit); auf iOS liest scanFromURLAsync NUR QR-Codes → 1D-EAN wird nie
-      // erkannt. Schlägt die Auto-Erkennung fehl, öffnen wir das EAN-Zahlenfeld
-      // (statt einer Sackgasse) und übernehmen das Bild nach der Eingabe.
+      // EAN-Schritt: Barcode aus dem gewählten Bild lesen (Android ML Kit,
+      // iOS Apple Vision — `leseBarcodesAusFoto`). Nicht eindeutig oder nicht
+      // lesbar → EAN-Eingabe (statt einer Sackgasse), Bild nach der Eingabe.
       if (step.mode === 'barcode') {
-        setCapturing(true);
-        let code = '';
-        try {
-          // 1) Native Apple Vision (iOS) — liest 1D-EAN aus dem Standbild.
-          //    Im aktuellen Dev-Binary evtl. noch nicht vorhanden → null.
-          code = (await scanBarcodeFromImage(uri)) || '';
-          // 2) Fallback expo-camera (Android = ML Kit ✓; iOS = QR-only).
-          if (!code) {
-            const scans = await scanFromURLAsync(uri, ['ean13', 'ean8', 'upc_a', 'upc_e']);
-            code = (scans?.[0]?.data || '').trim();
-          }
-        } catch {
-          code = '';
-        } finally {
-          setCapturing(false);
-        }
-        if (!code) {
-          setEanEntryValue('');
-          setEanEntryUri(uri); // öffnet das Eingabe-Overlay
-          return;
-        }
-        setEanCode(code);
-        barcodeHandledRef.current = true;
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        await ean.galerieBild(uri);
+        return;
       }
       onCaptured(uri);
     } catch {
       Alert.alert('Galerie-Auswahl fehlgeschlagen', 'Bitte versuch es noch einmal.');
     }
-  }, [capturing, step.mode, onCaptured]);
-
-  // Manuell eingegebene EAN übernehmen (Fallback, wenn der Code nicht aus dem
-  // Galeriebild gelesen werden konnte). Akzeptiert 8–14 Ziffern (EAN-8/13,
-  // UPC-A/E). Das gewählte Bild wird als EAN-Foto übernommen.
-  const confirmManualEan = useCallback(() => {
-    const digits = eanEntryValue.replace(/\D/g, '');
-    if (digits.length < 8 || digits.length > 14) {
-      Alert.alert('Ungültige EAN', 'Bitte gib die 8–13-stellige Nummer unter dem Strichcode ein.');
-      return;
-    }
-    const uri = eanEntryUri;
-    setEanCode(digits);
-    barcodeHandledRef.current = true;
-    setEanEntryUri(null);
-    setEanEntryValue('');
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    if (uri) onCaptured(uri);
-  }, [eanEntryValue, eanEntryUri, onCaptured]);
+  }, [capturing, step.mode, onCaptured, ean.galerieBild]);
 
   // ─── Submit ───────────────────────────────────────────────────────
   const doSubmit = useCallback(async () => {
@@ -938,11 +919,7 @@ export default function ProductWizardScreen() {
             // Erst wenn CameraX wirklich streamt, darf ausgelöst werden
             // (sonst Stale-Frame der vorherigen Session).
             onCameraReady={() => setCameraReady(true)}
-            barcodeScannerSettings={
-              step.mode === 'barcode'
-                ? { barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e'] }
-                : undefined
-            }
+            barcodeScannerSettings={step.mode === 'barcode' ? EAN_SCANNER_SETTINGS : undefined}
             onBarcodeScanned={step.mode === 'barcode' ? handleBarcode : undefined}
           />
         ) : null}
@@ -1090,46 +1067,35 @@ export default function ProductWizardScreen() {
           </Pressable>
         </View>
 
-        {/* EAN-Eingabe-Overlay — Fallback, wenn der Code nicht aus dem
-            Galeriebild gelesen werden konnte (v.a. iOS: 1D-Barcodes aus
-            Standbild nicht auto-lesbar). Oben positioniert, damit das
-            Zahlenfeld die Karte nicht verdeckt. */}
-        {eanEntryUri ? (
-          <View style={[styles.eanOverlay, { paddingTop: insets.top + 96 }]}>
-            <View style={styles.eanCard}>
-              <Text style={styles.eanTitle}>EAN eingeben</Text>
-              <Text style={styles.eanSub}>
-                Der Strichcode ließ sich aus dem Bild nicht automatisch lesen. Tippe die Nummer
-                unter dem Barcode ein — dein Bild wird trotzdem übernommen.
-              </Text>
-              <TextInput
-                style={styles.eanInput}
-                value={eanEntryValue}
-                onChangeText={(t) => setEanEntryValue(t.replace(/\D/g, '').slice(0, 14))}
-                keyboardType="number-pad"
-                placeholder="z. B. 4337256984164"
-                placeholderTextColor="rgba(0,0,0,0.35)"
-                autoFocus
-                maxLength={14}
-                returnKeyType="done"
-                onSubmitEditing={confirmManualEan}
-              />
-              <View style={styles.eanBtnRow}>
-                <Pressable
-                  onPress={() => {
-                    setEanEntryUri(null);
-                    setEanEntryValue('');
-                  }}
-                  style={[styles.eanBtn, styles.eanBtnGhost]}
-                >
-                  <Text style={styles.eanBtnGhostText}>Abbrechen</Text>
-                </Pressable>
-                <Pressable onPress={confirmManualEan} style={[styles.eanBtn, styles.eanBtnPrimary]}>
-                  <Text style={styles.eanBtnPrimaryText}>Übernehmen</Text>
-                </Pressable>
-              </View>
-            </View>
+        {/* „Nummer eintippen“ — nach EINTIPPEN_NACH_MS ohne bestätigte Lesung
+            (schwer lesbarer Code). Gleiche Stelle wie die Lesbarkeits-Pille,
+            die es im EAN-Schritt nicht gibt. */}
+        {step.mode === 'barcode' && ean.eintippenAnbieten && !capturing && !ean.abfrage ? (
+          <View style={[styles.readPillWrap, { bottom: insets.bottom + 232 }]}>
+            <Pressable
+              onPress={() => void ean.erfassen('eintippen')}
+              hitSlop={8}
+              style={[styles.readPill, { backgroundColor: 'rgba(0,0,0,0.62)' }]}
+            >
+              <MaterialCommunityIcons name="keyboard-outline" size={15} color="#fff" />
+              <Text style={styles.readPillText}>Nummer eintippen</Text>
+            </Pressable>
           </View>
+        ) : null}
+
+        {/* EAN-Eingabe: Nummer zum aufgenommenen Foto bestätigen/wählen/eintippen.
+            Oben positioniert, damit das Zahlenfeld die Karte nicht verdeckt. */}
+        {ean.abfrage ? (
+          <EanEingabe
+            key={ean.abfrage.uri}
+            grund={ean.abfrage.grund}
+            vorschlag={ean.abfrage.vorschlag}
+            vorschlaege={ean.abfrage.vorschlaege}
+            topInset={insets.top + 96}
+            onUebernehmen={ean.uebernehmen}
+            onOhneNummer={ean.ohneNummer}
+            onAbbrechen={ean.abbrechen}
+          />
         ) : null}
       </View>
     );
@@ -1248,18 +1214,6 @@ const styles = StyleSheet.create({
   chipThumbCheck: { position: 'absolute', top: 2, right: 2, width: 15, height: 15, borderRadius: 8, backgroundColor: PURPLE, alignItems: 'center', justifyContent: 'center' },
   shutter: { width: 76, height: 76, borderRadius: 38, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center', borderWidth: 4, borderColor: '#fff' },
   shutterInner: { width: 58, height: 58, borderRadius: 29, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
-  // EAN manual-entry overlay (gallery fallback)
-  eanOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.72)', alignItems: 'center', paddingHorizontal: 24 },
-  eanCard: { width: '100%', maxWidth: 380, backgroundColor: '#fff', borderRadius: 18, padding: 20, gap: 12 },
-  eanTitle: { fontSize: 18, fontWeight: '800', color: '#191c1d', letterSpacing: -0.2 },
-  eanSub: { fontSize: 13, fontWeight: '500', color: '#5a6166', lineHeight: 18 },
-  eanInput: { height: 52, borderRadius: 12, borderWidth: 1.5, borderColor: '#d5dadd', backgroundColor: '#f6f8f9', paddingHorizontal: 14, fontSize: 18, fontWeight: '700', color: '#191c1d', letterSpacing: 1 },
-  eanBtnRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
-  eanBtn: { flex: 1, height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  eanBtnGhost: { backgroundColor: '#eef1f2' },
-  eanBtnGhostText: { fontSize: 15, fontWeight: '700', color: '#5a6166' },
-  eanBtnPrimary: { backgroundColor: PURPLE },
-  eanBtnPrimaryText: { fontSize: 15, fontWeight: '800', color: '#fff' },
   // review
   thumb: { width: '31%', aspectRatio: 0.8, borderRadius: 12, borderWidth: 1.5, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   thumbLabel: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.55)', paddingHorizontal: 6, paddingVertical: 4 },
