@@ -62,7 +62,9 @@
  * WASM-Speicher immer in voller Auflösung (tryDownscale greift erst danach),
  * ein progressives JPEG hält dabei alle Koeffizienten (2 Byte je Pixel und
  * Kanal), CMYK hat vier Kanäle, ein PNG mit 16 Bit und Alpha acht Byte je
- * Pixel — und der Puffer für die entpackten Daten wächst durch Verdoppeln.
+ * Pixel — und der Puffer für die entpackten Daten wächst durch Verdoppeln
+ * (bei PNG über den GANZEN Datenstrom, egal was der Kopf sagt — Prüfrunde 3:
+ * 0,42 MB PNG → 872 MB; deshalb seitdem nur Baseline-JPEG, BILD_FORMATE).
  * Gemessen (frischer Prozess, Wachstum des WASM-Speichers je Pixel, bei
  * 12/24/48 MP): JPEG baseline 4:2:0 höchstens 2,2 B/px, baseline 4:4:4 3,7,
  * baseline CMYK 4,5, progressiv 4:4:4 10,5, progressiv CMYK 12,8; PNG RGB 8 Bit
@@ -99,8 +101,17 @@ const LESE_OPTIONEN = Object.freeze({
 const ZEIT_MS = 15000;
 /** Höchstens so viele Pixel dekodiert der Leser (siehe oben: Obergrenze der Bildgröße). */
 const MAX_PIXEL = 64 * 1000 * 1000;
-/** Formate laut Dateikopf, die der Leser bekommt (sharp-Namen). */
-const BILD_FORMATE = Object.freeze(['jpeg', 'png']);
+/**
+ * Formate laut Dateikopf, die der Leser bekommt (sharp-Namen). Nur JPEG, und
+ * nur Baseline (`isProgressive === false`, siehe bildPruefen): Prüfrunde 3
+ * zur Barcode-Korrektur (06.10.2026) zeigte ein PNG von 0,42 MB, dessen Kopf
+ * 7 MB versprach und das den Leser auf 872 MB trieb — stb_image entpackt den
+ * ganzen Datenstrom, egal was der Kopf sagt. Die App lädt ausschließlich
+ * JPEG hoch (alle Barcode-Fotos der letzten 30 Tage, Stichprobe von 400
+ * durchgehend Baseline); alles andere ist kein Fall für die automatische
+ * Korrektur und bleibt beim Menschen (fail-closed).
+ */
+const BILD_FORMATE = Object.freeze(['jpeg']);
 /**
  * Höchstens so viel WASM-Speicher darf das Dekodieren nach dekodierBytes()
  * belegen. Mit der Runde (zuletzt höchstens rund 300 MB) bleibt die Instanz
@@ -113,29 +124,20 @@ const MAX_DEKODIER_BYTES = 320 * 1000 * 1000;
 /**
  * Obere Schätzung des WASM-Speichers (Byte), den der Leser beim Dekodieren
  * dieses Bildes belegt (stb_image in zxing-wasm, siehe oben) — allein aus dem
- * Dateikopf (sharp `metadata()`). Unbekannte Angaben zählen wie die teuerste
- * Variante (fail-closed). Die Faktoren liegen über allen gemessenen Werten:
- *  - JPEG: je Kanal 1,25 Byte (Komponenten-Ebenen, als wäre nichts
- *    unterabgetastet), progressiv 3,75 (zusätzlich alle Koeffizienten), plus
- *    1 Byte Graustufen-Ausgabe; Rand auf ganze Blöcke (je Seite + 16).
- *  - PNG: 4,5 × Rohgröße je Pixel (Kanäle × Byte je Wert; Entpack-Puffer
- *    bis zum Doppelten, Ausgabe, interlaced-Teilbilder) plus 2 Byte.
- * @param {{format?:string, width?:number, height?:number, channels?:number, depth?:string, isProgressive?:boolean}} m
+ * Dateikopf (sharp `metadata()`). Nur Baseline-JPEG wird überhaupt gelesen
+ * (BILD_FORMATE), alles andere ergibt Infinity. Faktor über allen gemessenen
+ * Werten: je Kanal 1,25 Byte (Komponenten-Ebenen, als wäre nichts
+ * unterabgetastet) plus 1 Byte Graustufen-Ausgabe; Rand auf ganze Blöcke
+ * (je Seite + 16). Unbekannte Kanalzahl zählt wie vier (fail-closed).
+ * @param {{format?:string, width?:number, height?:number, channels?:number, isProgressive?:boolean}} m
  * @returns {number}  Byte; Infinity, wenn nichts Verlässliches im Kopf steht
  */
 function dekodierBytes(m) {
   const b = m && m.width; const h = m && m.height;
   if (!Number.isInteger(b) || !Number.isInteger(h) || b <= 0 || h <= 0) return Infinity;
+  if (m.format !== 'jpeg' || m.isProgressive !== false) return Infinity;
   const kanaele = Number.isInteger(m.channels) && m.channels >= 1 && m.channels <= 4 ? m.channels : 4;
-  if (m.format === 'jpeg') {
-    const jeKanal = m.isProgressive === false ? 1.25 : 3.75;
-    return Math.ceil((b + 16) * (h + 16) * (kanaele * jeKanal + 1));
-  }
-  if (m.format === 'png') {
-    const jeWert = m.depth === 'uchar' ? 1 : 2;
-    return Math.ceil((b * h + h) * (4.5 * kanaele * jeWert + 2));
-  }
-  return Infinity;
+  return Math.ceil((b + 16) * (h + 16) * (kanaele * 1.25 + 1));
 }
 
 const kurz = (v) => String((v && v.message) || v || 'unbekannt').slice(0, 120);
@@ -207,7 +209,7 @@ function laden() {
 /**
  * Darf der Leser dieses Bild dekodieren? Format und Abmessungen nur aus dem
  * Dateikopf (sharp `metadata()` entpackt keine Pixel; sharps eigene
- * Pixelgrenze ist aus, entschieden wird hier). Nur JPEG/PNG, höchstens
+ * Pixelgrenze ist aus, entschieden wird hier). Nur Baseline-JPEG, höchstens
  * `maxPixel` — und höchstens `maxBytes` geschätzter Dekodier-Speicher
  * (dekodierBytes; Prüfrunde 2 zur Barcode-Korrektur). Unlesbarer Kopf,
  * anderes Format, fehlende Abmessungen → Fehler.
@@ -222,12 +224,13 @@ async function bildPruefen(bild, { maxPixel = MAX_PIXEL, maxBytes = MAX_DEKODIER
     return { fehler: `bildkopf: ${kurz(e)}` };
   }
   if (!BILD_FORMATE.includes(m && m.format)) return { fehler: `bildformat: ${String((m && m.format) || 'unbekannt').slice(0, 20)}` };
+  if (m.isProgressive !== false) return { fehler: 'bildformat: jpeg progressiv' };
   const { width: b, height: h } = m;
   if (!Number.isInteger(b) || !Number.isInteger(h) || b <= 0 || h <= 0) return { fehler: 'bildkopf: ohne Abmessungen' };
   if (b * h > maxPixel) return { fehler: `bild_zu_gross: ${b}x${h}` };
   const bytes = dekodierBytes(m);
   if (!(bytes <= maxBytes)) {
-    const art = `${m.format}${m.isProgressive ? (m.format === 'png' ? ' interlaced' : ' progressiv') : ''} ${Number.isInteger(m.channels) ? m.channels : '?'}K${m.depth === 'ushort' ? ' 16bit' : ''}`;
+    const art = `${m.format} ${Number.isInteger(m.channels) ? m.channels : '?'}K`;
     return { fehler: `bild_zu_aufwendig: ${b}x${h} ${art}, ~${Number.isFinite(bytes) ? Math.round(bytes / 1e6) : '?'} MB` };
   }
   return null;

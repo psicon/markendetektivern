@@ -3295,7 +3295,8 @@ Patrick, 02.10.: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche",
   GESPEICHERTEN Zustand gerechnet, nie aus dem heutigen Ereignis — sonst
   gilt er nur einen Lauf; und eine Vertrauensregel muss kennen, was der alte
   Code bis zum Ausrollen noch schreibt. Prüfrunde 1 danach (06.10.): der Leser
-  dekodiert nur JPEG/PNG bis 64 MP, geprüft aus dem Dateikopf (sharp
+  dekodiert nur Baseline-JPEG (seit Prüfrunde 3: ein 0,42-MB-PNG trieb ihn
+  über den Kopf hinweg auf 872 MB) bis 64 MP, geprüft aus dem Dateikopf (sharp
   `metadata()`) — ein weißes 400-MP-JPEG unter 8 MB trieb ihn auf 1,1 GB und
   hätte die Runde jeden Morgen vor dem ersten Schreibvorgang beendet; ein
   Bremsvermerk gilt aus JEDER Quelle; Schritt 7 prüft, dass die gerechnete

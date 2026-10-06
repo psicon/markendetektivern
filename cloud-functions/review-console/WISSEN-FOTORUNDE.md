@@ -269,8 +269,8 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
      Bericht, keine Freigabe, und am nächsten Morgen derselbe Kandidat wieder
      (auch bei ausgeschaltetem Schalter, der Leser läuft für jeden Kandidaten).
      Deshalb liest `strichcode.bildPruefen` VOR dem Dekodieren nur den
-     Dateikopf (sharp `metadata()`, entpackt nichts, ~1 ms): nur JPEG und PNG,
-     höchstens 64 MP (`MAX_PIXEL`). Sonst Fehler (`bild_zu_gross: B×H`,
+     Dateikopf (sharp `metadata()`, entpackt nichts, ~1 ms): nur Baseline-JPEG
+     (seit Prüfrunde 3, siehe unten), höchstens 64 MP (`MAX_PIXEL`). Sonst Fehler (`bild_zu_gross: B×H`,
      `bildformat: …`, `bildkopf: …`) → keine Korrektur, gelbe Warnung
      `barcode_leser_fehler`. Gemessen: 64 MP → Prozess 253 MB; größtes
      Barcode-Foto in Produktion 48 MP (6000 × 8000, alle 4.459); unter den
@@ -303,6 +303,15 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
      Schätzung mit dem echten WASM-Wachstum (`__tests__/strichcode.test.js`).
      Wer zxing-wasm aktualisiert oder die Leseoptionen ändert, misst die
      Faktoren neu (Messweg im Kommentar von `src/strichcode.js`).
+     **Prüfrunde 3 (06.10.2026): seitdem NUR Baseline-JPEG.** Die Schätzung
+     aus dem Kopf hält bei PNG nicht: stb_image entpackt den GANZEN
+     Datenstrom, auch Daten hinter der letzten Bildzeile — ein PNG von
+     0,42 MB mit einem Kopf für 7 MB trieb den Leser auf 872 MB (Prozess
+     956 MB). Die App lädt ausschließlich JPEG hoch (alle Barcode-Fotos der
+     letzten 30 Tage, Stichprobe von 400 durchgehend Baseline). PNG und
+     progressives JPEG ergeben deshalb `bildformat: …` (keine Korrektur, der
+     Fall bleibt beim Menschen); `dekodierBytes` rechnet nur noch Baseline-
+     JPEG. Die PNG-/progressiv-Messwerte oben bleiben als Begründung stehen.
      Bibliotheks-Fallen: Formatnamen MIT Bindestrich (`'EAN-13'`; `'EAN13'`
      liefert stumm nichts); die WASM-Datei IMMER aus dem Paket laden (ohne
      `wasmBinary` holt die Bibliothek sie zur Laufzeit von einem CDN).

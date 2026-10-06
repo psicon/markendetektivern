@@ -22,6 +22,11 @@ beforeAll(async () => {
 }, 30000);
 afterAll(() => { global.fetch = echtesFetch; });
 
+/** Strichcode als Baseline-JPEG (wie die Fotos der App). */
+async function jpg(text, format) {
+  return sharp(await png(text, format)).flatten({ background: '#ffffff' }).jpeg({ quality: 90 }).toBuffer();
+}
+
 /** Strichcode als PNG (Buffer). */
 async function png(text, format) {
   const r = await schreiber.writeBarcode(text, { format, scale: 3 });
@@ -72,10 +77,10 @@ describe('nummernAus (rein)', () => {
 
 describe('liesBild (echter Leser, WASM aus dem Paket)', () => {
   it('EAN-13, EAN-8, UPC-A und UPC-E — UPC als 13-stellige GTIN', async () => {
-    expect(await liesBild(await png('4061464833821', 'EAN-13'))).toEqual({ gelesen: ['4061464833821'] });
-    expect(await liesBild(await png('96385074', 'EAN-8'))).toEqual({ gelesen: ['96385074'] });
-    expect(await liesBild(await png('036000291452', 'UPC-A'))).toEqual({ gelesen: ['0036000291452'] });
-    expect(await liesBild(await png('01234565', 'UPC-E'))).toEqual({ gelesen: ['0012345000065'] });
+    expect(await liesBild(await jpg('4061464833821', 'EAN-13'))).toEqual({ gelesen: ['4061464833821'] });
+    expect(await liesBild(await jpg('96385074', 'EAN-8'))).toEqual({ gelesen: ['96385074'] });
+    expect(await liesBild(await jpg('036000291452', 'UPC-A'))).toEqual({ gelesen: ['0036000291452'] });
+    expect(await liesBild(await jpg('01234565', 'UPC-E'))).toEqual({ gelesen: ['0012345000065'] });
   }, 30000);
 
   it('JPEG (wie die Fotos der App) wird gelesen', async () => {
@@ -124,9 +129,9 @@ describe('bildPruefen / liesBild: zu große Bilder werden nie dekodiert', () => 
   };
   const zlib = require('zlib');
 
-  it('Grenze 64 MP, nur JPEG und PNG', () => {
+  it('Grenze 64 MP, nur JPEG', () => {
     expect(MAX_PIXEL).toBe(64 * 1000 * 1000);
-    expect(BILD_FORMATE).toEqual(['jpeg', 'png']);
+    expect(BILD_FORMATE).toEqual(['jpeg']);
   });
 
   it('JPEG mit 20000 × 20000 im Kopf → Fehler bild_zu_gross, entschieden allein aus dem Kopf', async () => {
@@ -142,9 +147,10 @@ describe('bildPruefen / liesBild: zu große Bilder werden nie dekodiert', () => 
     expect(await bildPruefen(jpegMitKopf(klein, 8000, 8000))).toBeNull();
   }, 30000);
 
-  it('PNG mit 18000 × 18000 im Kopf → Fehler (PNG komprimiert eine Fläche genauso gut)', async () => {
+  it('PNG → Fehler bildformat, egal wie klein der Kopf ist (Prüfrunde 3: 0,42 MB PNG trieb den Leser auf 872 MB)', async () => {
+    expect(await liesBild(await png('4061464833821', 'EAN-13'))).toEqual({ fehler: 'bildformat: png' });
     const gross = pngMitKopf(await png('4061464833821', 'EAN-13'), 18000, 18000);
-    expect(await liesBild(gross)).toEqual({ fehler: 'bild_zu_gross: 18000x18000' });
+    expect(await liesBild(gross)).toEqual({ fehler: 'bildformat: png' });
   }, 30000);
 
   it('echtes Bild über einer (im Test kleinen) Grenze wird nicht gelesen, darunter schon', async () => {
@@ -189,65 +195,58 @@ describe('bildPruefen / dekodierBytes: Dekodier-Speicher aus dem Dateikopf gesch
   };
   const MB = 1000 * 1000;
 
-  it('Grenze 320 MB; Schätzung je Kodierung (über allen gemessenen Werten)', () => {
+  it('Grenze 320 MB; Schätzung nur für Baseline-JPEG (über allen gemessenen Werten)', () => {
     expect(MAX_DEKODIER_BYTES).toBe(320 * MB);
     const px = (b, h) => ({ width: b, height: h });
-    // JPEG: (B+16)(H+16) × (Kanäle × 1,25 bzw. progressiv 3,75 + 1)
+    // Baseline-JPEG: (B+16)(H+16) × (Kanäle × 1,25 + 1)
     expect(dekodierBytes({ format: 'jpeg', channels: 3, isProgressive: false, ...px(984, 984) })).toBe(1000 * 1000 * 4.75);
-    expect(dekodierBytes({ format: 'jpeg', channels: 4, isProgressive: true, ...px(984, 984) })).toBe(1000 * 1000 * 16);
-    // fehlende Angaben zählen wie die teuerste Variante
-    expect(dekodierBytes({ format: 'jpeg', channels: 3, ...px(984, 984) })).toBe(1000 * 1000 * 12.25);
+    // fehlende Kanalzahl zählt wie vier
     expect(dekodierBytes({ format: 'jpeg', isProgressive: false, ...px(984, 984) })).toBe(1000 * 1000 * 6);
-    // PNG: (B·H + H) × (4,5 × Kanäle × Byte je Wert + 2)
-    expect(dekodierBytes({ format: 'png', channels: 4, depth: 'ushort', ...px(1000, 1000) })).toBe(1001000 * 38);
-    expect(dekodierBytes({ format: 'png', channels: 3, depth: 'uchar', ...px(1000, 1000) })).toBe(1001000 * 15.5);
-    expect(dekodierBytes({ format: 'png', channels: 3, ...px(1000, 1000) })).toBe(1001000 * 29); // Bittiefe unbekannt → 16 Bit
-    // anderes Format oder keine Abmessungen → unendlich (nie dekodiert)
+    // progressiv, Progressiv-Angabe fehlt, PNG, anderes Format oder keine Abmessungen → unendlich (nie dekodiert)
+    expect(dekodierBytes({ format: 'jpeg', channels: 4, isProgressive: true, ...px(984, 984) })).toBe(Infinity);
+    expect(dekodierBytes({ format: 'jpeg', channels: 3, ...px(984, 984) })).toBe(Infinity);
+    expect(dekodierBytes({ format: 'png', channels: 3, depth: 'uchar', ...px(10, 10) })).toBe(Infinity);
     expect(dekodierBytes({ format: 'webp', channels: 3, ...px(10, 10) })).toBe(Infinity);
-    expect(dekodierBytes({ format: 'jpeg', channels: 3 })).toBe(Infinity);
+    expect(dekodierBytes({ format: 'jpeg', channels: 3, isProgressive: false })).toBe(Infinity);
     expect(dekodierBytes(null)).toBe(Infinity);
     // Das größte Barcode-Foto in Produktion (48 MP, baseline 4:2:0) und ein baseline-JPEG mit 64 MP bleiben darunter
     expect(dekodierBytes({ format: 'jpeg', channels: 3, isProgressive: false, ...px(6000, 8000) })).toBeLessThan(MAX_DEKODIER_BYTES);
     expect(dekodierBytes({ format: 'jpeg', channels: 3, isProgressive: false, ...px(8000, 8000) })).toBeLessThanOrEqual(MAX_DEKODIER_BYTES);
   });
 
-  it('progressives JPEG mit 8000 × 8000 im Kopf → bild_zu_aufwendig, entschieden allein aus dem Kopf; 4000 × 4000 geht', async () => {
-    const klein = await sharp(await png('4061464833821', 'EAN-13')).flatten({ background: '#ffffff' }).jpeg({ progressive: true, chromaSubsampling: '4:4:4' }).toBuffer();
-    expect((await sharp(klein).metadata()).isProgressive).toBe(true);
-    expect(await liesBild(jpegMitKopf(klein, 8000, 8000))).toEqual({ fehler: 'bild_zu_aufwendig: 8000x8000 jpeg progressiv 3K, ~787 MB' });
-    expect(await bildPruefen(jpegMitKopf(klein, 4000, 4000))).toBeNull();
-    // baseline mit denselben Abmessungen bleibt erlaubt (Grenze wie bisher die Pixelzahl)
+  it('progressives JPEG → Fehler bildformat, jede Größe; Baseline mit 8000 × 8000 bleibt erlaubt', async () => {
+    const prog = await sharp(await png('4061464833821', 'EAN-13')).flatten({ background: '#ffffff' }).jpeg({ progressive: true }).toBuffer();
+    expect((await sharp(prog).metadata()).isProgressive).toBe(true);
+    expect(await liesBild(prog)).toEqual({ fehler: 'bildformat: jpeg progressiv' });
+    expect(await bildPruefen(jpegMitKopf(prog, 400, 400))).toEqual({ fehler: 'bildformat: jpeg progressiv' });
     const baseline = await sharp(await png('4061464833821', 'EAN-13')).flatten({ background: '#ffffff' }).jpeg().toBuffer();
     expect(await bildPruefen(jpegMitKopf(baseline, 8000, 8000))).toBeNull();
   }, 30000);
 
-  it('PNG mit 16 Bit RGBA und 4000 × 4000 im Kopf → bild_zu_aufwendig; 2000 × 2000 geht', async () => {
+  it('PNG mit 16 Bit RGBA → Fehler bildformat, nie an den Leser', async () => {
     const rgba16 = await sharp(await png('4061464833821', 'EAN-13')).ensureAlpha().toColourspace('rgb16').png().toBuffer();
-    expect(await sharp(rgba16).metadata()).toMatchObject({ format: 'png', channels: 4, depth: 'ushort' });
-    expect(await liesBild(pngMitKopf(rgba16, 4000, 4000))).toEqual({ fehler: 'bild_zu_aufwendig: 4000x4000 png 4K 16bit, ~608 MB' });
-    expect(await bildPruefen(pngMitKopf(rgba16, 2000, 2000))).toBeNull();
+    expect(await liesBild(pngMitKopf(rgba16, 2000, 2000))).toEqual({ fehler: 'bildformat: png' });
   }, 30000);
 
-  it('kleine Bilder jeder Kodierung werden weiter gelesen (progressiv, CMYK, 16 Bit, interlaced)', async () => {
+  it('kleine Baseline-JPEGs werden gelesen, auch CMYK', async () => {
     const quelle = await sharp(await png('4000417025005', 'EAN-13')).flatten({ background: '#ffffff' }).toBuffer();
-    expect(await liesBild(await sharp(quelle).jpeg({ progressive: true }).toBuffer())).toEqual({ gelesen: ['4000417025005'] });
+    expect(await liesBild(await sharp(quelle).jpeg().toBuffer())).toEqual({ gelesen: ['4000417025005'] });
     expect(await liesBild(await sharp(quelle).toColourspace('cmyk').jpeg().toBuffer())).toEqual({ gelesen: ['4000417025005'] });
-    expect(await liesBild(await sharp(quelle).toColourspace('rgb16').png({ progressive: true }).toBuffer())).toEqual({ gelesen: ['4000417025005'] });
   }, 30000);
 
   it('Schätzung liegt über dem tatsächlichen Wachstum des WASM-Speichers (Gegenprobe mit dem echten Leser)', async () => {
     // Leser laden (aus dem Paket), dann das Modul ohne neue Einstellungen holen: dieselbe Instanz.
-    await liesBild(await png('4000417025005', 'EAN-13'));
+    await liesBild(await jpg('4000417025005', 'EAN-13'));
     const zx = require('zxing-wasm/reader');
     const modul = await zx.prepareZXingModule({ fireImmediately: true });
     const groesse = () => modul.HEAPU8.buffer.byteLength;
     const quelle = await sharp(await png('4000417025005', 'EAN-13')).flatten({ background: '#ffffff' }).toBuffer();
     const flaeche = (b, h, ch = 3) => sharp({ create: { width: b, height: h, channels: ch, background: ch === 4 ? { r: 255, g: 255, b: 255, alpha: 1 } : '#ffffff' } }).composite([{ input: quelle, gravity: 'centre' }]);
-    // die beiden teuersten Kodierungen je Pixel (gemessen 12,8 bzw. 33 Byte je Pixel)
+    // die teuerste zugelassene Kodierung je Pixel (Baseline CMYK 4:4:4, gemessen 4,5 Byte je Pixel)
     // (das zweite Bild braucht mehr als das erste, sonst wüchse der Speicher nicht und die Probe wäre leer)
     const bilder = [
-      await flaeche(1800, 2400).toColourspace('cmyk').jpeg({ progressive: true, chromaSubsampling: '4:4:4' }).toBuffer(),
-      await flaeche(1500, 2000, 4).toColourspace('rgb16').png({ progressive: true }).toBuffer(),
+      await flaeche(1800, 2400).toColourspace('cmyk').jpeg({ chromaSubsampling: '4:4:4' }).toBuffer(),
+      await flaeche(2700, 3600).toColourspace('cmyk').jpeg({ chromaSubsampling: '4:4:4' }).toBuffer(),
     ];
     const basis = groesse();
     for (const bild of bilder) {
