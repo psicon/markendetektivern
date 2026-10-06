@@ -138,3 +138,104 @@ describe('Barcode-Nummer und Halte-Gründe (Prüfrunde 2, 02.10.2026)', () => {
     expect(codes(warnungen(basis({ runde: runde({ eanFotoNichtGespeichert: 2 }) })))).toEqual(['gelb:barcode_befund_nicht_gespeichert']);
   });
 });
+
+describe('Produktsuche (unbekannte Barcodes)', () => {
+  const { produktsucheLage } = require('../src/produktsuche');
+  const zaehler = (over) => ({ bearbeitet: 120, gefunden: 58, keineDaten: 50, fehler: 2, uebersprungen: 10, serperRest: 9000, ...over });
+  const lage = ({ gestern = zaehler(), heute = null, konfig = null, wartend = 18000 } = {}) => produktsucheLage({ jetzt: JETZT, gesternRoh: gestern, heuteRoh: heute, konfigRoh: konfig, wartend });
+  const mit = (p) => codes(warnungen(basis({ produktsuche: p })));
+
+  it('normaler Tag → keine Warnung', () => {
+    expect(mit(lage())).toEqual([]);
+  });
+
+  it('nicht lesbar → gelb, sonst nichts', () => {
+    expect(mit({ unlesbar: true })).toEqual(['gelb:produktsuche_unbekannt']);
+  });
+
+  it('wegen Serper-Guthaben angehalten → rot mit Guthaben und Grenze', () => {
+    const w = warnungen(basis({ produktsuche: lage({ gestern: zaehler({ serperRest: 980, angehalten: 'serper_guthaben' }) }) }));
+    expect(codes(w)).toEqual(['rot:produktsuche_angehalten']);
+    expect(w[0].text).toMatch(/980.*Grenze 1\.000/);
+  });
+
+  it('Tagesdeckel erreicht ist Normalbetrieb → keine Warnung', () => {
+    expect(mit(lage({ gestern: zaehler({ angehalten: 'tagesdeckel' }) }))).toEqual([]);
+  });
+
+  it('Guthaben unter dem Dreifachen der Grenze → gelb vorab', () => {
+    expect(mit(lage({ gestern: zaehler({ serperRest: 2999 }) }))).toEqual(['gelb:serper_knapp']);
+    expect(mit(lage({ gestern: zaehler({ serperRest: 3000 }) }))).toEqual([]);
+  });
+
+  it('ausgeschaltet → keine Guthaben-Warnung', () => {
+    expect(mit(lage({ gestern: zaehler({ serperRest: 1500 }), konfig: { aktiv: false } }))).toEqual([]);
+  });
+
+  it('viele Fremddienst-Fehler → gelb, mehr als die Hälfte → rot', () => {
+    expect(mit(lage({ gestern: zaehler({ gefunden: 40, keineDaten: 40, fehler: 30 }) }))).toEqual(['gelb:produktsuche_fehler']);
+    expect(mit(lage({ gestern: zaehler({ gefunden: 10, keineDaten: 10, fehler: 30 }) }))).toEqual(['rot:produktsuche_fehler']);
+    // wenige Fehler absolut → keine Warnung, auch bei hoher Quote
+    expect(mit(lage({ gestern: zaehler({ gefunden: 3, keineDaten: 3, fehler: 4 }) }))).toEqual([]);
+  });
+
+  it('nur „ohne Daten", kein Treffer → rot (Handschrift des Vorfalls vom August)', () => {
+    expect(mit(lage({ gestern: zaehler({ gefunden: 0, keineDaten: 25, fehler: 0 }) }))).toEqual(['rot:produktsuche_findet_nichts']);
+    expect(mit(lage({ gestern: zaehler({ gefunden: 0, keineDaten: 19, fehler: 0 }) }))).toEqual([]);
+  });
+
+  it('Stau oben in der Reihenfolge ab sechs Läufen → gelb', () => {
+    expect(mit(lage({ gestern: zaehler({ kandidatenKnapp: 6 }) }))).toEqual(['gelb:produktsuche_stau']);
+    expect(mit(lage({ gestern: zaehler({ kandidatenKnapp: 5 }) }))).toEqual([]);
+  });
+
+  it('eingeschaltet, Barcodes warten, aber weder gestern noch heute ein Lauf → rot', () => {
+    expect(mit(lage({ gestern: null }))).toEqual(['rot:produktsuche_still']);
+    // heute läuft er schon wieder (z. B. erster Tag nach dem Ausrollen) → keine Warnung
+    expect(mit(lage({ gestern: null, heute: { bearbeitet: 2 } }))).toEqual([]);
+    // nichts wartet, bewusst pausiert oder ausgeschaltet → keine Warnung
+    expect(mit(lage({ gestern: null, wartend: 0 }))).toEqual([]);
+    expect(mit(lage({ gestern: null, konfig: { proLauf: 0 } }))).toEqual([]);
+    expect(mit(lage({ gestern: null, konfig: { aktiv: false } }))).toEqual([]);
+  });
+});
+
+describe('Produktsuche — Halte-Codes des Prozessors', () => {
+  const { produktsucheLage } = require('../src/produktsuche');
+  const lage = (angehalten, konfig = null) => produktsucheLage({ jetzt: JETZT, gesternRoh: { bearbeitet: 50, gefunden: 25, keineDaten: 25, serperRest: 9000, angehalten }, heuteRoh: null, konfigRoh: konfig, wartend: 100 });
+  const mit = (p) => warnungen(basis({ produktsuche: p }));
+
+  it('Serper-Guthaben nicht abrufbar → rot, eigener Text', () => {
+    const w = mit(lage('serper_guthaben_unbekannt'));
+    expect(codes(w)).toEqual(['rot:produktsuche_angehalten']);
+    expect(w[0].text).toMatch(/nicht abfragen/);
+  });
+
+  it('bewusst ausgeschaltet („aus") → keine Warnung', () => {
+    expect(mit(lage('aus', { aktiv: false }))).toEqual([]);
+  });
+
+  it('Pause nach Dienstausfall → rot, eigener Text; Zeile im Bericht lesbar', () => {
+    const p = lage('dienst_ausfall');
+    const w = mit(p);
+    expect(codes(w)).toEqual(['rot:produktsuche_angehalten']);
+    expect(w[0].text).toMatch(/pausiert/);
+    expect(p.zeile).toContain('Dienst ausgefallen');
+  });
+
+  it('ungültiger Wert in _meta/produktsuche → rot mit dem Feld, sofort (ohne Lauf des Prozessors)', () => {
+    const p = lage(null, { tagesDeckel: 'zwanzig' });
+    const w = mit(p);
+    expect(codes(w)).toEqual(['rot:produktsuche_angehalten']);
+    expect(w[0].text).toMatch(/ungültiger Wert \(tagesDeckel\)/);
+    expect(p.zustand).toMatch(/^angehalten: ungültiger Wert/);
+    // Ziffern als Text sind gültig → keine Warnung
+    expect(mit(lage(null, { tagesDeckel: '20' }))).toEqual([]);
+  });
+
+  it('unbekannter Code → rot mit dem Code', () => {
+    const w = mit(lage('irgendwas_neues'));
+    expect(codes(w)).toEqual(['rot:produktsuche_angehalten']);
+    expect(w[0].text).toContain('irgendwas_neues');
+  });
+});

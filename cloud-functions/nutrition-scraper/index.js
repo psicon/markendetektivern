@@ -9,9 +9,15 @@
  *      Für Tests + manuelle Recherchen.
  *
  *   2. scrapeEan
- *      Body/Query: { ean, productName?, productPath? }
- *      Resolver → mehrere URLs probieren → 1. Treffer wins.
- *      Für Einzel-Lookups (z.B. nach User-Feedback "fehlende Daten").
+ *      Body/Query: { ean, productName?, productPath?, ohneOpenFoodFacts?,
+ *                    nurDomains?, bevorzugteUrl?, auffrischen? }
+ *      (Parameter: src/anfrage.js, Ablauf: src/suche.js)
+ *      bevorzugteUrl → Resolver → mehrere URLs probieren → 1. voller Treffer.
+ *      Für Einzel-Lookups und den external-misses-processor.
+ *      Antwort u. a. `altdatenWiderlegt: true`, wenn die bevorzugte Seite die
+ *      dort vor dem 04.10.2026 ungeprüft gelesenen Daten widerlegt hat und
+ *      diese entfernt wurden (der Prozessor schließt dann nicht mit „alte
+ *      Daten bleiben“ ab).
  *
  *   3. scrapeBatch
  *      Iteriert produkte + markenProdukte ohne irgendeine source.
@@ -31,12 +37,13 @@ const functions = require('firebase-functions/v2/https');
 const params = require('firebase-functions/params');
 const admin = require('firebase-admin');
 
-const { fetchHtml } = require('./src/fetcher');
-const { extractFromHtml } = require('./src/extractor');
 const { InfrastrukturFehler } = require('./src/fehler');
-const { resolveCandidates } = require('./src/resolver');
-const { writeScrapeResult, incrementTelemetryFail } = require('./src/writer');
-const { isPageGoodCandidate } = require('./src/domains');
+const { resolveCandidates, kandidatFuerUrl } = require('./src/resolver');
+const { writeScrapeResult } = require('./src/writer');
+const { leseKandidat } = require('./src/kandidat');
+const { sucheEan } = require('./src/suche');
+const { leseScrapeParameter, neuerVerbrauch, istRatekandidat, entscheideErgebnis } = require('./src/anfrage');
+const { ergaenzeBefund } = require('./src/zusammenfuehren');
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
@@ -117,6 +124,9 @@ function isPlausibleEan(s) {
 }
 
 // ─── Endpoint 1: scrapeSingleUrl ──────────────────────────────────
+// Derselbe Weg wie scrapeEan (src/kandidat.js): auch eine von Hand
+// angegebene Seite muss zur EAN gehören, bevor die KI läuft und etwas
+// gespeichert wird.
 exports.scrapeSingleUrl = functions.onRequest(
   {
     ...COMMON_OPTS,
@@ -138,42 +148,49 @@ exports.scrapeSingleUrl = functions.onRequest(
     }
 
     try {
-      let fetched;
+      const kandidat = await kandidatFuerUrl(String(url));
+      if (!kandidat) {
+        res.status(400).json({ result: 'url_nicht_erlaubt', url });
+        return;
+      }
+      let r;
       try {
-        fetched = await fetchHtml(url, { apifyToken: APIFY_API_TOKEN.value() });
+        r = await leseKandidat({
+          kandidat,
+          ean: String(ean),
+          productName: productName || null,
+          apifyToken: APIFY_API_TOKEN.value(),
+          db,
+          auftrag: 'einzelseite',
+        });
       } catch (e) {
         if (e instanceof InfrastrukturFehler) {
+          // KI-/Apify-Ausfall ist keine Aussage über die Seite → 503.
           res.status(503).json({ result: e.code, url, error: e.message });
           return;
         }
         throw e;
       }
-      if (!fetched) {
+      if (r.status === 'abrufFehler') {
+        res.status(503).json({ result: 'fetch_unavailable', url, httpStatus: r.httpStatus, grund: r.grund });
+        return;
+      }
+      if (r.status === 'keineSeite') {
         res.status(200).json({ result: 'fetch_failed', url });
         return;
       }
-      let extracted;
-      try {
-        extracted = await extractFromHtml({ html: fetched.html, productName });
-      } catch (e) {
-        if (e instanceof InfrastrukturFehler) {
-          // KI-Ausfall ist keine Aussage über die Seite → 503, nicht „failed“.
-          res.status(503).json({ result: e.code, url, error: e.message });
-          return;
-        }
-        throw e;
-      }
-      if (!extracted) {
-        res.status(200).json({ result: 'extract_failed', url });
+      if (r.status !== 'treffer') {
+        res.status(200).json({ result: r.status === 'verworfen' ? r.grund : 'extract_failed', url });
         return;
       }
       const writeRes = await writeScrapeResult({
         ean: String(ean),
         productPath: productPath || null,
-        extracted,
-        sourceUrl: fetched.finalUrl,
+        extracted: r.befund,
+        sourceUrl: r.finalUrl,
+        sourceShop: kandidat.shop,
       });
-      res.status(200).json({ result: 'ok', extracted, write: writeRes });
+      res.status(200).json({ result: 'ok', extracted: r.befund, write: writeRes });
     } catch (e) {
       console.error('[scrapeSingleUrl] error:', e);
       res.status(500).send(String(e?.message || e));
@@ -193,130 +210,115 @@ exports.scrapeEan = functions.onRequest(
       return;
     }
 
-    const { ean, productName, productPath } = req.method === 'POST'
-      ? req.body
-      : req.query;
-
-    if (!ean) {
-      res.status(400).send('Missing ean param');
+    const p = leseScrapeParameter(req.method === 'POST' ? req.body : req.query);
+    if (p.fehler) {
+      res.status(400).send(p.fehler);
       return;
     }
+    for (const h of p.hinweise) console.warn(`[scrapeEan] ${p.ean}: ${h}`);
+
+    const verbrauch = neuerVerbrauch();
+    // Wer sucht? Der external-misses-processor setzt immer ohneOpenFoodFacts
+    // (Produktsuche); ohne den Parameter ruft der Katalog-Backfill
+    // (nutrition-backfill fireScraperForEan). Steht in jeder Kostenzeile.
+    const auftrag = p.ohneOpenFoodFacts ? 'produktsuche' : 'katalog';
+    // Eine Zeile je Lauf — zusammen mit den produktsuche_kosten-Zeilen des
+    // Extractors lassen sich die Kosten je EAN nachrechnen. Auch bei einem
+    // unerwarteten Fehler (500): Suche und KI können schon bezahlt sein.
+    const protokolliere = (ergebnis, extra = {}) => {
+      console.log(JSON.stringify({
+        evt: 'produktsuche_lauf',
+        ean: p.ean,
+        auftrag,
+        katalogPfad: !!p.productPath,
+        ergebnis,
+        auffrischen: p.auffrischen,
+        bevorzugteUrl: !!p.bevorzugteUrl,
+        nurDomains: !!p.nurDomains,
+        ...extra,
+        verbrauch,
+      }));
+    };
 
     try {
       const serperKey = SERPER_API_KEY.value();
-      let candidates;
+      let s;
       try {
-        candidates = await resolveCandidates([String(ean)], {
+        s = await sucheEan({
+          ean: p.ean,
+          productName: p.productName,
+          bevorzugteUrl: p.bevorzugteUrl,
+          filter: { ohneOpenFoodFacts: p.ohneOpenFoodFacts, nurDomains: p.nurDomains },
           serper: serperKey ? { apiKey: serperKey } : null,
+          apifyToken: APIFY_API_TOKEN.value(),
+          db,
+          verbrauch,
+          auftrag,
+          deps: { leseKandidat, resolveCandidates, kandidatFuerUrl },
         });
       } catch (e) {
         if (e instanceof InfrastrukturFehler) {
           // Suche ausgefallen (z. B. Serper-Guthaben leer) ≠ „keine Treffer“.
           console.warn(`[scrapeEan] ${e.code}: ${e.message}`);
-          res.status(503).json({ result: e.code, error: e.message });
+          protokolliere(e.code);
+          res.status(503).json({ result: e.code, error: e.message, verbrauch });
           return;
         }
         throw e;
       }
 
-      if (candidates.length === 0) {
-        res.status(200).json({ result: 'no_urls' });
+      if (s.treffer) {
+        const writeRes = await writeScrapeResult({
+          ean: p.ean,
+          productPath: p.productPath,
+          extracted: s.treffer.befund,
+          sourceUrl: s.treffer.finalUrl,
+          sourceShop: s.treffer.kandidat.shop,
+          auffrischen: p.auffrischen,
+          widerlegung: s.bevorzugteUrlWiderlegt,
+        });
+        protokolliere('ok', { shop: s.treffer.kandidat.shop, versucht: s.versucht, altdatenWiderlegt: writeRes.altdatenWiderlegt });
+        res.status(200).json({
+          result: 'ok',
+          triedUrls: s.kandidaten,
+          versucht: s.versucht,
+          successUrl: s.treffer.finalUrl,
+          successShop: s.treffer.kandidat.shop,
+          bevorzugteUrlGenutzt: s.ueberBevorzugteUrl,
+          altdatenWiderlegt: writeRes.altdatenWiderlegt,
+          extracted: s.treffer.befund,
+          write: writeRes,
+          verbrauch,
+        });
         return;
       }
 
-      // Versuche URLs sequentiell in Prio-Reihenfolge (Shops zuerst,
-      // OF + codecheck als Fallback). 1. erfolgreicher Extract wins.
-      const apifyToken = APIFY_API_TOKEN.value();
-      // KI-Ausfälle zählen getrennt von „Seite ohne Daten“: Fiel das Auslesen
-      // aus, ist „all_failed“ falsch — dann antwortet scrapeEan mit 503, und
-      // der Aufrufer (external-misses-processor) versucht es später erneut,
-      // statt die EAN dauerhaft als „no-data“ abzuschließen (Vorfall
-      // 18.08.–01.10.2026, ~5.400 EANs).
-      let extractErrors = 0;
-      let errorsInFolge = 0;
-      let zeitlimitErreicht = false;
-      let letzterFehlerCode = null;
-      // Gesamtfrist: der external-misses-processor bricht seinen Aufruf nach
-      // 240 s ab. Danach keine neuen Kandidaten mehr anfangen, sondern
-      // ehrlich „später erneut“ antworten.
-      const FRIST_MS = 190_000;
-      const gestartet = Date.now();
-      for (const candidate of candidates) {
-        if (Date.now() - gestartet > FRIST_MS) { zeitlimitErreicht = true; break; }
-        let fetched;
-        try {
-          fetched = await fetchHtml(candidate.url, {
-            requiresJS: candidate.requiresJS,
-            apifyToken,
-          });
-        } catch (e) {
-          if (!(e instanceof InfrastrukturFehler)) throw e;
-          extractErrors += 1;
-          errorsInFolge += 1;
-          letzterFehlerCode = e.code;
-          console.warn(`[scrapeEan] ${e.code} (${candidate.shop}): ${e.message}`);
-          if (errorsInFolge >= 2) break;
-          continue;
-        }
-        if (!fetched) continue;
-        // Quality-Check für UNKNOWN-Domain-Hits (serper-unknown):
-        // bevor wir Claude-Tokens verbrennen, prüfen wir ob die Page
-        // überhaupt verwertbar ist (EAN drin + Nährwert-Keyword + Mindestgröße).
-        if (candidate.requiresQualityCheck) {
-          if (!isPageGoodCandidate(fetched.html, String(ean))) {
-            console.log(`[scrapeEan] skip ${candidate.shop} (quality-check fail)`);
-            // Telemetrie-Fail-Counter inkrementieren → bei 5+ Fails ohne
-            // Success wird die Domain auto-temp-blacklistet
-            incrementTelemetryFail(db, candidate.shop, String(ean), 'quality_check').catch(()=>{});
-            continue;
-          }
-        }
-        let extracted;
-        try {
-          extracted = await extractFromHtml({ html: fetched.html, productName });
-        } catch (e) {
-          if (!(e instanceof InfrastrukturFehler)) throw e;
-          extractErrors += 1;
-          errorsInFolge += 1;
-          letzterFehlerCode = e.code;
-          console.warn(`[scrapeEan] KI-Auslesen nicht verfügbar (${candidate.shop}): ${e.message}`);
-          // Zweimal hintereinander ausgefallen → die KI ist gerade weg; keine
-          // weiteren Seiten holen (spart Apify-Abrufe), später erneut.
-          if (errorsInFolge >= 2) break;
-          continue;
-        }
-        errorsInFolge = 0;
-        if (!extracted) continue;
-        const writeRes = await writeScrapeResult({
-          ean: String(ean),
-          productPath: productPath || null,
-          extracted,
-          sourceUrl: fetched.finalUrl,
-          sourceShop: candidate.shop,
-        });
-        res.status(200).json({
-          result: 'ok',
-          triedUrls: candidates.length,
-          successUrl: fetched.finalUrl,
-          successShop: candidate.shop,
-          extracted,
-          write: writeRes,
-        });
-        return;
+      // Kein Treffer, aber die gespeicherte Quellseite widerlegt den
+      // Altbestand → dessen Daten entfernen (src/zusammenfuehren.js). Nur
+      // bei einem inhaltlichen Ergebnis: bei 503 bleibt alles, wie es ist.
+      let altdatenWiderlegt = false;
+      if (s.bevorzugteUrlWiderlegt && s.ergebnis.http === 200) {
+        const w = await writeScrapeResult({ ean: p.ean, extracted: null, widerlegung: s.bevorzugteUrlWiderlegt });
+        altdatenWiderlegt = w.altdatenWiderlegt;
       }
-      if (extractErrors > 0 || zeitlimitErreicht) {
-        // Mindestens ein Dienst fiel aus oder die Frist lief ab, bevor alle
-        // Kandidaten geprüft waren → keine inhaltliche Aussage möglich.
-        res.status(503).json({
-          result: extractErrors > 0 ? letzterFehlerCode : 'zeitlimit',
-          triedUrls: candidates.length,
-          extractErrors,
-        });
-        return;
-      }
-      res.status(200).json({ result: 'all_failed', triedUrls: candidates.length });
+
+      // Kein Treffer: 503, wenn ein Dienst ausfiel, die Frist ablief oder
+      // KEIN Kandidat ohne Abruffehler antwortete (Fremddienst-Regel,
+      // CLAUDE.md) — sonst inhaltlich „nichts gefunden“.
+      protokolliere(s.ergebnis.result, { versucht: s.versucht, abrufFehler: s.abrufFehler, altdatenWiderlegt });
+      res.status(s.ergebnis.http).json({
+        result: s.ergebnis.result,
+        triedUrls: s.kandidaten,
+        versucht: s.versucht,
+        abrufFehler: s.abrufFehler,
+        extractErrors: s.infraFehler,
+        altdatenWiderlegt,
+        ...(s.ergebnis.fehler ? { error: s.ergebnis.fehler } : {}),
+        verbrauch,
+      });
     } catch (e) {
       console.error('[scrapeEan] error:', e);
+      protokolliere('fehler_500', { fehler: String(e?.message || e).slice(0, 200) });
       res.status(500).send(String(e?.message || e));
     }
   },
@@ -355,6 +357,7 @@ exports.scrapeBatch = functions.onRequest(
       scrape_failed: 0,
       no_eans: 0,
       no_urls: 0,
+      abruf_fehler: 0,
       error: 0,
     };
     const startedAt = Date.now();
@@ -516,93 +519,59 @@ exports.scrapeBatch = functions.onRequest(
         const candidatesToTry = candidates.slice(0, MAX_CANDIDATES);
 
         // Accumulative-Extraction: sammle Daten aus mehreren Kandidaten,
-        // schreib am Ende den Merge. Stop früh wenn alles Kern-Felder
-        // (Zutaten + Nährwerte) abgedeckt sind. priceOnly-Shops liefern
-        // nur Preis, andere liefern Zutaten/Nährwerte/Preis.
-        // User-Vorgabe: "Preis nur von offiziellen und bekannten Shops",
-        // also strip attr_preis* wenn candidate.noPriceTrust=true ODER
-        // candidate.source==='serper-unknown'.
+        // schreib am Ende den Merge. Stop früh wenn Kern-Felder (Zutaten +
+        // Nährwerte + Preis) abgedeckt sind. Jede Seite läuft über denselben
+        // Weg wie scrapeEan (src/kandidat.js): EAN-Beleg vor der KI,
+        // Vertrauen der Quelle (priceOnly/noPriceTrust), Preis nur in Euro
+        // aus DE/AT-Shops. Gesammelt wird mit ergaenzeBefund (Preis als
+        // Block, Name mit seinem Beleg).
+        const hatZutaten = (m) =>
+          typeof m?.attr_ingredientStatement === 'string' && m.attr_ingredientStatement.trim().length > 0;
+        const hatNaehrwerte = (m) =>
+          typeof m?.nutr_Energie_val === 'number' || typeof m?.nutr_Fett_val === 'number';
         let merged = null;        // accumulated extracted-result
         let firstSourceUrl = null;
         let firstSourceShop = null;
-        let firstHadIngredients = false;
-        let firstHadNutrition = false;
+        // Wie scrapeEan (src/suche.js): getrennt für die belegten Kandidaten
+        // (Serper-Treffer) — Codecheck und OpenFoodFacts hängen als
+        // Rückfall-Adressen an JEDER EAN und antworten immer (Suchseite, 404).
+        const zaehler = { abrufFehler: 0, beantwortet: 0, belegteKandidaten: 0, belegteAbrufFehler: 0, belegteBeantwortet: 0 };
 
         for (const candidate of candidatesToTry) {
-          // Early-Stop: wenn wir bereits Zutaten + Nährwerte haben, reicht.
-          if (firstHadIngredients && firstHadNutrition && merged?.attr_preis) {
+          // Early-Stop: wenn wir bereits Zutaten + Nährwerte + Preis haben, reicht.
+          if (hatZutaten(merged) && hatNaehrwerte(merged) && merged?.attr_preis) {
             break;
-          }
-
-          const fetched = await fetchHtml(candidate.url, {
-            requiresJS: candidate.requiresJS,
-            apifyToken,
-          });
-          if (!fetched) continue;
-          if (candidate.requiresQualityCheck) {
-            if (!isPageGoodCandidate(fetched.html, eans[0])) {
-              incrementTelemetryFail(db, candidate.shop, eans[0], 'quality_check').catch(()=>{});
-              continue;
-            }
-          }
-          // VOR DEM KI-AUFRUF: die HTML MUSS die EAN als Text enthalten.
-          if (fetched.html && !fetched.html.includes(eans[0])) {
-            incrementTelemetryFail(db, candidate.shop, eans[0], 'ean_not_in_html').catch(()=>{});
-            continue;
           }
           // Wirft bei KI-Ausfall (ExtractUnavailableError) → processDoc bricht
           // ab, der Worker zählt einen Fehler, und es wird KEIN Failure-Marker
           // geschrieben (sonst würde das Produkt nach 3 Ausfällen für immer
           // übersprungen).
-          const extracted = await extractFromHtml({
-            html: fetched.html,
-            productName: product?.name,
+          const belegt = !istRatekandidat(candidate);
+          if (belegt) zaehler.belegteKandidaten += 1;
+          const r = await leseKandidat({
+            kandidat: candidate,
+            ean: eans[0],
+            productName: product?.name || null,
+            apifyToken,
+            db,
+            auftrag: 'katalog',
           });
-          if (!extracted) continue;
-
-          // Trust-basierter Strip: NICHT-trusted Quellen liefern nur
-          // bestimmte Felder. priceOnly → NUR Preis-Felder behalten.
-          // noPriceTrust → Preis-Felder droppen, Rest behalten.
-          if (candidate.priceOnly) {
-            // Aggregator (z.B. discounto) → nur Preis-Felder
-            const priceOnlyFields = ['attr_preis', 'attr_preisPackgroesse', 'attr_preisPerKg'];
-            for (const k of Object.keys(extracted)) {
-              if (k.startsWith('_')) continue; // keep _confidence/_model
-              if (!priceOnlyFields.includes(k)) delete extracted[k];
-            }
-          } else if (candidate.noPriceTrust) {
-            // DB oder unknown → Preis-Felder droppen
-            delete extracted.attr_preis;
-            delete extracted.attr_preisPackgroesse;
-            delete extracted.attr_preisPerKg;
+          if (r.status === 'abrufFehler') {
+            zaehler.abrufFehler += 1;
+            if (belegt) zaehler.belegteAbrufFehler += 1;
+            continue;
           }
-
-          // Merge in akkumulierten Result: erster Hit definiert Source,
-          // spätere füllen nur fehlende Felder auf.
+          zaehler.beantwortet += 1;
+          if (belegt) zaehler.belegteBeantwortet += 1;
+          if (r.status !== 'treffer') continue;
           if (!merged) {
-            merged = { ...extracted };
-            firstSourceUrl = fetched.finalUrl;
+            firstSourceUrl = r.finalUrl;
             firstSourceShop = candidate.shop;
-          } else {
-            for (const [k, v] of Object.entries(extracted)) {
-              if (v == null) continue;
-              if (k.startsWith('_')) continue;
-              // Felder die noch nicht da sind ergänzen
-              if (merged[k] == null || merged[k] === '' || (Array.isArray(merged[k]) && merged[k].length === 0)) {
-                merged[k] = v;
-              }
-            }
           }
-
-          firstHadIngredients = firstHadIngredients ||
-            (typeof merged.attr_ingredientStatement === 'string' &&
-             merged.attr_ingredientStatement.trim().length > 0);
-          firstHadNutrition = firstHadNutrition ||
-            (typeof merged.nutr_Energie_val === 'number' ||
-             typeof merged.nutr_Fett_val === 'number');
+          merged = ergaenzeBefund(merged, r.befund);
         }
 
-        if (merged && (firstHadIngredients || firstHadNutrition || merged.attr_preis)) {
+        if (merged && (hatZutaten(merged) || hatNaehrwerte(merged) || merged.attr_preis)) {
           await writeScrapeResult({
             ean: eans[0],
             productPath: `${collection}/${d.id}`,
@@ -611,6 +580,16 @@ exports.scrapeBatch = functions.onRequest(
             sourceShop: firstSourceShop,
           });
           return { type: 'ok' };
+        }
+        // Nur Abruffehler (403/429/5xx/Zeitlimit) → keine Aussage über das
+        // Produkt, also KEIN Failure-Marker (sonst nach 3 Läufen für immer
+        // übersprungen); der nächste Batch versucht es erneut. Dieselbe
+        // Regel wie scrapeEan (anfrage.entscheideErgebnis): antworteten nur
+        // Rückfall-Adressen, waren die Shopseiten trotzdem alle gesperrt
+        // (Prüfrunde 3 — bis dahin zählte deren Antwort als Aussage).
+        const entscheidung = entscheideErgebnis({ kandidaten: candidatesToTry.length, ...zaehler });
+        if (entscheidung.http === 503) {
+          return { type: 'abruf_fehler' };
         }
         // Alle Candidates durchprobiert, kein Extract → Failure-Marker.
         // Nach 3 Versuchen wird der Doc beim Scan geskippt.
@@ -643,6 +622,7 @@ exports.scrapeBatch = functions.onRequest(
               ok: 'scrape_ok',
               no_urls: 'no_urls',
               failed: 'scrape_failed',
+              abruf_fehler: 'abruf_fehler',
             };
             stats[map[r.type]] = (stats[map[r.type]] || 0) + 1;
           } catch (e) {

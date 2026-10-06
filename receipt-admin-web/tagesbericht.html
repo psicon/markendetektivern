@@ -332,6 +332,7 @@
               <div class="zeile"><span>Zweitprüfung</span><span>${zp.eingeschaltet ? (zp.modus === 'shadow' ? 'Beobachtung' : 'an') : 'aus'}</span></div>
               <div class="zeile"><span>Zweitprüfungen letzte 48 h</span><span style="color:${zp.eingeschaltet && !zp.laeufeLetzte48h ? 'var(--nein)' : 'inherit'}">${zp.laeufeLetzte48h ?? 0}</span></div>
             </section>
+            ${b.produktsuche ? produktsucheBox(b.produktsuche) : ''}
           </div>
 
           <section class="box" style="margin-top:14px"><h3>Aktionen</h3>
@@ -360,6 +361,28 @@
                 <td class="n">${euro(x.gebuchtCents || 0)}</td><td class="n" style="color:${(x.warnungen || []).some((w) => w.stufe === 'rot') ? 'var(--nein)' : 'inherit'}">${(x.warnungen || []).length}</td></tr>`).join('')}
             </table></div>
           </section>`;
+      }
+
+      /* ─── Produktsuche: unbekannte Barcodes, Vortag (src/produktsuche.js) ─── */
+      function produktsucheBox(p) {
+        if (p.unlesbar) return '<section class="box"><h3>Produktsuche (unbekannte Barcodes)</h3><div class="leer">Zahlen nicht lesbar.</div></section>';
+        const z = p.gestern;
+        const zahlDe = (n) => Number(n || 0).toLocaleString('de-DE');
+        const zustand = String(p.zustand || '—');
+        const rot = (bed) => (bed ? ' style="color:var(--nein)"' : '');
+        return `<section class="box"><h3>Produktsuche — ${esc(p.tag ? `${p.tag.slice(8, 10)}.${p.tag.slice(5, 7)}.` : 'gestern')} (unbekannte Barcodes)</h3>
+          ${z ? `<div class="zeile"><span>bearbeitet</span><span>${zahlDe(z.bearbeitet)}${p.tagesDeckel != null ? ` <span class="leer">/ ${zahlDe(p.tagesDeckel)}</span>` : ''}</span></div>
+            <div class="zeile"><span>gefunden</span><span style="color:var(--ok)">${zahlDe(z.gefunden)}</span></div>
+            <div class="zeile"><span>ohne Daten</span><span>${zahlDe(z.keineDaten)}</span></div>
+            <div class="zeile"><span>übersprungen (kostenlos)</span><span>${zahlDe(z.uebersprungen)}</span></div>
+            <div class="zeile"><span>Fehler (Fremddienst)</span><span${rot(z.fehler > 0)}>${zahlDe(z.fehler)}</span></div>
+            ${z.kostenSchaetzungUsd != null ? `<div class="zeile"><span>Kosten (Schätzung)</span><span>${esc(z.kostenSchaetzungUsd.toFixed(2).replace('.', ','))} $</span></div>` : ''}`
+          : '<div class="leer">Gestern keine Zahlen — nicht gelaufen.</div>'}
+          <div class="zeile"><span>Serper-Rest</span><span${rot(p.angehalten === 'serper_guthaben')}>${p.serperRest == null ? '—' : zahlDe(p.serperRest)}</span></div>
+          <div class="zeile"><span>Zustand</span><span${rot(zustand.startsWith('angehalten'))}>${esc(zustand)}</span></div>
+          ${p.wartend != null ? `<div class="zeile"><span>Barcodes warten</span><span>${zahlDe(p.wartend)}</span></div>` : ''}
+          ${p.heute ? `<div class="leer" style="margin-top:6px">Heute bis jetzt: ${zahlDe(p.heute.bearbeitet)} bearbeitet, ${zahlDe(p.heute.gefunden)} gefunden.</div>` : ''}
+        </section>`;
       }
 
       /* ─── Bon-Runde (07:45, src/bonRunde.js) ─── */

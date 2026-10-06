@@ -348,6 +348,14 @@ async function tryScraper(eans) {
         sourceTimestamp: data.scrapedAt ?? admin.firestore.Timestamp.now(),
         sourceUrl: data.scrapedUrl ?? null,
         sourceShop, // z.B. 'metro.de', 'codecheck.info'
+        // Herkunft des Preises: seit dem 04.10.2026 (nutritionscrape v4) am
+        // Dokument (priceShop, priceFetchedAt). Der nutrition-scraper führt
+        // seitdem feldweise zusammen — ein Preis kann aus einem früheren
+        // Abruf eines anderen Shops stammen als scrapedUrl/scrapedAt; mit
+        // deren Werten bekäme er Shop und Datum des letzten Abrufs.
+        // Altbestand ohne die Felder: wie bisher.
+        preisShop: typeof data.priceShop === 'string' && data.priceShop.trim() ? data.priceShop.trim() : sourceShop,
+        preisTimestamp: data.priceFetchedAt ?? data.scrapedAt ?? admin.firestore.Timestamp.now(),
         hasIngredients: !!ingredientStatement,
         ingredientStatement,
         hasNutrition,
@@ -524,7 +532,7 @@ async function processProduct(docRef, product, dryRun) {
           // jünger ist als bestehender attr_preisUpdatedAt
           if (k.startsWith('attr_preis')) {
             const oldTs = product.attr_preisUpdatedAt;
-            const newTs = s.sourceTimestamp;
+            const newTs = s.preisTimestamp;
             if (oldTs && newTs && tsToMillis(newTs) <= tsToMillis(oldTs)) continue;
             update[k] = v;
             continue;
@@ -535,9 +543,9 @@ async function processProduct(docRef, product, dryRun) {
         }
         // wenn preis aus Scrape kommt UND noch keiner am Produkt → preisDatum+Shop setzen
         if (update.attr_preis != null) {
-          update.attr_preisShop = s.sourceShop;
-          update.attr_preisUpdatedAt = s.sourceTimestamp;
-          reasons.push(`preis(scraper:${s.sourceShop || '?'}:${update.attr_preis}€)`);
+          update.attr_preisShop = s.preisShop;
+          update.attr_preisUpdatedAt = s.preisTimestamp;
+          reasons.push(`preis(scraper:${s.preisShop || '?'}:${update.attr_preis}€)`);
         }
       }
     }

@@ -3,23 +3,79 @@
  *
  * Aus index.js extrahiert → unit-testbar OHNE firebase-admin /
  * Modul-Seiteneffekte (index.js ruft admin.initializeApp() beim Laden).
- * Behaviour-identische Verbatim-Kopie; index.js requirt diese Funktionen.
- * Spiegelt lib/services/externalProductService.ts (Client) — bei Änderungen
- * beide Seiten + die Tests nachziehen.
+ *
+ * Seit 04.10.2026 ist DIESE Datei die Wahrheit. Die Kopie in
+ * lib/services/externalProductService.ts (Client) ist als @deprecated
+ * markierter toter Code (die App ruft nur noch diese Cloud Function) und
+ * wird nicht mehr nachgezogen: Platzhalter-Namen und Quellenrang
+ * unterscheiden sich dort bewusst.
  */
 
 'use strict';
 
-// Wie alt darf ein cached Eintrag sein bevor wir frisch fetchen. (4 Wochen)
+// Wie alt darf ein cached Eintrag sein bevor wir unsere EIGENEN Kopien
+// (reweapify/nutritionscrape/scraped_products) erneut lesen. (4 Wochen)
+// Achtung: Das ist KEIN Abruf aus dem Netz — wann die Daten wirklich aus dem
+// Netz kamen, steht in `fetchedAt` (siehe lib/speichern.js).
 const EXTERNAL_CACHE_MAX_AGE_MS = 4 * 7 * 24 * 60 * 60 * 1000; // 4 Wochen
 
-// Source-Priority-Order. Niedriger Index = bessere Quelle.
-const SOURCE_PRIORITY = ['rewe', 'globus', 'metro', 'scraper', 'openfood'];
-const UPGRADE_THRESHOLD_INDEX = SOURCE_PRIORITY.indexOf('openfood'); // 4
+// ─── Quellenrang ─────────────────────────────────────────────────────
+//
+// Welche Quelle gewinnt bei den stabilen Feldern (Name, Bild, Zutaten,
+// Nährwerte …)? Niedriger Rang = bessere Quelle.
+//   rewe            0  (REWE-Pipeline: reweapify / scraped_products)
+//   globus = metro  1
+//   scraper         2  (JEDER Online-Shop aus der Suche: rossmann, budni,
+//                       atundo, … — `source` trägt dort den Shop-Namen)
+//   openfood        3  (OpenFoodFacts-API UND die openfoodfacts-Webseite,
+//                       `source` 'openfood' bzw. 'openfoodfacts')
+//
+// Bis 04.10.2026 stand hier eine Liste, die nur die fünf Gruppennamen
+// kannte. Shop-Namen und 'openfoodfacts' bekamen Rang 99 und lagen damit
+// UNTER der OpenFoodFacts-API: Shop-Zutaten konnten nie gewinnen, und
+// ~700 Dokumente liefen alle 7 Tage in die Aufwertungs-Schleife.
+const QUELLEN_GRUPPEN_RANG = { rewe: 0, globus: 1, metro: 1, scraper: 2, openfood: 3 };
+const RANG_UNBEKANNT = 99;
+const RANG_OPENFOOD = QUELLEN_GRUPPEN_RANG.openfood;
 
-function sourcePriority(s) {
-  const i = SOURCE_PRIORITY.indexOf(s);
-  return i === -1 ? 99 : i;
+/**
+ * Ordnet einen `source`-Wert seiner Gruppe zu. Leere/fehlende Quelle → null.
+ * @returns {'rewe'|'globus'|'metro'|'scraper'|'openfood'|null}
+ */
+function quellenGruppe(source) {
+  const s = typeof source === 'string' ? source.trim().toLowerCase() : '';
+  if (!s) return null;
+  if (s === 'rewe' || s === 'globus' || s === 'metro' || s === 'scraper') return s;
+  if (s.includes('openfood')) return 'openfood';
+  return 'scraper';
+}
+
+/** Rang einer Quelle (niedriger = besser). Unbekannt/leer → 99. */
+function quellenRang(source) {
+  const g = quellenGruppe(source);
+  return g ? QUELLEN_GRUPPEN_RANG[g] : RANG_UNBEKANNT;
+}
+
+/** Schwache Quelle = OpenFoodFacts oder unbekannt → Aufwertung lohnt. */
+function istSchwacheQuelle(source) {
+  return quellenRang(source) >= RANG_OPENFOOD;
+}
+
+// ─── Produktname ─────────────────────────────────────────────────────
+//
+// 'Produkt' (früherer Default von normaliseReweapify) und 'Unbekannt'
+// (früherer Default von normaliseOpenFood) sind Platzhalter, keine Namen.
+// Sie wurden mit merge:true über echte Namen geschrieben (665 Dokumente,
+// Analyse 04.10.2026). Seitdem liefern die Normalizer ohne Namen
+// `undefined`, und jeder Platzhalter gilt beim Lesen als „kein Name".
+const PLATZHALTER_NAMEN = new Set(['produkt', 'unbekannt']);
+
+/** Echter Produktname oder null (leer/Platzhalter → null). */
+function echterName(name) {
+  if (typeof name !== 'string') return null;
+  const t = name.trim();
+  if (!t || PLATZHALTER_NAMEN.has(t.toLowerCase())) return null;
+  return t;
 }
 
 /** Normalisiert einen EAN-String auf nur Ziffern (Doc-Id-safe). */
@@ -101,7 +157,8 @@ function normaliseOpenFood(p) {
   const allergens = p.allergens_tags ?? [];
   const has = (s) => allergens.some((t) => t.toLowerCase().includes(s));
   return {
-    productName: p.product_name ?? p.generic_name ?? 'Unbekannt',
+    // Kein Platzhalter mehr ('Unbekannt') — ohne Namen bleibt das Feld leer.
+    productName: echterName(p.product_name) ?? echterName(p.generic_name) ?? undefined,
     brandName: p.brands,
     imageUrl: p.image_front_url ?? p.image_url,
     packSize: p.quantity,
@@ -179,8 +236,12 @@ function normaliseReweapify(data) {
     packSize = data?.itemSize;
   }
   return {
+    // Kein Platzhalter mehr ('Produkt') — ohne Namen bleibt das Feld leer.
     productName:
-      data?.productName ?? data?.attr_productName ?? data?.title ?? 'Produkt',
+      echterName(data?.productName) ??
+      echterName(data?.attr_productName) ??
+      echterName(data?.title) ??
+      undefined,
     brandName:
       data?.attr_BrandId ??
       data?.brandKey ??
@@ -243,9 +304,13 @@ function normaliseReweapify(data) {
 
 module.exports = {
   EXTERNAL_CACHE_MAX_AGE_MS,
-  SOURCE_PRIORITY,
-  UPGRADE_THRESHOLD_INDEX,
-  sourcePriority,
+  QUELLEN_GRUPPEN_RANG,
+  RANG_UNBEKANNT,
+  RANG_OPENFOOD,
+  quellenGruppe,
+  quellenRang,
+  istSchwacheQuelle,
+  echterName,
   normaliseEan,
   isExternalCacheStale,
   parseLeadingNumber,

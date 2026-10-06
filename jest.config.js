@@ -52,6 +52,8 @@ module.exports = {
       roots: [
         '<rootDir>/cloud-functions/ai-product-comparison',
         '<rootDir>/cloud-functions/external-product-lookup',
+        '<rootDir>/cloud-functions/external-misses-processor',
+        '<rootDir>/cloud-functions/nutrition-scraper',
         '<rootDir>/cloud-functions/crowd-upload-location',
         '<rootDir>/cloud-functions/crowd-upload-reward',
         '<rootDir>/cloud-functions/survey-reward',

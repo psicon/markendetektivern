@@ -62,6 +62,7 @@ const { auffaelligkeiten } = require('./ort');
 const { bildDefektOf } = require('./einreichung');
 const { warnungen } = require('./warnungen');
 const { mitWiederholung, arbeite, schlafe } = require('./ki');
+const { ladeProduktsuche } = require('./produktsuche');
 
 const COL = 'crowd_uploads';
 const BERICHTE = 'ops_tagesberichte';
@@ -829,7 +830,8 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   }
 
   // 9) Lage bei Bons und Aktionen, Warnungen
-  const [lage, aktionen, vorher, bonSnap] = await Promise.all([bonLage(db, start), aktionsLage(db), db.doc(`${BERICHTE}/aktuell`).get(), db.doc(`ops_bonrunden/${tag}`).get().catch((e) => { logger.warn('ops_bonrunden nicht lesbar', { tag, fehler: String(e && e.message).slice(0, 160) }); return null; })]);
+  // Produktsuche (unbekannte Barcodes): wirft nie, ein Lesefehler wird `unlesbar`.
+  const [lage, aktionen, vorher, bonSnap, produktsuche] = await Promise.all([bonLage(db, start), aktionsLage(db), db.doc(`${BERICHTE}/aktuell`).get(), db.doc(`ops_bonrunden/${tag}`).get().catch((e) => { logger.warn('ops_bonrunden nicht lesbar', { tag, fehler: String(e && e.message).slice(0, 160) }); return null; }), ladeProduktsuche(db, start, logger)]);
   // Ergebnis der Bon-Runde von 07:45 (src/bonRunde.js) in denselben Bericht.
   const bonRundeRoh = (d) => (({ laufAt, ...rest }) => ({ ...rest, laufAt: laufAt && laufAt.toMillis ? laufAt.toMillis() : null }))(d);
   // Ein Lesefehler beim Bon-Bericht darf den Tagesbericht nicht kosten — die
@@ -885,6 +887,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     jetzt: start, aktionen, zweitpruefung: lage.zweitpruefung, bons: lage.bons, runde, notbremse: bremse,
     regelVersion: { alt: vorher.exists ? vorher.get('regelVersion') || null : null, neu: version },
     bonRunde: { scharf: lage.bonWorkerScharf, bericht: bonRundeHeute, abgebrochen: bonAbgebrochen, laeuftNoch: bonLaeuftNoch, unbekannt: bonRundeUnbekannt },
+    produktsuche,
   });
   const gebuchtCents = gebucht.filter((s) => s.rewardResult === 'credited').reduce((s, g) => s + (Number(g.rewardCents) || 0), 0);
   const fall = (p) => ({ id: p.id, name: String(nameOf(p.x) || '?').slice(0, 60), markt: p.x.marketName || null, grund: p.grund, hinweis: p.ctx?.hinweis || null, zurueckgehalten: p.zurueckgehaltenGrund || null });
@@ -931,6 +934,8 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     bons: lage.bons,
     zweitpruefung: lage.zweitpruefung,
     bonRunde: bonRundeHeute,
+    // Hintergrundsuche für unbekannte Barcodes, Vortag (src/produktsuche.js).
+    produktsuche,
     aktionen: aktionen.filter((a) => a.active && a.endAt > start - 7 * 24 * 60 * 60 * 1000).map(({ id, kind, startAt, endAt, budgetRemainingCents, budgetTotalCents, cashbackPerBonCents }) => ({ id, kind, startAt, endAt, budgetRemainingCents, budgetTotalCents, cashbackPerBonCents })),
     warnungen: warn,
   };

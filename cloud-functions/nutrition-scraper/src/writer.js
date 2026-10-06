@@ -1,39 +1,97 @@
 /**
  * Schreibt Scraper-Ergebnisse in die nutritionscrape-Collection.
  *
- * Dokument-Format passend zum CF2-Backfill-Adapter (tryScraper):
+ * Dokument-Format passend zum CF2-Backfill-Adapter (tryScraper) und zur
+ * Übernahme in external_products (external-product-lookup):
  *   {
  *     gtin: string,                 // EAN — Lookup-Key
- *     productPath?: string,         // Optional: ref auf produkte/markenProdukte
+ *     productPath?: string,         // ref auf produkte/markenProdukte (bleibt)
  *     attr_ingredientStatement?: string,
  *     nutr_*_val/_unit:             // alle nutr_*-Felder
- *     scrapedAt: Timestamp,         // wann gescrapet
+ *     attr_*:                       // Hersteller, Packung, Allergene …
+ *     productName?: string,         // nur mit eanBeleg (src/seitenDaten.js)
+ *     shopBildUrl?: string,         // Bild der Shopseite, nur mit eanBeleg
+ *     eanBeleg?: 'jsonld_gtin' | 'seitentext',
+ *     attr_preis?, attr_preisPackgroesse?, attr_preisPerKg?,
+ *     priceShop?, priceCurrency?: 'EUR', priceFetchedAt?: Timestamp,
+ *     fetchedAt: Timestamp,         // letzter echter Abruf mit KI-Auslesen
+ *     scrapedAt: Timestamp,         // zuletzt ein Feld geändert (wie bisher)
+ *     widerlegtAm?, widerlegtGrund?, widerlegtUrl?  // Altbestand von der
+ *                                   // eigenen Quellseite widerlegt (Daten weg)
  *     scrapedSource: 'scraper',
- *     scrapedUrl: string,           // welche URL die Daten hatte
- *     confidence: number,           // LLM-Self-rating
- *     model: string,                // welches LLM-Modell
+ *     scrapedUrl/sourceUrl: string, // welche URL die Daten hatte
+ *     sourceShop: string,
+ *     confidence: number,           // KI-Selbsteinschätzung
+ *     model: string,                // welches KI-Modell
  *     tokensIn/Out: number          // für Kosten-Tracking
  *   }
  */
 
 const admin = require('firebase-admin');
 
-const COLLECTION = 'nutritionscrape';
+const { fuehreZusammen, widerlegeAltbestand } = require('./zusammenfuehren');
 
-/** Schreibt ein Resultat. Idempotent — wenn schon ein Eintrag für die
- *  EAN existiert UND der confidence-Score geringer ist als der neue,
- *  wird überschrieben. */
+const COLLECTION = 'nutritionscrape';
+// v4 (04.10.2026): + productName/shopBildUrl/eanBeleg, fetchedAt,
+// priceShop/priceCurrency/priceFetchedAt, Zusammenführen feldweise.
+// v3: extended prompt mit allen attr_*-Feldern.
+const SCHEMA_VERSION = 4;
+
+// Felder, die nur der Writer setzt — gleichnamige Felder im Befund werden
+// ignoriert (die KI-Antwort filtert schon der Extractor, das hier ist die
+// zweite Sicherung: Herkunft und Katalogbezug fälscht kein Befund).
+const FESTE_FELDER = new Set([
+  'gtin', 'productPath', 'scrapedSource', 'scrapedUrl', 'sourceShop', 'sourceUrl',
+  'confidence', 'model', 'tokensIn', 'tokensOut', 'schemaVersion',
+  'fetchedAt', 'scrapedAt', 'priceFetchedAt',
+  'widerlegtAm', 'widerlegtGrund', 'widerlegtUrl',
+]);
+
+/**
+ * Schreibt einen Fund feldweise in nutritionscrape/{ean} — in EINER
+ * Transaktion (Lesen, Zusammenführen, Schreiben). Nie `merge: false`: ein
+ * Fund ohne Zutaten löscht keine vorhandenen Zutaten mehr, `productPath`
+ * bleibt. Unbelegter Altbestand (vor v4) wird vom ersten belegten Fund
+ * ersetzt. Regeln: src/zusammenfuehren.js.
+ *
+ * @param {object} args
+ * @param {object|null} args.extracted Befund (src/befund.js) oder null, wenn
+ *   nur eine Widerlegung zu schreiben ist
+ * @param {boolean} [args.auffrischen=false] nur vom external-misses-processor:
+ *   ein gültiger neuer Preis ersetzt den alten unabhängig von der
+ *   KI-Sicherheit (Preise ändern sich mit der Zeit).
+ * @param {{url:string, grund:string}|null} [args.widerlegung] die bevorzugte
+ *   Seite wurde verworfen (src/suche.js) — widerlegt sie den gespeicherten
+ *   Altbestand, werden dessen Daten entfernt und der Vermerk gesetzt.
+ * @returns {Promise<{result:string, mode?:string, fields?:string[],
+ *   confidence?:number|null, altdatenWiderlegt:boolean}>}
+ */
 async function writeScrapeResult({
   ean,
   productPath = null,
   extracted,
   sourceUrl,
   sourceShop = null,
+  auffrischen = false,
+  widerlegung = null,
 }) {
-  if (!ean || !extracted) return { result: 'skip_empty' };
+  if (!ean || (!extracted && !widerlegung)) return { result: 'skip_empty', altdatenWiderlegt: false };
 
   const db = admin.firestore();
   const docRef = db.collection(COLLECTION).doc(String(ean));
+  const jetzt = admin.firestore.FieldValue.serverTimestamp();
+
+  if (!extracted) {
+    // Kein neuer Fund — nur widerlegen, falls der Altbestand dazu passt.
+    const w = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(docRef);
+      const r = widerlegeAltbestand(snap.exists ? snap.data() : null, { ...widerlegung, jetzt });
+      if (r) tx.set(docRef, mitLoeschungen(r.setzen, r.loeschen), { merge: true });
+      return r;
+    });
+    if (w) console.log(`[writer] ${ean}: Altbestand widerlegt (${widerlegung.grund}), ${w.loeschen.length} Felder entfernt`);
+    return { result: w ? 'widerlegt' : 'skip_empty', altdatenWiderlegt: !!w };
+  }
 
   // Wenn sourceShop nicht explizit gesetzt → von URL ableiten
   let derivedShop = sourceShop;
@@ -46,10 +104,17 @@ async function writeScrapeResult({
     }
   }
 
-  const data = {
-    gtin: ean,
-    productPath,
-    scrapedAt: admin.firestore.FieldValue.serverTimestamp(),
+  // Strukturierte Daten — _-prefixed und feste Felder NICHT aus dem Befund
+  const neu = {};
+  for (const [k, v] of Object.entries(extracted)) {
+    if (k.startsWith('_') || FESTE_FELDER.has(k)) continue;
+    if (v == null) continue;
+    neu[k] = v;
+  }
+  // Feste Felder NACH den Daten — sie kommen nur vom Writer.
+  Object.assign(neu, {
+    gtin: String(ean),
+    productPath: productPath || null,
     scrapedSource: 'scraper',
     scrapedUrl: sourceUrl,
     sourceShop: derivedShop,
@@ -58,95 +123,51 @@ async function writeScrapeResult({
     model: extracted._model ?? null,
     tokensIn: extracted._tokensIn ?? null,
     tokensOut: extracted._tokensOut ?? null,
-    // Schema-Version — Marker fürs smart-skip im scrapeBatch.
-    // v3 = aktueller extended prompt mit allen attr_*-Feldern
-    //      (preis, hersteller, packageSize, allergene[], isVegan, isBio,
-    //       biosiegel, herkunftsland, nutri_score, eco_score, spuren[])
-    schemaVersion: 3,
-  };
-
-  // Strukturierte Daten — _-prefixed Felder NICHT übernehmen
-  for (const [k, v] of Object.entries(extracted)) {
-    if (k.startsWith('_')) continue;
-    if (v == null) continue;
-    data[k] = v;
+    schemaVersion: SCHEMA_VERSION,
+  });
+  if (typeof neu.attr_preis === 'number' && neu.attr_preis > 0 && !neu.priceShop) {
+    neu.priceShop = derivedShop;
   }
 
-  // Idempotent-Write Logik:
-  //   newConf > oldConf → full overwrite (alte Daten ersetzt)
-  //   newConf == oldConf:
-  //     - new from real shop, old from openfoodfacts → full overwrite
-  //     - sonst → MERGE neue Felder (alte Werte bleiben + neue ergänzt)
-  //   newConf < oldConf → MERGE nur Felder die nicht existierten
-  //     (besser-conf-Daten bleiben, neue attr_*-Felder werden additiv
-  //     ergänzt — z.B. Hersteller/Allergene/Bio aus späterem schema-update)
-  //
-  //   Begründung: ermöglicht Schema-Migration ohne Daten-Verlust.
-  let writeMode = 'overwrite'; // 'overwrite' | 'merge_new_only' | 'merge_full'
-  const existing = await docRef.get();
-  if (existing.exists) {
-    const old = existing.data() || {};
-    const oldConf = old.confidence ?? 0;
-    const newConf = data.confidence ?? 0;
-    const oldShop = (old.sourceShop || '').toLowerCase();
-    const newShop = (derivedShop || '').toLowerCase();
-    const oldIsOpenfood = /openfoodfacts/.test(oldShop) || oldShop === 'openfoodfacts';
-    const newIsOpenfood = /openfoodfacts/.test(newShop) || newShop === 'openfoodfacts';
-    const newIsBetterShop = !newIsOpenfood && oldIsOpenfood;
-
-    if (newConf > oldConf) {
-      writeMode = 'overwrite';
-    } else if (newConf === oldConf) {
-      writeMode = newIsBetterShop ? 'overwrite' : 'merge_full';
-    } else {
-      // newConf < oldConf — nur Felder ergänzen die noch nicht da waren
-      writeMode = 'merge_new_only';
-    }
-  }
-
-  if (writeMode === 'merge_full' || writeMode === 'merge_new_only') {
-    const oldData = existing.data() || {};
-    const mergeData = {};
-    for (const [k, v] of Object.entries(data)) {
-      if (v == null) continue;
-      if (k === '_touchedAt') continue;
-      if (writeMode === 'merge_new_only') {
-        if (oldData[k] === undefined) mergeData[k] = v;
-      } else {
-        // merge_full: alle non-null Felder mergen
-        if (k === 'confidence' && (oldData.confidence ?? 0) > (v ?? 0)) continue;
-        mergeData[k] = v;
-      }
-    }
-    if (Object.keys(mergeData).length === 0) {
-      return {
-        result: 'skip_no_new_fields',
-        mode: writeMode,
-        oldConf: existing.data()?.confidence,
-      };
-    }
-    // scrapedAt IMMER updaten beim Merge (sonst sieht User in UI alte
-    // Timestamps obwohl Daten gerade angereichert wurden).
-    mergeData.scrapedAt = admin.firestore.FieldValue.serverTimestamp();
-    await docRef.set(mergeData, { merge: true });
-    return { result: 'merged', mode: writeMode, fields_added: Object.keys(mergeData) };
-  }
-
-  await docRef.set(data, { merge: false });
+  const { plan, widerlegt } = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(docRef);
+    const alt = snap.exists ? snap.data() : null;
+    const p = fuehreZusammen(alt, neu, { auffrischen, jetzt });
+    // Widerlegter Altbestand: fuehreZusammen hat ihn schon ersetzt (ein
+    // widerlegbarer Altbestand ist immer unbelegt); dazu der Vermerk.
+    const w = widerlegung ? widerlegeAltbestand(alt, { ...widerlegung, jetzt }) : null;
+    if (w) Object.assign(p.setzen, w.setzen);
+    tx.set(docRef, mitLoeschungen(p.setzen, p.loeschen), { merge: true });
+    return { plan: p, widerlegt: !!w };
+  });
 
   // Telemetrie: per-Domain Erfolgs-Counter + Confidence-Average.
   // Wird vom Resolver für Auto-Whitelist/Blacklist-Logik gelesen.
   // Schwellen: successCount>=3 UND avgConfidence>=0.7 → Whitelist;
   //            failCount>=5 && successCount==0 → 24h Blacklist
-  if (derivedShop && typeof derivedShop === 'string') {
+  // Gezählt wird wie bisher nur, wenn der neue Fund das Dokument bestimmt
+  // (neu angelegt oder sicherer/besserer Shop).
+  if (plan.erfolgFuerTelemetrie && derivedShop && typeof derivedShop === 'string') {
     try {
-      await incrementTelemetrySuccess(db, derivedShop, data.confidence ?? null, ean);
+      await incrementTelemetrySuccess(db, derivedShop, neu.confidence ?? null, ean);
     } catch (e) {
       console.warn('[writer] telemetry write failed:', e?.message);
     }
   }
 
-  return { result: 'written', confidence: data.confidence };
+  return {
+    result: ['neu', 'ueberschreiben', 'ersetzen'].includes(plan.modus) ? 'written' : plan.modus === 'nur_abrufdatum' ? 'skip_no_new_fields' : 'merged',
+    mode: plan.modus,
+    fields: plan.geaendert,
+    confidence: neu.confidence,
+    altdatenWiderlegt: widerlegt,
+  };
+}
+
+function mitLoeschungen(setzen, loeschen) {
+  const daten = { ...setzen };
+  for (const k of loeschen) daten[k] = admin.firestore.FieldValue.delete();
+  return daten;
 }
 
 /** Per-Domain Success-Counter inkrementieren + running average der
@@ -181,7 +202,7 @@ async function incrementTelemetrySuccess(db, shop, confidence, ean) {
 
 /** Per-Domain Fail-Counter inkrementieren. Wird vom Resolver/Quality-
  *  Check aufgerufen wenn eine Page als nicht-verwertbar verworfen wird
- *  ODER Claude conf<0.5 returnt. */
+ *  ODER die Seite nicht zur EAN gehört. */
 async function incrementTelemetryFail(db, shop, ean, reason) {
   if (!shop || typeof shop !== 'string') return;
   const safeKey = shop.replace(/[\/.#$\[\]]/g, '_');
@@ -202,4 +223,4 @@ async function incrementTelemetryFail(db, shop, ean, reason) {
   }
 }
 
-module.exports = { writeScrapeResult, incrementTelemetryFail, COLLECTION };
+module.exports = { writeScrapeResult, incrementTelemetryFail, COLLECTION, SCHEMA_VERSION };

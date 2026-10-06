@@ -38,8 +38,32 @@ export interface ExternalProductDoc {
   /** Welche Quelle den Treffer geliefert hat. */
   source: ExternalProductSource;
 
-  /** Wann der Datensatz das letzte Mal aus der Source gefetched wurde. */
+  /**
+   * Wann das Dokument zuletzt geschrieben/umkopiert wurde. NICHT der
+   * Datenstand — der steht in `fetchedAt` (seit 04.10.2026).
+   */
   cachedAt: Timestamp;
+
+  // ─── Produktsuche 04.10.2026 (nur Server schreibt) ───────────────
+  /** Wann das Dokument angelegt wurde (nur beim Anlegen gesetzt). */
+  storedAt?: Timestamp;
+  /**
+   * Datenstand: wann die Daten wirklich aus dem Netz kamen. null bei der
+   * REWE-Pipeline (unbekannt, fetchedAtQuelle 'rewe_pipeline').
+   */
+  fetchedAt?: Timestamp | null;
+  fetchedAtQuelle?: 'openfood_api' | 'nutritionscrape' | 'rewe_pipeline';
+  /** true, wenn fetchedAt nur aus nutritionscrape.scrapedAt geschätzt ist. */
+  fetchedAtGeschaetzt?: boolean;
+  /** Herkunft je Feldgruppe (name, bild, zutaten, naehrwerte, …) → source. */
+  feldQuellen?: Record<string, string>;
+  /** Letzter Versuch, OpenFoodFacts-Daten kostenlos aufzufrischen. */
+  openfoodVersuchtAm?: Timestamp;
+  /**
+   * Das Bild stammt von einer Shopseite (nur mit Freigabe
+   * _meta/produktsuche.shopBilder; ausgeschaltet entfernt der Server es).
+   */
+  bildVonShop?: boolean;
 
   // ─── Basis-Felder ────────────────────────────────────────────────
   productName: string;
@@ -51,6 +75,10 @@ export interface ExternalProductDoc {
   // ─── Preis / Pack (Shop-spezifisch) ──────────────────────────────
   /** Preis in EUR (float). Optional — OpenFood hat z.B. keinen Preis. */
   price?: number;
+  /** Shop, von dem der Preis stammt (z.B. 'rewe', 'rossmann', 'budni.de'). */
+  priceShop?: string;
+  /** Stand des Preises; fehlt, wenn unbekannt (REWE-Pipeline). */
+  priceFetchedAt?: Timestamp;
   /** Packungsgröße als String, z.B. "500g", "1L", "6×0,33L". */
   packSize?: string;
   /** Kategorie als String (Source-spezifisch). Wird für Alternative-
@@ -169,7 +197,11 @@ export type ExternalMissStatus =
   | 'processing'
   | 'resolved'
   | 'no-data'
-  | 'skipped';
+  | 'skipped'
+  /** Nach mehreren Fehlern in Folge (nie 'no-data' — Infrastruktur ist kein Urteil). */
+  | 'error'
+  /** Vom Prozessor vor dem Bezahlen ausgelassen, siehe uebersprungenGrund. */
+  | 'uebersprungen';
 
 export interface ExternalLookupMissDoc {
   /** EAN, gleich der doc-id (nur Ziffern). */
@@ -196,6 +228,27 @@ export interface ExternalLookupMissDoc {
   processingError?: string;
   /** Optional: Notiz vom Admin / Investigation-Sicht. */
   note?: string;
+
+  // ─── Produktsuche 04.10.2026 (nur Server schreibt) ───────────────
+  /** Warum (wieder) gesucht wird. */
+  grund?: 'neu' | 'nur_openfood' | 'auffrischen';
+  /** Reihenfolge des Prozessors: scanTage * 1e13 + lastSeenAt (ms); höher = früher. */
+  rang?: number;
+  /** An wie vielen verschiedenen Kalendertagen (Europe/Berlin) gescannt. */
+  scanTage?: number;
+  /** Letzter Scan-Tag 'YYYY-MM-DD' (Europe/Berlin). */
+  letzterScanTag?: string;
+  uebersprungenGrund?: 'ungueltige_ean' | 'ladencode' | 'im_katalog';
+  /** Letzte Auffrischung mit inhaltlichem Ergebnis (mit oder ohne Fund; ohne Fund bleiben die alten Daten stehen). */
+  refreshVersuchtAm?: Timestamp;
+  /** Fehler jeder Art in Folge (Wartezeit, Sicherheitsnetz); errorCount zählt nur Fehler am Barcode. */
+  fehlerInFolge?: number;
+  /** Vorher kein neuer Versuch (wachsende Wartezeit nach Fehlern). */
+  naechsterVersuchAb?: Timestamp;
+  /** Code des letzten Fehlers (z. B. 'fetch_unavailable', 'zeitlimit_aufruf'). */
+  letzterFehlerCode?: string;
+  /** Wann ein abgeschlossener Fall zuletzt wieder geöffnet wurde. */
+  wiedergeoeffnetAm?: Timestamp;
 }
 
 /** Default-Wert für ein neues Miss-Doc. */

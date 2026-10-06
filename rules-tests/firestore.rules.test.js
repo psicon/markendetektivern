@@ -59,6 +59,9 @@ beforeAll(async () => {
     await setDoc(doc(db, 'receipts/r1'), { userId: ALICE, status: 'approved' });
     await setDoc(doc(db, 'cashback_payouts/pay1'), { userId: ALICE, amountCents: 100 });
     await setDoc(doc(db, `cashback_sperren/${MALLORY}`), { gesperrt: true, grund: 'test', quelle: 'test' });
+    await setDoc(doc(db, '_meta/produktsuche'), { aktiv: true, tagesDeckel: 120 });
+    await setDoc(doc(db, '_meta/produktsuche_tage/tage/2026-10-04'), { bearbeitet: 5 });
+    await setDoc(doc(db, '_meta/openFoodRateLimit'), { rateLimitUntilMs: 0 });
     await setDoc(doc(db, 'gamification/actions'), { search_product: { points: 1 } });
     await setDoc(doc(db, 'aggregates/leaderboard_v1'), { top: [] });
     await setDoc(doc(db, 'leaderboards/' + ALICE), { displayName: 'Alice', stats: {} });
@@ -187,6 +190,24 @@ describe('Kontosperre: cashback_sperren ist server-only', () => {
     await assertFails(setDoc(doc(mallory(), `cashback_sperren/${ALICE}`), { gesperrt: true }));
     await assertFails(getDocs(collection(alice(), 'cashback_sperren')));
     await assertFails(getDoc(doc(unauth(), `cashback_sperren/${MALLORY}`)));
+  });
+});
+
+// Produktsuche (04.10.2026): _meta/produktsuche steuert, wie viele bezahlte
+// Suchen (Serper, KI, Apify) am Tag laufen; _meta/produktsuche_tage/tage/*
+// zählt sie. Server-only — kein Block in firestore.rules, das finale deny-all
+// greift. Wer den Schalter schreiben könnte, könnte Geld ausgeben lassen.
+describe('Produktsuche: _meta ist server-only', () => {
+  test('ANGRIFF: Schalter hochdrehen oder lesen scheitert, auch angemeldet', async () => {
+    await assertFails(setDoc(doc(mallory(), '_meta/produktsuche'), { aktiv: true, tagesDeckel: 5000, proLauf: 20 }));
+    await assertFails(updateDoc(doc(mallory(), '_meta/produktsuche'), { serperMindestGuthaben: 0 }));
+    await assertFails(getDoc(doc(alice(), '_meta/produktsuche')));
+    await assertFails(getDoc(doc(unauth(), '_meta/produktsuche')));
+  });
+  test('ANGRIFF: Tageszähler lesen/fälschen scheitert', async () => {
+    await assertFails(setDoc(doc(mallory(), '_meta/produktsuche_tage/tage/2026-10-04'), { bearbeitet: 0 }));
+    await assertFails(getDocs(collection(alice(), '_meta/produktsuche_tage/tage')));
+    await assertFails(getDoc(doc(alice(), '_meta/openFoodRateLimit')));
   });
 });
 

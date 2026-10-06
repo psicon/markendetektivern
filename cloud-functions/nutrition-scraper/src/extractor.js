@@ -24,12 +24,20 @@
  * SCRAPER_GEMINI_MODEL / SCRAPER_GEMINI_LOCATION.
  *
  * ═══ Fehlervertrag (die eigentliche Reparatur) ═══
- *   • Daten gefunden                → Objekt
- *   • Seite hat nichts Verwertbares → null   (inhaltliche Aussage)
+ *   • KI hält die Seite für eine Produktseite (Sicherheit ≥ 0,5) → Objekt.
+ *     Ob darin etwas Verwertbares steht, entscheidet der Aufrufer
+ *     (seitenDaten.hatVerwertbareDaten) — erst er kennt den belegten Namen.
+ *   • Seite ist keine Produktseite / Modell lehnt ab → null (inhaltliche Aussage)
  *   • KI nicht erreichbar / Kontingent / Zeitlimit / kaputtes JSON nach
  *     Wiederholungen → wirft ExtractUnavailableError (code
  *     'extract_unavailable'). Ein Infrastrukturfehler ist NIE eine Aussage
  *     über das Produkt — die Aufrufer dürfen daraus kein „keine Daten“ machen.
+ *
+ * ═══ Kosten ═══
+ * Jede KI-Antwort — auch null, Ablehnung, kaputtes JSON oder Fehler — steht
+ * als eine Logzeile `{"evt":"produktsuche_kosten", …}` im Log. Bis 04.10.
+ * wurden nur erfolgreiche Aufrufe geloggt; gut die Hälfte der bezahlten
+ * Aufrufe blieb unsichtbar.
  */
 
 const { GoogleGenAI } = require('@google/genai');
@@ -39,9 +47,15 @@ const { ExtractUnavailableError } = require('./fehler');
 const MODEL = process.env.SCRAPER_GEMINI_MODEL || 'gemini-3.5-flash';
 const LOCATION = process.env.SCRAPER_GEMINI_LOCATION || 'eu';
 const PROJECT = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'markendetektive-895f7';
-// Gemessen 02.10.2026 (eu, LOW): 1–11 s je Seite. 45 s lässt Luft und hält
-// den schlimmsten Fall (3 Versuche + Pausen ≈ 150 s) unter dem Zeitbudget
-// von scrapeEan.
+// Gemessen 02.10.2026 (eu, LOW): 1–11 s je Seite. 45 s lässt Luft. Der
+// schlimmste Fall EINER Seite (3 Versuche + Pausen ≈ 150 s, davor bis 135 s
+// Abruf mit Apify-Rückfall) passt NICHT in die Frist von scrapeEan (190 s,
+// geprüft nur vor jedem neuen Kandidaten) und auch nicht sicher unter den
+// Abbruch des Prozessors nach 240 s. Bricht der Prozessor ab, läuft
+// scrapeEan weiter und speichert einen Fund trotzdem; der Prozessor prüft
+// deshalb vor der nächsten bezahlten Suche, ob inzwischen ein Fund vorliegt
+// (external-misses-processor, 'ok_nach_zeitlimit'). Gemessen seit 01.10.:
+// 1 von 393 Aufrufen über 240 s.
 const CALL_TIMEOUT_MS = 45_000;
 const MAX_ATTEMPTS = 3;
 // Inhaltliche Ablehnung durch das Modell: Wiederholen bringt nichts, und es
@@ -349,6 +363,12 @@ Aus dem folgenden HTML einer Produkt-Seite extrahiere:
 
 17. **confidence** — deine Selbst-Einschätzung 0.0-1.0, wie sicher du bist dass es eine echte Produkt-Seite ist und die Daten korrekt extrahiert wurden.
 
+18. **produktName** — der Produktname, wie er auf der Seite steht (Marke + Bezeichnung + Menge, z.B. "Milka Alpenmilch Schokolade 100 g"), OHNE Shopnamen und ohne Zusätze wie "kaufen", "online bestellen", "bei Shop X". Steht vor dem HTML ein [Rohname aus den Seitendaten], gib GENAU diesen bereinigt zurück und erfinde nichts dazu. Den [Erwarteten Produkt-Namen] NICHT übernehmen, wenn er so nicht auf der Seite steht. Wenn nicht erkennbar → null.
+
+19. **einzelprodukt** — boolean. true, wenn die Seite genau EIN Produkt beschreibt (Produktdetailseite). false bei Suchergebnissen, Listen, Kategorie- oder Vergleichsseiten mit mehreren Produkten. null wenn unklar.
+
+20. **produktBildUrl** — NUR wenn im Text eine vollständige Bild-Adresse (https://…) des Produkts selbst steht (z.B. Markdown ![Bild](https://…)): exakt kopieren, nichts zusammensetzen. Sonst null.
+
 WICHTIG:
 - Returnere AUSSCHLIESSLICH ein JSON-Objekt, keine Erklärungen
 - Fehlende Felder = null (NICHT undefined, NICHT 0). Bei Arrays: leeres Array []
@@ -360,21 +380,104 @@ WICHTIG:
 HTML:
 {HTML_CONTENT}`;
 
-/** Extrahiert strukturierte Produkt-Daten aus HTML.
- *  Returnt das geparste Objekt, null wenn die Seite nichts Verwertbares
- *  hat — und WIRFT ExtractUnavailableError, wenn die KI nicht antwortet
- *  (siehe Fehlervertrag oben). `apiKey` wird seit dem Wechsel auf Vertex
- *  nicht mehr gebraucht und ignoriert. */
-async function extractFromHtml({ html, productName = null, modelOverride = null } = {}) {
+// ═══ Erlaubte Felder der KI-Antwort ═══
+// Genau die Felder, die EXTRACTION_PROMPT verlangt (Daten) — alles andere aus
+// der Antwort wird verworfen. Bis zur Prüfrunde 04.10.2026 gingen ALLE
+// Schlüssel weiter; der Writer setzte sie NACH gtin/productPath/sourceShop.
+// Ein Modell, das (aus eigenem Antrieb oder durch Text auf einer Shopseite)
+// productName, sourceShop oder productPath „liefert", hätte so die
+// Belegprüfung umgangen, die Herkunft gefälscht ('rewe.de') oder die
+// Übernahme in external_products unterdrückt.
+const NAEHRWERT_NAMEN = [
+  'Energie', 'Fett', 'FettdavongesttigteFettsuren', 'Kohlenhydrate',
+  'KohlenhydratedavonZucker', 'Ballaststoffe', 'Eiwei', 'Salz',
+];
+const KI_DATENFELDER = new Set([
+  'attr_ingredientStatement',
+  ...NAEHRWERT_NAMEN.flatMap((n) => [`nutr_${n}_val`, `nutr_${n}_unit`]),
+  'nutr_serving_size', 'nutr_serving_unit',
+  'attr_preis', 'attr_preisPackgroesse', 'attr_preisPerKg',
+  'attr_hersteller', 'attr_packageSize', 'attr_packageUnit',
+  'attr_nutri_score', 'attr_eco_score', 'attr_allergene', 'attr_spuren',
+  'attr_isVegan', 'attr_isVegetarisch', 'attr_isBio', 'attr_biosiegel', 'attr_herkunftsland',
+]);
+
+/** Nur einfache Werte: Text, endliche Zahl, Wahrheitswert, null, Liste von Texten. */
+function einfacherWert(v) {
+  if (v === null) return true;
+  if (typeof v === 'string' || typeof v === 'boolean') return true;
+  if (typeof v === 'number') return Number.isFinite(v);
+  return Array.isArray(v) && v.every((x) => typeof x === 'string');
+}
+
+/** Datenfelder der KI-Antwort nach der Liste oben. */
+function nurDatenfelder(parsed) {
+  const out = {};
+  for (const [k, v] of Object.entries(parsed)) {
+    if (KI_DATENFELDER.has(k) && einfacherWert(v)) out[k] = v;
+  }
+  return out;
+}
+
+/** Eine Logzeile je KI-Antwort (Vertrag Produktsuche, 04.10.2026).
+ *  `auftrag` trennt die Kosten der Produktsuche (external-misses-processor)
+ *  von denen des Katalog-Backfills, die sonst unter demselben evt stünden. */
+function logKosten({ ean, model, usage, ergebnis, versuch, auftrag }) {
+  console.log(JSON.stringify({
+    evt: 'produktsuche_kosten',
+    ean: ean ?? null,
+    auftrag: auftrag ?? null,
+    modell: model,
+    standort: LOCATION,
+    tokensEin: usage?.promptTokenCount ?? null,
+    tokensAus: usage?.candidatesTokenCount ?? null,
+    // Denk-Token werden wie Ausgabe-Token berechnet.
+    tokensDenken: usage?.thoughtsTokenCount ?? null,
+    versuch,
+    ergebnis,
+  }));
+}
+
+function zaehleVerbrauch(verbrauch, usage) {
+  if (!verbrauch) return;
+  verbrauch.kiAufrufe = (verbrauch.kiAufrufe || 0) + 1;
+  verbrauch.tokensEin = (verbrauch.tokensEin || 0) + (usage?.promptTokenCount || 0);
+  verbrauch.tokensAus = (verbrauch.tokensAus || 0) + (usage?.candidatesTokenCount || 0);
+  verbrauch.tokensDenken = (verbrauch.tokensDenken || 0) + (usage?.thoughtsTokenCount || 0);
+}
+
+/** Extrahiert strukturierte Produkt-Daten aus HTML (oder Apify-Markdown).
+ *  Returnt das geparste Objekt (Sicherheit ≥ 0,5) oder null — und WIRFT
+ *  ExtractUnavailableError, wenn die KI nicht antwortet (Fehlervertrag oben).
+ *
+ *  @param {string} [args.ean]      nur für die Kosten-Logzeile
+ *  @param {string} [args.rohName]  Name aus den Seitendaten (JSON-LD/og/title);
+ *                                  die KI bereinigt ihn nur
+ *  @param {object} [args.verbrauch] Zähler für Aufrufe und Token
+ *  @param {string} [args.auftrag]  'produktsuche' | 'katalog' | 'einzelseite'
+ *                                  (nur für die Kosten-Logzeile)
+ *  Die KI-Felder für Name/Einzelprodukt/Bild kommen als _kiProduktName,
+ *  _kiEinzelprodukt, _kiBildUrl zurück — übernommen werden sie erst nach der
+ *  Belegprüfung (seitenDaten.ermittleIdentitaet). */
+async function extractFromHtml({
+  html,
+  productName = null,
+  modelOverride = null,
+  ean = null,
+  rohName = null,
+  verbrauch = null,
+  auftrag = null,
+} = {}) {
   const stripped = stripHtml(html);
   if (stripped.length < 200) {
-    // Kein/zu wenig Content
+    // Kein/zu wenig Content — kein KI-Aufruf, keine Kosten
     return null;
   }
 
-  const promptHtml = productName
-    ? `[Erwarteter Produkt-Name: "${productName}"]\n\n${stripped}`
-    : stripped;
+  const hinweise = [];
+  if (productName) hinweise.push(`[Erwarteter Produkt-Name: "${productName}"]`);
+  if (rohName) hinweise.push(`[Rohname aus den Seitendaten: "${rohName}"]`);
+  const promptHtml = hinweise.length > 0 ? `${hinweise.join('\n')}\n\n${stripped}` : stripped;
 
   // EXTRACTION_PROMPT enthält "{HTML_CONTENT}" Marker am Ende —
   // statischer Teil als Systemanweisung, das HTML als Nutzer-Nachricht.
@@ -387,16 +490,24 @@ async function extractFromHtml({ html, productName = null, modelOverride = null 
   let parsed = null;
   let resp = null;
   let lastErr = null;
+  let versuch = null;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    resp = null;
     try {
       resp = await callGemini({ systemInstruction, userText, model });
       parsed = parseResponse(resp);
+      versuch = attempt;
       break;
     } catch (e) {
+      // Auch eine kaputte oder abgelehnte Antwort hat Token gekostet.
+      const usage = resp?.usageMetadata || null;
+      zaehleVerbrauch(verbrauch, usage);
       if (e?.code === 'blocked') {
+        logKosten({ ean, model, usage, ergebnis: 'blockiert', versuch: attempt, auftrag });
         console.warn(`[extractor] Modell lehnt die Seite inhaltlich ab: ${e.message}`);
         return null;
       }
+      logKosten({ ean, model, usage, ergebnis: e?.code === 'json' ? 'json_fehler' : 'fehler', versuch: attempt, auftrag });
       lastErr = e;
       const status = e?.status ?? e?.code;
       console.warn(
@@ -413,56 +524,39 @@ async function extractFromHtml({ html, productName = null, modelOverride = null 
       lastErr,
     );
   }
-  if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+  const usage = resp?.usageMetadata || {};
+  zaehleVerbrauch(verbrauch, usage);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     // Kein Objekt (z. B. eine Liste) — inhaltlich unbrauchbar, kein Ausfall.
+    logKosten({ ean, model, usage, ergebnis: 'kein_objekt', versuch, auftrag });
     return null;
   }
 
   // Confidence-Schwelle: < 0.5 als unbrauchbar verwerfen
   const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0;
   if (confidence < 0.5) {
+    logKosten({ ean, model, usage, ergebnis: 'keine_produktseite', versuch, auftrag });
     return null;
   }
+  logKosten({ ean, model, usage, ergebnis: 'gelesen', versuch, auftrag });
 
-  // Cleanup: Drop confidence aus dem Output (wir loggen das separat)
-  const out = { ...parsed };
-  delete out.confidence;
-
-  // Wenn nichts Verwertbares im Output → null.
-  // "Verwertbar" = Zutaten ODER Nährwerte ODER Preis ODER Hersteller.
-  // Preis-only-Hits (z.B. discounto.de, Aggregator-Sites) sind absolut
-  // wertvoll für die Preis-Historie — nicht verwerfen nur weil Nutrition
-  // fehlt. Das war 2026-05-19 die Haupt-Ursache für "extract_failed" bei
-  // Pages die eigentlich Daten hatten.
-  const hasIngredients =
-    typeof out.attr_ingredientStatement === 'string' &&
-    out.attr_ingredientStatement.trim().length > 0;
-  const hasNutrition =
-    typeof out.nutr_Energie_val === 'number' ||
-    typeof out.nutr_Fett_val === 'number' ||
-    typeof out.nutr_Kohlenhydrate_val === 'number' ||
-    typeof out.nutr_Eiwei_val === 'number';
-  const hasPrice = typeof out.attr_preis === 'number' && out.attr_preis > 0;
-  const hasManufacturer =
-    typeof out.attr_hersteller === 'string' &&
-    out.attr_hersteller.trim().length > 0;
-  if (!hasIngredients && !hasNutrition && !hasPrice && !hasManufacturer) {
-    return null;
-  }
-
-  const usage = resp?.usageMetadata || {};
-  console.log(
-    `[extractor] ${model}@${LOCATION}: in=${usage.promptTokenCount ?? '?'} ` +
-      `out=${usage.candidatesTokenCount ?? '?'} denken=${usage.thoughtsTokenCount ?? 0}`,
-  );
+  // Nur die Datenfelder des Prompts (KI_DATENFELDER). Die Identitätsfelder
+  // gehen als _ki* zurück und erst nach der Belegprüfung ins Dokument
+  // (seitenDaten.ermittleIdentitaet).
+  const kiProduktName = typeof parsed.produktName === 'string' ? parsed.produktName : null;
+  const kiEinzelprodukt = typeof parsed.einzelprodukt === 'boolean' ? parsed.einzelprodukt : null;
+  const kiBildUrl = typeof parsed.produktBildUrl === 'string' ? parsed.produktBildUrl : null;
 
   return {
-    ...out,
+    ...nurDatenfelder(parsed),
     _confidence: confidence,
     _model: model,
     _tokensIn: usage.promptTokenCount ?? null,
     _tokensOut: usage.candidatesTokenCount ?? null,
     _tokensThought: usage.thoughtsTokenCount ?? 0,
+    _kiProduktName: kiProduktName,
+    _kiEinzelprodukt: kiEinzelprodukt,
+    _kiBildUrl: kiBildUrl,
   };
 }
 
