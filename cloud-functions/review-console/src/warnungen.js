@@ -244,10 +244,9 @@ function warnungen(k) {
     }
   }
   for (const t of (k.notbremse?.text || [])) rot('notbremse', `Notbremse: ${t}`);
-  // Gelb: die Bremse hält nur dank Fällen, die sie schon an einem Vortag
-  // zurückgehalten hat, bzw. solche Fälle wurden heute doch abgelehnt
-  // (fotoRundeRegeln.notbremse, Nachprüfung 06.10.2026) — kein neuer Befund,
-  // aber offen bzw. nachzusehen.
+  // Gelb: Fälle, die die Bremse schon an einem Vortag zurückgehalten hat,
+  // warten auf eine Entscheidung in der Konsole (fotoRundeRegeln.notbremse,
+  // Entscheidung Patrick 06.10.2026) — kein neuer Befund, eine Zeile je Morgen.
   for (const g of (k.notbremse?.gelb || [])) gelb(g.code || 'notbremse_vortage', `Notbremse: ${g.text}`);
 
   // ── Bon-Runde (07:45) ────────────────────────────────────────────────

@@ -740,42 +740,50 @@ describe('Bildschirmfoto als Preisbeleg (Patrick 04.10.2026: „ja, bau das")', 
     // Nachprüfung 06.10.2026 (zweimal): erst zählten die zurückgehaltenen Fälle
     // am nächsten Morgen erneut als NEUER Befund (täglich roter Alarm); dann
     // zählten sie gar nicht mehr — und eine anhaltende Fehllesung mit wenigen
-    // neuen Fällen gab sie zur Ablehnung frei. Jetzt: für das Ob zählen sie
-    // mit, für die Farbe der Warnung nur die frischen.
+    // neuen Fällen gab sie zur Ablehnung frei. Seit der Entscheidung Patricks
+    // (06.10.2026: „ja") lehnt die Runde einen in einem echten Lauf
+    // zurückgehaltenen Fall nie mehr selbst ab — Sperre `ablehnenGesperrt` am
+    // Fall, und jede andere heutige Ablehnung hält die Kohorte zurück.
     describe('zwei Morgen: übernommene Fälle', () => {
       const { preisBildschirmMitVorbefund, preisBildschirmVorbefund } = require('../src/preisBildschirm');
       const modi = { bildschirm: true, beleg: true };
+      const L1 = '2026-10-06_0800';
       const heute = (uid) => ({ ...entscheideFall(fall({ preisBildschirm: pb(true, 'bildschirm', true) })), id: `f_${uid}`, audit: echt, x: { userId: uid }, eingabe: fall({ preisBildschirm: pb(true, 'bildschirm', true) }) });
-      // Tag 1: vier Personen → Bremse, die Befunde landen am Dokument
+      // Tag 1: vier Personen → Bremse, die Befunde landen mit Sperre am Dokument
       const tag1 = () => {
         const t1 = [...frei(120), ...['a', 'b', 'c', 'd'].map(heute)];
         expect(notbremse(t1, { schnittQuote: null })).toMatchObject({ bildschirm: true, gelb: [] });
-        const e = t1.filter((p) => p.grund === 'notbremse_preis_bildschirm').map((p) => rundeOffenEintrag(p, { lauf: '2026-10-06_0800' }));
+        const e = t1.filter((p) => p.grund === 'notbremse_preis_bildschirm').map((p) => rundeOffenEintrag(p, { lauf: L1 }));
         expect(e).toHaveLength(4);
+        for (const x of e) expect(x.preisBildschirm).toEqual({ modus: true, befund: 'ablehnen', seit: L1, regeln: ['bildschirm'], ablehnenGesperrt: true, gesperrtSeit: L1 });
         return e;
       };
-      // Tag 2: niemand hat entschieden, das Modell liest dasselbe
-      const uebernommen = (e, uid) => {
-        const eingabe = fall({ preisBildschirm: preisBildschirmMitVorbefund(pb(true, 'bildschirm', true), preisBildschirmVorbefund({ review: { rundeOffen: e } }), modi) });
+      // Tag N: niemand hat entschieden, das Modell liest (standardmäßig) dasselbe
+      const uebernommen = (e, uid, heutePb = pb(true, 'bildschirm', true), over = {}) => {
+        const eingabe = fall({ ...over, preisBildschirm: preisBildschirmMitVorbefund(heutePb, preisBildschirmVorbefund({ review: { rundeOffen: e } }), modi) });
         return { ...entscheideFall(eingabe), id: `f_${uid}`, audit: echt, x: { userId: uid, review: { rundeOffen: e } }, eingabe };
       };
-      it('nur übernommene: Bremse hält sie weiter, kein Rot, gelbe Zeile mit „seit"', () => {
+      const alt = (t) => t.filter((p) => p.id && p.id.startsWith('f_'));
+      it('nur übernommene: gesperrt, sie halten selbst (keine Ablehnung), Bremse greift weiter, kein Rot, gelbe Zeile mit „seit"', () => {
         const eintraege = tag1();
         const t2 = [...frei(120), ...eintraege.map((e, i) => uebernommen(e, 'abcd'[i]))];
-        expect(t2.filter((p) => p.entscheidung === 'ablehnen' && p.preisBildschirmFall.vorbefund)).toHaveLength(4);
+        expect(t2.filter((p) => p.entscheidung === 'ablehnen')).toHaveLength(0);
+        expect(alt(t2).every((p) => p.entscheidung === 'offen' && p.grund === 'preis_bildschirm_unsicher' && p.preisBildschirmFall.vorbefund)).toBe(true);
         const b2 = notbremse(t2, { schnittQuote: null });
         expect(b2).toMatchObject({ bildschirm: true, text: [], ausVortagen: { bildschirm: 4 } });
-        expect(b2).not.toHaveProperty('ausVortagenAbgelehnt');
-        expect(b2.gelb).toEqual([{ code: 'notbremse_vortage_bildschirm', text: expect.stringMatching(/^4 Bildschirm-Ablehnungen \(4 Personen\) liegen seit 2026-10-06_0800 bei der Notbremse und sind noch nicht entschieden\. In der Konsole entscheiden/) }]);
-        expect(t2.filter((p) => p.grund === 'notbremse_preis_bildschirm')).toHaveLength(4);
+        expect(b2.gelb).toEqual([{ code: 'notbremse_vortage_bildschirm', text: `4 Fälle (4 Personen, Bildschirmfoto als Preis) warten seit ${L1} auf deine Entscheidung in der Konsole.` }]);
+        // Am Dokument: Merker und Sperre reisen weiter
+        for (const p of alt(t2)) {
+          expect(rundeOffenEintrag(p, { lauf: 'L2' })).toMatchObject({ grund: 'preis_bildschirm_unsicher', notbremseEcht: 'notbremse_preis_bildschirm', preisBildschirm: { befund: 'halten', seit: L1, ablehnenGesperrt: true, gesperrtSeit: L1 } });
+        }
       });
       it('Fehllesung hält an, drei neue Personen (unter der Schwelle): alle sieben bleiben liegen, gelb', () => {
         const eintraege = tag1();
         const t2 = [...frei(117), ...eintraege.map((e, i) => uebernommen(e, 'abcd'[i])), ...['e', 'f', 'g'].map(heute)];
         const b2 = notbremse(t2, { schnittQuote: null });
         expect(b2).toMatchObject({ bildschirm: true, text: [], ausVortagen: { bildschirm: 4 } });
-        expect(b2.gelb[0].text).toMatch(/— heute 3 neue \(3 Personen\) mitgehalten\./);
-        expect(t2.filter((p) => p.grund === 'notbremse_preis_bildschirm')).toHaveLength(7);
+        expect(b2.gelb[0].text).toMatch(/— heute 3 neue \(3 Personen\) mitgehalten\.$/);
+        expect(t2.filter((p) => p.grund === 'notbremse_preis_bildschirm')).toHaveLength(3);
         expect(t2.filter((p) => p.entscheidung === 'ablehnen')).toHaveLength(0);
       });
       it('vier neue Personen: die frischen allein greifen → rot, die übernommenen im Text', () => {
@@ -783,92 +791,162 @@ describe('Bildschirmfoto als Preisbeleg (Patrick 04.10.2026: „ja, bau das")', 
         const t2 = [...frei(116), ...eintraege.map((e, i) => uebernommen(e, 'abcd'[i])), ...['e', 'f', 'g', 'h'].map(heute)];
         const b2 = notbremse(t2, { schnittQuote: null });
         expect(b2).toMatchObject({ bildschirm: true, gelb: [], ausVortagen: { bildschirm: 4 } });
-        expect(b2.text.join(' ')).toMatch(/Bei 4 von 124 Einreichungen \(4 Personen, 3 %\).*dazu 4 schon an einem Vortag zurückgehaltene/);
-        expect(t2.filter((p) => p.grund === 'notbremse_preis_bildschirm')).toHaveLength(8);
+        expect(b2.text.join(' ')).toMatch(/Bei 4 von 124 Einreichungen \(4 Personen, 3 %\).*dazu 4 schon an einem Vortag zurückgehaltene\. Sie bleiben liegen, bis du sie in der Konsole entscheidest/);
+        expect(t2.filter((p) => p.grund === 'notbremse_preis_bildschirm')).toHaveLength(4);
+        expect(t2.filter((p) => p.entscheidung === 'ablehnen')).toHaveLength(0);
       });
-      it('Bremse greift nicht mehr (mehr geprüfte Fälle): übernommene werden abgelehnt und eigens gezählt', () => {
+      // Bis 06.10.2026: „Bremse greift nicht mehr → übernommene werden abgelehnt".
+      it('Bremse greift nicht mehr (mehr geprüfte Fälle): die übernommenen bleiben trotzdem liegen, gelbe Zeile', () => {
         const eintraege = tag1();
         // 4 Personen bei 164 geprüften = 2,4 % ≤ 2,5 %
         const t2 = [...frei(160), ...eintraege.map((e, i) => uebernommen(e, 'abcd'[i]))];
         const b2 = notbremse(t2, { schnittQuote: null });
-        expect(b2).toMatchObject({ bildschirm: false, text: [], gelb: [], ausVortagenAbgelehnt: { bildschirm: 4 } });
-        expect(t2.filter((p) => p.entscheidung === 'ablehnen' && p.grund === 'preis_bildschirm' && p.ausVortagAbgelehnt === 'bildschirm')).toHaveLength(4);
+        expect(b2).toMatchObject({ bildschirm: false, text: [], ausVortagen: { bildschirm: 4 } });
+        expect(b2.gelb).toEqual([{ code: 'notbremse_vortage_bildschirm', text: expect.stringMatching(/^4 Fälle .* warten seit /) }]);
+        expect(b2).not.toHaveProperty('ausVortagenAbgelehnt');
+        expect(alt(t2).every((p) => p.entscheidung === 'offen')).toBe(true);
       });
-      it('… hält danach die Gesamt-Bremse sie doch, zählen sie nicht als abgelehnt', () => {
+      it('… dann werden neue Bildschirm-Ablehnungen des Tages normal abgelehnt — nicht als „mitgehalten" gemeldet', () => {
         const eintraege = tag1();
-        const t2 = [...frei(150), ...eintraege.map((e, i) => uebernommen(e, 'abcd'[i])),
+        const t2 = [...frei(200), ...eintraege.map((e, i) => uebernommen(e, 'abcd'[i])), heute('neu')];
+        const b2 = notbremse(t2, { schnittQuote: null });
+        expect(b2.bildschirm).toBe(false);
+        expect(t2.find((p) => p.id === 'f_neu')).toMatchObject({ entscheidung: 'ablehnen', grund: 'preis_bildschirm' });
+        expect(b2.gelb[0].text).not.toMatch(/mitgehalten/);
+        expect(alt(t2).filter((p) => p.id !== 'f_neu').every((p) => p.entscheidung === 'offen')).toBe(true);
+      });
+      // Selbstprüfung 06.10.2026 (Regelwerk): die Sperre allein deckt nur die
+      // Bildschirm-Ablehnung. Liest die Bildprüfung heute keinen Preis mehr
+      // (oder „Fotos passen nicht"), hätte ein anderer Grund den gesperrten
+      // Fall abgelehnt — die Kohorte hält ihn zurück, und zwar NACH den
+      // übrigen Bremsen, die ihn weiter mitzählen (Geld/Betrug: keine Bremse
+      // wird unempfindlicher, Freigaben unberührt).
+      it('Kohorte: eine heutige Ablehnung aus ANDEREM Grund (Preis fehlt, Fotos passen nicht) bleibt zurückgehalten', () => {
+        const eintraege = tag1();
+        const ohnePreis = uebernommen(eintraege[0], 'a', pb(true, 'bildschirm', true), { preisVorhanden: false, audit: { ...echt, preisSichtbar: false } });
+        expect(ohnePreis).toMatchObject({ entscheidung: 'ablehnen', grund: 'preis_fehlt' });
+        const unpassend = uebernommen(eintraege[1], 'b', pb(true, 'bildschirm', true), { audit: { ...echt, echt: false } });
+        expect(unpassend).toMatchObject({ entscheidung: 'ablehnen', grund: 'fotos_unpassend' });
+        const t2 = [...frei(120), ohnePreis, unpassend, ...eintraege.slice(2).map((e, i) => uebernommen(e, 'cd'[i]))];
+        const b2 = notbremse(t2, { schnittQuote: null });
+        expect(ohnePreis).toMatchObject({ entscheidung: 'offen', grund: 'notbremse_preis_bildschirm', zurueckgehaltenGrund: 'preis_fehlt' });
+        expect(unpassend).toMatchObject({ entscheidung: 'offen', grund: 'notbremse_preis_bildschirm', zurueckgehaltenGrund: 'fotos_unpassend' });
+        expect(b2).toMatchObject({ bildschirm: true, preis: false, bild: false, ausVortagen: { bildschirm: 4 } });
+        // Ein echter Lauf: der Grund ist der Merker, die Sperre steht am Eintrag.
+        const e2 = rundeOffenEintrag(ohnePreis, { lauf: 'L2' });
+        expect(e2).toMatchObject({ grund: 'notbremse_preis_bildschirm', zurueckgehalten: 'preis_fehlt', preisBildschirm: { ablehnenGesperrt: true, gesperrtSeit: L1 } });
+        expect(e2).not.toHaveProperty('notbremseEcht');
+      });
+      it('… und zählt in den übrigen Bremsen weiter mit wie bisher (Preis-Bremse greift dank seiner — hält dann alle)', () => {
+        const eintraege = tag1();
+        const ohnePreis = uebernommen(eintraege[0], 'a', pb(true, 'bildschirm', true), { preisVorhanden: false, audit: { ...echt, preisSichtbar: false } });
+        // 7 weitere „Preis fehlt" + der übernommene = 8 von 24 geprüften (33 %) → Preis-Bremse
+        const preisFehlt = Array.from({ length: 7 }, (_, i) => ({ entscheidung: 'ablehnen', grund: 'preis_fehlt', audit: echt, x: { userId: `pf${i}` } }));
+        const t2 = [...frei(13), ohnePreis, ...eintraege.slice(1).map((e, i) => uebernommen(e, 'bcd'[i])), ...preisFehlt];
+        const b2 = notbremse(t2, { schnittQuote: null });
+        expect(b2.preis).toBe(true);
+        expect(preisFehlt.every((p) => p.entscheidung === 'offen' && p.grund === 'notbremse_preis')).toBe(true);
+        expect(ohnePreis).toMatchObject({ entscheidung: 'offen', grund: 'notbremse_preis' });
+        expect(t2.filter((p) => p.entscheidung === 'ablehnen')).toHaveLength(0);
+        // Merker und Sperre überleben auch einen Halt durch eine andere Bremse.
+        expect(rundeOffenEintrag(ohnePreis, { lauf: 'L2' })).toMatchObject({ grund: 'notbremse_preis', notbremseEcht: 'notbremse_preis_bildschirm', preisBildschirm: { ablehnenGesperrt: true, gesperrtSeit: L1 } });
+      });
+      it('… ebenso in der Gesamt-Bremse', () => {
+        const eintraege = tag1();
+        const t2 = [...frei(150), ...eintraege.map((e, i) => uebernommen(e, 'abcd'[i], pb(true, 'bildschirm', true), { audit: { ...echt, echt: false } })),
           ...Array.from({ length: 12 }, (_, i) => ({ entscheidung: 'ablehnen', grund: 'kein_produktname', audit: echt, x: { userId: `k${i}` } }))];
         const b2 = notbremse(t2, { schnittQuote: 0.01 });
         expect(b2.gesamt).toBe(true);
-        expect(b2).not.toHaveProperty('ausVortagenAbgelehnt');
+        expect(alt(t2).every((p) => p.entscheidung === 'offen' && p.grund === 'notbremse_quote' && p.zurueckgehaltenGrund === 'fotos_unpassend')).toBe(true);
+        // ohne die Gesamt-Bremse hielte sie die Kohorte am Ende
+        const t3 = [...frei(150), ...eintraege.map((e, i) => uebernommen(e, 'abcd'[i], pb(true, 'bildschirm', true), { audit: { ...echt, echt: false } }))];
+        expect(notbremse(t3, { schnittQuote: 0.01 }).gesamt).toBe(false);
+        expect(alt(t3).every((p) => p.entscheidung === 'offen' && p.grund === 'notbremse_preis_bildschirm')).toBe(true);
       });
-      it('ein Trockenlauf hat nichts zurückgehalten: danach zählen die Fälle im ersten scharfen Lauf als frisch (rot)', () => {
+      it('ein Trockenlauf hat nichts zurückgehalten: kein Merker, keine Sperre; danach zählen die Fälle im ersten scharfen Lauf als frisch (rot)', () => {
         const t1 = [...frei(120), ...['a', 'b', 'c', 'd'].map(heute)];
         notbremse(t1, { schnittQuote: null });
         const trocken = t1.filter((p) => p.grund === 'notbremse_preis_bildschirm').map((p) => rundeOffenEintrag(p, { lauf: 'T1', trocken: true }));
         expect(trocken[0]).not.toHaveProperty('notbremseEcht');
+        expect(trocken[0].preisBildschirm).not.toHaveProperty('ablehnenGesperrt');
         const t2 = [...frei(120), ...trocken.map((e, i) => uebernommen(e, 'abcd'[i]))];
         const b2 = notbremse(t2, { schnittQuote: null });
         expect(b2).toMatchObject({ bildschirm: true, gelb: [] });
         expect(b2.text).toHaveLength(1);
         expect(b2).not.toHaveProperty('ausVortagen');
       });
-      it('ein Trockenlauf NACH einem echten Halt trägt den Merker weiter (notbremseEcht)', () => {
+      it('ein Trockenlauf NACH einem echten Halt trägt Merker und Sperre weiter', () => {
         const eintraege = tag1();
-        // Trockenlauf am Nachmittag: die Bremse hält dieselben Fälle (im Speicher)
+        // Trockenlauf am Nachmittag
         const tr = [...frei(120), ...eintraege.map((e, i) => uebernommen(e, 'abcd'[i]))];
         notbremse(tr, { schnittQuote: null });
-        const nachTrocken = tr.filter((p) => p.grund === 'notbremse_preis_bildschirm').map((p) => rundeOffenEintrag(p, { lauf: 'T2', trocken: true }));
-        expect(nachTrocken[0]).toMatchObject({ trocken: true, notbremseEcht: 'notbremse_preis_bildschirm' });
+        const nachTrocken = alt(tr).map((p) => rundeOffenEintrag(p, { lauf: 'T2', trocken: true }));
+        expect(nachTrocken[0]).toMatchObject({ trocken: true, notbremseEcht: 'notbremse_preis_bildschirm', preisBildschirm: { ablehnenGesperrt: true, gesperrtSeit: L1 } });
         // auch über einen zweiten Trockenlauf hinweg
         const tr2 = [...frei(120), ...nachTrocken.map((e, i) => uebernommen(e, 'abcd'[i]))];
         notbremse(tr2, { schnittQuote: null });
-        const nachTrocken2 = tr2.filter((p) => p.grund === 'notbremse_preis_bildschirm').map((p) => rundeOffenEintrag(p, { lauf: 'T3', trocken: true }));
-        expect(nachTrocken2[0]).toMatchObject({ notbremseEcht: 'notbremse_preis_bildschirm' });
+        const nachTrocken2 = alt(tr2).map((p) => rundeOffenEintrag(p, { lauf: 'T3', trocken: true }));
+        expect(nachTrocken2[0]).toMatchObject({ notbremseEcht: 'notbremse_preis_bildschirm', preisBildschirm: { ablehnenGesperrt: true, gesperrtSeit: L1 } });
         const t2 = [...frei(120), ...nachTrocken2.map((e, i) => uebernommen(e, 'abcd'[i]))];
         const b2 = notbremse(t2, { schnittQuote: null });
         expect(b2).toMatchObject({ bildschirm: true, text: [], ausVortagen: { bildschirm: 4 } });
         expect(b2.gelb).toHaveLength(1);
-        // ein echter Lauf schreibt den Merker nicht (dort ist der Grund selbst der Merker)
-        expect(rundeOffenEintrag(t2.find((p) => p.grund === 'notbremse_preis_bildschirm'), { lauf: 'L2' })).not.toHaveProperty('notbremseEcht');
+        expect(t2.filter((p) => p.entscheidung === 'ablehnen')).toHaveLength(0);
       });
       // Abschlussprüfung 06.10.2026: die Kohorte zählt ganz, auch wer heute aus
-      // anderem Grund offen ist — sonst entschied ein Technikfehler mittelbar
-      // über die Ablehnung der übrigen.
-      it('Kohorte: ein übernommener Fall heute ohne Bildprüfung (offen) zählt für das Ob weiter mit; zurückgehalten werden nur die Ablehnungen', () => {
+      // anderem Grund offen ist.
+      it('Kohorte: ein übernommener Fall heute ohne Bildprüfung (offen) zählt weiter mit; Merker und Sperre überleben den Tag', () => {
         const eintraege = tag1();
         const ohneAudit = { ...entscheideFall(fall({ audit: null, auditFehler: 'INVALID_ARGUMENT' })), id: 'f_a', audit: null, x: { userId: 'a', review: { rundeOffen: eintraege[0] } } };
         expect(ohneAudit).toMatchObject({ entscheidung: 'offen', grund: 'bild_audit_gescheitert' });
         const t2 = [...frei(120), ohneAudit, ...eintraege.slice(1).map((e, i) => uebernommen(e, 'bcd'[i]))];
         const b2 = notbremse(t2, { schnittQuote: null });
         expect(b2).toMatchObject({ bildschirm: true, text: [], ausVortagen: { bildschirm: 4 } });
-        expect(b2).not.toHaveProperty('ausVortagenAbgelehnt');
-        expect(b2.gelb[0].text).toMatch(/^4 Bildschirm-Ablehnungen \(4 Personen\) liegen seit 2026-10-06_0800 .* — davon 1 heute aus anderem Grund offen \(etwa Bildprüfung gescheitert oder anders gelesen\), zählt weiter mit\./);
-        expect(t2.filter((p) => p.grund === 'notbremse_preis_bildschirm')).toHaveLength(3);
+        expect(b2.gelb[0].text).toBe(`4 Fälle (4 Personen, Bildschirmfoto als Preis) warten seit ${L1} auf deine Entscheidung in der Konsole.`);
         expect(ohneAudit).toMatchObject({ entscheidung: 'offen', grund: 'bild_audit_gescheitert' });
         expect(ohneAudit).not.toHaveProperty('zurueckgehaltenGrund');
-        // Der echte Lauf trägt den Merker weiter (der Grund ist heute ein anderer) …
+        // Der echte Lauf trägt Merker und Sperre weiter (der Grund ist heute ein anderer) …
         const e2 = rundeOffenEintrag(ohneAudit, { lauf: 'L2' });
-        expect(e2).toMatchObject({ grund: 'bild_audit_gescheitert', trocken: false, notbremseEcht: 'notbremse_preis_bildschirm' });
-        // … und am Morgen darauf zählt der Fall weiter zur Kohorte.
-        const t3 = [...frei(120), { ...ohneAudit, x: { userId: 'a', review: { rundeOffen: e2 } } }, ...eintraege.slice(1).map((e, i) => uebernommen(e, 'bcd'[i]))];
+        expect(e2).toMatchObject({ grund: 'bild_audit_gescheitert', trocken: false, notbremseEcht: 'notbremse_preis_bildschirm', preisBildschirm: { ablehnenGesperrt: true, gesperrtSeit: L1 } });
+        // … und am Morgen darauf zählt der Fall weiter zur Kohorte und wird nicht abgelehnt.
+        const t3 = [...frei(120), uebernommen(e2, 'a'), ...eintraege.slice(1).map((e, i) => uebernommen(e, 'bcd'[i]))];
         expect(notbremse(t3, { schnittQuote: null })).toMatchObject({ bildschirm: true, ausVortagen: { bildschirm: 4 } });
+        expect(t3.filter((p) => p.entscheidung === 'ablehnen')).toHaveLength(0);
       });
-      it('Kohorte: gesperrte Konten (liegen stumm) und heute freigegebene zählen nicht', () => {
+      it('Einträge von VOR der Entscheidung (Halt ohne Sperre): der Merker allein sperrt', () => {
+        const eintraege = tag1().map(({ preisBildschirm: { ablehnenGesperrt: _a, gesperrtSeit: _g, ...pbOhne }, ...rest }) => ({ ...rest, preisBildschirm: pbOhne }));
+        const t2 = [...frei(160), ...eintraege.map((e, i) => uebernommen(e, 'abcd'[i]))];
+        // ohne Sperre lesen sie heute wieder „ablehnen" …
+        expect(t2.filter((p) => p.entscheidung === 'ablehnen' && p.grund === 'preis_bildschirm')).toHaveLength(4);
+        const b2 = notbremse(t2, { schnittQuote: null });
+        // … die Kohorte hält sie trotzdem, obwohl die Bremse nicht greift (4 Personen bei 164)
+        expect(b2.bildschirm).toBe(false);
+        expect(alt(t2).every((p) => p.entscheidung === 'offen' && p.grund === 'notbremse_preis_bildschirm')).toBe(true);
+        // und der echte Lauf schreibt die Sperre nach
+        expect(rundeOffenEintrag(alt(t2)[0], { lauf: 'L2' }).preisBildschirm).toMatchObject({ ablehnenGesperrt: true, gesperrtSeit: L1 });
+      });
+      it('Kohorte: gesperrte Konten (liegen stumm) und heute freigegebene zählen nicht — die übrigen warten trotzdem', () => {
         const eintraege = tag1();
         const gesperrt = { ...entscheideFall({ kontoSperre: 'gesperrt' }), id: 'f_a', audit: null, x: { userId: 'a', review: { rundeOffen: eintraege[0] } } };
         const t2 = [...frei(120), gesperrt, ...eintraege.slice(1).map((e, i) => uebernommen(e, 'bcd'[i]))];
-        expect(notbremse(t2, { schnittQuote: null })).toMatchObject({ bildschirm: false, ausVortagenAbgelehnt: { bildschirm: 3 } });
+        const b2 = notbremse(t2, { schnittQuote: null });
+        expect(b2).toMatchObject({ bildschirm: false, ausVortagen: { bildschirm: 3 } });
+        expect(b2.gelb[0].text).toMatch(/^3 Fälle \(3 Personen/);
+        expect(t2.filter((p) => p.entscheidung === 'ablehnen')).toHaveLength(0);
         const freiHeute = { entscheidung: 'freigeben', grund: null, audit: echt, id: 'f_a', x: { userId: 'a', review: { rundeOffen: eintraege[0] } } };
         const t2b = [...frei(120), freiHeute, ...eintraege.slice(1).map((e, i) => uebernommen(e, 'bcd'[i]))];
-        expect(notbremse(t2b, { schnittQuote: null })).toMatchObject({ bildschirm: false, ausVortagenAbgelehnt: { bildschirm: 3 } });
+        expect(notbremse(t2b, { schnittQuote: null })).toMatchObject({ bildschirm: false, ausVortagen: { bildschirm: 3 } });
+        // Freigaben bleiben unberührt
+        expect(freiHeute.entscheidung).toBe('freigeben');
       });
-      it('ein Trockenlauf-Halt allein setzt den Merker auch im echten Lauf danach nicht (er hat nichts zurückgehalten)', () => {
+      it('ein Trockenlauf-Halt allein setzt weder Merker noch Sperre, auch im echten Lauf danach nicht (er hat nichts zurückgehalten)', () => {
         const t1 = [...frei(120), ...['a', 'b', 'c', 'd'].map(heute)];
         notbremse(t1, { schnittQuote: null });
         const trocken = rundeOffenEintrag(t1.find((p) => p.grund === 'notbremse_preis_bildschirm'), { lauf: 'T1', trocken: true });
         const ohneAudit = { ...entscheideFall(fall({ audit: null, auditFehler: 'x' })), audit: null, x: { userId: 'a', review: { rundeOffen: trocken } } };
-        expect(rundeOffenEintrag(ohneAudit, { lauf: 'L1' })).not.toHaveProperty('notbremseEcht');
+        const e = rundeOffenEintrag(ohneAudit, { lauf: 'L1' });
+        expect(e).not.toHaveProperty('notbremseEcht');
+        expect(e).not.toHaveProperty('preisBildschirm');
       });
     });
     it('andere eigene Bremsen zählen weiter Fälle (Preis fehlt: 8 Ablehnungen einer Person)', () => {
@@ -890,7 +968,10 @@ describe('Bildschirmfoto als Preisbeleg (Patrick 04.10.2026: „ja, bau das")', 
       const p = { ...plan({ preisBildschirm: pb(true, 'bildschirm', true) }) };
       notbremse([p, ...Array.from({ length: 60 }, () => ({ entscheidung: 'freigeben', grund: null, audit: echt })), ...Array.from({ length: 3 }, () => ({ entscheidung: 'ablehnen', grund: 'preis_bildschirm', audit: echt }))], { schnittQuote: null });
       expect(p).toMatchObject({ entscheidung: 'offen', grund: 'notbremse_preis_bildschirm' });
-      expect(rundeOffenEintrag(p, { lauf: 'L' }).preisBildschirm).toEqual({ modus: true, befund: 'ablehnen', seit: 'L', regeln: ['bildschirm'] });
+      // Entscheidung Patrick 06.10.2026: im echten Lauf mit Sperre gegen eine Ablehnung …
+      expect(rundeOffenEintrag(p, { lauf: 'L' }).preisBildschirm).toEqual({ modus: true, befund: 'ablehnen', seit: 'L', regeln: ['bildschirm'], ablehnenGesperrt: true, gesperrtSeit: 'L' });
+      // … im Trockenlauf ohne (er vermerkt nichts Dauerhaftes).
+      expect(rundeOffenEintrag(p, { lauf: 'L', trocken: true }).preisBildschirm).toEqual({ modus: true, befund: 'ablehnen', seit: 'L', regeln: ['bildschirm'] });
     });
     it('ohne Befund kein Eintrag dafür', () => {
       const p = plan({ ortAuffaellig: 'Ausland', preisBildschirm: pb(true, 'kassenbon', true) });
