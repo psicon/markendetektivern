@@ -514,7 +514,16 @@ function analysiereSeite({ inhalt, ean, istMarkdown = false } = {}) {
 
 const PLATZHALTER_NAME =
   /^(produkt|produkte|artikel|startseite|home|suche|suchergebnisse|404|seite nicht gefunden|client challenge|access denied|forbidden|just a moment.*|attention required.*|willkommen.*)$/i;
-const VERDAECHTIGER_NAME = /(suchergebnis|search result|not found|nicht gefunden|client challenge|captcha|cookie)/i;
+// Barcode-Datenbanken (06.10.2026, erster Lauf nach dem Ausrollen): opengtindb
+// lieferte als Namen seinen Seitentitel „4068706509612 Open EAN Database -
+// Datenbank und Produktbewertung“.
+const VERDAECHTIGER_NAME = /(suchergebnis|search result|not found|nicht gefunden|client challenge|captcha|cookie|open ean database|ean[- ]?datenbank|barcode[- ]?datenbank|produktbewertung)/i;
+// Ein Name, der mit einer Strichcode-Nummer (8–14 Ziffern) BEGINNT, ist der
+// Seitentitel einer Barcode-Seite oder nur die Nummer selbst, nie ein
+// Produktname. Gemessen 06.10.2026: 3 von 21.109 Namen in external_products,
+// alle drei unbrauchbar. Kopie: external-product-lookup/lib/normalizers.js
+// (echterName) — bei Änderungen beide nachziehen.
+const NAME_BEGINNT_MIT_NUMMER = /^\d{8,14}\b/;
 const SHOP_WOERTER = /\b(shop|online[- ]?shop|kaufen|bestellen|gro(ß|ss)handel|versand|apotheke)\b|\.(de|at|com|eu|net|shop)\b/i;
 
 function hostWoerter(host) {
@@ -558,7 +567,7 @@ function bereinigeName(roh, { host = null } = {}) {
   if (s.length > 200) s = s.slice(0, 200).trim();
   if (s.length < 3) return null;
   if (/^[\d\s.-]+$/.test(s)) return null;
-  if (PLATZHALTER_NAME.test(s) || VERDAECHTIGER_NAME.test(s)) return null;
+  if (PLATZHALTER_NAME.test(s) || VERDAECHTIGER_NAME.test(s) || NAME_BEGINNT_MIT_NUMMER.test(s)) return null;
   return s;
 }
 

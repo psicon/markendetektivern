@@ -69,12 +69,19 @@ function istSchwacheQuelle(source) {
 // Analyse 04.10.2026). Seitdem liefern die Normalizer ohne Namen
 // `undefined`, und jeder Platzhalter gilt beim Lesen als „kein Name".
 const PLATZHALTER_NAMEN = new Set(['produkt', 'unbekannt']);
+// Seitentitel einer Barcode-Datenbank bzw. nur die Nummer selbst (06.10.2026:
+// „4068706509612 Open EAN Database - Datenbank und Produktbewertung“ aus der
+// Suche; 3 von 21.109 gespeicherten Namen, alle unbrauchbar). Kopie der Regel
+// in nutrition-scraper/src/seitenDaten.js (bereinigeName) — beide nachziehen.
+const NAME_BEGINNT_MIT_NUMMER = /^\d{8,14}\b/;
+const DATENBANK_TITEL = /open ean database|ean[- ]?datenbank|barcode[- ]?datenbank|produktbewertung/i;
 
-/** Echter Produktname oder null (leer/Platzhalter → null). */
+/** Echter Produktname oder null (leer/Platzhalter/Seitentitel → null). */
 function echterName(name) {
   if (typeof name !== 'string') return null;
   const t = name.trim();
   if (!t || PLATZHALTER_NAMEN.has(t.toLowerCase())) return null;
+  if (NAME_BEGINNT_MIT_NUMMER.test(t) || DATENBANK_TITEL.test(t)) return null;
   return t;
 }
 

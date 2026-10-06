@@ -334,6 +334,21 @@ describe('bereinigeName', () => {
       expect(bereinigeName(roh, { host: 'x.de' })).toBeNull();
     },
   );
+
+  // 06.10.2026, erster Lauf nach dem Ausrollen: Seitentitel einer Barcode-Datenbank.
+  test.each([
+    ['4068706509612 Open EAN Database - Datenbank und Produktbewertung', 'www.opengtindb.org'],
+    ['4068706509612 Sahnejoghurt', 'x.de'],
+    ['EAN-Datenbank: Sahnejoghurt', 'x.de'],
+  ])('Seitentitel einer Barcode-Seite %p → null', (roh, host) => {
+    expect(bereinigeName(roh, { host })).toBeNull();
+  });
+
+  test('Nummer mitten im Namen bleibt (OpenFoodFacts-Schreibweise)', () => {
+    expect(bereinigeName('Dreamies mit Thunfisch Geschmack 4008429158223 Ergänzungsfuttermittel für Katzen', { host: 'x.de' }))
+      .toBe('Dreamies mit Thunfisch Geschmack 4008429158223 Ergänzungsfuttermittel für Katzen');
+    expect(bereinigeName('100 % Orangensaft 1 l', { host: 'x.de' })).toBe('100 % Orangensaft 1 l');
+  });
 });
 
 describe('nameGestuetzt', () => {

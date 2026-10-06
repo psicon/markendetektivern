@@ -101,6 +101,14 @@ describe('echterName', () => {
     expect(echterName('Produktmix Nüsse')).toBe('Produktmix Nüsse');
   });
 
+  test('Seitentitel einer Barcode-Datenbank und nackte Nummer → null (06.10.2026)', () => {
+    expect(echterName('4068706509612 Open EAN Database - Datenbank und Produktbewertung')).toBeNull();
+    expect(echterName('5901359174150')).toBeNull();
+    expect(echterName('Barcode-Datenbank: Milch')).toBeNull();
+    // Nummer mitten im Namen (OpenFoodFacts) bleibt ein Name
+    expect(echterName("Queen's Traditional Danish Butter Cookies 0077330345583 Dänische Buttergebäcke")).toBe("Queen's Traditional Danish Butter Cookies 0077330345583 Dänische Buttergebäcke");
+  });
+
   test('Nicht-Strings → null', () => {
     expect(echterName(null)).toBeNull();
     expect(echterName(undefined)).toBeNull();
