@@ -63,7 +63,7 @@ const { GoogleGenAI } = require('@google/genai');
 const { evaluateDuplicate, completenessCheck, dupZumSpeichern, appGrund, REASON } = require('./duplicatePolicy');
 const {
   entscheideFall, bildBefund, fotoVorbefund, bildMitVorbefund, belegeVon, notbremse, nameAusLesungen, eanAusLesungen, rettungNichtGeschafft, rundeOffenEintrag, preisBildschirmGemeldet,
-  korrekturBremse, KORREKTUR_ALT_MAX, BILD_GRUENDE, AUSSER_GESAMTQUOTE, KONTO_GESPERRT, EIGENE_BREMSEN,
+  korrekturBremse, KORREKTUR_ALT_MAX, BILD_GRUENDE, AUSSER_GESAMTQUOTE, KONTO_GESPERRT,
 } = require('./fotoRundeRegeln');
 // Werte-Helfer gemeinsam mit der Prüfkonsole (index.js/einreichung.js) — eine Quelle.
 const {
@@ -1574,16 +1574,6 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   const version = regelVersion(pbModus, belegModus, korrekturAn);
   const zaehle = (liste, feld) => liste.reduce((a, p) => { const k = p[feld] || '?'; a[k] = (a[k] || 0) + 1; return a; }, {});
   const abgelehnt = plan.filter((p) => p.entscheidung === 'ablehnen' && !p.uebersprungen);
-  // Notbremse: Ablehnungen, die eine Bremse an einem Vortag zurückgehalten
-  // hatte und heute doch geschrieben wurden (im Trockenlauf: geplant), weil
-  // sie nicht mehr griff — eigens gezählt und gelb gemeldet (Nachprüfung
-  // 06.10.2026). Nach dem Schreiben gezählt: übersprungene oder nicht
-  // geschriebene Fälle sind dann schon offen.
-  const ausVortagenAbgelehnt = zaehle(abgelehnt.filter((p) => p.ausVortagAbgelehnt), 'ausVortagAbgelehnt');
-  for (const [schalter, n] of Object.entries(ausVortagenAbgelehnt)) {
-    const b = EIGENE_BREMSEN.find((x) => x.schalter === schalter);
-    if (b && b.textAbgelehnt) bremse.gelb.push({ code: `notbremse_vortage_abgelehnt_${schalter}`, text: b.textAbgelehnt(n, dryRun) });
-  }
   // Gesperrte Konten liegen stumm und dauerhaft — sie warten NICHT auf eine
   // Entscheidung und zählen deshalb getrennt (sonst füllten sie „wartet auf
   // dich" und die Warnung „wartet seit X Tagen" jeden Morgen).
@@ -1858,12 +1848,10 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     schreibFehler: runde.schreibFehler,
     notbremse: {
       bild: bremse.bild, gesamt: bremse.gesamt, preis: bremse.preis, woche: bremse.woche, bildschirm: bremse.bildschirm, korrektur: korrekturStand.gebremst,
-      // Bildschirm-Bremse (Nachprüfung 06.10.2026): mitgehaltene Fälle aus
-      // Vortagen, und solche, die heute doch abgelehnt wurden (Bremse griff
-      // nicht mehr; im Trockenlauf geplant). Ob nur gelb gewarnt wurde, steht
-      // in `warnungen` (notbremse_vortage_*).
+      // Bildschirm-Bremse: Fälle aus Vortagen, die auf eine Entscheidung in
+      // der Konsole warten (Entscheidung Patrick 06.10.2026: die Runde lehnt
+      // sie nie selbst ab). Die gelbe Zeile steht in `warnungen` (notbremse_vortage_*).
       ...(bremse.ausVortagen ? { ausVortagen: bremse.ausVortagen } : {}),
-      ...(Object.keys(ausVortagenAbgelehnt).length ? { ausVortagenAbgelehnt } : {}),
     },
     // Bildschirmfoto als Preisbeleg (Patrick 04.10.2026) — Zahlen und Fälle.
     preisBildschirm,

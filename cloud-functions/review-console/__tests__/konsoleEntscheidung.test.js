@@ -287,6 +287,25 @@ describe('Befunde der Morgenrunde (review.rundeOffen, Prüfrunde 2, 02.10.2026)'
     expect(doc('a').review.rundeOffen).toBeUndefined();
   });
 
+  // Entscheidung Patrick 06.10.2026: Fälle der Bildschirm-Notbremse liegen,
+  // bis ein Mensch sie entscheidet — die Runde lehnt sie nie mehr selbst ab.
+  // Die Konsole bleibt frei: Freigabe ohne force, Ablehnung, „Zurückstellen"
+  // lässt Merker und Sperre stehen.
+  it('Fall der Bildschirm-Notbremse (Merker + Sperre): Freigabe ohne force, Ablehnung möglich, „Zurückstellen" lässt die Sperre stehen', async () => {
+    const pbSperre = { modus: true, befund: 'halten', seit: '2026-10-05_080000', regeln: ['bildschirm'], ablehnenGesperrt: true, gesperrtSeit: '2026-10-05_080000' };
+    const nb = (grund) => rundeOffen(grund, { sperrend: [], hinweis: null, notbremseEcht: 'notbremse_preis_bildschirm', preisBildschirm: pbSperre });
+    lege('f', nb('preis_bildschirm_unsicher'));
+    lege('a', nb('notbremse_preis_bildschirm'));
+    lege('h', nb('preis_bildschirm_unsicher'));
+    expect((await entscheide({ ids: ['f'], decision: 'approve' })).results[0].outcome).toBe('approved');
+    expect(doc('f').review.rundeOffen).toBeUndefined();
+    await entscheide({ ids: ['a'], decision: 'reject', reason: 'fotos_unpassend' });
+    expect(doc('a')).toMatchObject({ status: 'rejected', rejectReason: 'fotos_unpassend' });
+    expect(doc('a').review.rundeOffen).toBeUndefined();
+    await entscheide({ ids: ['h'], decision: 'hold', reason: 'nachfragen' });
+    expect(doc('h')).toMatchObject({ status: 'pending', review: { rundeOffen: { notbremseEcht: 'notbremse_preis_bildschirm', preisBildschirm: { ablehnenGesperrt: true } } } });
+  });
+
   it('Ablehnung nimmt den Eintrag mit; „Zurückstellen" (hold) lässt ihn stehen', async () => {
     lege('a', rundeOffen('foto_fremdes_konto'));
     lege('h', rundeOffen('foto_fremdes_konto'));

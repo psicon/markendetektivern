@@ -903,7 +903,9 @@ function preisBildschirmEintrag(pb, { lauf = null } = {}) {
   }
   // Gesperrt: heute hält eine scharfe Regel den Fall, oder die Sperre eines
   // früheren Laufs reist mit (preisBildschirmMitVorbefund). Eine von der
-  // Notbremse zurückgehaltene Ablehnung sperrt nicht (`befund: 'ablehnen'`).
+  // Notbremse zurückgehaltene Ablehnung (`befund: 'ablehnen'`) sperrt hier
+  // nicht — die Sperre setzt dafür die Runde, nur im echten Lauf
+  // (fotoRundeRegeln.mitBremsSperre, Entscheidung Patrick 06.10.2026).
   const haeltHeute = scharf && wirkt.befund === 'halten';
   if (!haeltHeute && pb.ablehnenGesperrt !== true) return befund;
   return {
@@ -949,9 +951,12 @@ function preisBildschirmVorbefund(x) {
  * Würde jeden Morgen neu gefragt und die erste „bildschirm"-Antwort
  * entschiede, wüchse die Wahrscheinlichkeit einer Ablehnung mit jedem Tag, den
  * der Fall auf Patrick wartet; die Antwort des Vortags steht bewusst nicht am
- * Dokument (preisBildschirmEintrag), ginge also verloren. Nur ein Vorbefund
- * „ablehnen" (von der Notbremse zurückgehalten) darf bei heutiger
- * Ablehn-Lesung abgelehnt werden.
+ * Dokument (preisBildschirmEintrag), ginge also verloren. Ein Vorbefund
+ * „ablehnen" (von der Notbremse zurückgehalten) trägt seit 06.10.2026 dieselbe
+ * Sperre, wenn ein echter Lauf ihn zurückhielt (fotoRundeRegeln.mitBremsSperre,
+ * Entscheidung Patrick: liegen lassen bis zur Konsole) — dann hält er nur.
+ * Ohne Sperre (Halt nur im Trockenlauf) darf er bei heutiger Ablehn-Lesung
+ * abgelehnt werden.
  *
  * Aufheben kann nur ein Mensch in der Konsole (jede Entscheidung dort ersetzt
  * `review`) — oder der Schalter DER REGEL, die den Befund trägt
@@ -967,10 +972,10 @@ function preisBildschirmVorbefund(x) {
  * Liest die Bildschirm-Regel heute „ablehnen", hält sie den Fall dann nur
  * (preis_bildschirm_unsicher), genau wie beim Rückweg über `'shadow'`. Vorher
  * wurde ein Preisbeleg-Halt nach `preisBelegRegel: false` auf eine einzige
- * neue „bildschirm"-Lesung hin endgültig abgelehnt. Eine von der Notbremse
- * zurückgehaltene Ablehnung (Vorbefund „ablehnen") ist kein Halt für einen
- * Menschen — ihre Regel ist die Bildschirm-Regel, und ist die aus, lehnt heute
- * ohnehin nichts ab.
+ * neue „bildschirm"-Lesung hin endgültig abgelehnt. Für eine von der
+ * Notbremse zurückgehaltene Ablehnung (Vorbefund „ablehnen") gilt dasselbe,
+ * sobald sie die Sperre trägt (fotoRundeRegeln.mitBremsSperre); ihre Regel
+ * ist die Bildschirm-Regel, und ist die aus, lehnt heute ohnehin nichts ab.
  *
  * Die Sperre reist mit, bis ein Mensch entscheidet (Nachprüfung 06.10.2026):
  * `ablehnenGesperrt` + `gesperrtSeit` stehen am Ergebnis, sobald der frühere

@@ -18,6 +18,8 @@ const { PREIS_BILDSCHIRM, preisBildschirmLage, preisBildschirmHinweis, preisBild
 
 const PENDING_OLDER = REASON.PENDING_OLDER;
 const KONTO_GESPERRT = 'konto_gesperrt';
+/** Halte-Grund der Bildschirm-Notbremse (EIGENE_BREMSEN). */
+const NOTBREMSE_BILDSCHIRM = 'notbremse_preis_bildschirm';
 
 /**
  * Ablehngründe, die besagen: dieses Produkt war für diese Person schon
@@ -64,30 +66,29 @@ const EIGENE_BREMSEN = Object.freeze([
   // vier Minuten) bei 126 geprüften; als Fälle gezählt (4, 3,2 %) hätte die
   // Bremse genau dann gegriffen, wenn die Regel richtig lag. Eine
   // geänderte Lesart des Modells trifft dagegen viele Personen.
-  // Übernommene Fälle (`vortageGetrennt`, Nachprüfung 06.10.2026, zweimal):
-  // ein noch offener Fall, den diese Bremse schon in einem früheren ECHTEN
-  // Lauf zurückgehalten hat (`review.rundeOffen.grund` = ihr Halte-Grund,
-  // sonst der weitergetragene Merker `notbremseEcht` — von einem Trockenlauf
-  // oder einem echten Lauf, in dem der Fall aus anderem Grund offen blieb),
-  // zählt für die Frage, OB die Bremse greift, weiter mit — ob er heute
-  // erneut „ablehnen" liest (preisBildschirmMitVorbefund), aus anderem Grund
-  // offen ist oder gesperrt hält (Abschlussprüfung 06.10.2026: sonst gab eine
-  // gescheiterte Bildprüfung bei EINEM Fall die übrigen zur Ablehnung frei).
-  // Ohne das gab eine anhaltende Fehllesung mit wenigen neuen
-  // Fällen (Tag 2: drei neue Personen) die gestern zurückgehaltenen zur
-  // endgültigen Ablehnung frei, ohne jede Warnung. Ob ROT gewarnt wird,
-  // entscheiden dagegen nur die frischen Fälle: greift die Bremse nur dank
-  // der übernommenen, ist das kein neuer Befund, sondern ein offener —
-  // gelbe Zeile „seit … zurückgehalten, in der Konsole entscheiden" statt
-  // täglich desselben roten Alarms (der legte den Rückweg
-  // `preisBildschirmRegel: 'shadow'` nahe, und der bezahlt alle
-  // zurückgehaltenen am Morgen darauf). Greift die Bremse gar nicht mehr
-  // (mehr geprüfte Fälle, oder ein Teil wurde in der Konsole entschieden),
-  // lehnt die Runde die übernommenen, die heute wieder „ablehnen" lesen, ab,
-  // wie in preisBildschirmMitVorbefund vorgesehen — das
-  // zählt der Bericht eigens (`notbremse.ausVortagenAbgelehnt`) und meldet
-  // es gelb. Ein Trockenlauf zählt nicht als „schon zurückgehalten": er hat
-  // nichts zurückgehalten, sein Befund ist im ersten scharfen Lauf neu.
+  // Übernommene Fälle (`vortageGetrennt`, Entscheidung Patrick 06.10.2026:
+  // „ja"): ein Fall, den diese Bremse in einem ECHTEN Lauf zurückgehalten hat,
+  // wird nie mehr automatisch abgelehnt, bis ein Mensch ihn in der Konsole
+  // entschieden hat — egal, ob andere Fälle derselben Kohorte entschieden
+  // wurden, und egal, wie viele neue Fälle an einem späteren Morgen kommen.
+  // Zwei Riegel: am Fall die Sperre `ablehnenGesperrt` (rundeOffenEintrag,
+  // preisBildschirm.preisBildschirmEintrag — gegen die Bildschirm-Ablehnung,
+  // auch nach Rücknahme der Regel), und in notbremse() jede andere heutige
+  // Ablehnung eines solchen Falls (etwa „Preis fehlt" oder „Fotos passen
+  // nicht" nach einer neuen Lesung) wird zurückgehalten. Erkannt wird er am
+  // Eintrag `review.rundeOffen` (`grund` eines echten Laufs bzw. der
+  // weitergetragene Merker `notbremseEcht`). Freigaben bleiben unberührt.
+  // Vorher (Nachprüfung und Abschlussprüfung 06.10.2026) lehnte die Runde die
+  // übrigen ab, sobald die Bremse ohne die entschiedenen nicht mehr griff —
+  // etwa nachdem Patrick einen Fall freigegeben hatte, weil das Modell ein
+  // echtes Preisschild falsch las.
+  // Die Kohorte (alle noch offenen solchen Fälle) zählt weiter für die Frage,
+  // OB die Bremse heute greift — sie hält dann auch die neuen
+  // Bildschirm-Ablehnungen des Tages mit zurück (die haltende Richtung). Ob
+  // ROT gewarnt wird, entscheiden nur die frischen Fälle; sonst steht eine
+  // gelbe Zeile „N Fälle warten seit …" im Bericht. Ein Trockenlauf zählt nicht
+  // als „schon zurückgehalten": er hat nichts zurückgehalten, sein Befund ist
+  // im ersten scharfen Lauf neu.
   // Seit 26.09. höchstens 2 Personen je Lauf. Schwelle: mindestens 4 Personen und mehr
   // als 2,5 % der geprüften (vorher 5 und 5 % auf Fälle — das ließ eine
   // Fehllesung im Umfang der e-Bon-Quote, ~4 %, an jedem normalen Tag
@@ -95,19 +96,16 @@ const EIGENE_BREMSEN = Object.freeze([
   // Den häufigsten Modellfehler (e-Bon als „Bildschirm") fängt schon die
   // Regel selbst ab (Lesedienst-Gegenzeichen, preisBildschirm.preisBildschirmBefund)
   // und meldet ihn als Warnung.
-  { schalter: 'bildschirm', gruende: [PREIS_BILDSCHIRM], halten: 'notbremse_preis_bildschirm', basis: 'geprueft', min: 4, anteil: 0.025, zaehle: 'personen', vortageGetrennt: true,
-    // Seit wann ein übernommener Fall liegt: Befund am Dokument (bleibt über die Tage gleich), sonst der letzte Lauf.
-    seit: (ro) => (ro.preisBildschirm && typeof ro.preisBildschirm.seit === 'string' && ro.preisBildschirm.seit) || (typeof ro.lauf === 'string' && ro.lauf) || null,
-    // Teilentscheidung (Abschlussprüfung 06.10.2026): wer in der Konsole nur
-    // einzelne der zurückgehaltenen entscheidet, nimmt sie aus der Kohorte —
-    // reichen die übrigen nicht mehr für die Schwelle, lehnt die Runde sie am
-    // Morgen darauf ab, auch wenn die Entscheidung gerade eine Fehllesung
-    // bestätigt hat. Ob die Kohorte stattdessen bis zur Konsole liegen bleibt,
-    // ist Patricks offene Frage (WISSEN-FOTORUNDE.md, Notbremse) — bis dahin
-    // sagen es beide Meldungen vorher.
-    text: (n, g, pz, personen, ausVortagen = 0) => `Bei ${n} von ${g} Einreichungen (${personen} Personen, ${pz} %) hielt die Bildprüfung das Preisfoto für ein Bildschirmfoto — diese Ablehnungen zurückgehalten${ausVortagen ? `, dazu ${ausVortagen} schon an einem Vortag zurückgehaltene` : ''}. Sie bleiben liegen, solange die Bremse greift; greift sie an einem späteren Morgen nicht mehr, lehnt die Runde sie ab — vorher in der Konsole ansehen und alle auf einmal entscheiden: wer nur einzelne entscheidet, lässt die übrigen ablehnen, sobald die Bremse ohne die entschiedenen nicht mehr greift.`,
-    textVortage: ({ alt, altPersonen, ohneBefund = 0, frisch, frischPersonen, seit }) => `${alt} Bildschirm-Ablehnung${alt === 1 ? '' : 'en'} (${altPersonen} ${altPersonen === 1 ? 'Person' : 'Personen'}) ${alt === 1 ? 'liegt' : 'liegen'} seit ${seit || 'einem früheren Lauf'} bei der Notbremse und ${alt === 1 ? 'ist' : 'sind'} noch nicht entschieden${ohneBefund ? ` — davon ${ohneBefund} heute aus anderem Grund offen (etwa Bildprüfung gescheitert oder anders gelesen), ${ohneBefund === 1 ? 'zählt' : 'zählen'} weiter mit` : ''}${frisch ? ` — heute ${frisch} neue (${frischPersonen} ${frischPersonen === 1 ? 'Person' : 'Personen'}) mitgehalten` : ''}. In der Konsole entscheiden, und zwar alle auf einmal (Grund „Notbremse (Bildschirmfoto als Preis)"): wer nur einzelne entscheidet, lässt die übrigen ablehnen, sobald die Bremse ohne die entschiedenen nicht mehr greift. Die Regel auf Beobachtung zu stellen, bezahlt sie am Morgen darauf.`,
-    textAbgelehnt: (n, trocken) => `${n} Bildschirm-Ablehnung${n === 1 ? '' : 'en'}, die die Notbremse an einem Vortag zurückgehalten hatte, ${trocken ? 'würde ein scharfer Lauf heute ablehnen' : 'heute abgelehnt'} — die Bremse griff nicht mehr (mehr geprüfte Einreichungen als an dem Morgen, oder ein Teil wurde inzwischen in der Konsole entschieden). Falls das Modell falsch las: in der Konsole öffnen und zurückholen.` },
+  { schalter: 'bildschirm', gruende: [PREIS_BILDSCHIRM], halten: NOTBREMSE_BILDSCHIRM, basis: 'geprueft', min: 4, anteil: 0.025, zaehle: 'personen', vortageGetrennt: true,
+    // Seit wann ein übernommener Fall liegt: Sperre bzw. Befund am Dokument (bleiben über die Tage gleich), sonst der letzte Lauf.
+    seit: (ro) => {
+      const pb = ro.preisBildschirm && typeof ro.preisBildschirm === 'object' ? ro.preisBildschirm : {};
+      const s = (v) => (typeof v === 'string' && v ? v : null);
+      return s(pb.gesperrtSeit) || s(pb.seit) || s(ro.lauf);
+    },
+    text: (n, g, pz, personen, ausVortagen = 0) => `Bei ${n} von ${g} Einreichungen (${personen} Personen, ${pz} %) hielt die Bildprüfung das Preisfoto für ein Bildschirmfoto — diese Ablehnungen zurückgehalten${ausVortagen ? `, dazu ${ausVortagen} schon an einem Vortag zurückgehaltene` : ''}. Sie bleiben liegen, bis du sie in der Konsole entscheidest — auch einzeln, die Runde lehnt keinen davon mehr selbst ab. Die Regel auf Beobachtung zu stellen, bezahlt sie am Morgen darauf.`,
+    // Eine Zeile je Morgen, solange Fälle warten (keine Wiederholung des roten Textes).
+    textVortage: ({ alt, altPersonen, frisch, frischPersonen, seit }) => `${alt} ${alt === 1 ? 'Fall' : 'Fälle'} (${altPersonen} ${altPersonen === 1 ? 'Person' : 'Personen'}, Bildschirmfoto als Preis) ${alt === 1 ? 'wartet' : 'warten'} seit ${seit || 'einem früheren Lauf'} auf deine Entscheidung in der Konsole${frisch ? ` — heute ${frisch} neue (${frischPersonen} ${frischPersonen === 1 ? 'Person' : 'Personen'}) mitgehalten` : ''}.` },
 ]);
 const AUSSER_GESAMTQUOTE = new Set([...EIGENE_BREMSEN.flatMap((b) => b.gruende), REASON.SAME_USER]);
 
@@ -672,8 +670,12 @@ const KORREKTUR_ALT_MAX = 25;
  *    Befund gilt im nächsten Lauf weiter, je Regel unter deren Schalter
  *    (preisBildschirmVorbefund). Hat eine scharfe Regel den Fall einmal
  *    angehalten, steht dazu die Sperre gegen eine automatische Ablehnung —
- *    auch allein, ohne Befund (Nachprüfung 06.10.2026). Keine Sperre für die
- *    Konsole: sie gibt ohne Notiz frei, wer hinsieht, entscheidet.
+ *    auch allein, ohne Befund (Nachprüfung 06.10.2026). Dieselbe Sperre
+ *    bekommt ein Fall, den die Bildschirm-Notbremse in einem ECHTEN Lauf
+ *    zurückgehalten hat (Entscheidung Patrick 06.10.2026, mitBremsSperre) —
+ *    ab diesem Lauf, und jeden weiteren Morgen, solange der Merker steht.
+ *    Keine Sperre für die Konsole: sie gibt ohne Notiz frei, wer hinsieht,
+ *    entscheidet.
  *  - `notbremseEcht`: Halte-Grund einer Notbremse mit `vortageGetrennt`, die
  *    den Fall in einem früheren ECHTEN Lauf zurückgehalten hatte — solange
  *    der Fall offen bleibt, in jedem Lauf, dessen `grund` ihn nicht selbst
@@ -709,7 +711,11 @@ const KORREKTUR_ALT_MAX = 25;
 function rundeOffenEintrag(p, { lauf, trocken = false } = {}) {
   if (!p || p.grund === KONTO_GESPERRT) return null;
   const sperrend = rundeBefunde(p.eingabe);
-  const pbEintrag = p.eingabe ? preisBildschirmEintrag(p.eingabe.preisBildschirm, { lauf }) : null;
+  // Merker eines echten Notbremse-Halts (siehe echtVonBremse) — vor dem
+  // Preis-Eintrag gelesen, weil er dort die Sperre gegen eine Ablehnung setzt.
+  const vorher = rundeOffenVon(p);
+  const echt = echtVonBremse(vorher);
+  const pbEintrag = mitBremsSperre(p.eingabe ? preisBildschirmEintrag(p.eingabe.preisBildschirm, { lauf }) : null, { p, vorher, echt, lauf, trocken });
   const pbSperre = !!(trocken && pbEintrag && pbEintrag.ablehnenGesperrt === true);
   if (p.entscheidung === 'freigeben' && !sperrend.length && !pbSperre) return null;
   const ef = p.eingabe && p.eingabe.eanFoto;
@@ -723,8 +729,6 @@ function rundeOffenEintrag(p, { lauf, trocken = false } = {}) {
   // Merker eines echten Notbremse-Halts weitertragen, solange der Fall offen
   // bleibt — außer ein echter Lauf hält ihn heute selbst mit demselben Grund
   // (dann ist der Grund der Merker). Siehe echtVonBremse.
-  const vorher = rundeOffenVon(p);
-  const echt = echtVonBremse(vorher);
   const merker = echt && (trocken || p.grund !== echt) ? echt : null;
   // Schon in einem echten Lauf gemeldeter Preis-Befund: nur ein Trockenlauf
   // trägt das weiter (ein echter Eintrag mit Befund ist selbst der Beleg).
@@ -764,6 +768,33 @@ function rundeOffenEintrag(p, { lauf, trocken = false } = {}) {
     lauf: lauf || null,
     trocken: !!trocken,
   };
+}
+
+/**
+ * Sperre gegen eine automatische Ablehnung für einen Fall der
+ * Bildschirm-Notbremse (Entscheidung Patrick 06.10.2026: „ja") — derselbe
+ * Mechanismus wie für einen scharfen Halt der Bildschirm-Regel
+ * (`ablehnenGesperrt` + `gesperrtSeit` in `review.rundeOffen.preisBildschirm`,
+ * preisBildschirm.preisBildschirmEintrag). Gesetzt, wenn
+ *  - ein ECHTER Lauf den Fall heute mit dieser Bremse zurückhält, oder
+ *  - der Fall den Merker eines früheren echten Halts trägt (`echt`, aus
+ *    `grund` bzw. `notbremseEcht`) — auch für Einträge, die vor dieser
+ *    Entscheidung geschrieben wurden und die Sperre noch nicht tragen, und
+ *    auch im Trockenlauf (die Sperre stammt dann aus einem echten Lauf).
+ * Ein Halt nur im Trockenlauf setzt nichts: Trockenläufe vermerken nichts
+ * Dauerhaftes. Die Sperre hält, bis ein Mensch in der Konsole entscheidet
+ * (jede Entscheidung dort ersetzt `review`; „Zurückstellen" lässt sie stehen).
+ * Sie sagt nichts darüber, woran der Halt hing — das Dokument liest der
+ * Einreicher selbst.
+ */
+function mitBremsSperre(pbEintrag, { p, vorher, echt, lauf, trocken }) {
+  const heuteEcht = !trocken && p.grund === NOTBREMSE_BILDSCHIRM;
+  if (!heuteEcht && echt !== NOTBREMSE_BILDSCHIRM) return pbEintrag;
+  if (pbEintrag && pbEintrag.ablehnenGesperrt === true) return pbEintrag;
+  const s = (v) => (typeof v === 'string' && v ? v.slice(0, 40) : null);
+  const vorPb = vorher && vorher.preisBildschirm && typeof vorher.preisBildschirm === 'object' ? vorher.preisBildschirm : {};
+  const seit = (echt === NOTBREMSE_BILDSCHIRM ? s(vorPb.gesperrtSeit) || s(vorPb.seit) || s(vorher.lauf) : null) || s(lauf);
+  return { ...(pbEintrag || {}), ablehnenGesperrt: true, gesperrtSeit: seit };
 }
 
 function ablehnen(grund, ctx = {}) { return { entscheidung: 'ablehnen', grund, ctx }; }
@@ -836,28 +867,29 @@ function rundeOffenVon(p) {
  *     schnittQuote lässt dieselben Gründe weg. Kippt die Gesamtquote, werden
  *     ALLE Ablehnungen des Laufs gehalten, auch die mit eigener Bremse.
  *
- *  Übernommene Fälle (`vortageGetrennt`, nur Bildschirm-Bremse, Nachprüfung
- *  06.10.2026): ob die Bremse greift, zählen frische Ablehnungen UND alle
- *  noch offenen Fälle, die sie an einem Vortag zurückgehalten hat (die
- *  Kohorte — auch die, die heute aus anderem Grund offen sind oder gesperrt
- *  halten, Abschlussprüfung 06.10.2026); rot gewarnt wird nur, wenn die
- *  frischen allein greifen würden — sonst eine gelbe Zeile (`gelb`). Greift
- *  sie nicht, bleiben die übernommenen Ablehnungen stehen und werden gezählt
- *  (`ausVortagenAbgelehnt`, Fall-Merker `ausVortagAbgelehnt`). Das geht nur
- *  noch über mehr geprüfte Fälle oder eine Teilentscheidung in der Konsole
- *  (offene Frage an Patrick, WISSEN-FOTORUNDE.md).
+ *  Übernommene Fälle (`vortageGetrennt`, nur Bildschirm-Bremse; Entscheidung
+ *  Patrick 06.10.2026: „ja"): alle noch offenen Fälle, die diese Bremse in
+ *  einem früheren ECHTEN Lauf zurückgehalten hat (die Kohorte), werden nie
+ *  automatisch abgelehnt — jede heutige Ablehnung eines solchen Falls, aus
+ *  welchem Grund auch immer, bleibt zurückgehalten (Grund = Halte-Grund der
+ *  Bremse, der ursprüngliche in `zurueckgehaltenGrund`), und zwar NACH allen
+ *  übrigen Bremsen, damit diese die Fälle weiter mitzählen wie bisher. Die
+ *  Bildschirm-Ablehnung selbst sperrt schon `ablehnenGesperrt` am Fall
+ *  (mitBremsSperre); das hier fängt die übrigen Gründe (etwa „Preis fehlt"
+ *  nach einer neuen Lesung) und Einträge ohne Sperre. Die Kohorte zählt mit
+ *  für die Frage, ob die Bremse heute greift (dann hält sie auch die neuen
+ *  Bildschirm-Ablehnungen zurück); rot gewarnt wird nur, wenn die frischen
+ *  allein greifen würden. Wartet eine Kohorte und gibt es kein Rot, steht
+ *  EINE gelbe Zeile „N Fälle warten seit …" im Bericht (`gelb`) — ob die
+ *  Bremse heute greift oder nicht.
  *
  * @param {Array<{entscheidung:string, grund:string|null, audit?:object|null}>} plan (wird verändert)
  * @param {{schnittQuote:number|null, bildMaxAnteil?:number, bildMin?:number, gesamtMin?:number}} opts
- * @returns {{bild:boolean, gesamt:boolean, preis:boolean, woche:boolean, bildschirm:boolean, text:string[], gelb:Array<{code:string, text:string}>, ausVortagen?:Object<string,number>, ausVortagenAbgelehnt?:Object<string,number>}}
- *   `bildschirm` usw.: die Bremse greift (rot ODER gelb gemeldet) — bei der
- *   Bildschirm-Bremse auch, wenn heute nur die Kohorte aus Vortagen offen ist
- *   und nichts Neues zurückzuhalten war;
- *   `text`: rote Warnungen; `gelb`: gelbe (Bremse greift nur dank übernommener Fälle);
- *   `ausVortagen`: je Bremse mit `vortageGetrennt` die noch offenen Fälle aus Vortagen
- *   (Kohorte, auch die heute aus anderem Grund offenen), wenn die Bremse greift;
- *   `ausVortagenAbgelehnt`: dieselben, wenn die Bremse nicht mehr greift und sie
- *   nach diesem Schritt noch abgelehnt werden (geplant — geschrieben zählt die Runde)
+ * @returns {{bild:boolean, gesamt:boolean, preis:boolean, woche:boolean, bildschirm:boolean, text:string[], gelb:Array<{code:string, text:string}>, ausVortagen?:Object<string,number>}}
+ *   `bildschirm` usw.: die Bremse greift — bei der Bildschirm-Bremse auch,
+ *   wenn sie nur dank der Kohorte greift und nichts Neues zurückzuhalten war;
+ *   `text`: rote Warnungen; `gelb`: gelbe (es warten Fälle aus Vortagen, kein neuer Befund);
+ *   `ausVortagen`: je Bremse mit `vortageGetrennt` die Größe der Kohorte, sobald sie nicht leer ist
  */
 function notbremse(plan, { schnittQuote = null, bildMaxAnteil = 0.1, bildMin = 5, gesamtMin = 10 } = {}) {
   const ergebnis = { bild: false, gesamt: false, preis: false, woche: false, bildschirm: false, text: [], gelb: [] };
@@ -867,44 +899,40 @@ function notbremse(plan, { schnittQuote = null, bildMaxAnteil = 0.1, bildMin = 5
   // `zaehle: 'personen'`: verschiedene Konten statt Fälle. Ohne Konto zählt
   // ein Fall als eigene Person (die strengere Richtung).
   const personenVon = (liste) => new Set(liste.map((p) => (p.x && p.x.userId) || `ohne_konto_${p.id || plan.indexOf(p)}`)).size;
+  // Kohorte (Entscheidung Patrick 06.10.2026): alle noch offenen Fälle, die
+  // eine Bremse mit `vortageGetrennt` in einem früheren echten Lauf
+  // zurückgehalten hat — ob sie heute „ablehnen" lesen (aus irgendeinem
+  // Grund), aus anderem Grund offen sind (Bildprüfung gescheitert,
+  // Zeitgrenze) oder gesperrt halten. Gesperrte Konten liegen stumm und
+  // warten auf keine Entscheidung — sie zählen nicht. Heute freigegebene
+  // gehören nicht dazu: Freigaben bleiben unberührt.
+  const kohorten = [];
   for (const b of EIGENE_BREMSEN) {
     const betroffen = plan.filter((p) => p.entscheidung === 'ablehnen' && b.gruende.includes(p.grund));
-    // `vortageGetrennt`: die Kohorte = alle noch offenen Fälle, die diese
-    // Bremse in einem früheren echten Lauf zurückgehalten hat (Eintrag am
-    // Dokument) — ob sie heute wieder „ablehnen" lesen, aus anderem Grund
-    // offen sind (Bildprüfung gescheitert, Zeitgrenze) oder gesperrt halten
-    // (heute anders gelesen). Zählt mit für das Ob, nicht für die Farbe der
-    // Warnung (siehe EIGENE_BREMSEN). Zurückgehalten werden nur die heutigen
-    // Ablehnungen. Abschlussprüfung 06.10.2026: zählten nur die, die heute
-    // „ablehnen" lasen, fiel ein Fall mit gescheiterter Bildprüfung aus der
-    // Zählung — und ein Technikfehler gab die übrigen zur endgültigen
-    // Ablehnung frei; ebenso eine schwankende Lesung, also gerade das Zeichen,
-    // dass dem Modell nicht zu trauen ist. Gesperrte Konten liegen stumm und
-    // warten auf keine Entscheidung — sie zählen nicht.
     const kohorte = b.vortageGetrennt
-      ? plan.filter((p) => schonZurueckgehalten(p, b) && p.grund !== KONTO_GESPERRT && (p.entscheidung === 'offen' || betroffen.includes(p)))
+      ? plan.filter((p) => schonZurueckgehalten(p, b) && p.grund !== KONTO_GESPERRT && (p.entscheidung === 'offen' || p.entscheidung === 'ablehnen'))
       : [];
-    const alt = betroffen.filter((p) => kohorte.includes(p));
     const frisch = betroffen.filter((p) => !kohorte.includes(p));
     const basis = b.basis === 'geprueft' ? geprueft : plan.length;
     const zahl = (liste) => (b.zaehle === 'personen' ? personenVon(liste) : liste.length);
     const greift = (n) => n >= b.min && basis > 0 && n / basis > b.anteil;
+    let rot = false;
     if (greift(zahl([...frisch, ...kohorte]))) {
       ergebnis[b.schalter] = true;
       const nFrisch = zahl(frisch);
       if (!kohorte.length || greift(nFrisch)) {
         ergebnis.text.push(b.text(frisch.length, basis, pz(nFrisch, basis), personenVon(frisch), kohorte.length));
-      } else {
-        const seit = kohorte.map((p) => b.seit(rundeOffenVon(p))).filter(Boolean).sort()[0] || null;
-        ergebnis.gelb.push({ code: `notbremse_vortage_${b.schalter}`, text: b.textVortage({ alt: kohorte.length, altPersonen: personenVon(kohorte), ohneBefund: kohorte.length - alt.length, frisch: frisch.length, frischPersonen: personenVon(frisch), seit }) });
+        rot = true;
       }
-      if (kohorte.length) ergebnis.ausVortagen = { ...(ergebnis.ausVortagen || {}), [b.schalter]: kohorte.length };
       halten(betroffen, b.halten);
-    } else {
-      // Greift nicht mehr: die übernommenen bleiben Ablehnungen — gemerkt, damit
-      // der Bericht sie eigens zählt (auch wenn später eine andere Bremse sie hält).
-      alt.forEach((p) => { p.ausVortagAbgelehnt = b.schalter; });
     }
+    if (!kohorte.length) continue;
+    kohorten.push([b, kohorte]);
+    ergebnis.ausVortagen = { ...(ergebnis.ausVortagen || {}), [b.schalter]: kohorte.length };
+    if (rot) continue;
+    const mit = ergebnis[b.schalter] ? frisch : [];
+    const seit = kohorte.map((p) => b.seit(rundeOffenVon(p))).filter(Boolean).sort()[0] || null;
+    ergebnis.gelb.push({ code: `notbremse_vortage_${b.schalter}`, text: b.textVortage({ alt: kohorte.length, altPersonen: personenVon(kohorte), frisch: mit.length, frischPersonen: personenVon(mit), seit }) });
   }
   const bildAbgelehnt = plan.filter((p) => p.entscheidung === 'ablehnen' && BILD_GRUENDE.has(p.grund));
   if (bildAbgelehnt.length >= bildMin && geprueft && bildAbgelehnt.length / geprueft > bildMaxAnteil) {
@@ -920,17 +948,18 @@ function notbremse(plan, { schnittQuote = null, bildMaxAnteil = 0.1, bildMin = 5
     ergebnis.text.push(`Ablehnungsquote ${Math.round(quote * 100)} % statt üblich ${Math.round(schnittQuote * 100)} % — alle Ablehnungen dieses Laufs zurückgehalten.`);
     halten(plan.filter((p) => p.entscheidung === 'ablehnen'), 'notbremse_quote');
   }
-  // Nach ALLEN Bremsen gezählt: hält die Bild- oder Gesamt-Bremse einen
-  // übernommenen Fall doch noch, wird er nicht abgelehnt.
-  for (const p of plan) {
-    if (!p.ausVortagAbgelehnt || p.entscheidung !== 'ablehnen') continue;
-    ergebnis.ausVortagenAbgelehnt = { ...(ergebnis.ausVortagenAbgelehnt || {}), [p.ausVortagAbgelehnt]: ((ergebnis.ausVortagenAbgelehnt || {})[p.ausVortagAbgelehnt] || 0) + 1 };
-  }
+  // Zum Schluss: was aus einer Kohorte jetzt noch „ablehnen" heißt, bleibt
+  // zurückgehalten, bis ein Mensch entscheidet (Entscheidung Patrick
+  // 06.10.2026) — aus welchem Grund auch immer, ob die Bremse heute greift
+  // oder nicht. Erst NACH allen übrigen Bremsen: so zählen diese Fälle dort
+  // weiter mit wie bisher (Bildprüfung, Gesamtquote, Preis), und keine Bremse
+  // wird dadurch unempfindlicher.
+  for (const [b, kohorte] of kohorten) halten(kohorte.filter((p) => p.entscheidung === 'ablehnen'), b.halten);
   return ergebnis;
 }
 
 module.exports = {
   entscheideFall, bildBefund, fotoVorbefund, bildMitVorbefund, belegeVon, notbremse, nameAusLesungen, eanAusLesungen, rettungNichtGeschafft,
   rundeBefunde, rundeOffenEintrag, preisBildschirmGemeldet, korrekturBremse,
-  BILD_GRUENDE, EIGENE_BREMSEN, AUSSER_GESAMTQUOTE, KONTO_GESPERRT, DOPPEL_GRUENDE, RUNDE_SPERREND, KORREKTUR_BREMSE, KORREKTUR_ALT_MAX,
+  BILD_GRUENDE, EIGENE_BREMSEN, NOTBREMSE_BILDSCHIRM, AUSSER_GESAMTQUOTE, KONTO_GESPERRT, DOPPEL_GRUENDE, RUNDE_SPERREND, KORREKTUR_BREMSE, KORREKTUR_ALT_MAX,
 };

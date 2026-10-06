@@ -845,10 +845,10 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   („laden" oder „kassenbon" zu einer Datei wie ein Bildschirm), und die
   Antwort des Vortags steht nicht am Dokument — würde jeden Morgen neu
   gefragt, wüchse die Wahrscheinlichkeit einer Ablehnung mit jedem Tag, den
-  der Fall auf Patrick wartet. Nur ein Befund „ablehnen" (von der Notbremse
-  zurückgehalten) darf bei heutiger Ablehn-Lesung abgelehnt werden — und nur,
-  wenn die Notbremse mit ihm zusammen nicht mehr greift (Abschnitt
-  Notbremse, „Übernommene Fälle"). Folge:
+  der Fall auf Patrick wartet. Ein Befund „ablehnen" (von der Notbremse
+  zurückgehalten) wird seit 06.10.2026 ebenfalls nie mehr abgelehnt, wenn ein
+  ECHTER Lauf ihn zurückhielt — er trägt dann dieselbe Sperre (Entscheidung
+  Patrick, Abschnitt Notbremse, „Übernommene Fälle"). Folge:
   ein am ersten Tag nur wegen „unklar" oder fehlender Antwort gehaltenes
   Bildschirmfoto lehnt die Runde nicht mehr selbst ab, es wartet auf die
   Konsole (gemessen selten: unklar 3 von 351, ohne Antwort 0 von 448).
@@ -1313,74 +1313,64 @@ Freigaben laufen IMMER — sie sind die harmlose Richtung. Zurückgehalten
   im Umfang der e-Bon-Quote (~4 %, viele Personen) an jedem echten Tag seit
   26.09. durch (Gegenprüfung 04.10.2026). Eine geänderte Lesart des Modells
   trifft viele Personen, eine Welle eine oder zwei. Zählt wie „Preis fehlt" nicht in die Gesamtquote
-  (`AUSSER_GESAMTQUOTE`, am Dokument über `review.reason`). Ein zurückgehaltener
-  Ablehn-Befund steht am Fall und hält im nächsten Lauf weiter, solange der
-  Tag ihn nicht selbst wieder als „ablehnen" liest. **Übernommene Fälle**
-  (an einem Vortag in einem ECHTEN Lauf von dieser Bremse zurückgehalten,
-  `review.rundeOffen.grund` bzw. der weitergetragene Merker
-  `review.rundeOffen.notbremseEcht`; Nachprüfung 06.10.2026, zwei Runden,
-  Abschlussprüfung 06.10.2026):
-  - **Ob die Bremse greift, zählt die ganze Kohorte mit** — alle noch
-    offenen Fälle, die sie zurückgehalten hat, ob sie heute wieder „ablehnen"
-    lesen, aus anderem Grund offen sind (Bildprüfung gescheitert, 429,
-    Zeitgrenze) oder gesperrt halten (heute anders gelesen). Zurückgehalten
-    werden nur die heutigen Ablehnungen. Eine Zwischenfassung zählte nur
-    frische Fälle — dann gab eine anhaltende Fehllesung mit wenigen neuen
-    Fällen (Tag 2: drei neue Personen, Schwelle vier) die gestern
-    zurückgehaltenen zur endgültigen Ablehnung frei, ohne jede Warnung
-    (nachgestellt: alle sieben `rejected`). Die nächste zählte nur, wer heute
-    „ablehnen" las — dann gab eine gescheiterte Bildprüfung bei EINEM Fall
-    (Tag 1: vier Personen gehalten, Tag 2: 429 bei einer) die übrigen drei
-    zur endgültigen Ablehnung frei, mit gelber Meldung „weniger Personen"
-    (nachgestellt, Abschlussprüfung). Ein Technikfehler entschied so
-    mittelbar über drei Ablehnungen — dieselbe Klasse, die die Sperre
-    `ablehnenGesperrt` beseitigt hat. Ebenso eine heute schwankende Lesung,
-    also gerade das Zeichen, dass dem Modell nicht zu trauen ist. Damit das
-    über mehrere Morgen hält, trägt jeder Lauf den Merker als
-    `notbremseEcht` weiter, solange der Fall offen bleibt und sein `grund`
-    ihn nicht selbst trägt. Gesperrte Konten liegen stumm und zählen nicht.
-  - **Rot nur, wenn die frischen Fälle allein greifen würden.** Hält die
-    Bremse nur dank der übernommenen, ist das kein neuer Befund, sondern ein
-    offener: gelbe Zeile `notbremse_vortage_bildschirm` („N … liegen seit …
-    bei der Notbremse und sind noch nicht entschieden — davon K heute aus
-    anderem Grund offen … — heute M neue mitgehalten. In der Konsole entscheiden,
-    und zwar alle auf einmal …"). Vorher kam derselbe rote
-    Alarm jeden Morgen, bis ein Mensch jeden Fall entschieden hatte, und legte
-    den Rückweg `preisBildschirmRegel: 'shadow'` nahe — der bezahlt alle
-    zurückgehaltenen am Morgen darauf. Solange die übernommenen offen sind
-    und die Schwelle halten, hält die Bremse auch neue Bildschirm-Ablehnungen
-    mit zurück (die haltende Richtung). Bericht: `notbremse.ausVortagen`
-    (die ganze Kohorte).
-  - **Greift sie nicht mehr**, lehnt die Runde einen übernommenen Fall ab,
-    der heute wieder „ablehnen" liest (wie in `preisBildschirmMitVorbefund`
-    vorgesehen). Das geht nur noch auf zwei Wegen: mehr geprüfte Fälle als
-    am Vortag (4 Personen ab 160 geprüften), oder ein Teil der Kohorte wurde
-    in der Konsole entschieden (Teilentscheidung, siehe unten). Gezählt
-    (`notbremse.ausVortagenAbgelehnt`, im Trockenlauf geplant) und gelb
-    gemeldet (`notbremse_vortage_abgelehnt_bildschirm`, mit beiden Ursachen
-    und dem Hinweis auf „Zurückholen" in der Konsole). Der rote Text am
-    ersten Morgen und die gelbe Zeile sagen vorher: alle auf einmal
-    entscheiden.
-  - Ein Trockenlauf hält nichts zurück und zählt nie als „schon
-    zurückgehalten" (nach Tagen mit ausgeschaltetem `fotoWorker` ist der
-    erste scharfe Lauf rot). Er überschreibt aber den Eintrag am Dokument —
-    deshalb trägt er den Merker eines echten Halts als
-    `review.rundeOffen.notbremseEcht` weiter (sonst wäre der nächste Morgen
-    wieder rot gewesen, und eine spätere Ablehnung nicht eigens gezählt).
-  **Offen für Patrick:** sollen übernommene Fälle bis zur Entscheidung in
-  der Konsole immer liegen bleiben (dieselbe Sperre wie `ablehnenGesperrt`)?
-  Dafür spricht der Rest-Weg oben: eine Ablehnung ist endgültig, und er
-  hängt an der Tagesmenge bzw. einer Teilentscheidung, nicht an einem
-  Menschen, der die übrigen angesehen hat. Nachgestellt (Abschlussprüfung
-  06.10.2026, Test „Befund 2"): Tag 1 hält die Bremse vier Personen, Patrick
-  gibt einen Fall frei, weil das Modell ein echtes Preisschild falsch las —
-  am Morgen darauf sind es drei Personen, die Bremse greift nicht mehr, und
-  die übrigen drei werden ohne Blick endgültig abgelehnt, obwohl ein Mensch
-  die Fehllesung gerade bestätigt hat. Bis zur Entscheidung warnen beide
-  Meldungen davor („alle auf einmal entscheiden"). Dagegen: jede ausgelöste
-  Bremse kostet dann Handarbeit, auch wenn das Modell richtig lag (Auslösen
-  ist selten: seit 26.09. höchstens 2 Personen je Lauf). Mit der Sperre
-  entfiele auch der Weg „mehr geprüfte Fälle".
+  (`AUSSER_GESAMTQUOTE`, am Dokument über `review.reason`).
+  **Übernommene Fälle — ENTSCHIEDEN (Patrick 06.10.2026: „ja"):** ein Fall,
+  den diese Bremse in einem ECHTEN Lauf zurückgehalten hat, wird nie mehr
+  automatisch abgelehnt, bis ein Mensch ihn in der Konsole entschieden hat —
+  egal, ob andere Fälle derselben Kohorte entschieden wurden, und egal, wie
+  viele neue Fälle an einem späteren Morgen kommen. Freigaben bleiben
+  unberührt (die Runde gibt ihn frei, wenn nichts mehr hält — etwa nach
+  `preisBildschirmRegel: 'shadow'`; das sagt der rote Text am ersten Morgen).
+  Umsetzung (`fotoRundeRegeln.mitBremsSperre` und `notbremse`):
+  - **Sperre am Fall:** der echte Lauf, der den Fall zurückhält, schreibt
+    `review.rundeOffen.preisBildschirm.ablehnenGesperrt` + `gesperrtSeit` —
+    dieselbe Sperre wie bei einem scharfen Halt der Bildschirm-Regel (siehe
+    Bildschirmfoto). Ab dem nächsten Morgen hält der Fall damit selbst
+    (`preis_bildschirm_unsicher`, Hinweis „Befund vom …, gilt bis zur
+    Entscheidung"), statt erneut „ablehnen" zu lesen — auch nach Rücknahme
+    der Regel, ohne Bildprüfung und im Trockenlauf. Ein Eintrag mit dem
+    Merker, aber ohne Sperre (vor dieser Entscheidung geschrieben), bekommt
+    sie beim nächsten Lauf nachgetragen.
+  - **Kohorte:** alle noch offenen solchen Fälle (erkannt an `grund` eines
+    echten Eintrags bzw. am Merker `review.rundeOffen.notbremseEcht`, den
+    jeder Lauf weiterträgt, solange der Fall offen bleibt). Jede heutige
+    Ablehnung eines Kohorten-Falls — aus welchem Grund auch immer, etwa
+    „Preis fehlt" oder „Fotos passen nicht" nach einer neuen Lesung — bleibt
+    zurückgehalten (`grund` = Halte-Grund der Bremse, der ursprüngliche in
+    `zurueckgehalten`). Das geschieht NACH allen übrigen Bremsen: Bildprüfung,
+    Gesamtquote und Preis zählen die Fälle weiter mit wie bisher (Selbstprüfung
+    06.10.2026: vorher gezogen, wären sie dort weggefallen und andere Bremsen
+    unempfindlicher geworden). Gesperrte Konten liegen stumm und zählen nicht.
+  - Die Kohorte zählt weiter für die Frage, OB die Bremse heute greift — dann
+    hält sie auch die neuen Bildschirm-Ablehnungen des Tages zurück, und die
+    bekommen ebenfalls Sperre und Merker. **Folge:** solange die wartenden
+    Fälle die Schwelle halten (4 Personen, > 2,5 % der geprüften), lehnt die
+    Runde keine Bildschirm-Ablehnung mehr selbst ab; die Warteschlange wächst,
+    bis du entscheidest.
+  - **Meldungen:** rot nur, wenn die frischen Fälle allein die Bremse ziehen
+    („… Sie bleiben liegen, bis du sie in der Konsole entscheidest — auch
+    einzeln …"). Sonst, solange eine Kohorte wartet, EINE gelbe Zeile je
+    Morgen `notbremse_vortage_bildschirm`: „N Fälle (P Personen,
+    Bildschirmfoto als Preis) warten seit … auf deine Entscheidung in der
+    Konsole[ — heute M neue mitgehalten]" — ob die Bremse greift oder nicht.
+    Bericht: `notbremse.ausVortagen` (Größe der Kohorte). Die frühere gelbe
+    Meldung „… heute abgelehnt" (`notbremse_vortage_abgelehnt_bildschirm`,
+    `ausVortagenAbgelehnt`) gibt es nicht mehr.
+  - **Ein Trockenlauf** hält nichts zurück, setzt weder Sperre noch Merker und
+    zählt nie als „schon zurückgehalten" (nach Tagen mit ausgeschaltetem
+    `fotoWorker` ist der erste scharfe Lauf rot). Einen Merker oder eine
+    Sperre aus einem echten Lauf trägt er unverändert weiter.
+  - **Konsole:** frei wie immer — Freigabe ohne force und Notiz, Ablehnung;
+    jede Entscheidung ersetzt `review` und nimmt Sperre und Merker mit.
+    „Zurückstellen" lässt beide stehen. Wird eine Ablehnung später
+    zurückgeholt (reopen), gilt der Fall für die Runde als neu.
+  - Vorher (Nachprüfung und Abschlussprüfung 06.10.2026) lehnte die Runde die
+    übernommenen ab, sobald die Bremse ohne sie nicht mehr griff — über mehr
+    geprüfte Fälle (4 Personen ab 160 geprüften) oder eine Teilentscheidung:
+    Tag 1 hält die Bremse vier Personen, Patrick gibt einen frei, weil das
+    Modell ein echtes Preisschild falsch las — am Morgen darauf wurden die
+    übrigen drei ohne Blick endgültig abgelehnt. Test „Befund 2" in
+    `__tests__/taeglicheRunde.test.js` hält jetzt das Gegenteil fest.
 - Wochen-Sperre und alte 24-h-Sperre zählen wie „Preis fehlt" NICHT in die
   Gesamtquote — weder heute noch im 30-Tage-Schnitt (`AUSSER_GESAMTQUOTE`,
   geprüft an `rejectReason` UND `review.reason`). Gesperrte Konten brauchen

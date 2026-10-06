@@ -176,15 +176,16 @@ describe('Bildschirmfoto als Preisbeleg (04.10.2026)', () => {
   it('Notbremse der Regel erscheint rot wie jede Notbremse', () => {
     expect(codes(warnungen(basis({ notbremse: { bild: false, gesamt: false, bildschirm: true, text: ['Bei 6 von 60 …'] } })))).toEqual(['rot:notbremse']);
   });
-  // Nachprüfung 06.10.2026: hält die Bremse nur dank Fällen eines Vortags
-  // (bzw. wurden solche Fälle doch abgelehnt), meldet sie gelb, nicht rot.
+  // Nachprüfung 06.10.2026: warten Fälle eines Vortags auf eine Entscheidung
+  // (Entscheidung Patrick 06.10.2026: die Runde lehnt sie nie selbst ab),
+  // meldet die Bremse gelb, nicht rot.
   it('… gelbe Einträge der Notbremse erscheinen gelb mit ihrem Code', () => {
     const w = warnungen(basis({ notbremse: { bild: false, gesamt: false, bildschirm: true, text: [], gelb: [
-      { code: 'notbremse_vortage_bildschirm', text: '4 Bildschirm-Ablehnungen … liegen seit …' },
-      { code: 'notbremse_vortage_abgelehnt_bildschirm', text: '3 … heute abgelehnt' },
+      { code: 'notbremse_vortage_bildschirm', text: '4 Fälle … warten seit …' },
+      { code: 'ohne_code_test', text: 'x' },
     ] } }));
-    expect(codes(w)).toEqual(['gelb:notbremse_vortage_bildschirm', 'gelb:notbremse_vortage_abgelehnt_bildschirm']);
-    expect(w[0].text).toBe('Notbremse: 4 Bildschirm-Ablehnungen … liegen seit …');
+    expect(codes(w)).toEqual(['gelb:notbremse_vortage_bildschirm', 'gelb:ohne_code_test']);
+    expect(w[0].text).toBe('Notbremse: 4 Fälle … warten seit …');
     // ältere Aufrufer ohne `gelb` bleiben unverändert
     expect(warnungen(basis({ notbremse: { bild: false, gesamt: false, text: [] } }))).toEqual([]);
   });
