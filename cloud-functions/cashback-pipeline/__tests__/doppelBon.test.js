@@ -101,13 +101,15 @@ describe('Schalter', () => {
     expect(D.schalterModus(v)).toBe(e);
   });
 
-  test('Code-Default: alles aus außer seite und bild (an) und seiteAbweichend (Beobachtung), Schwelle 0,6, mindestens 5 Artikel', () => {
+  test('Code-Default: alles aus außer summe, seite und bild (an) und seiteAbweichend (Beobachtung), Schwelle 0,6, mindestens 5 Artikel', () => {
     // seite/bild an (Nachprüfung 05.10.2026): sie sichern nur Zahlwege ab, die
     // ohne Schalter (Artikelsumme) bzw. erst mit scharfem Feinvergleich entstehen.
-    // seiteAbweichend (06.10.2026) wird ab dem Deploy nur beobachtet.
-    expect(D.doppelModi({})).toEqual({ summe: false, konten: false, artikel: false, bestellung: false, datum: false, kontenArtikel: false, seite: true, kontenDatum: false, bild: true, seiteAbweichend: 'shadow', schwelle: 0.6, minArtikel: 5 });
-    expect(D.modiVermerk(D.doppelModi({ doppelDatum: 'shadow', doppelKontenArtikel: true, doppelOnlineSeite: 'shadow', doppelKontenDatum: true, doppelBildAehnlich: false, doppelSeiteAbweichend: true })))
+    // seiteAbweichend (06.10.2026) wird ab dem Deploy nur beobachtet. summe an
+    // (dritte Prüfrunde 06.10.2026): der Doppelfall vom 04.10. ab dem Deploy.
+    expect(D.doppelModi({})).toEqual({ summe: true, konten: false, artikel: false, bestellung: false, datum: false, kontenArtikel: false, seite: true, kontenDatum: false, bild: true, seiteAbweichend: 'shadow', schwelle: 0.6, minArtikel: 5 });
+    expect(D.modiVermerk(D.doppelModi({ doppelSumme: false, doppelDatum: 'shadow', doppelKontenArtikel: true, doppelOnlineSeite: 'shadow', doppelKontenDatum: true, doppelBildAehnlich: false, doppelSeiteAbweichend: true })))
       .toEqual({ summe: false, konten: false, artikel: false, bestellung: false, datum: 'shadow', kontenArtikel: true, seite: 'shadow', kontenDatum: true, bild: false, seiteAbweichend: true });
+    expect(D.doppelModi({ doppelSumme: 'shadow' }).summe).toBe('shadow');
     expect(D.doppelModi({ doppelSeiteAbweichend: false }).seiteAbweichend).toBe(false);
     expect(D.doppelModi({ doppelSeiteAbweichend: 'ja' }).seiteAbweichend).toBe(false);
     // Nur ein FEHLENDER Wert gilt als an; alles Unbekannte bleibt aus.

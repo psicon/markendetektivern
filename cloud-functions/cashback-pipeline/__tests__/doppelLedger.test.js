@@ -245,8 +245,18 @@ describe('Beobachtungs-Modus', () => {
     expect(earns().find((e) => e.receiptId === 's2').schluessel).toEqual([]);
   });
 
-  test('Code-Default (keine Schalter) → altes Verhalten, Einträge und Schlüssel werden trotzdem geschrieben', async () => {
+  test('Code-Default (keine Schalter) → summe greift (dritte Prüfrunde 06.10.2026: der Doppelfall vom 04.10. ab dem Deploy)', async () => {
     fake.store.set('cashback_config/v1', { campaignsEnabled: true, dailyCap: 3 });
+    bonAnlegen('o1');
+    await verarbeiten('o1');
+    bonInPruefung('o2');
+    expect((await freigeben('o2')).body).toMatchObject({ status: 'rejected', rejectReason: 'duplicate_content_self' });
+    expect(earns()).toHaveLength(1);
+    expect(fake.store.get('receipts/o2').doppelPruefung.modi).toMatchObject({ summe: true, konten: false, artikel: false });
+  });
+
+  test('alle Regeln ausdrücklich aus (doppelSumme: false) → altes Verhalten, Einträge und Schlüssel werden trotzdem geschrieben', async () => {
+    fake.store.set('cashback_config/v1', { campaignsEnabled: true, dailyCap: 3, doppelSumme: false });
     bonAnlegen('o1');
     await verarbeiten('o1');
     bonInPruefung('o2');

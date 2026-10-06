@@ -146,9 +146,13 @@
  *              der grobe dHash sperrte sie bisher). Nur wenn keine andere
  *              Regel wirksam trifft (Reihenfolge). (Offene Kandidaten, Markt,
  *              Resolver: siehe zweite Runde 06.10.2026 unten.)
- *              Schalter `doppelBildAehnlich`, Code-Default TRUE (wirkt nur,
- *              wo der scharfe Feinvergleich `capture.bildAehnlich` schrieb),
- *              und Voraussetzung für `bildFeinvergleich: true`.
+ *              Schalter `doppelBildAehnlich`, Code-Default TRUE, und
+ *              Voraussetzung für `bildFeinvergleich: true`. Wirkt, wo
+ *              `capture.bildAehnlich` steht: vom scharfen Feinvergleich beim
+ *              Hochladen ODER — seit der vierten Prüfrunde 06.10.2026 und in
+ *              JEDEM Modus des Feinvergleichs, also schon ab dem Deploy — vom
+ *              Nachtrag bei gleichzeitigem Hochladen (index.js
+ *              gleichzeitigeBildKandidaten, siehe unten).
  *
  * Nachprüfung 06.10.2026 (Befunde der Nachprüfung zum Prompt-Schalter):
  *   datum      ohne gleiche Uhrzeit zählt als Summe auch die gleiche Summe
@@ -193,33 +197,92 @@
  *              21 von 459 Paaren an verschiedenen Märkten, also etwa +5 %
  *              Prüffälle (scratchpad/bild_markt_mess.js).
  *   bild       sieht alle groben Treffer, die laufen oder Geld bekamen (bis
- *              BILD_MAX_KANDIDATEN, neueste zuerst), nicht nur die bis zu 3
- *              fein verglichenen — drei ältere ähnliche Bons verdrängten sonst
- *              das Original aus der Liste.
+ *              BILD_MAX_KANDIDATEN, seit der Abschlussprüfung bezahlte zuerst,
+ *              siehe unten), nicht nur die bis zu 3 fein verglichenen — drei
+ *              ältere ähnliche Bons verdrängten sonst das Original aus der Liste.
  *   seite, seiteAbweichend  ein UNSICHER erkannter Markt (Tippfehler-
  *              Abgleich ohne lesbaren Namen, Eigenmarken-Stufe: marktIstSicher)
  *              gilt als gleicher Markt: ein Abschnitt ohne Kopf wurde „dm" und
  *              einzeln bezahlt.
  *   Prüfregeln (bild, seiteAbweichend) gelten auch bei einer Entscheidung über
- *              den Resolver: trifft eine wirksam und steht der Bon nicht schon
- *              mit einem Prüfgrund in der Prüfung (modiFuerEntscheidung), hält
+ *              den Resolver: trifft eine wirksam (und hat ein Mensch genau
+ *              diesen Treffer nicht quittiert, quittierteTreffer), hält
  *              der Resolver ihn fest („halten") statt zu buchen — sonst gab die
  *              Bon-Runde einen Abschnitt bzw. eine Kopie frei, die wegen der
  *              Lese-Sicherheit in der Prüfung lag.
  *
- * Bekannte Lücke (Korrektur 05.10.2026): dieselbe Person, ANDERER Bon-Tag (ab
- * 1 Tag, nicht erst ab 9), Uhrzeit geändert oder verdeckt UND Endsumme UND
- * mindestens ein Artikelpreis geändert → weder Summe noch Artikelsumme passt,
- * keine Textregel greift. Heute sperrt der grobe dHash solche Kopien (außer
- * bei starkem Beschnitt); mit scharfem Feinvergleich fängt sie Regel `bild`
- * nur bis ±8 Tage um den Bon-Tag des Originals. Gemessen als Kandidat (nicht
- * gebaut): „gleiche Person, gleicher Markt, 1–95 Tage, Artikelanteil ≥ 0,8
- * ohne Summe" — 0 von 11.442 bezahlten Paaren, höchster ehrlicher Wert 0,75.
+ * Dritte Prüfrunde 06.10.2026 (Angriffe mit dem echten index.js nachgestellt,
+ * __tests__/nachpruefung0610c.test.js):
+ *   bild       `bild_aehnlich_offen` schaltet im Resolver keine Regel mehr ab
+ *              (damals modiFuerEntscheidung): gab ein Mensch die Kopie frei, buchte er
+ *              sie, und das Original (ohne Vermerk) wurde danach ebenfalls
+ *              bezahlt. Jetzt hält der Resolver erneut fest, solange das
+ *              Original offen oder inzwischen bezahlt ist.
+ *   bild       auch außerhalb von ±8 Tagen, wenn der Artikelanteil mindestens
+ *              BILD_FERN_ANTEIL erreicht (bildTrifft) — mit scharfem
+ *              Feinvergleich war eine Kopie mit dem Datum „gestern" zu einem
+ *              älteren Original sonst bezahlt.
+ *   seiteAbweichend  auch bei gemischter Art am selben Tag (eine Seite als
+ *              Online-Bestellung, ein Teil als App-Kassenbon, einer ohne Summe;
+ *              `abweichend: ['belegart']`).
+ *   summe      Code-Default AN (schalterModusStandardAn).
+ *
+ * Vierte Prüfrunde 06.10.2026 (__tests__/nachpruefung0610d.test.js):
+ *   bild, seiteAbweichend  eine Freigabe schaltet keine Regel mehr ab, sondern
+ *              quittiert die einzelnen Treffer, die der Mensch in der Zeile
+ *              „Doppel-Prüfung" vor sich hatte (quittierteTreffer): wirksam,
+ *              gegen einen entschiedenen Bon, im Stand `doppelPruefung.at`, den
+ *              die Prüfkonsole mitschickt; neu nur bei `bild_aehnlich_bezahlt`
+ *              und `seite_abweichend`, bei `bild_aehnlich_offen` wird nur
+ *              Quittiertes weitergetragen. Vorher (a) buchte die Freigabe einer
+ *              Kopie, die einem bezahlten ANDEREN Einkauf und dem offenen
+ *              Original ähnelte, und danach das Original — zwei Gutschriften;
+ *              (b) hielten bild und seiteAbweichend abwechselnd endlos fest.
+ *   bild       offene Kandidaten zuerst (statt bezahlte): die Kopie wartet auf
+ *              das Original, auch wenn sie zusätzlich einem bezahlten Bon ähnelt.
+ *   bild       auch bei GLEICHZEITIGEM Hochladen: enqueueCashback sieht nach dem
+ *              Anlegen nach, ob ein älterer Bon derselben Person mit nahem dHash
+ *              inzwischen angelegt ist, und trägt ihn als Kandidaten nach
+ *              (`capture.bildAehnlich.gleichzeitig`). Nur ältere — so trägt
+ *              immer die jüngere Einreichung den Vermerk, nie beide.
+ *
+ * Abschlussprüfung 06.10.2026 (__tests__/abschluss0610.test.js):
+ *   bild       die Kandidatenliste fasst alle groben Treffer der Bildprüfung
+ *              (BILD_MAX_KANDIDATEN 55 statt 20) und ordnet beim Kürzen
+ *              bezahlte vor offenen (bildKandidatenOrdnen). Vorher, mit 20 und
+ *              „neueste zuerst": 20 frische, ähnlich aussehende Uploads kurz vor
+ *              der bearbeiteten Kopie verdrängten das bezahlte Original, wurden
+ *              abgelehnt, und die Kopie wurde bezahlt (nur mit scharfem
+ *              Feinvergleich). Grenze bleibt die Rückschau der Bildprüfung (50
+ *              jüngste Bons der Person): 50 beliebige Uploads zwischen Original
+ *              und Kopie schieben das Original dort hinaus — bestehend, auch
+ *              ohne diesen Zweig.
+ *   bild       ein Bild, das sharp nicht lesen kann (PDF, HEIC, abgeschnittene
+ *              Datei), hat keinen dHash — Regel bild und die grobe Sperre sind
+ *              dafür blind. enqueueCashback vermerkt das
+ *              (`capture.bildNichtLesbar`), und processCashback gibt einen
+ *              solchen Bon vor der ersten Gutschrift an einen Menschen
+ *              (`bild_nicht_pruefbar`, Schalter `bildNichtLesbarPruefen`).
+ *
+ * Bekannte Lücken (Korrektur 05.10.2026, ergänzt 06.10.): dieselbe Person,
+ * ANDERER Bon-Tag (ab 1 Tag, nicht erst ab 9), Uhrzeit geändert oder verdeckt
+ * UND Endsumme UND mindestens ein Artikelpreis geändert → weder Summe noch
+ * Artikelsumme passt, keine Textregel greift. Heute sperrt der grobe dHash
+ * solche Kopien (außer bei starkem Beschnitt); mit scharfem Feinvergleich fängt
+ * sie Regel `bild` bis ±8 Tage um den Bon-Tag des Originals und darüber hinaus
+ * nur ab einem Artikelanteil von BILD_FERN_ANTEIL. Gemessen als Textregel-
+ * Kandidat (nicht gebaut): „gleiche Person, gleicher Markt, 1–95 Tage,
+ * Artikelanteil ≥ 0,8 ohne Summe" — 0 von 11.442 bezahlten Paaren, höchster
+ * ehrlicher Wert 0,75. Und: Regel bild steht nur an der JÜNGEREN Einreichung.
+ * Wurde die Kopie bezahlt, während das Original abgelehnt war (Status nicht
+ * offen, nicht bezahlt), und wird das Original später nachverarbeitet, sieht es
+ * die Kopie nicht — vor einer Nachverarbeitung abgelehnter Bons die Bons der
+ * Person mit `capture.bildAehnlich` auf diese ID prüfen.
  *
  * Jede Regel hängt an einem Schalter in `cashback_config/v1` (false | 'shadow'
- * | true, Code-Default false = altes Verhalten; Ausnahmen `seite` und `bild`
- * (Default true) und `seiteAbweichend` (Default 'shadow'), siehe oben). Ein
- * Treffer im Modus 'shadow' wird am Bon vermerkt, ändert aber nichts.
+ * | true, Code-Default false = altes Verhalten; Ausnahmen `summe`, `seite` und
+ * `bild` (Default true) und `seiteAbweichend` (Default 'shadow'), siehe oben).
+ * Ein Treffer im Modus 'shadow' wird am Bon vermerkt, ändert aber nichts.
  */
 
 const crypto = require('crypto');
@@ -668,6 +731,10 @@ function schalterModus(v) {
  * Nur für Schutzregeln, die ausschließlich einen Zahlweg absichern, der selbst
  * ohne Schalter gilt (seite) bzw. erst mit einem anderen scharfen Schalter
  * entsteht (bild) — dort hieße „aus" per Default: der Deploy öffnet die Lücke.
+ * Dazu summe (dritte Prüfrunde 06.10.2026): der Doppelfall vom 04.10., den
+ * Patrick abgestellt haben will („ja, abstellen"), und gemessen ohne einen
+ * zahlbaren Fehlalarm (615 Paare, 612 derselbe Bon, die übrigen 3 mit 1–2
+ * Artikeln) — „aus" per Default hieße: der Deploy allein stellt nichts ab.
  * Ein ausdrückliches false oder 'shadow' wirkt wie überall.
  */
 function schalterModusStandardAn(v) {
@@ -688,7 +755,9 @@ function doppelModi(config = {}) {
   const schwelle = Number(config.doppelArtikelSchwelle);
   const minArtikel = Number(config.doppelArtikelMin);
   return {
-    summe: schalterModus(config.doppelSumme),
+    // Code-Default AN (dritte Prüfrunde 06.10.2026, siehe Kopf): sonst
+    // verhinderte der Deploy allein den Doppelfall vom 04.10. nicht.
+    summe: schalterModusStandardAn(config.doppelSumme),
     konten: schalterModus(config.doppelKonten),
     artikel: schalterModus(config.doppelArtikel),
     bestellung: schalterModus(config.doppelBestellnummer),
@@ -739,37 +808,106 @@ const BILD_OFFEN_GRUND = 'bild_aehnlich_offen';
 const SEITE_GRUND = 'seite_abweichend';
 // Regeln, die nicht ablehnen, sondern einen Menschen entscheiden lassen.
 const PRUEF_REGELN = new Set(['bild', 'seiteAbweichend']);
-// Prüfgründe am Bon, die genau diese Regeln setzen.
-const PRUEF_GRUENDE = new Set([BILD_GRUND, BILD_OFFEN_GRUND, SEITE_GRUND]);
 // Status eines Bild-Kandidaten, der noch nicht entschieden ist (Regel bild).
 const BILD_OFFEN_STATUS = new Set(['ocr_pending', 'review']);
+// Status eines Bild-Kandidaten, der Geld bekommen hat (Reihenfolge beim Kürzen).
+const BILD_BEZAHLT_STATUS = new Set(['approved', 'paid', 'matched']);
 // Wie viele Kandidaten aus `capture.bildAehnlich` Regel bild höchstens prüft
 // (je einer ein Bon-Lesevorgang, im Fenster dazu eine Ledger-Abfrage).
-const BILD_MAX_KANDIDATEN = 20;
+// Abschlussprüfung 06.10.2026: mindestens so viele, wie die Bildprüfung beim
+// Hochladen überhaupt finden kann — index.js DHASH_DEDUP_LOOKBACK (50 jüngste
+// Bons) plus DHASH_EXAKT_FEIN (5 exakte Treffer), Test abschluss0610. Vorher
+// 20, neueste zuerst: 20 frisch hochgeladene, noch offene Lockvögel mit
+// ähnlichem Bild schoben das bezahlte Original aus der Liste, wurden danach
+// abgelehnt, und die bearbeitete Kopie war bezahlt. Gelesen wird nur bei Bons
+// mit `capture.bildAehnlich`; beim Kürzen zählt die Reihenfolge von
+// bildKandidatenOrdnen (bezahlte zuerst).
+const BILD_MAX_KANDIDATEN = 55;
+// Regel bild außerhalb des Fensters: Mindestanteil gleicher Artikel (bildTrifft).
+const BILD_FERN_ANTEIL = 0.8;
 
 /** Hält ein wirksamer Treffer dieser Regel nur in der Prüfung fest (statt abzulehnen)? */
 function nurPruefung(regel) {
   return PRUEF_REGELN.has(regel);
 }
 
+// Prüfgründe, unter denen ein Mensch die Zeile „Doppel-Prüfung" vor sich hat
+// (die Bon-Runde fasst sie nie an, review-console/src/bonRegeln bearbeitbar).
+const PRUEF_GRUENDE = new Set([BILD_GRUND, BILD_OFFEN_GRUND, SEITE_GRUND]);
+// … und unter denen eine Freigabe NEUE Treffer quittiert: die Konsole sagt dort
+// „mit JEDEM verlinkten Bon vergleichen". Bei `bild_aehnlich_offen` lautet die
+// Anweisung „erst den offenen entscheiden" — eine Freigabe dort quittiert
+// nichts Neues, sie trägt nur schon Quittiertes weiter.
+const QUITTUNG_GRUENDE = new Set([BILD_GRUND, SEITE_GRUND]);
+
+/** Schlüssel eines Treffers für die Quittung: Regel + der andere Bon. */
+function trefferSchluessel(t) {
+  return `${t.regel}:${t.gegen}`;
+}
+
+/** Zeitpunkt als Millisekunden (Firestore-Timestamp, Zahl, Date, {seconds}). */
+function zeitMs(v) {
+  if (v == null) return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (v instanceof Date) return v.getTime();
+  if (typeof v.toMillis === 'function') return v.toMillis();
+  const s = typeof v.seconds === 'number' ? v.seconds : typeof v._seconds === 'number' ? v._seconds : null;
+  if (s == null) return null;
+  const n = typeof v.nanoseconds === 'number' ? v.nanoseconds : typeof v._nanoseconds === 'number' ? v._nanoseconds : 0;
+  return s * 1000 + Math.floor(n / 1e6);
+}
+
 /**
- * Doppel-Modi für eine Entscheidung über den Resolver (Mensch in der
- * Prüfkonsole, Bon-Runde). Die Prüfregeln (bild, seiteAbweichend) bleiben
- * wirksam — ein Treffer hält den Bon fest, statt ihn zu buchen —, AUSSER der
- * Bon steht schon mit einem ihrer Prüfgründe in der Prüfung: dann hat ein
- * Mensch die Zeile „Doppel-Prüfung" vor sich und entscheidet selbst (die
- * Bon-Runde fasst diese Gründe nie an). Bis 06.10.2026 beobachtete der
- * Resolver sie immer nur — die Bon-Runde gab so einen Abschnitt bzw. eine
- * Kopie frei, die wegen der Lese-Sicherheit in der Prüfung lag (Nachprüfung
- * 06.10.2026, zweite Runde).
- * @param {object} modi           doppelModi()
- * @param {string|null} reviewReason  Prüfgrund am Bon
+ * Welche Treffer der Prüfregeln (bild, seiteAbweichend) ein Mensch mit seiner
+ * Freigabe QUITTIERT — als Schlüssel `regel:gegen` für doppelUrteil(quittiert).
+ *
+ * Vierte Prüfrunde 06.10.2026: bis dahin schaltete der Resolver nach dem
+ * Prüfgrund am Bon eine ganze Regel ab (`bild_aehnlich_bezahlt` → bild,
+ * `seite_abweichend` → seiteAbweichend). Zwei Folgen, beide mit dem echten
+ * index.js nachgestellt:
+ *   - Ähnelte die Kopie einem bezahlten ANDEREN Einkauf und dem noch offenen
+ *     Original, stand der Grund auf `bild_aehnlich_bezahlt`. Der Mensch sah
+ *     einen anderen Einkauf und gab frei — die Regel war damit auch für das
+ *     offene Original aus, die Kopie wurde gebucht, danach das Original
+ *     (es trägt keinen Vermerk). Zwei Gutschriften für einen Einkauf.
+ *   - Trafen bild UND seiteAbweichend, schaltete jede Freigabe nur die eine
+ *     Regel ab, die andere hielt wieder fest — der Grund wechselte endlos,
+ *     ein zweiter echter Einkauf wurde nie bezahlt.
+ * Jetzt zählt, was der Mensch in der Zeile „Doppel-Prüfung" vor sich hatte:
+ * jeder Treffer einer Prüfregel, der dort wirksam (oder schon quittiert) und
+ * gegen einen ENTSCHIEDENEN Bon stand, gilt mit der Freigabe als „anderer
+ * Einkauf". Ein noch offener Kandidat wird nie quittiert (wie er ausgeht, sah
+ * niemand), ein neuer Treffer ebenso wenig — beide halten weiter fest.
+ *
+ * Nur, wenn der Mensch GENAU DIESEN Stand gesehen hat: `gesehenMs` (von der
+ * Prüfkonsole mitgeschickt) muss `doppelPruefung.at` entsprechen. Wurde der
+ * Vermerk inzwischen neu geschrieben (anderer Prüfer, erneute Verarbeitung),
+ * quittiert die Freigabe nichts, der Resolver hält fest, und die Konsole lädt
+ * den neuen Stand. Neue Quittungen nur bei `bild_aehnlich_bezahlt` und
+ * `seite_abweichend` (QUITTUNG_GRUENDE); bei `bild_aehnlich_offen` werden nur
+ * schon quittierte Treffer weitergetragen — dort heißt die Anweisung „erst den
+ * offenen Bon entscheiden", und wer das befolgt, hat die übrigen Zeilen nicht
+ * zwingend verglichen. Die Bon-Runde und andere Gründe quittieren nie.
+ * @param {object} o
+ * @param {string|null} o.reviewReason   Prüfgrund am Bon
+ * @param {object|null} o.doppelPruefung `receipts.doppelPruefung`
+ * @param {number|string|null} o.gesehenMs  `doppelPruefung.at`, wie ihn der Mensch sah
+ * @returns {string[]}
  */
-function modiFuerEntscheidung(modi, reviewReason) {
-  if (!PRUEF_GRUENDE.has(String(reviewReason || ''))) return { ...modi };
-  const out = { ...modi };
-  for (const regel of PRUEF_REGELN) if (out[regel]) out[regel] = 'shadow';
-  return out;
+function quittierteTreffer({ reviewReason = null, doppelPruefung = null, gesehenMs = null } = {}) {
+  const grund = String(reviewReason || '');
+  if (!PRUEF_GRUENDE.has(grund)) return [];
+  const neueQuittung = QUITTUNG_GRUENDE.has(grund);
+  const dp = doppelPruefung && typeof doppelPruefung === 'object' ? doppelPruefung : null;
+  if (!dp) return [];
+  const stand = zeitMs(dp.at);
+  const gesehen = gesehenMs == null || gesehenMs === '' ? NaN : Number(gesehenMs);
+  if (stand == null || !Number.isFinite(gesehen) || gesehen !== stand) return [];
+  const treffer = Array.isArray(dp.treffer) ? dp.treffer : [];
+  return [...new Set(treffer
+    .filter((t) => t && nurPruefung(t.regel) && (t.modus === 'quittiert' || (neueQuittung && t.modus === 'wirksam'))
+      && !t.offen && typeof t.gegen === 'string' && t.gegen)
+    .map(trefferSchluessel))];
 }
 
 /**
@@ -785,22 +923,83 @@ function bildKandidatenIds(bildAehnlich, bonId) {
 }
 
 /**
+ * Reihenfolge der Bild-Kandidaten, bevor sie für `capture.bildAehnlich.
+ * kandidaten` auf BILD_MAX_KANDIDATEN gekürzt werden (Abschlussprüfung
+ * 06.10.2026): zuerst Bons, die Geld bekommen haben, dann noch offene, dann
+ * der Rest; innerhalb jeder Gruppe die neuesten zuerst (ein Original liegt
+ * höchstens wenige Wochen zurück).
+ *
+ * Bezahlte zuerst, weil sich nur OFFENE Bons beliebig vermehren lassen: jeder
+ * frische Upload ist `ocr_pending`, bis er gelesen ist. Vorher galt allein
+ * „neueste zuerst" — 20 Lockvögel kurz vor der Kopie verdrängten das bezahlte
+ * Original, wurden abgelehnt, und die Kopie wurde bezahlt (mit dem echten
+ * index.js nachgestellt). Bezahlte Bons begrenzen die Tages- und Wochendeckel.
+ * Gegen das Verdrängen eines noch OFFENEN Originals hilft nur, dass
+ * BILD_MAX_KANDIDATEN alle groben Treffer fasst.
+ * @param {Array<{id:string, status?:string|null, ms?:number|null}>} liste
+ * @param {string|null} [bonId]  eigener Bon (fällt heraus)
+ * @returns {string[]}
+ */
+function bildKandidatenOrdnen(liste, bonId = null) {
+  const rang = (s) => (BILD_BEZAHLT_STATUS.has(s) ? 0 : BILD_OFFEN_STATUS.has(s) ? 1 : 2);
+  const gesehen = new Set();
+  const eintraege = [];
+  for (const k of Array.isArray(liste) ? liste : []) {
+    if (!k || typeof k.id !== 'string' || !k.id || k.id === bonId || gesehen.has(k.id)) continue;
+    gesehen.add(k.id);
+    eintraege.push({ id: k.id, rang: rang(k.status), ms: Number.isFinite(k.ms) ? k.ms : 0 });
+  }
+  return eintraege
+    .sort((a, b) => a.rang - b.rang || b.ms - a.ms || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map((e) => e.id)
+    .slice(0, BILD_MAX_KANDIDATEN);
+}
+
+/**
+ * Anteil gleicher Artikel zweier Lesungen für Regel bild — wie vergleiche(),
+ * aber ohne Marktbedingung (die Regel ist seit 06.10.2026 marktunabhängig).
+ * null, wenn eine Lesung weniger als `minArtikel` Artikel hat.
+ */
+function bildAnteil(neu, alt, modi = {}) {
+  if (!neu || !alt) return null;
+  const minArtikel = modi.minArtikel ?? 5;
+  const rabatt = Boolean(neu.rabatt || alt.rabatt);
+  return mitNamen(
+    anteilAus(neu.artikel, alt.artikel, minArtikel),
+    rabatt ? anteilAus(artikelNamen(neu.artikel), artikelNamen(alt.artikel), minArtikel) : null,
+    rabatt,
+  );
+}
+
+/**
  * Regel bild (Nachprüfung 05.10.2026, Markt seit 06.10.2026 egal): passt ein
  * Kandidat aus `capture.bildAehnlich` (Bon derselben Person) zur neuen
  * Lesung? Bon-Tag höchstens DATUM_FENSTER_TAGE daneben. Ein noch offener
  * Kandidat (`offen`) ohne gelesenes Datum gilt als im Fenster — er wird ja
  * erst gelesen. Ob er bezahlt bzw. offen ist, prüft der Aufrufer (Ledger,
  * Status).
+ *
+ * Weiter weg (dritte Prüfrunde 06.10.2026): mit scharfem Feinvergleich sperrt
+ * der grobe Bildvergleich (120 Tage Rückschau) eine beschnittene Kopie nicht
+ * mehr — eine Kopie mit dem Datum „gestern" zu einem 15 Tage alten Original
+ * war bezahlt. Darum trifft die Regel auch außerhalb des Fensters, wenn
+ * zusätzlich der Artikelanteil (`anteil`, bildAnteil) mindestens
+ * BILD_FERN_ANTEIL erreicht: gemessen „gleiche Person, gleicher Markt, 1–95
+ * Tage, Anteil ≥ 0,8" — 0 von 11.442 bezahlten Paaren, höchster ehrlicher Wert
+ * 0,75; eine Kopie mit einem geänderten von zehn Preisen liegt bei 0,9. Weiter
+ * als der grobe Bildvergleich reicht keiner der Kandidaten zurück.
  * @param {object} neu        identitaet()
- * @param {{tag?:string|null, offen?:boolean}} kandidat
- * @returns {{abstand:number|null}|null}
+ * @param {{tag?:string|null, offen?:boolean, anteil?:number|null}} kandidat
+ * @param {object} [modi]     doppelModi() (Schwelle)
+ * @returns {{abstand:number|null, fern?:true}|null}
  */
-function bildTrifft(neu, kandidat) {
+function bildTrifft(neu, kandidat, modi = {}) {
   if (!neu || !kandidat || !neu.tag) return null;
   const abstand = tageAbstand(neu.tag, kandidat.tag);
   if (abstand == null) return kandidat.offen === true ? { abstand: null } : null;
-  if (abstand > DATUM_FENSTER_TAGE) return null;
-  return { abstand };
+  if (abstand <= DATUM_FENSTER_TAGE) return { abstand };
+  const schwelle = Math.max(modi.schwelle ?? 0.6, BILD_FERN_ANTEIL);
+  return Number.isFinite(kandidat.anteil) && kandidat.anteil >= schwelle ? { abstand, fern: true } : null;
 }
 
 /**
@@ -1076,14 +1275,20 @@ function personKandidaten({ bonId, neu, eintraege, modi = {} }) {
  *        Regel datum, fremde → Regel kontenDatum.
  * @param {Array<{id:string, tag:string, abstand:number, anteil:number|null, gleicheZeit:boolean, andererMarkt:boolean, lebendig:boolean}>} o.person
  *        Kandidaten aus dem Personen-Index (personKandidaten) → Regel datum.
- * @param {Array<{id:string, markt:string|null, tag:string|null, lebendig:boolean, offen?:boolean}>} o.bild
+ * @param {Array<{id:string, markt:string|null, tag:string|null, lebendig:boolean, offen?:boolean, anteil?:number|null}>} o.bild
  *        Kandidaten aus `capture.bildAehnlich` (nur dieselbe Person) → Regel
  *        bild (hält in der Prüfung, lehnt nicht ab). `lebendig` = laut Ledger
- *        bezahlt, `offen` = noch nicht entschieden (BILD_OFFEN_STATUS).
+ *        bezahlt, `offen` = noch nicht entschieden (BILD_OFFEN_STATUS),
+ *        `anteil` = bildAnteil() gegen die Lesung des Kandidaten (außerhalb
+ *        des Fensters, bildTrifft).
  * @param {object} o.modi        doppelModi()
- * @returns {{treffer: Array<{regel:string, gegen:string, sameUser:boolean, anteil?:number, modus:'wirksam'|'beobachtung'}>, wirksam: object|null}}
+ * @param {string[]} [o.quittiert]  quittierteTreffer(): Treffer der Prüfregeln,
+ *        die ein Mensch mit seiner Freigabe als „anderer Einkauf" bestätigt
+ *        hat. Sie bleiben in der Liste (modus 'quittiert'), halten aber nicht
+ *        mehr fest. Ablehnende Regeln und offene Kandidaten nie.
+ * @returns {{treffer: Array<{regel:string, gegen:string, sameUser:boolean, anteil?:number, modus:'wirksam'|'beobachtung'|'quittiert'}>, wirksam: object|null}}
  */
-function doppelUrteil({ bonId, uid, neu, andere = [], schluessel = [], kontenArtikel = [], kontenDatum = [], person = [], bild = [], modi = {} }) {
+function doppelUrteil({ bonId, uid, neu, andere = [], schluessel = [], kontenArtikel = [], kontenDatum = [], person = [], bild = [], modi = {}, quittiert = [] }) {
   const treffer = [];
   const modusVon = (regel) => (modi[regel] === true ? 'wirksam' : modi[regel] === 'shadow' ? 'beobachtung' : null);
   const schwelle = modi.schwelle ?? 0.6;
@@ -1104,6 +1309,13 @@ function doppelUrteil({ bonId, uid, neu, andere = [], schluessel = [], kontenArt
   const andereZeit = (eintrag) => Boolean(neu.uhrzeit) && Boolean(eintrag.uhrzeit) && neu.uhrzeit !== eintrag.uhrzeit;
   const seiteTrifft = (v, eintrag) => seiteBasis(v, eintrag) && !andereNummer(eintrag) && !andereZeit(eintrag);
   const appFeld = (eintrag) => (neu.app && eintrag.app ? { app: true } : {});
+  // Gemischte Art (dritte Prüfrunde 06.10.2026): eine Rechnungsseite als
+  // Online-Bestellung, ein weiterer Teil als App-Kassenbon — beide setzen ohne
+  // gedruckte Summe die Artikelsumme ein (lib/belegart.js), Regel seite griff
+  // nicht (sie verlangt dieselbe Art). Nur am selben Tag und nur als
+  // seiteAbweichend (Prüfung, `abweichend: ['belegart']`): nicht gemessen.
+  const artGemischt = (eintrag) => (neu.online || neu.app) && (eintrag.online || eintrag.app) && !gleicheArt(eintrag);
+  const gemischtBasis = (v, eintrag) => marktGilt(v, eintrag) && artGemischt(eintrag) && (neu.ohneSumme || eintrag.ohneSumme);
   // Regel seiteAbweichend (Nachprüfung 06.10.2026): seite träfe, nur ein
   // aufhebendes Merkmal weicht ab — eine andere Uhrzeit, eine andere
   // Bestellnummer, bei einem App-Bon ein Bon-Tag genau 1 daneben. Mit EINEM
@@ -1183,11 +1395,12 @@ function doppelUrteil({ bonId, uid, neu, andere = [], schluessel = [], kontenArt
         treffer.push({ regel: 'seite', gegen: id, sameUser: true, ...appFeld(eintrag), ...marktFeld, modus: modusVon('seite') });
       }
       // Regel seiteAbweichend am selben Tag: alles wie seite, nur Uhrzeit oder
-      // Bestellnummer verschieden.
-      if (modusVon('seiteAbweichend') && seiteBasis(v, eintrag) && !seiteTrifft(v, eintrag)) {
+      // Bestellnummer verschieden — oder die Art (gemischtBasis).
+      const gemischt = gemischtBasis(v, eintrag);
+      if (modusVon('seiteAbweichend') && ((seiteBasis(v, eintrag) && !seiteTrifft(v, eintrag)) || gemischt)) {
         treffer.push({
           regel: 'seiteAbweichend', gegen: id, sameUser: true,
-          abweichend: abweichung(eintrag, false),
+          abweichend: [...(gemischt ? ['belegart'] : []), ...abweichung(eintrag, false)],
           ...appFeld(eintrag),
           ...marktFeld,
           modus: modusVon('seiteAbweichend'),
@@ -1247,24 +1460,40 @@ function doppelUrteil({ bonId, uid, neu, andere = [], schluessel = [], kontenArt
   // Regel bild (Nachprüfung 05.10.2026): Bild ähnlich einem Bon derselben
   // Person, vom Feinvergleich nicht als dasselbe bestätigt, Bon-Tag ±8 →
   // Prüfung durch einen Menschen. Seit 06.10.2026 (zweite Runde) jeder Markt
-  // und auch gegen einen noch OFFENEN Kandidaten — bezahlte zuerst (sie
-  // bestimmen den Grund `bild_aehnlich_bezahlt`).
+  // und auch gegen einen noch OFFENEN Kandidaten. Offene zuerst (vierte
+  // Prüfrunde 06.10.2026, vorher bezahlte zuerst): ähnelt die Kopie einem
+  // bezahlten anderen Einkauf UND dem noch offenen Original, wartet sie auf
+  // das Original (bildWarten in index.js) bzw. steht als
+  // `bild_aehnlich_offen` in der Prüfung — „erst den anderen entscheiden".
+  // Mit bezahlten zuerst ging sie sofort als `bild_aehnlich_bezahlt` an einen
+  // Menschen, der nur den anderen Einkauf verglich.
   const bildListe = bild.filter((k) => k && k.id !== bonId && (k.lebendig || k.offen))
-    .sort((a, b) => Number(Boolean(b.lebendig)) - Number(Boolean(a.lebendig)));
+    .sort((a, b) => Number(Boolean(a.lebendig)) - Number(Boolean(b.lebendig)));
   for (const k of bildListe) {
     const modus = modusVon('bild');
     if (!modus) break;
     const offen = !k.lebendig;
-    const t = bildTrifft(neu, { tag: k.tag, offen });
+    const t = bildTrifft(neu, { tag: k.tag, offen, anteil: k.anteil }, modi);
     if (!t) continue;
     if (treffer.some((x) => x.regel === 'bild' && x.gegen === k.id)) continue;
     const kMarkt = k.markt ? String(k.markt).toLowerCase() : null;
     treffer.push({
       regel: 'bild', gegen: k.id, sameUser: true, tag: k.tag ?? null, abstand: t.abstand,
+      ...(t.fern ? { anteil: rund(k.anteil) } : {}),
       ...(offen ? { offen: true } : {}),
       ...(kMarkt && neu.markt && kMarkt !== neu.markt ? { andererMarkt: true } : {}),
       modus,
     });
+  }
+  // Quittung (quittierteTreffer): Treffer einer Prüfregel gegen einen
+  // entschiedenen Bon, den ein Mensch schon als „anderer Einkauf" freigegeben
+  // hat, hält nicht mehr fest. Er bleibt in der Liste, damit die Prüfkonsole
+  // ihn weiter zeigt und eine weitere Freigabe ihn wieder quittiert.
+  if (Array.isArray(quittiert) && quittiert.length) {
+    const q = new Set(quittiert);
+    for (const t of treffer) {
+      if (t.modus === 'wirksam' && nurPruefung(t.regel) && !t.offen && q.has(trefferSchluessel(t))) t.modus = 'quittiert';
+    }
   }
   treffer.sort((a, b) => REGEL_REIHENFOLGE.indexOf(a.regel) - REGEL_REIHENFOLGE.indexOf(b.regel));
   const wirksam = treffer.find((t) => t.modus === 'wirksam') || null;
@@ -1298,9 +1527,12 @@ module.exports = {
   BILD_GRUND,
   BILD_OFFEN_GRUND,
   BILD_OFFEN_STATUS,
+  BILD_BEZAHLT_STATUS,
   BILD_MAX_KANDIDATEN,
+  BILD_FERN_ANTEIL,
   SEITE_GRUND,
   PRUEF_GRUENDE,
+  QUITTUNG_GRUENDE,
   NICHT_ARTIKEL_RE,
   normName,
   artikelSchluessel,
@@ -1325,9 +1557,12 @@ module.exports = {
   schalterModusStandardBeobachtung,
   doppelModi,
   nurPruefung,
-  modiFuerEntscheidung,
+  quittierteTreffer,
+  trefferSchluessel,
   bildKandidatenIds,
+  bildKandidatenOrdnen,
   bildTrifft,
+  bildAnteil,
   marktIstSicher,
   modiVermerk,
   kontenArtikelKandidaten,

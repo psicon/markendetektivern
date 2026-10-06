@@ -106,9 +106,11 @@ const {
   grundFuer: doppelGrund,
   schalterModus,
   bildTrifft,
+  bildAnteil,
   bildKandidatenIds,
+  bildKandidatenOrdnen,
   marktIstSicher,
-  modiFuerEntscheidung,
+  quittierteTreffer,
   nurPruefung,
   BILD_OFFEN_STATUS,
   BILD_MAX_KANDIDATEN,
@@ -208,6 +210,11 @@ const DHASH_DUPLICATE_THRESHOLD = 3;
 // Bigger = better recall, more cost per upload. 50 covers typical
 // power users (50 days @ 1 bon/day, or 50 last bons of any cadence).
 const DHASH_DEDUP_LOOKBACK = 50;
+// Exakte dHash-Treffer, die die Bildprüfung mit scharfem Feinvergleich
+// zusätzlich holt (sonst 1). Zusammen mit DHASH_DEDUP_LOOKBACK die Obergrenze
+// der groben Treffer — lib/doppelBon BILD_MAX_KANDIDATEN muss sie fassen
+// (Abschlussprüfung 06.10.2026, Test abschluss0610).
+const DHASH_EXAKT_FEIN = 5;
 
 // 86ca0wbg7 — B: zusätzlich zur Count-Grenze den Fuzzy-Dedup-Scan auf ein
 // ZEITFENSTER bounden (createdAt), damit die Prüfung auch bei Tausenden Bons
@@ -227,6 +234,12 @@ const SWEEP_MAX_ANZAHL = 5;
 const BILD_WARTEN_MAX = 4;
 // Zusammen für alle Kandidaten (Download + Vergleich); danach wird gelesen.
 const BILD_FEINVERGLEICH_BUDGET_MS = 15_000;
+// Regel bild bei gleichzeitigem Hochladen (vierte Prüfrunde 06.10.2026,
+// gleichzeitigeBildKandidaten): so weit vor dem eigenen Anlegen wird nach
+// einem älteren Bon mit nahem dHash gesucht. Zwischen Bildprüfung und Anlegen
+// liegen höchstens Download und Feinvergleich (≤ 15 s Budget) — 10 min
+// lassen reichlich Luft für Uhrabweichungen.
+const BILD_GLEICHZEITIG_FENSTER_MS = 10 * 60 * 1000;
 // Dieselbe DATEI noch einmal nach einer Ablehnung wegen eines Lesefehlers:
 // einmal neu lesen statt „schon eingereicht" (Prüfrunde 04.10.: 25 solche
 // Sperren in 30 Tagen, der App-Text „dein erster Eintrag bleibt gültig" stimmte
@@ -626,7 +639,9 @@ const DEFAULT_CONFIG = {
   // Doppel-Schutz in der Buchung (Entscheidung Patrick 04.10.2026,
   // lib/doppelBon.js). Je Regel false | 'shadow' | true; aus = altes
   // Verhalten. Einträge und Schlüssel schreibt die Buchung unabhängig davon.
-  doppelSumme: false,
+  // summe: Code-Default AN (dritte Prüfrunde 06.10.2026, lib/doppelBon
+  // doppelModi) — der Doppelfall vom 04.10. ist ab dem Deploy abgestellt.
+  doppelSumme: true,
   doppelKonten: false,
   doppelArtikel: false,
   doppelArtikelSchwelle: 0.6,
@@ -650,11 +665,20 @@ const DEFAULT_CONFIG = {
   // Seite/jeden Abschnitt einzeln. Rückweg: ausdrücklich false.
   doppelOnlineSeite: true,
   doppelKontenDatum: false,
-  // Regel bild (Nachprüfung 05.10.2026): nicht bestätigter Bildtreffer gegen
-  // einen bezahlten Bon derselben Person, gleicher Markt, ±8 Tage → Prüfung.
-  // Wirkt nur, wo der scharfe Feinvergleich `capture.bildAehnlich` schrieb,
-  // und ist Voraussetzung für bildFeinvergleich: true (bildFeinModus).
+  // Regel bild (Nachprüfung 05.10.2026, Stand 06.10.2026): nicht bestätigter
+  // grober Bildtreffer gegen einen bezahlten ODER noch offenen Bon derselben
+  // Person, jeder Markt, Bon-Tag ±8 (weiter weg nur mit Artikelanteil ≥ 0,8)
+  // → Prüfung bzw. Warten auf das offene Original; nie Ablehnung. Wirkt, wo
+  // `capture.bildAehnlich` steht: vom scharfen Feinvergleich ODER — in jedem
+  // Modus, also schon ab dem Deploy — vom Nachtrag bei gleichzeitigem
+  // Hochladen (gleichzeitigeBildKandidaten). Voraussetzung für
+  // bildFeinvergleich: true (bildFeinModus).
   doppelBildAehnlich: true,
+  // Bild, das die Bildprüfung nicht lesen kann (`capture.bildNichtLesbar`:
+  // PDF, HEIC, abgeschnittene Datei) → vor der ersten Gutschrift Prüfung
+  // `bild_nicht_pruefbar` (Abschlussprüfung 06.10.2026). false = altes
+  // Verhalten (gelesen und bezahlt, ohne Bildprüfung).
+  bildNichtLesbarPruefen: true,
   // Ladenbon ohne verwertbaren Händlernamen streng prüfen (keine Namensstufen,
   // kein Tippfehler-Abgleich → unknown_merchant statt meist „dm"). Aus = wie
   // vor Prüfrunde 2. Vor true mit Patrick klären: trifft ehrliche Bons
@@ -918,7 +942,7 @@ function marktSicherFuer(merchantInfo, rawMerchant) {
  *
  * Außerhalb einer Transaktion, also nicht race-frei (ein paralleler Abschnitt
  * kann gerade gebucht werden): den Rückhalt liefert der Resolver, der dieselben
- * Regeln in der Buchungs-Transaktion prüft (modiFuerEntscheidung). Hier steht
+ * Regeln in der Buchungs-Transaktion prüft (lib/doppelBon quittierteTreffer). Hier steht
  * der Grund nur früher am Bon, und die Bon-Runde spart die Zweitlesung.
  * Gelesen werden nur die Tageseinträge bezahlter Bons (`cashback_days`, Tag
  * und Fenster wie in der Buchung) und die Bild-Kandidaten samt Ledger.
@@ -932,13 +956,20 @@ async function pruefRegelnOhneBuchung({ uid, cashbackId, neu, modi, bildIds = []
   };
   const bild = [];
   if (nurPruef.bild && neu && neu.tag) {
-    for (const id of bildIds.slice(0, BILD_MAX_KANDIDATEN)) {
-      const s = await db.doc(`receipts/${id}`).get();
+    // Parallel gelesen (bis zu BILD_MAX_KANDIDATEN, Abschlussprüfung 06.10.2026).
+    const ids = bildIds.slice(0, BILD_MAX_KANDIDATEN);
+    const snaps = await Promise.all(ids.map((id) => db.doc(`receipts/${id}`).get()));
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      const s = snaps[i];
       // Nur ein Bon DIESER Person (der grobe Vergleich sucht nur dort).
       if (!s.exists || s.get('userId') !== uid) continue;
       const tag = typeof s.get('bonDate') === 'string' ? s.get('bonDate') : null;
       const offenStatus = BILD_OFFEN_STATUS.has(s.get('status'));
-      if (!bildTrifft(neu, { tag, offen: offenStatus })) continue;
+      // Artikelanteil gegen die Lesung des Kandidaten (Regel bild außerhalb
+      // von ±8 Tagen, dritte Prüfrunde 06.10.2026).
+      const anteil = bildAnteil(neu, identitaetAusBon(s.data()), modi);
+      if (!bildTrifft(neu, { tag, offen: offenStatus, anteil }, modi)) continue;
       const l = await db.collection(`users/${uid}/cashback_ledger`).where('receiptId', '==', id).get();
       const netto = l.docs.reduce((sum, d) => {
         const x = d.data();
@@ -951,6 +982,7 @@ async function pruefRegelnOhneBuchung({ uid, cashbackId, neu, modi, bildIds = []
         tag,
         lebendig: netto > 0,
         offen: netto <= 0 && offenStatus,
+        anteil,
       });
     }
   }
@@ -1050,9 +1082,10 @@ async function pruefRegelnOhneBuchung({ uid, cashbackId, neu, modi, bildIds = []
  * wurde). Trifft sie wirksam und keine ablehnende Regel, bucht die
  * Transaktion nicht (capReason `bild_aehnlich_bezahlt` bzw. `_offen`); der
  * Aufrufer hält den Bon fest bzw. lässt ihn auf das Original warten.
- * processCashback und Resolver geben sie mit; im Resolver gilt sie nur, wenn
- * der Bon nicht schon mit einem Prüfgrund in der Prüfung steht
- * (lib/doppelBon modiFuerEntscheidung).
+ * processCashback und Resolver geben sie mit.
+ * opts.quittiert = Treffer der Prüfregeln, die ein Mensch mit seiner Freigabe
+ * quittiert hat (nur Resolver, lib/doppelBon quittierteTreffer): sie halten
+ * nicht mehr fest. Ablehnende Regeln und offene Kandidaten nie.
  */
 async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, bonDateIso, campaignId, campaignMode, caps = null, opts = {}) {
   const ledgerCol = userRef.collection('cashback_ledger');
@@ -1325,14 +1358,23 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
       // für die, deren Tag ins Fenster passt (bzw. offen ohne Datum).
       const bildStand = [];
       if (modi.bild && Array.isArray(opts.bild)) {
-        for (const id of opts.bild.slice(0, BILD_MAX_KANDIDATEN)) {
-          if (typeof id !== 'string' || !id || id === cashbackId) continue;
-          const kSnap = await tx.get(db.doc(`receipts/${id}`));
-          if (!kSnap.exists || kSnap.get('userId') !== userRef.id) continue;
+        // Bis zu BILD_MAX_KANDIDATEN Bons in EINEM Lesevorgang (Abschlussprüfung
+        // 06.10.2026: 55 statt 20 — einzeln nacheinander hielte die Transaktion
+        // ihre Sperren entsprechend länger).
+        const ids = [...new Set(opts.bild.filter((id) => typeof id === 'string' && id && id !== cashbackId))]
+          .slice(0, BILD_MAX_KANDIDATEN);
+        const kSnaps = ids.length ? await tx.getAll(...ids.map((id) => db.doc(`receipts/${id}`))) : [];
+        for (let i = 0; i < ids.length; i++) {
+          const id = ids[i];
+          const kSnap = kSnaps[i];
+          if (!kSnap || !kSnap.exists || kSnap.get('userId') !== userRef.id) continue;
           const m = kSnap.get('merchant');
           const tag = typeof kSnap.get('bonDate') === 'string' ? kSnap.get('bonDate') : null;
           const offenStatus = BILD_OFFEN_STATUS.has(kSnap.get('status'));
-          if (!bildTrifft(neu, { tag, offen: offenStatus })) continue;
+          // Artikelanteil gegen die Lesung des Kandidaten: außerhalb von ±8
+          // Tagen trifft die Regel nur damit (dritte Prüfrunde 06.10.2026).
+          const anteil = bildAnteil(neu, identitaetAusBon(kSnap.data()), modi);
+          if (!bildTrifft(neu, { tag, offen: offenStatus, anteil }, modi)) continue;
           const lebendig = await lebtLautLedger(userRef.id, id);
           bildStand.push({
             id,
@@ -1340,6 +1382,7 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
             tag,
             lebendig,
             offen: !lebendig && offenStatus,
+            anteil,
           });
         }
       }
@@ -1360,6 +1403,7 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
         person: personStandTreffer,
         bild: bildStand,
         modi,
+        quittiert: Array.isArray(opts.quittiert) ? opts.quittiert : [],
       });
       doppelTreffer = urteil.treffer;
       doppel = urteil.wirksam || urteil.treffer[0] || null;
@@ -1824,6 +1868,56 @@ async function verifyAuthFromRequest(req) {
   }
 }
 
+/**
+ * Regel bild bei gleichzeitigem Hochladen (vierte Prüfrunde 06.10.2026).
+ *
+ * Die Bildprüfung in enqueueCashback sucht ähnliche Bons, BEVOR der eigene
+ * angelegt wird. Laden dieselbe Person Original und beschnittene Kopie
+ * gleichzeitig hoch (zwei Geräte am selben Konto, ein Skript gegen den
+ * Endpoint), sieht keine Seite die andere: kein `capture.bildAehnlich`, und
+ * eine Kopie mit geändertem Datum, geänderter Uhrzeit und einem geänderten
+ * Preis trifft keine Textregel — beide wurden bezahlt (mit dem echten Handler
+ * nachgestellt). Gemessen (21 Tage, 6.309 Bons): 78 Paare derselben Person
+ * unter 10 s auseinander, keines mit nahem dHash — das Fenster gab es, genutzt
+ * wurde es nicht.
+ *
+ * Darum nach dem Anlegen nachsehen: welche ÄLTEREN Bons derselben Person
+ * (`createdAt` = Zeitpunkt des Anlegens, bei Gleichstand die Bon-ID) mit nahem
+ * dHash sind inzwischen da? Weil erst angelegt und dann gelesen wird, sieht
+ * von zwei gleichzeitigen Bons der jüngere den älteren immer (Firestore liest
+ * nach dem eigenen Schreiben alles, was davor bestätigt war). Nur ältere — so
+ * trägt immer die JÜNGERE Einreichung den Vermerk, nie beide; zwei Bons, die
+ * gegenseitig aufeinander warten, gibt es damit nicht (Regel bild wartet auf
+ * einen offenen Kandidaten).
+ * @returns {Promise<Array<{id:string, distanz:number, status:string|null, ms:number}>>} neueste zuerst
+ */
+async function gleichzeitigeBildKandidaten({ uid, cashbackId, dHash, bekannt = [] }) {
+  const msVon = (v) => (v && typeof v.toMillis === 'function' ? v.toMillis() : null);
+  const eigen = await db.collection('receipts').doc(cashbackId).get();
+  const eigeneMs = msVon(eigen.get('createdAt'));
+  if (eigeneMs == null || typeof dHash !== 'string') return [];
+  const snap = await db
+    .collection('receipts')
+    .where('userId', '==', uid)
+    .where('createdAt', '>=', admin.firestore.Timestamp.fromMillis(eigeneMs - BILD_GLEICHZEITIG_FENSTER_MS))
+    .orderBy('createdAt', 'desc')
+    .limit(DHASH_DEDUP_LOOKBACK)
+    .get();
+  const out = [];
+  for (const d of snap.docs) {
+    if (d.id === cashbackId || bekannt.includes(d.id)) continue;
+    const ms = msVon(d.get('createdAt'));
+    const aelter = ms != null && (ms < eigeneMs || (ms === eigeneMs && d.id < cashbackId));
+    if (!aelter || !BILD_SPERR_STATUS.has(d.get('status'))) continue;
+    const anderer = d.get('capture.perceptualHashServer');
+    if (typeof anderer !== 'string' || anderer.length !== dHash.length) continue;
+    const distanz = hammingDistance(dHash, anderer);
+    // Status und Zeitpunkt für die Reihenfolge beim Kürzen (bildKandidatenOrdnen).
+    if (distanz >= 0 && distanz <= DHASH_DUPLICATE_THRESHOLD) out.push({ id: d.id, distanz, status: d.get('status') || null, ms });
+  }
+  return out;
+}
+
 // ─── enqueueCashback (HTTPS) ────────────────────────────────────────
 
 exports.enqueueCashback = onRequest(
@@ -2001,6 +2095,12 @@ exports.enqueueCashback = onRequest(
     let serverBytesSize = 0;
     // Nicht bestätigter dHash-Treffer (Feinvergleich) — landet am Bon.
     let bildAehnlich = null;
+    // Status und Zeitpunkt der Kandidaten in bildAehnlich (für den Nachtrag
+    // bei gleichzeitigem Hochladen, bildKandidatenOrdnen).
+    let bildKandidatenInfo = [];
+    // Datei geladen, aber kein Bild, das sharp lesen kann (PDF, HEIC,
+    // abgeschnittene Datei) — Abschlussprüfung 06.10.2026, siehe unten.
+    let bildNichtLesbar = null;
     try {
       const bucket = admin.storage().bucket();
       const file = bucket.file(storagePath);
@@ -2008,10 +2108,23 @@ exports.enqueueCashback = onRequest(
       serverBytesSize = bytes.length;
 
       // Compute server-trusted hash + read EXIF in parallel
-      const [dHash, exif] = await Promise.all([
-        computeDHash(bytes),
+      const [dHashErgebnis, exif] = await Promise.all([
+        computeDHash(bytes).then((h) => ({ h }), (fehler) => ({ fehler })),
         readExifMeta(bytes),
       ]);
+      if (dHashErgebnis.fehler) {
+        // Die Datei ist da, aber ohne dHash sind die grobe Bildsperre, der
+        // Feinvergleich und Regel bild blind für sie — die Texterkennung liest
+        // PDF und HEIC trotzdem (contentType aus dem Upload). Eine bearbeitete
+        // Kopie als PDF wurde so bezahlt (Abschlussprüfung 06.10.2026, mit dem
+        // echten Handler nachgestellt). Vermerken; processCashback gibt den Bon
+        // vor einer Gutschrift an einen Menschen (`bild_nicht_pruefbar`). Ein
+        // Fehler beim LADEN (IAM, Netz) bleibt, was er war: kein Urteil.
+        // Gemessen 60 Tage: 2 Fälle, beide bei 512 KiB abgeschnittene Uploads.
+        bildNichtLesbar = { fehler: String((dHashErgebnis.fehler && dHashErgebnis.fehler.message) || dHashErgebnis.fehler).slice(0, 200) };
+        throw dHashErgebnis.fehler;
+      }
+      const dHash = dHashErgebnis.h;
       serverDhash = dHash;
       exifMeta = exif;
       forensicFlags = deriveForensicFlags(exif, Date.now(), MAX_BON_AGE_DAYS_EXIF_CEILING);
@@ -2067,7 +2180,7 @@ exports.enqueueCashback = onRequest(
         .collection('receipts')
         .where('userId', '==', uid)
         .where('capture.perceptualHashServer', '==', serverDhash)
-        .limit(feinModus ? 5 : 1)
+        .limit(feinModus ? DHASH_EXAKT_FEIN : 1)
         .get();
 
       // Alle Treffer ≤ Schwelle sammeln (für den Feinvergleich nächste zuerst);
@@ -2139,20 +2252,19 @@ exports.enqueueCashback = onRequest(
               const v = t.doc.get('createdAt');
               return v && typeof v.toMillis === 'function' ? v.toMillis() : 0;
             };
+            bildKandidatenInfo = kandidaten.map((k) => ({ id: k.id, status: k.treffer.doc.get('status') || null, ms: msVon(k.treffer) }));
             bildAehnlich = {
               kandidat: erster ? erster.kandidat : naechster.doc.id,
-              // ALLE groben Treffer, die laufen oder Geld bekamen — neueste
-              // zuerst, höchstens BILD_MAX_KANDIDATEN —, nicht nur die bis zu
-              // 3 fein verglichenen (Nachprüfung 06.10.2026, zweite Runde: drei
-              // ältere ähnliche Bons, etwa App-Bons derselben Kette, verdrängten
-              // sonst das Original aus der Liste). Regel bild in processCashback
-              // prüft jeden (Status, Datum ±8, Ledger); ein Original liegt
-              // höchstens wenige Wochen zurück, darum die neuesten zuerst.
-              kandidaten: kandidaten
-                .slice()
-                .sort((x, y) => msVon(y.treffer) - msVon(x.treffer))
-                .map((k) => k.id)
-                .slice(0, BILD_MAX_KANDIDATEN),
+              // ALLE groben Treffer, die laufen oder Geld bekamen, nicht nur
+              // die bis zu 3 fein verglichenen (Nachprüfung 06.10.2026, zweite
+              // Runde: drei ältere ähnliche Bons, etwa App-Bons derselben Kette,
+              // verdrängten sonst das Original aus der Liste). Regel bild in
+              // processCashback prüft jeden (Status, Datum ±8, Ledger).
+              // BILD_MAX_KANDIDATEN fasst alle groben Treffer; beim Kürzen
+              // bezahlte zuerst (Abschlussprüfung 06.10.2026: 20 frische
+              // Lockvögel verdrängten sonst das bezahlte Original —
+              // lib/doppelBon bildKandidatenOrdnen).
+              kandidaten: bildKandidatenOrdnen(bildKandidatenInfo),
               // Welche davon fein verglichen wurden (höchstens 3, nächster zuerst).
               verglichen: fein.ergebnisse.map((e) => e.kandidat).filter((id) => typeof id === 'string'),
               distanz: erster ? erster.distanz : naechster.distance,
@@ -2201,7 +2313,7 @@ exports.enqueueCashback = onRequest(
       // Non-fatal: if forensics fail (e.g. storage IAM hiccup), log
       // and continue without the signal. Better to under-flag than to
       // block legit users on infra glitches.
-      logger.warn('forensics-failed', { uid, err: e.message });
+      logger.warn('forensics-failed', { uid, err: e.message, bildNichtLesbar: Boolean(bildNichtLesbar) });
     }
 
     // Use the client-provided id (so the placeholder mirror doc and
@@ -2299,6 +2411,9 @@ exports.enqueueCashback = onRequest(
         // Dieselbe Datei wie ein wegen eines Lesefehlers abgelehnter Bon —
         // einmal neu gelesen (04.10.2026).
         ...(neuversuchVon ? { neuversuchVon } : {}),
+        // Kein Bild, das die Bildprüfung lesen kann (Abschlussprüfung
+        // 06.10.2026) — processCashback gibt den Bon an einen Menschen.
+        ...(bildNichtLesbar ? { bildNichtLesbar } : {}),
       },
       storage: {
         bucket: admin.storage().bucket().name,
@@ -2323,6 +2438,44 @@ exports.enqueueCashback = onRequest(
       logger.warn('enqueue-fremde-upload-id', { uid, clientUploadId: cashbackId, wettlauf: true });
       res.status(409).json({ code: 'invalid_upload_id' });
       return;
+    }
+
+    // Regel bild bei gleichzeitigem Hochladen (vierte Prüfrunde 06.10.2026,
+    // gleichzeitigeBildKandidaten): ältere Bons derselben Person mit nahem
+    // dHash, die die Bildprüfung oben noch nicht sehen konnte, als Kandidaten
+    // nachtragen — VOR dem Publish, damit die Verarbeitung sie kennt. In jedem
+    // Modus des Feinvergleichs: die grobe Sperre oben hat dasselbe Fenster,
+    // nach dem Anlegen kann aber nur noch die Prüfung (Regel bild) greifen.
+    // Ein Fehler ist kein Urteil — der Bon wird wie bisher gelesen.
+    if (serverDhash && doppelModi(config).bild) {
+      try {
+        const bekannt = bildAehnlich ? bildKandidatenIds(bildAehnlich, cashbackId) : [];
+        const gleichzeitig = await gleichzeitigeBildKandidaten({ uid, cashbackId, dHash: serverDhash, bekannt });
+        if (gleichzeitig.length) {
+          const ids = gleichzeitig.map((k) => k.id);
+          const bisher = { ...(bildAehnlich || { kandidat: ids[0], distanz: gleichzeitig[0].distanz, bestaetigt: false }) };
+          // „nur abgelehnte oder unvergütete" stimmt danach nicht mehr.
+          delete bisher.grund;
+          // Erst zusammenführen, dann ordnen, dann kürzen (Abschlussprüfung
+          // 06.10.2026): vorher standen die nachgetragenen vorn und konnten ein
+          // bezahltes Original aus der Bildprüfung hinausschieben.
+          const info = new Map(bildKandidatenInfo.map((k) => [k.id, k]));
+          const kandidaten = bildKandidatenOrdnen(
+            [...gleichzeitig, ...bekannt.map((id) => info.get(id) || { id, status: null, ms: null })],
+            cashbackId,
+          );
+          await docRef.update({
+            'capture.bildAehnlich': {
+              ...bisher,
+              kandidaten,
+              gleichzeitig: ids,
+            },
+          });
+          logger.warn('bild-gleichzeitig-hochgeladen', { uid, cashbackId, gegen: ids, feinModus });
+        }
+      } catch (e) {
+        logger.warn('bild-gleichzeitig-pruefung-fehlgeschlagen', { uid, cashbackId, err: e.message });
+      }
     }
 
     // Update the user-side mirror to ocr_pending. If the client wrote
@@ -2455,10 +2608,24 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
       return;
     }
 
-    const config = await loadConfig();
     const now = admin.firestore.FieldValue.serverTimestamp();
 
     try {
+      // Konfiguration STRIKT (dritte Prüfrunde 06.10.2026): der Rückfall auf
+      // DEFAULT_CONFIG schaltete bei einem Lesefehler den Doppel-Schutz und
+      // den Aktions-Modus still ab (ein zweites Foto desselben Bons wurde im
+      // Dauer-Modus bezahlt). Jetzt ist es ein Infrastrukturfehler wie
+      // ledger_precheck_failed: Neuversuch über den Kehrlauf, nach
+      // MAX_PROCESS_ATTEMPTS Prüfung, nie Ablehnung oder Gutschrift.
+      let config;
+      try {
+        config = await loadConfig({ strict: true });
+      } catch (e) {
+        const err = new Error(`config unavailable: ${e.message}`);
+        err.code = 'config_unavailable';
+        throw err;
+      }
+
       // 1) Download image bytes from Storage
       const bucket = admin.storage().bucket(receipt.storage.bucket);
       const file = bucket.file(receipt.storage.path);
@@ -3627,9 +3794,19 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
               ? !felderTragen
               : true; // Beobachtungs-Modus: rechnen, aber wie bisher halten
 
-        if (haltenWegenLesung || editedImage) {
+        // Bild ohne dHash (enqueueCashback `capture.bildNichtLesbar`: PDF,
+        // HEIC, abgeschnittene Datei) — Bildsperre und Regel bild sind dafür
+        // blind, eine bearbeitete Kopie als PDF wurde sonst bezahlt
+        // (Abschlussprüfung 06.10.2026). Vor der ersten Gutschrift sieht ein
+        // Mensch hin; der Grund geht VOR `ocr_confidence_*`, die die Bon-Runde
+        // allein entscheiden würde. Notaus ohne Deploy:
+        // `cashback_config/v1.bildNichtLesbarPruefen: false`.
+        const bildNichtPruefbar = Boolean(receipt.capture?.bildNichtLesbar) && config.bildNichtLesbarPruefen !== false;
+        if (haltenWegenLesung || editedImage || bildNichtPruefbar) {
           status = 'review';
-          reviewReason = editedImage ? 'forensics_software' : `ocr_confidence_${conf}`;
+          reviewReason = editedImage
+            ? 'forensics_software'
+            : bildNichtPruefbar ? 'bild_nicht_pruefbar' : `ocr_confidence_${conf}`;
         }
         if (felder) {
           ocrFieldAgreement = {
@@ -4212,7 +4389,7 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
         // `lauf_zeitgrenze` (03.10.2026): der Lauf war zu langsam, um noch zu
         // entscheiden — ebenfalls keine Aussage über den Bon.
         const infraCode =
-          err && (err.code === 'ocr_unavailable' || err.code === 'ledger_precheck_failed' || err.code === 'referee_unavailable' || err.code === 'ledger_tx_failed' || err.code === 'lauf_zeitgrenze' || err.code === 'ocr_zeitbudget')
+          err && (err.code === 'ocr_unavailable' || err.code === 'ledger_precheck_failed' || err.code === 'referee_unavailable' || err.code === 'ledger_tx_failed' || err.code === 'lauf_zeitgrenze' || err.code === 'ocr_zeitbudget' || err.code === 'config_unavailable')
             ? err.code
             : null;
         const infra = !!infraCode;
@@ -4845,6 +5022,10 @@ exports.tremendousWebhook = onRequest(
 // Nur Bons im Status 'review' sind auflösbar (schützt vor Doppel-Credit).
 // Key-gated (Secret NUTRITION_SCRAPER_TRIGGER_KEY). Aufruf:
 //   …/resolveCashbackReview?key=…&receiptId=…&decision=approve|reject
+// Optional `doppelStand=<ms>` (vierte Prüfrunde 06.10.2026): der Stand von
+// `doppelPruefung.at`, den der Mensch gesehen hat. Nur dann quittiert eine
+// Freigabe die Treffer der Prüfregeln aus dieser Zeile (lib/doppelBon
+// quittierteTreffer); ohne ihn hält ein Prüfregel-Treffer weiter fest.
 exports.resolveCashbackReview = onRequest(
   { region: REGION, timeoutSeconds: 60, memory: '256MiB', cors: false, secrets: [CASHBACK_ADMIN_KEY] },
   async (req, res) => {
@@ -5023,7 +5204,15 @@ exports.resolveCashbackReview = onRequest(
         res.status(409).json({ code: 'no_cashback_computed', reviewReason: r.reviewReason || null });
         return;
       }
-      const entscheidungsModi = modiFuerEntscheidung(doppelModi(config), r.reviewReason);
+      const entscheidungsModi = doppelModi(config);
+      // Vierte Prüfrunde 06.10.2026: eine Freigabe quittiert nur die einzelnen
+      // Treffer der Prüfregeln, die der Mensch in der Zeile „Doppel-Prüfung"
+      // vor sich hatte — im Stand, den die Prüfkonsole mitschickt
+      // (`doppelStand` = doppelPruefung.at). Offene Kandidaten und neue Treffer
+      // halten weiter fest (lib/doppelBon quittierteTreffer).
+      const quittiert = decision === 'approve'
+        ? quittierteTreffer({ reviewReason: r.reviewReason, doppelPruefung: r.doppelPruefung, gesehenMs: req.query.doppelStand })
+        : [];
       const settle = await syncLedgerForReceipt(
         userRef,
         receiptId,
@@ -5044,13 +5233,18 @@ exports.resolveCashbackReview = onRequest(
         // Prüfregeln (bild, seiteAbweichend) gelten hier auch (Nachprüfung
         // 06.10.2026, zweite Runde: die Bon-Runde gab einen Abschnitt bzw. eine
         // Kopie frei, die wegen der Lese-Sicherheit in der Prüfung lag) — ein
-        // Treffer hält fest (unten), außer der Bon steht schon mit einem ihrer
-        // Prüfgründe in der Prüfung: dann hat der Mensch sie vor sich.
-        { bon: identitaetAusBon(r), doppel: entscheidungsModi, bild: bildKandidatenIds(r.capture && r.capture.bildAehnlich, receiptId) },
+        // Treffer hält fest (unten), außer ein Mensch hat GENAU DIESEN Treffer
+        // gesehen und mit dieser Freigabe quittiert.
+        {
+          bon: identitaetAusBon(r),
+          doppel: entscheidungsModi,
+          bild: bildKandidatenIds(r.capture && r.capture.bildAehnlich, receiptId),
+          quittiert,
+        },
       );
       if (settle?.doppelTreffer?.length) {
         for (const t of settle.doppelTreffer) {
-          logger.warn('doppel-treffer', { cashbackId: receiptId, quelle: 'resolver', regel: t.regel, modus: t.modus, sameUser: t.sameUser, gegen: t.sameUser ? t.gegen : null, anteil: t.anteil ?? null, andererMarkt: t.andererMarkt === true, abstand: t.abstand ?? null });
+          logger.warn('doppel-treffer', { cashbackId: receiptId, quelle: 'resolver', regel: t.regel, modus: t.modus, sameUser: t.sameUser, gegen: t.sameUser ? t.gegen : null, anteil: t.anteil ?? null, andererMarkt: t.andererMarkt === true, abstand: t.abstand ?? null, offen: t.offen === true });
         }
       }
       const doppelPruefung = settle?.doppelGeprueft
@@ -5065,8 +5259,9 @@ exports.resolveCashbackReview = onRequest(
         // nicht buchen, nicht ablehnen, sondern festhalten. Der Bon bleibt in
         // der Prüfung, jetzt mit dem Prüfgrund der Regel und der Zeile
         // „Doppel-Prüfung" (verlinkt den anderen Bon). Die Bon-Runde fasst
-        // diesen Grund nie an; ein Mensch, der danach erneut freigibt, bucht
-        // (modiFuerEntscheidung). Gebucht wurde nichts (Transaktion), der
+        // diesen Grund nie an; ein Mensch, der danach erneut freigibt,
+        // quittiert die Treffer, die er dort sah (quittierteTreffer) — ein
+        // offener Kandidat hält weiter fest. Gebucht wurde nichts (Transaktion), der
         // Spiegel bleibt 'review'.
         const grund = doppelGrund(settle.doppel);
         await ref.update({
@@ -5075,7 +5270,7 @@ exports.resolveCashbackReview = onRequest(
           entscheidungLaeuft: admin.firestore.FieldValue.delete(),
           updatedAt: ts,
         });
-        logger.info('cashback-review-gehalten', { receiptId, uid, regel: settle.doppel.regel, grund, gegen: settle.doppel.gegen });
+        logger.info('cashback-review-gehalten', { receiptId, uid, regel: settle.doppel.regel, grund, gegen: settle.doppel.gegen, quittiert: quittiert.length });
         res.status(409).json({ code: 'halten', reviewReason: grund, regel: settle.doppel.regel, gegen: settle.doppel.gegen });
         return;
       }

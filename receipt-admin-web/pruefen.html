@@ -291,15 +291,17 @@
         ocr_confidence_medium: { titel: 'Texterkennung teilweise unsicher', tun: 'Markt, Bon-Datum und Endsumme gegen das Bild prüfen' },
         ocr_confidence_none: { titel: 'Texterkennung ohne brauchbares Ergebnis', tun: 'Bild von Hand lesen — keine Lesung hat die Summenprobe bestanden' },
         ocr_unavailable: { titel: 'Texterkennung ist nicht gelaufen', tun: 'Technischer Ausfall, keine Aussage über den Bon — im Zweifel erneut verarbeiten lassen' },
+        config_unavailable: { titel: 'Einstellungen waren nicht lesbar', tun: 'Technischer Ausfall, keine Aussage über den Bon — erneut verarbeiten lassen' },
         lauf_zeitgrenze: { titel: 'Verarbeitung war zu langsam', tun: 'Technischer Ausfall (Google antwortete zu langsam), keine Aussage über den Bon — erneut verarbeiten lassen' },
         ocr_zeitbudget: { titel: 'Verarbeitung war zu langsam', tun: 'Technischer Ausfall (Google antwortete zu langsam), keine Aussage über den Bon — erneut verarbeiten lassen' },
         forensics_software: { titel: 'Bild wurde mit einem Bildprogramm bearbeitet', tun: 'Auf Montagen achten: gleichmäßige Schrift, saubere Kanten, doppelte Zeilenabstände' },
         bon_date_future: { titel: 'Bon-Datum liegt in der Zukunft', tun: 'Datum auf dem Bild prüfen — meist ein Lesefehler bei der Jahreszahl' },
         duplicate_content_self: { titel: 'Derselbe Bon wurde schon eingereicht', tun: 'Beide Einreichungen vergleichen; die frühere zählt' },
         duplicate_content_cross_user: { titel: 'Derselbe Bon kam von einem anderen Konto', tun: 'Beide vergleichen — gleicher Markt, gleicher Tag, gleiche Summe' },
-        bild_aehnlich_bezahlt: { titel: 'Bild ähnelt einem schon bezahlten Bon dieser Person', tun: 'Mit dem verlinkten Bon vergleichen (Doppel-Prüfung): beschnitten, Datum, Uhrzeit oder Preise geändert? Derselbe Einkauf → ablehnen als „bereits eingereicht"; ein anderer Einkauf → freigeben' },
-        bild_aehnlich_offen: { titel: 'Bild ähnelt einem anderen Bon dieser Person, der noch nicht entschieden war', tun: 'Mit dem verlinkten Bon vergleichen (Doppel-Prüfung): derselbe Einkauf (beschnitten, Datum, Uhrzeit oder Preise geändert)? Dann nur einen von beiden freigeben, den anderen ablehnen als „bereits eingereicht"; zwei verschiedene Einkäufe → beide freigeben' },
-        seite_abweichend: { titel: 'Sieht aus wie ein weiterer Teil eines schon bezahlten Belegs dieser Person', tun: 'Mit dem verlinkten Bon vergleichen (Doppel-Prüfung): dieselbe Online-Rechnung bzw. derselbe App-Bon, nur Uhrzeit, Bestellnummer oder Datum anders? Derselbe Einkauf → ablehnen als „bereits eingereicht"; ein anderer Einkauf → freigeben' },
+        bild_aehnlich_bezahlt: { titel: 'Bild ähnelt einem schon bezahlten Bon dieser Person', tun: 'Mit JEDEM verlinkten Bon vergleichen (Doppel-Prüfung): beschnitten, Datum, Uhrzeit oder Preise geändert? Derselbe Einkauf wie einer davon → ablehnen als „bereits eingereicht"; ein anderer Einkauf als alle → freigeben. Die Freigabe gilt nur für die Zeilen, die du hier siehst — steht eine als „noch nicht entschieden" da, hält sie diesen Bon wieder fest, bis der andere entschieden ist' },
+        bild_aehnlich_offen: { titel: 'Bild ähnelt einem anderen Bon dieser Person, der noch nicht entschieden war', tun: 'Zuerst den verlinkten Bon entscheiden, der „noch nicht entschieden" ist (Doppel-Prüfung) — solange er offen ist, hält eine Freigabe diesen Bon wieder fest und bestätigt auch die anderen Zeilen nicht. Derselbe Einkauf (beschnitten, Datum, Uhrzeit oder Preise geändert)? Dann diesen ablehnen als „bereits eingereicht"; zwei verschiedene Einkäufe → beide freigeben (ist der andere inzwischen bezahlt, zeigt eine Freigabe hier zuerst den neuen Stand)' },
+        bild_nicht_pruefbar: { titel: 'Bild konnte nicht automatisch auf Kopien geprüft werden', tun: 'Datei ist kein lesbares Foto (PDF, HEIC oder abgeschnitten) — der Vergleich mit früheren Bons fehlt. Original öffnen und mit den letzten bezahlten Bons dieser Person vergleichen: derselbe Einkauf (beschnitten, Datum, Uhrzeit oder Preise geändert)? → ablehnen als „bereits eingereicht"; ein eigener Einkauf → freigeben' },
+        seite_abweichend: { titel: 'Sieht aus wie ein weiterer Teil eines schon bezahlten Belegs dieser Person', tun: 'Mit JEDEM verlinkten Bon vergleichen (Doppel-Prüfung): dieselbe Online-Rechnung bzw. derselbe App-Bon, nur Uhrzeit, Bestellnummer oder Datum anders? Derselbe Einkauf → ablehnen als „bereits eingereicht"; ein anderer Einkauf als alle → freigeben (gilt für alle Zeilen, die du hier siehst)' },
         mensch_hat_entschieden: { titel: 'Wurde bereits von Hand entschieden', tun: 'Der frühere Beschluss steht; erneut zustellen ändert daran nichts' },
         support_kulanz_unknown_merchant: { titel: 'Kulanzfall aus dem Support', tun: 'Wie mit dem Support besprochen entscheiden' },
       };
@@ -314,10 +316,10 @@
         datum: 'gleicher Bon mit anderem Datum',
         kontenArtikel: 'gleiche Artikel in einem anderen Konto',
         kontenDatum: 'gleicher Bon in einem anderen Konto, anderes Datum',
-        bild: 'Bild ähnelt einem Bon dieser Person (±8 Tage) — zur Prüfung',
+        bild: 'Bild ähnelt einem Bon dieser Person — zur Prüfung',
         seiteAbweichend: 'wie ein weiterer Teil desselben Belegs, nur Uhrzeit, Bestellnummer oder Tag anders — zur Prüfung',
       };
-      const ABWEICHEND_DE = { uhrzeit: 'Uhrzeit', bestellnummer: 'Bestellnummer', tag: 'Datum' };
+      const ABWEICHEND_DE = { uhrzeit: 'Uhrzeit', bestellnummer: 'Bestellnummer', tag: 'Datum', belegart: 'Belegart (Online-Rechnung / App-Bon)' };
       function doppelZeile(dp) {
         const t = (dp && dp.treffer) || [];
         if (!t.length) return '';
@@ -328,7 +330,8 @@
           x.abstand ? ` · ${esc(String(x.abstand))} Tage daneben` : ''}${
           Array.isArray(x.abweichend) && x.abweichend.length ? ` · anders: ${esc(x.abweichend.map((a) => ABWEICHEND_DE[a] || a).join(', '))}` : ''}${
           x.gegen ? ` · <a href="pruefen.html?tab=receipts&id=${encodeURIComponent(x.gegen)}">${esc(x.gegen)}</a>` : ''}${
-          x.modus === 'beobachtung' ? ' <span style="color:var(--fg3)">· Beobachtungs-Modus, ohne Wirkung</span>' : ''}`).join('<br>')}</div>`;
+          x.modus === 'beobachtung' ? ' <span style="color:var(--fg3)">· Beobachtungs-Modus, ohne Wirkung</span>' : ''}${
+          x.modus === 'quittiert' ? ' <span style="color:var(--fg3)">· schon von Hand als anderer Einkauf freigegeben</span>' : ''}`).join('<br>')}</div>`;
       }
       const LEDGER_DE = { earn: 'gutgeschrieben', reverse: 'storniert', payout: 'ausgezahlt' };
 
@@ -343,7 +346,7 @@
         processing_in_progress: 'dieser Bon wird gerade automatisch verarbeitet — in einer Minute erneut versuchen',
         // Nachprüfung 06.10.2026: Prüfregel in der Buchung getroffen. Der Fall
         // wird neu geladen und zeigt die Zeile „Doppel-Prüfung"; eine erneute
-        // Freigabe bucht dann.
+        // Freigabe quittiert die Treffer dort (ein noch offener Bon hält weiter).
         halten: 'Doppel-Verdacht — der Bon ähnelt einem anderen Bon dieser Person. Zeile „Doppel-Prüfung" ansehen, dann erneut entscheiden',
         forbidden: 'der Zugang zum Resolver wurde abgelehnt',
         // Keine Antwort: der Resolver kann trotzdem gebucht haben — nicht blind
@@ -415,8 +418,12 @@
 
       // `zeigt` = die ID des Falls, der WIRKLICH auf dem Bildschirm steht.
       // Ohne diesen Zustand konnte über einen Fall entschieden werden, der noch
-      // lud oder gar nicht mehr angezeigt wurde.
-      const S = { type: 'photos', queue: [], idx: 0, cache: new Map(), done: new Set(), busy: false, counts: {}, mode: null, zeigt: null, gesucht: '' };
+      // lud oder gar nicht mehr angezeigt wurde. `zeigtStand` = Stand der Zeile
+      // „Doppel-Prüfung" dieses Falls (doppelPruefung.at): nur mit ihm
+      // quittiert eine Freigabe die Treffer, die dort stehen (vierte
+      // Prüfrunde 06.10.2026) — ist der Vermerk inzwischen neu, hält der
+      // Resolver fest, und der Fall wird neu geladen.
+      const S = { type: 'photos', queue: [], idx: 0, cache: new Map(), done: new Set(), busy: false, counts: {}, mode: null, zeigt: null, zeigtStand: null, gesucht: '' };
 
       const cur = () => S.queue[S.idx] || null;
       // Nach dem Entsperren nur dann wieder freigeben, wenn ein Fall steht.
@@ -439,6 +446,7 @@
        */
       function leisteAus() {
         S.zeigt = null;
+        S.zeigtStand = null;
         $('bar').style.visibility = 'hidden';
         ['bOk', 'bNo', 'bNoReward', 'bSkip'].forEach((id) => { $(id).disabled = true; });
         hideReasons();
@@ -575,6 +583,7 @@
         if (!fall) { zeigeFehler('Der Fall kam leer zurück.', () => { S.cache.delete(c.id); showCurrent(); }); return; }
         render(fall);
         S.zeigt = c.id;
+        S.zeigtStand = fall.kind === 'receipt' && fall.row && fall.row.doppelPruefung ? (fall.row.doppelPruefung.at ?? null) : null;
         leisteAn();
         // Die nächsten drei still vorladen.
         const next = S.queue.slice(S.idx + 1, S.idx + 4).map((x) => x.id);
@@ -878,7 +887,8 @@
         try {
           // 95 s: der Server wartet bis zu 75 s auf den Resolver — das SDK gäbe
           // sonst nach 70 s auf, bevor „Ergebnis unklar" überhaupt ankommt.
-          const r = await call('reviewDecideReceipt', { timeout: 95000 })({ receiptId: c.id, decision, reason });
+          const doppelStand = decision === 'approve' ? S.zeigtStand : null;
+          const r = await call('reviewDecideReceipt', { timeout: 95000 })({ receiptId: c.id, decision, reason, doppelStand });
           if (r.data.ok) {
             // Der Resolver rechnet die Deckel beim Freigeben NEU — ein Bon, der
             // Tage in der Prüfung lag, kann am Tageslimit hängen und mit
@@ -912,7 +922,12 @@
             await advance(fallId);
           } else {
             const code = r.data.code || r.data.http;
-            toast(`Nicht ausgeführt: ${esc(RESOLVER_DE[code] || code)}`, 'bad');
+            // Der verlinkte Bon ist noch nicht entschieden: eine erneute
+            // Freigabe hielte wieder fest (dritte Prüfrunde 06.10.2026).
+            const text = code === 'halten' && r.data.reviewReason === 'bild_aehnlich_offen'
+              ? 'Der ähnliche Bon (Zeile „Doppel-Prüfung") ist noch nicht entschieden — zuerst ihn entscheiden, dann diesen'
+              : RESOLVER_DE[code] || code;
+            toast(`Nicht ausgeführt: ${esc(text)}`, 'bad');
             if (code === 'halten') {
               // Den Fall frisch laden: die Zeile „Doppel-Prüfung" ist neu.
               S.cache.delete(fallId);

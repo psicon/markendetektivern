@@ -172,6 +172,9 @@ const BON_URTEIL = {
   duplicate_content_cross_user: 'locked',
   bon_date_future: 'hold',
   ocr_unavailable: 'hold',
+  // Konfiguration nicht lesbar (dritte Prüfrunde 06.10.2026, cashback-pipeline
+  // verarbeiteCashback) — technischer Ausfall, keine Aussage über den Bon.
+  config_unavailable: 'hold',
   // Lauf zu langsam (03.10.2026, cashback-pipeline laufzeitPruefen) —
   // technischer Ausfall wie ocr_unavailable, keine Aussage über den Bon.
   lauf_zeitgrenze: 'hold',
@@ -189,6 +192,10 @@ const BON_URTEIL = {
   // eine weitere Seite eines bezahlten Belegs, nur Uhrzeit, Bestellnummer
   // oder (App) der Tag weichen ab — ein Mensch vergleicht die beiden.
   seite_abweichend: 'hold',
+  // Abschlussprüfung 06.10.2026 (cashback-pipeline `capture.bildNichtLesbar`):
+  // die Datei ist kein Bild, das die Bildprüfung lesen kann (PDF, HEIC,
+  // abgeschnitten) — der Abgleich mit früheren Bons fehlt, ein Mensch sieht hin.
+  bild_nicht_pruefbar: 'hold',
 };
 const bonUrteil = (row) => BON_URTEIL[row.reviewReason] || (row.reconOk === false ? 'hold' : 'ok');
 
@@ -590,7 +597,10 @@ exports.reviewDecideReceipt = onCall({ region: REGION, timeoutSeconds: 90, secre
   const reason = p.reason ? String(p.reason) : '';
   if (!receiptId) throw new HttpsError('invalid-argument', 'receiptId fehlt.');
   if (!resolverEntscheidungGueltig(decision, reason)) throw new HttpsError('invalid-argument', 'decision=approve|reject[&reason]|no_reward&reason=daily_cap_reached|weekly_cap_reached|per_user_cap_reached');
-  const r = await resolverAufruf({ receiptId, decision, reason, duplicateOf: p.duplicateOf || null, priorStatus: p.priorStatus || null, schluessel: CASHBACK_ADMIN_KEY.value() });
+  // doppelStand: Stand der Zeile „Doppel-Prüfung", den der Prüfer sah (vierte
+  // Prüfrunde 06.10.2026) — nur damit quittiert die Freigabe deren Treffer.
+  const doppelStand = p.doppelStand == null || p.doppelStand === '' || !Number.isFinite(Number(p.doppelStand)) ? null : Number(p.doppelStand);
+  const r = await resolverAufruf({ receiptId, decision, reason, duplicateOf: p.duplicateOf || null, priorStatus: p.priorStatus || null, doppelStand, schluessel: CASHBACK_ADMIN_KEY.value() });
   logger.info('[review-console] receipt decision', { adminUid, receiptId, decision, reason, http: r.http, code: r.code });
   // 409 = fachlich (nicht in review / campaign_missing / no_cashback_computed) — als Ergebnis zurückgeben, kein Exception-Rauschen.
   if (!r.ok) return r;

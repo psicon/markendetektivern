@@ -114,10 +114,17 @@ function antwort() {
   return r;
 }
 
-async function entscheiden(id, decision = 'approve') {
+/**
+ * Entscheidung über den Resolver. Wie die Prüfkonsole schickt sie den Stand der
+ * Zeile „Doppel-Prüfung" mit, den der Mensch gerade sieht (`doppelStand`,
+ * vierte Prüfrunde 06.10.2026); `gesehen: false` = ohne (Bon-Runde, Skript).
+ */
+async function entscheiden(id, decision = 'approve', { gesehen = true } = {}) {
   const res = antwort();
+  const dp = fake.store.get(`receipts/${id}`)?.doppelPruefung;
+  const stand = gesehen && dp && dp.at && typeof dp.at.toMillis === 'function' ? String(dp.at.toMillis()) : undefined;
   await fn.resolveCashbackReview(
-    { get: (h) => (h === 'x-admin-key' ? SCHLUESSEL : undefined), query: { receiptId: id, decision } },
+    { get: (h) => (h === 'x-admin-key' ? SCHLUESSEL : undefined), query: { receiptId: id, decision, ...(stand ? { doppelStand: stand } : {}) } },
     res,
   );
   return res;
@@ -463,10 +470,21 @@ describe('B — Regel bild (Feinvergleich hat einen Bildtreffer nicht bestätigt
     expect(earns()).toHaveLength(1);
   });
 
-  test('Bon-Tag mehr als 8 Tage vom Original entfernt → bezahlt (bekannte Lücke, siehe CLAUDE.md)', async () => {
+  test('Bon-Tag mehr als 8 Tage vom Original entfernt, Artikelanteil ≥ 0,8 → trotzdem Prüfung (dritte Prüfrunde 06.10.2026)', async () => {
     // Das Original wurde damals frisch eingereicht und bezahlt.
     await original({ datum: vorTagen(10), hochgeladenVorTagen: 10 });
     bonAnlegen('kopie', { markt: 'kaufland', zeit: '12:31', datum: GESTERN, items: KOPIE, capture: aehnlich() });
+    await verarbeiten('kopie');
+    expect(bon('kopie')).toMatchObject({ status: 'review', reviewReason: D.BILD_GRUND });
+    expect(bon('kopie').doppelPruefung.treffer).toEqual([expect.objectContaining({ regel: 'bild', gegen: 'orig', abstand: 9, anteil: 0.9, modus: 'wirksam' })]);
+    expect(earns()).toHaveLength(1);
+  });
+
+  test('Bon-Tag mehr als 8 Tage entfernt, Artikelanteil unter 0,8 (anderer Einkauf mit ähnlichem Bild) → bezahlt', async () => {
+    await original({ datum: vorTagen(10), hochgeladenVorTagen: 10 });
+    // 3 von 10 Preisen anders: Anteil 0,7.
+    const ANDERS = ZEHN.map((it, i) => (i < 3 ? { ...it, priceCents: it.priceCents + 10 } : it));
+    bonAnlegen('kopie', { markt: 'kaufland', zeit: '12:31', datum: GESTERN, items: ANDERS, capture: aehnlich() });
     await verarbeiten('kopie');
     expect(bon('kopie').status).toBe('approved');
     expect(earns()).toHaveLength(2);
@@ -480,7 +498,7 @@ describe('B — Regel bild (Feinvergleich hat einen Bildtreffer nicht bestätigt
     expect(bon('kopie').status).toBe('approved');
   });
 
-  test('der NÄCHSTE Kandidat ist ein offener Bon, ein weiterer bezahlt → trotzdem Prüfung', async () => {
+  test('der NÄCHSTE Kandidat ist ein offener Bon, ein weiterer bezahlt → wartet auf den offenen, danach trotzdem Prüfung', async () => {
     await original();
     bonAnlegen('offen', { markt: 'kaufland', zeit: '19:00', datum: GESTERN });
     fake.store.set('receipts/offen', { ...bon('offen'), status: 'review', merchant: { id: 'kaufland' }, bonDate: GESTERN });
@@ -488,13 +506,17 @@ describe('B — Regel bild (Feinvergleich hat einen Bildtreffer nicht bestätigt
       markt: 'kaufland', zeit: '12:31', datum: VORGESTERN, items: KOPIE,
       capture: aehnlich('offen', { kandidaten: ['offen', 'orig'] }),
     });
+    // Vierte Prüfrunde 06.10.2026: der offene bestimmt den Grund — die Kopie
+    // wartet erst auf ihn (bildWarten), dann Prüfung `bild_aehnlich_offen`.
     await verarbeiten('kopie');
-    expect(bon('kopie')).toMatchObject({ status: 'review', reviewReason: D.BILD_GRUND });
-    // Der bezahlte bestimmt den Grund; der offene steht daneben (06.10.2026).
+    expect(bon('kopie')).toMatchObject({ status: 'ocr_pending', bildWartet: { gegen: 'offen', versuche: 1 } });
+    for (let i = 2; i <= 5; i++) await verarbeiten('kopie');
+    expect(bon('kopie')).toMatchObject({ status: 'review', reviewReason: D.BILD_OFFEN_GRUND });
     expect(bon('kopie').doppelPruefung.treffer).toEqual([
-      expect.objectContaining({ regel: 'bild', gegen: 'orig' }),
       expect.objectContaining({ regel: 'bild', gegen: 'offen', offen: true }),
+      expect.objectContaining({ regel: 'bild', gegen: 'orig' }),
     ]);
+    expect(earns().map((e) => e.receiptId)).toEqual(['orig']);
   });
 
   test('Regel rein: Tag ±8 (Markt seit 06.10.2026 egal), Reihenfolge nach allen ablehnenden Regeln', () => {

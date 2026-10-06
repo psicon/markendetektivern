@@ -112,10 +112,17 @@ function antwort() {
   return r;
 }
 
-async function entscheiden(id, decision = 'approve') {
+/**
+ * Entscheidung über den Resolver. Wie die Prüfkonsole schickt sie den Stand der
+ * Zeile „Doppel-Prüfung" mit, den der Mensch gerade sieht (`doppelStand`,
+ * vierte Prüfrunde 06.10.2026); `gesehen: false` = ohne (Bon-Runde, Skript).
+ */
+async function entscheiden(id, decision = 'approve', { gesehen = true } = {}) {
   const res = antwort();
+  const dp = fake.store.get(`receipts/${id}`)?.doppelPruefung;
+  const stand = gesehen && dp && dp.at && typeof dp.at.toMillis === 'function' ? String(dp.at.toMillis()) : undefined;
   await fn.resolveCashbackReview(
-    { get: (h) => (h === 'x-admin-key' ? SCHLUESSEL : undefined), query: { receiptId: id, decision } },
+    { get: (h) => (h === 'x-admin-key' ? SCHLUESSEL : undefined), query: { receiptId: id, decision, ...(stand ? { doppelStand: stand } : {}) } },
     res,
   );
   return res;

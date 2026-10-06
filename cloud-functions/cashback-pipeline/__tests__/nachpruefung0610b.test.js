@@ -128,10 +128,17 @@ function antwort() {
 }
 
 /** Freigabe über den Resolver (Bon-Runde bzw. Prüfkonsole). */
-async function entscheiden(id, decision = 'approve') {
+/**
+ * Entscheidung über den Resolver. Wie die Prüfkonsole schickt sie den Stand der
+ * Zeile „Doppel-Prüfung" mit, den der Mensch gerade sieht (`doppelStand`,
+ * vierte Prüfrunde 06.10.2026); `gesehen: false` = ohne (Bon-Runde, Skript).
+ */
+async function entscheiden(id, decision = 'approve', { gesehen = true } = {}) {
   const res = antwort();
+  const dp = fake.store.get(`receipts/${id}`)?.doppelPruefung;
+  const stand = gesehen && dp && dp.at && typeof dp.at.toMillis === 'function' ? String(dp.at.toMillis()) : undefined;
   await fn.resolveCashbackReview(
-    { get: (h) => (h === 'x-admin-key' ? SCHLUESSEL : undefined), query: { receiptId: id, decision } },
+    { get: (h) => (h === 'x-admin-key' ? SCHLUESSEL : undefined), query: { receiptId: id, decision, ...(stand ? { doppelStand: stand } : {}) } },
     res,
   );
   return res;
@@ -229,9 +236,16 @@ describe('1 — Regel bild: das Original ist noch nicht entschieden', () => {
     expect(bon('kopie').doppelPruefung.treffer).toEqual([expect.objectContaining({ regel: 'bild', gegen: 'orig', offen: true, modus: 'wirksam' })]);
     expect(bearbeitbar(bon('kopie'))).toBe(false);
     expect(earns()).toHaveLength(0);
-    // Ein Mensch hat den Grund vor sich und gibt frei → bucht.
+    // Ein Mensch gibt frei, solange das Original offen ist → wieder festhalten
+    // (dritte Prüfrunde 06.10.2026: sonst wurden Kopie UND Original bezahlt).
     const res = await entscheiden('kopie');
-    expect(res.body).toMatchObject({ ok: true, status: 'approved', creditedCents: 8 });
+    expect(res.code).toBe(409);
+    expect(res.body).toEqual({ code: 'halten', reviewReason: D.BILD_OFFEN_GRUND, regel: 'bild', gegen: 'orig' });
+    expect(earns()).toHaveLength(0);
+    // Das Original wird abgelehnt → jetzt bucht die Freigabe der Kopie.
+    expect((await entscheiden('orig', 'reject')).body).toMatchObject({ ok: true, status: 'rejected' });
+    const res2 = await entscheiden('kopie');
+    expect(res2.body).toMatchObject({ ok: true, status: 'approved', creditedCents: 8 });
     expect(earns().map((e) => e.receiptId)).toEqual(['kopie']);
   });
 
@@ -313,14 +327,32 @@ describe('5 — Resolver hält bei einer Prüfregel fest, statt zu buchen', () =
     expect(earns()).toHaveLength(2);
   });
 
-  test('modiFuerEntscheidung: Prüfgrund am Bon → Prüfregeln nur beobachten; sonst bleiben sie, wie geschaltet', () => {
-    const modi = D.doppelModi({ doppelSeiteAbweichend: true, doppelSumme: true });
-    expect(D.modiFuerEntscheidung(modi, 'ocr_confidence_low')).toMatchObject({ bild: true, seiteAbweichend: true, summe: true });
-    for (const g of [D.BILD_GRUND, D.BILD_OFFEN_GRUND, D.SEITE_GRUND]) {
-      expect(D.modiFuerEntscheidung(modi, g)).toMatchObject({ bild: 'shadow', seiteAbweichend: 'shadow', summe: true });
-    }
-    // Ausgeschaltet bleibt aus.
-    expect(D.modiFuerEntscheidung(D.doppelModi({ doppelBildAehnlich: false }), D.BILD_GRUND)).toMatchObject({ bild: false, seiteAbweichend: 'shadow' });
+  test('quittierteTreffer (vierte Prüfrunde 06.10.2026, ersetzt modiFuerEntscheidung): nur gesehene, entschiedene Treffer der Prüfregeln', () => {
+    const at = fake.zeit(1_000_000);
+    const dp = {
+      at,
+      treffer: [
+        { regel: 'seiteAbweichend', gegen: 's1', modus: 'wirksam' },
+        { regel: 'bild', gegen: 'alt', modus: 'wirksam' },
+        { regel: 'bild', gegen: 'orig', modus: 'wirksam', offen: true },
+        { regel: 'bild', gegen: 'frueher', modus: 'quittiert' },
+        { regel: 'bild', gegen: 'beob', modus: 'beobachtung' },
+        { regel: 'summe', gegen: 'x', modus: 'wirksam' },
+      ],
+    };
+    expect(D.quittierteTreffer({ reviewReason: D.BILD_GRUND, doppelPruefung: dp, gesehenMs: '1000000' }))
+      .toEqual(['seiteAbweichend:s1', 'bild:alt', 'bild:frueher']);
+    // bild_aehnlich_offen: „erst den offenen entscheiden" — nur schon Quittiertes weitertragen.
+    expect(D.quittierteTreffer({ reviewReason: D.BILD_OFFEN_GRUND, doppelPruefung: dp, gesehenMs: 1_000_000 }))
+      .toEqual(['bild:frueher']);
+    // Anderer Stand, kein Stand, kein Prüfgrund → nichts.
+    expect(D.quittierteTreffer({ reviewReason: D.BILD_GRUND, doppelPruefung: dp, gesehenMs: 999_999 })).toEqual([]);
+    expect(D.quittierteTreffer({ reviewReason: D.BILD_GRUND, doppelPruefung: dp })).toEqual([]);
+    expect(D.quittierteTreffer({ reviewReason: 'ocr_confidence_low', doppelPruefung: dp, gesehenMs: 1_000_000 })).toEqual([]);
+    expect(D.quittierteTreffer({ reviewReason: D.BILD_GRUND, doppelPruefung: null, gesehenMs: 1_000_000 })).toEqual([]);
+    // Firestore-Timestamp als {seconds, nanoseconds}.
+    expect(D.quittierteTreffer({ reviewReason: D.SEITE_GRUND, doppelPruefung: { ...dp, at: { seconds: 1000, nanoseconds: 0 } }, gesehenMs: 1_000_000 }))
+      .toHaveLength(3);
   });
 });
 
@@ -467,11 +499,11 @@ describe('4 — Regel bild sieht alle groben Treffer, nicht nur die 3 verglichen
   test('bildKandidatenIds: eigener Bon raus, ohne Doppelte, höchstens BILD_MAX_KANDIDATEN', () => {
     expect(D.bildKandidatenIds({ kandidat: 'a', kandidaten: ['b', 'a', 'self', 'c', 7, ''] }, 'self')).toEqual(['b', 'a', 'c']);
     expect(D.bildKandidatenIds(null, 'x')).toEqual([]);
-    const viele = Array.from({ length: 30 }, (_, i) => `k${i}`);
+    const viele = Array.from({ length: D.BILD_MAX_KANDIDATEN + 25 }, (_, i) => `k${i}`);
     expect(D.bildKandidatenIds({ kandidaten: viele }, 'x')).toHaveLength(D.BILD_MAX_KANDIDATEN);
   });
 
-  test('rein: bezahlte Kandidaten vor offenen; nur bezahlt oder offen zählt', () => {
+  test('rein: offene Kandidaten vor bezahlten (vierte Prüfrunde 06.10.2026); nur bezahlt oder offen zählt', () => {
     const neu = D.identitaet({ merchantId: 'kaufland', bonDate: GESTERN, items: ZEHN });
     const modi = D.doppelModi({});
     const u = D.doppelUrteil({
@@ -482,10 +514,10 @@ describe('4 — Regel bild sieht alle groben Treffer, nicht nur die 3 verglichen
         { id: 'bezahlt', markt: 'netto', tag: VORGESTERN, lebendig: true },
       ],
     });
-    expect(u.treffer.map((t) => t.gegen)).toEqual(['bezahlt', 'offen1']);
-    expect(u.wirksam).toMatchObject({ gegen: 'bezahlt', andererMarkt: true });
-    expect(D.grundFuer(u.wirksam)).toBe(D.BILD_GRUND);
-    expect(D.grundFuer(u.treffer[1])).toBe(D.BILD_OFFEN_GRUND);
-    expect(u.treffer[1]).toMatchObject({ offen: true, abstand: null });
+    expect(u.treffer.map((t) => t.gegen)).toEqual(['offen1', 'bezahlt']);
+    expect(u.wirksam).toMatchObject({ gegen: 'offen1', offen: true, abstand: null });
+    expect(D.grundFuer(u.wirksam)).toBe(D.BILD_OFFEN_GRUND);
+    expect(D.grundFuer(u.treffer[1])).toBe(D.BILD_GRUND);
+    expect(u.treffer[1]).toMatchObject({ gegen: 'bezahlt', andererMarkt: true });
   });
 });
