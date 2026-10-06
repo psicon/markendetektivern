@@ -434,14 +434,26 @@ describe('Rückweg: Barcode-Korrektur verwerfen (Prüfrunde 06.10.2026)', () => 
     expect((await entscheide({ ids: ['neu'], decision: 'approve' })).results[0]).toMatchObject({ outcome: 'blocked', reason: 'sperre_woche_gleicher_nutzer' });
   });
 
+  it('… und eine eigene Einreichung mit der VERWORFENEN Foto-Nummer hält (ean_alt_doppelt) — gleich, ob dazwischen eine Runde lief (Prüfrunde 1 zur Barcode-Korrektur)', async () => {
+    lege('frei', { ...korrektur, status: 'approved', createdAt: ts(T0 - 2 * TAG_MS) });
+    expect((await verwerfen('frei')).results[0].outcome).toBe('korrektur_verworfen');
+    expect(doc('frei').eanFotoOcr).toMatchObject({ befund: 'korrigiert' }); // keine Runde dazwischen
+    lege('neu', { ean: ANDERE, createdAt: ts(T0) });
+    expect((await entscheide({ ids: ['neu'], decision: 'approve' })).results[0]).toMatchObject({ outcome: 'blocked', reason: 'ean_alt_doppelt' });
+    expect(doc('neu').status).toBe('pending');
+  });
+
   it('Warteschlange: eine verworfene Korrektur zählt im EAN-Index nicht mehr (Feld im select)', async () => {
     lege('frei', { ...korrektur, status: 'approved', createdAt: ts(T0 - 2 * TAG_MS), eanKorrekturVerworfen: { by: 'patrick', notiz: 'stimmt' } });
     lege('neu', { ean: ANDERE, createdAt: ts(T0) });
     const spy = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 20 * 60 * 1000);
     try {
       const q = await konsole.reviewQueue({ ...admin, data: { type: 'photos' } });
-      // unter ANDERE gibt es keine eigene Freigabe mehr — die Korrektur von `frei` ist verworfen
-      expect(q.rows.find((x) => x.id === 'neu')).toMatchObject({ ean: ANDERE, verdict: 'ok' });
+      // unter ANDERE gibt es keine eigene Freigabe mehr — die Korrektur von `frei` ist verworfen,
+      // also keine Wochen-Sperre (ohne das Feld im select stünde hier `locked`). Die verworfene
+      // Foto-Nummer gehört aber weiter zu den Nummern der Freigabe (werte.eanFotoFreigegebenOf,
+      // Prüfrunde 1 zur Barcode-Korrektur) → Halt `ean_alt_doppelt`, wie in der Morgenrunde.
+      expect(q.rows.find((x) => x.id === 'neu')).toMatchObject({ ean: ANDERE, verdict: 'hold', reasons: ['ean_alt_doppelt'] });
     } finally { spy.mockRestore(); }
   });
 });

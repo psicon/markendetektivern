@@ -305,7 +305,7 @@ describe('Halte-Befund früherer Läufe (Prüfrunde 2, 02.10.2026)', () => {
   it('eanFotoVorbefund: nur abweichend/unsicher halten; Quelle eanFotoOcr', () => {
     expect(eanFotoVorbefund({ ...KFS, eanFotoOcr: { ean: '4013602136424', befund: 'abweichend', bestaetigt: true, lauf: '2026-10-02_080000' } }))
       // ohne Vermerk aus einem anderen Lauf als dem 06.10. → Befund des alten Codes, gebremst (Prüfrunde 06.10.2026)
-      .toEqual({ befund: 'abweichend', gelesen: '4013602136424', gespeichert: '4250231136474', bestaetigt: true, zweit: null, lauf: '2026-10-02_080000', quelle: 'eanFotoOcr', vertraut: false, gebremst: 'altcode_2026-10-02_080000', korrekturfaehig: false });
+      .toEqual({ befund: 'abweichend', gelesen: '4013602136424', gespeichert: '4250231136474', bestaetigt: true, zweit: null, lauf: '2026-10-02_080000', quelle: 'eanFotoOcr', vertraut: false, gebremst: 'altcode_2026-10-02_080000', gebremstQuelle: 'eanFotoOcr', korrekturfaehig: false });
     expect(eanFotoVorbefund({ ...KFS, eanFotoOcr: { ean: ANDERE, befund: 'unsicher', zweit: '4001382088125' } })).toMatchObject({ befund: 'unsicher', zweit: '4001382088125' });
     for (const befund of ['gleich', 'kein_urteil', 'zweifelhaft', undefined]) expect(eanFotoVorbefund({ ...KFS, eanFotoOcr: { ean: ANDERE, befund } })).toBeNull();
     expect(eanFotoVorbefund(KFS)).toBeNull();
@@ -803,5 +803,100 @@ describe('Prüfrunde 06.10.2026 (Runde 3): Strichcode-Leser als Pflicht-Zeuge, v
     expect(evaluateDuplicate({ ...neu, createdAt: T0 }, [{ ...pf, createdAt: T0 - 24 * STUNDE }].filter((o) => eanSchluessel(o.ean) === eanSchluessel(FK)))).toMatchObject({ verdict: 'ok' });
     // über die verwandten: gesperrt — die Aufrufer machen daraus nur einen Halt (ean_alt_doppelt)
     expect(evaluateDuplicate({ ...neu, createdAt: T0 }, [{ ...pf, createdAt: T0 - 24 * STUNDE }])).toMatchObject({ verdict: 'locked', priorId: 'frei' });
+  });
+});
+
+describe('Prüfrunde 1 zur Barcode-Korrektur (06.10.2026): Bremse aus jeder Quelle, verworfene Korrektur einer Freigabe', () => {
+  const {
+    eanFotoVorbefund, eanFotoMitVorbefund, eanFotoEintrag, eanFotoBefund, eanFotoBestaetigen, eanKorrekturKandidat,
+    eanFotoFreigegebenOf, eanNummern, teilenNummer, eanSchluessel, LETZTER_LAUF_OHNE_VERMERK,
+  } = require('../src/werte');
+  const S = '4061464833821';
+  const F = '4000417025005';
+  const ALT = LETZTER_LAUF_OHNE_VERMERK;
+  const SPAETER = '2026-10-07_080001';
+  const zweimal = (n) => eanFotoBestaetigen(eanFotoBefund(S, n), n);
+  const nichtLesbar = eanFotoBefund(S, '');
+  // eanFotoOcr vom 06.10. (vertraut, ohne Vermerk), Rückfall vom alten Code am 07.10. neu geschrieben (ohne Vermerk → altcode)
+  const altRueckfall = () => ({
+    ean: S,
+    eanFotoOcr: { ean: F, befund: 'abweichend', bestaetigt: true, lauf: ALT },
+    review: { rundeOffen: { lauf: SPAETER, eanFoto: { befund: 'abweichend', ean: F, bestaetigt: true } } },
+  });
+
+  it('eanFotoVorbefund: Bremse aus dem Rückfall, auch wenn eanFotoOcr zuerst kommt (Quelle mitgegeben)', () => {
+    const v = eanFotoVorbefund(altRueckfall());
+    expect(v).toMatchObject({ quelle: 'eanFotoOcr', gebremst: `altcode_${SPAETER}`, gebremstQuelle: 'rundeOffen', korrekturfaehig: false });
+    // Notbremse nur im Rückfall (eanFotoOcr konnte nicht gespeichert werden)
+    const nb = {
+      ean: S,
+      eanFotoOcr: { ean: F, befund: 'abweichend', bestaetigt: true, zweit: F, korrekturfaehig: true, lauf: 'L1' },
+      review: { rundeOffen: { lauf: 'L1', eanFoto: { befund: 'abweichend', ean: F, bestaetigt: true, zweit: F, korrekturfaehig: true, korrekturGebremst: 'L1' } } },
+    };
+    expect(eanFotoVorbefund(nb)).toMatchObject({ quelle: 'eanFotoOcr', gebremst: 'L1', gebremstQuelle: 'rundeOffen' });
+    // steht die Bremse in eanFotoOcr, ist das die Quelle
+    const oben = { ...nb, eanFotoOcr: { ...nb.eanFotoOcr, korrekturGebremst: 'L1' } };
+    expect(eanFotoVorbefund(oben)).toMatchObject({ gebremst: 'L1', gebremstQuelle: 'eanFotoOcr' });
+    // ohne Bremse kein Feld
+    const ohne = { ...nb, review: { rundeOffen: { lauf: 'L1', eanFoto: { ...nb.review.rundeOffen.eanFoto, korrekturGebremst: undefined } } } };
+    expect(eanFotoVorbefund(ohne).gebremst).toBeUndefined();
+    expect(eanFotoVorbefund(ohne).gebremstQuelle).toBeUndefined();
+  });
+
+  it('eanFotoMitVorbefund trägt die Bremse weiter — unverändert übernommen (mit neuSpeichern) oder heute zweimal dieselbe Nummer', () => {
+    const v = eanFotoVorbefund(altRueckfall());
+    const unlesbar = eanFotoMitVorbefund(nichtLesbar, v);
+    expect(unlesbar).toMatchObject({ art: 'abweichend', korrekturGebremst: `altcode_${SPAETER}`, neuSpeichern: true, korrekturfaehig: false, vorbefund: { quelle: 'eanFotoOcr' } });
+    expect(eanFotoEintrag(unlesbar)).toMatchObject({ befund: 'abweichend', korrekturGebremst: `altcode_${SPAETER}`, korrekturfaehig: false });
+    expect(eanFotoEintrag(unlesbar).neuSpeichern).toBeUndefined(); // landet nicht am Dokument
+    const heute = eanFotoMitVorbefund(zweimal(F), v);
+    expect(heute).toMatchObject({ art: 'abweichend', korrekturGebremst: `altcode_${SPAETER}` });
+    // Bremse schon in eanFotoOcr → kein Neuschreiben nötig
+    const oben = eanFotoVorbefund({ ...altRueckfall(), eanFotoOcr: { ean: F, befund: 'abweichend', bestaetigt: true, lauf: SPAETER } });
+    expect(oben.gebremstQuelle).toBe('eanFotoOcr');
+    expect(eanFotoMitVorbefund(nichtLesbar, oben).neuSpeichern).toBeUndefined();
+  });
+
+  it('… und der nächste Lauf (Rückfall UND eanFotoOcr mit Vermerk) korrigiert nie — weder unlesbar noch zweimal F', () => {
+    // So sieht das Dokument nach dem ersten Lauf des neuen Codes aus: beide Quellen tragen den Vermerk.
+    const b = eanFotoMitVorbefund(nichtLesbar, eanFotoVorbefund(altRueckfall()));
+    const eintrag = eanFotoEintrag(b);
+    const danach = { ean: S, eanFotoOcr: { ...eintrag, lauf: 'L2' }, review: { rundeOffen: { lauf: 'L2', eanFoto: { befund: 'abweichend', ean: F, bestaetigt: true, zweit: F, korrekturfaehig: false, korrekturGebremst: b.korrekturGebremst } } } };
+    expect(eanKorrekturKandidat(danach, nichtLesbar)).toBeNull();
+    expect(eanKorrekturKandidat(danach, zweimal(F))).toBeNull();
+    // ohne den Vermerk im Rückfall (Stand vor dieser Prüfrunde) wäre am Folgetag korrigiert worden
+    const vorher = { ...danach, eanFotoOcr: { ean: F, befund: 'abweichend', bestaetigt: true, lauf: ALT }, review: { rundeOffen: { lauf: 'L2', eanFoto: { befund: 'abweichend', ean: F, bestaetigt: true, zweit: F, korrekturfaehig: false } } } };
+    expect(eanKorrekturKandidat(vorher, zweimal(F))).toMatchObject({ ean: F, heuteBestaetigt: true });
+  });
+
+  it('ein `unsicher` bekommt keinen Bremsvermerk (wird ohnehin nie korrigiert)', () => {
+    const x = { ...altRueckfall(), eanFotoOcr: { ean: F, befund: 'unsicher', zweit: S, lauf: 'L1' } };
+    const v = eanFotoVorbefund(x);
+    expect(v).toMatchObject({ befund: 'unsicher', gebremst: `altcode_${SPAETER}` });
+    const b = eanFotoMitVorbefund(nichtLesbar, v);
+    expect(b.art).toBe('unsicher');
+    expect(b.korrekturGebremst).toBeUndefined();
+    expect(b.neuSpeichern).toBeUndefined();
+  });
+
+  it('eanFotoFreigegebenOf: Freigabe mit VERWORFENER Korrektur → die verworfene Foto-Nummer gehört zu ihren Nummern, unabhängig davon, ob danach eine Runde lief', () => {
+    const korr = { ean: F, vorher: S, aus: 'heute', zeuge: { art: 'striche', gelesen: [F] } };
+    const verworfen = { by: 'patrick', notiz: 'Scanner stimmt', ean: F, vorher: S };
+    // ohne Runde dazwischen: eanFotoOcr steht noch auf `korrigiert`
+    const a = { userId: 'u1', ean: S, status: 'approved', eanKorrektur: korr, eanKorrekturVerworfen: verworfen, eanFotoOcr: { ean: F, befund: 'korrigiert', vorher: S } };
+    expect(eanFotoFreigegebenOf(a)).toBe(F);
+    // mit Runde dazwischen (sie schrieb eanFotoOcr aus der verworfenen Korrektur) → dieselbe Nummer
+    const a2 = { ...a, eanFotoOcr: { ean: F, befund: 'abweichend', bestaetigt: true, zweit: F, korrekturfaehig: false } };
+    expect(eanFotoFreigegebenOf(a2)).toBe(F);
+    const pa = policyOf('a', a);
+    expect(pa).toMatchObject({ ean: S, eanVorher: null, eanFotoFrei: F });
+    expect(eanNummern(pa)).toEqual([eanSchluessel(S), eanSchluessel(F)]);
+    expect(teilenNummer(policyOf('b', { userId: 'u1', ean: F, status: 'pending' }), pa)).toBe(true);
+    // nur bei einer Freigabe; ohne gültige abweichende Nummer nichts
+    expect(eanFotoFreigegebenOf({ ...a, status: 'pending' })).toBeNull();
+    expect(eanFotoFreigegebenOf({ ...a, eanKorrekturVerworfen: { ...verworfen, ean: S }, eanKorrektur: { ...korr, ean: S } })).toBeNull();
+    // nicht verworfen: die Korrektur gilt (eanOf = F), die Foto-Nummer ist dann die effektive, nicht `eanFotoFrei`
+    const gilt = { ...a, eanKorrekturVerworfen: undefined };
+    expect(policyOf('g', gilt)).toMatchObject({ ean: F, eanVorher: S, eanFotoFrei: null });
   });
 });

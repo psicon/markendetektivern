@@ -9,7 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
-const { liesBild, nummernAus, mitZeit, LESER, LESE_OPTIONEN } = require('../src/strichcode');
+const { liesBild, bildPruefen, nummernAus, mitZeit, LESER, LESE_OPTIONEN, MAX_PIXEL, BILD_FORMATE } = require('../src/strichcode');
 
 let schreiber;
 const echtesFetch = global.fetch;
@@ -76,8 +76,76 @@ describe('liesBild (echter Leser, WASM aus dem Paket)', () => {
   it('keine Striche → leer (kein Fehler); kaputte oder leere Datei → Fehler; wirft nie', async () => {
     const weiss = await sharp({ create: { width: 400, height: 300, channels: 3, background: '#ffffff' } }).jpeg().toBuffer();
     expect(await liesBild(weiss)).toEqual({ gelesen: [] });
-    expect(await liesBild(Buffer.from([1, 2, 3, 4, 5]))).toMatchObject({ fehler: expect.stringMatching(/^bild: /) });
+    // Kein Bildkopf lesbar → Fehler schon vor dem Leser (bildPruefen).
+    expect(await liesBild(Buffer.from([1, 2, 3, 4, 5]))).toMatchObject({ fehler: expect.stringMatching(/^bildkopf: /) });
     expect(await liesBild(Buffer.alloc(0))).toEqual({ fehler: 'leere_datei' });
     expect(await liesBild(null)).toEqual({ fehler: 'leere_datei' });
+  }, 30000);
+});
+
+/**
+ * Obergrenze der Bildgröße (Prüfrunde 1 zur Barcode-Korrektur, 06.10.2026):
+ * eine weiße Fläche mit 324 MP passt in 4,9 MB (unter die Upload-Grenze von
+ * 8 MB) und trieb den Leser über 900 MB — zusammen mit der Runde über 1 GiB,
+ * Cloud Run beendet die Instanz in Schritt 4c, jeden Morgen erneut.
+ */
+describe('bildPruefen / liesBild: zu große Bilder werden nie dekodiert', () => {
+  /** JPEG mit gefälschten Abmessungen im Kopf (SOF0/SOF2) — der Inhalt bleibt klein. */
+  const jpegMitKopf = (buf, breite, hoehe) => {
+    const b = Buffer.from(buf);
+    for (let i = 2; i + 9 < b.length; i++) {
+      if (b[i] === 0xff && (b[i + 1] === 0xc0 || b[i + 1] === 0xc2)) {
+        b.writeUInt16BE(hoehe, i + 5);
+        b.writeUInt16BE(breite, i + 7);
+        return b;
+      }
+    }
+    throw new Error('kein SOF gefunden');
+  };
+  /** PNG mit gefälschten Abmessungen im IHDR (CRC neu berechnet, sonst wäre schon der Kopf kaputt). */
+  const pngMitKopf = (buf, breite, hoehe) => {
+    const b = Buffer.from(buf);
+    expect(b.toString('latin1', 12, 16)).toBe('IHDR');
+    b.writeUInt32BE(breite, 16);
+    b.writeUInt32BE(hoehe, 20);
+    b.writeUInt32BE(zlib.crc32(b.subarray(12, 29)), 29);
+    return b;
+  };
+  const zlib = require('zlib');
+
+  it('Grenze 64 MP, nur JPEG und PNG', () => {
+    expect(MAX_PIXEL).toBe(64 * 1000 * 1000);
+    expect(BILD_FORMATE).toEqual(['jpeg', 'png']);
+  });
+
+  it('JPEG mit 20000 × 20000 im Kopf → Fehler bild_zu_gross, entschieden allein aus dem Kopf', async () => {
+    // Ein echtes Bild dieser Größe (4,1 MB) trieb den Leser auf 1.114 MB (gemessen
+    // 06.10.2026). Hier nur der Kopf gefälscht: ohne die Prüfung käme „bild: …"
+    // vom Leser zurück, mit ihr `bild_zu_gross` — der Leser sieht die Datei nie.
+    const klein = await sharp(await png('4061464833821', 'EAN-13')).flatten({ background: '#ffffff' }).jpeg().toBuffer();
+    const gross = jpegMitKopf(klein, 20000, 20000);
+    expect((await sharp(gross, { limitInputPixels: false }).metadata())).toMatchObject({ width: 20000, height: 20000 });
+    expect(await liesBild(gross)).toEqual({ fehler: 'bild_zu_gross: 20000x20000' });
+    // knapp über der Grenze (8001 × 8000) ebenso, genau an der Grenze nicht
+    expect(await bildPruefen(jpegMitKopf(klein, 8001, 8000))).toEqual({ fehler: 'bild_zu_gross: 8001x8000' });
+    expect(await bildPruefen(jpegMitKopf(klein, 8000, 8000))).toBeNull();
+  }, 30000);
+
+  it('PNG mit 18000 × 18000 im Kopf → Fehler (PNG komprimiert eine Fläche genauso gut)', async () => {
+    const gross = pngMitKopf(await png('4061464833821', 'EAN-13'), 18000, 18000);
+    expect(await liesBild(gross)).toEqual({ fehler: 'bild_zu_gross: 18000x18000' });
+  }, 30000);
+
+  it('echtes Bild über einer (im Test kleinen) Grenze wird nicht gelesen, darunter schon', async () => {
+    const jpeg = await sharp(await png('4000417025005', 'EAN-13')).flatten({ background: '#ffffff' }).jpeg({ quality: 85 }).toBuffer();
+    const { width, height } = await sharp(jpeg).metadata();
+    expect(await liesBild(jpeg, { maxPixel: width * height - 1 })).toEqual({ fehler: `bild_zu_gross: ${width}x${height}` });
+    expect(await liesBild(jpeg, { maxPixel: width * height })).toEqual({ gelesen: ['4000417025005'] });
+  }, 30000);
+
+  it('andere Formate (WebP, TIFF) → Fehler bildformat, nie an den Leser', async () => {
+    const quelle = await png('4000417025005', 'EAN-13');
+    expect(await liesBild(await sharp(quelle).webp().toBuffer())).toEqual({ fehler: 'bildformat: webp' });
+    expect(await liesBild(await sharp(quelle).tiff().toBuffer())).toEqual({ fehler: 'bildformat: tiff' });
   }, 30000);
 });

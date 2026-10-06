@@ -193,9 +193,21 @@ function eanFotoOf(x) {
  * deshalb zu den Nummern der Einreichung (eanNummern) — nur für die
  * VERWANDTEN Einreichungen, also als Halt (`ean_alt_doppelt`), nie als
  * Ablehnung.
+ *
+ * Verworfene Korrektur (Prüfrunde 1 zur Barcode-Korrektur, 06.10.2026): nach
+ * einer Korrektur steht in `eanFotoOcr` `korrigiert`, nicht `abweichend` —
+ * verwirft ein Mensch sie, fiele die Foto-Nummer ohne diesen Zweig aus den
+ * Nummern der Freigabe. Ob sie dazugehörte, hinge dann davon ab, ob zwischen
+ * Verwerfen und Freigabe eine Runde lief (die schreibt `eanFotoOcr` aus der
+ * verworfenen Korrektur als `abweichend`, bestätigt). Deshalb zählt bei einer
+ * Freigabe mit verworfener Korrektur deren Nummer (verworfenQuelle — die
+ * Nummer, die der Strichcode-Leser bezeugt hatte). Gilt ebenso für eine schon
+ * freigegebene Einreichung, deren Korrektur nachträglich verworfen wird.
  */
 function eanFotoFreigegebenOf(x) {
   if (!x || x.status !== 'approved') return null;
+  const v = verworfenQuelle(x);
+  if (v) return v.ean;
   const o = x.eanFotoOcr;
   if (!o || typeof o !== 'object' || o.befund !== 'abweichend' || o.bestaetigt !== true) return null;
   return eanFotoOf(x);
@@ -357,7 +369,16 @@ const EAN_HALTEN = new Set(['abweichend', 'unsicher']);
  * Befund gibt das beim Neuschreiben weiter (eanFotoMitVorbefund).
  * Dritte Quelle seit Runde 3 der Prüfrunde 06.10.2026: eine verworfene
  * Korrektur (`quelle: 'verworfen'`, eanFotoHalteQuellen).
- * @returns {{befund:'abweichend'|'unsicher', gelesen:string|null, gespeichert:string|null, bestaetigt:boolean, zweit:string|null, lauf:string|null, quelle:'eanFotoOcr'|'rundeOffen'|'verworfen', vertraut:boolean, korrekturfaehig:boolean, gebremst?:string}|null}
+ * `gebremst` (Prüfrunde 1 zur Barcode-Korrektur, 06.10.2026): aus JEDER
+ * Quelle, nicht nur aus der ersten. Bis dahin ging ein Bremsvermerk verloren,
+ * der nur im Rückfall `review.rundeOffen` stand (Befund des alten Codes, der
+ * den Rückfall nach dem 06.10. ohne Vermerk neu schrieb; Notbremse, deren
+ * `eanFotoOcr` nicht gespeichert werden konnte): Schritt 7b schreibt den
+ * Rückfall jeden Lauf neu, und zwar aus diesem Befund — ohne Vermerk. Am Tag
+ * darauf korrigierte die Runde den Fall dann doch selbst, ohne Warnung.
+ * `gebremstQuelle`: woher der Vermerk stammt. Steht er nicht in `eanFotoOcr`,
+ * schreibt die Runde ihn dort hinein (eanFotoMitVorbefund → `neuSpeichern`).
+ * @returns {{befund:'abweichend'|'unsicher', gelesen:string|null, gespeichert:string|null, bestaetigt:boolean, zweit:string|null, lauf:string|null, quelle:'eanFotoOcr'|'rundeOffen'|'verworfen', vertraut:boolean, korrekturfaehig:boolean, gebremst?:string, gebremstQuelle?:string}|null}
  */
 function eanFotoVorbefund(x) {
   const quellen = eanFotoHalteQuellen(x);
@@ -365,7 +386,12 @@ function eanFotoVorbefund(x) {
   const [erste] = quellen;
   const gleich = (q) => q.befund === erste.befund && q.bestaetigt === erste.bestaetigt
     && (q.gelesen ? !!erste.gelesen && gtin14(q.gelesen) === gtin14(erste.gelesen) : !erste.gelesen);
-  return { ...erste, korrekturfaehig: quellen.every((q) => q.vertraut && gleich(q)) };
+  const g = quellen.find((q) => q.gebremst);
+  return {
+    ...erste,
+    ...(g ? { gebremst: g.gebremst, gebremstQuelle: g.quelle } : {}),
+    korrekturfaehig: quellen.every((q) => q.vertraut && gleich(q)),
+  };
 }
 
 /**
@@ -557,7 +583,13 @@ function eanFotoMitVorbefund(heute, vorher) {
     ...(vorher.befund === 'abweichend'
       ? { bestaetigt: vorher.bestaetigt, korrekturfaehig: vorher.korrekturfaehig === true, zweit: vorher.zweit || (vorher.bestaetigt ? vorher.gelesen : null) }
       : { zweit: vorher.zweit }),
-    ...(vorher.gebremst ? { korrekturGebremst: vorher.gebremst } : {}),
+    // Bremsvermerk (eanFotoVorbefund, aus jeder Quelle) geht mit; stand er
+    // nicht in `eanFotoOcr`, wird der Befund dort neu geschrieben (`neuSpeichern`,
+    // taeglicheRunde `altUnveraendert`) — sonst hinge er allein am Rückfall. Ein `unsicher`
+    // braucht keinen: er wird ohnehin nie korrigiert.
+    ...(vorher.gebremst && vorher.befund === 'abweichend'
+      ? { korrekturGebremst: vorher.gebremst, ...(vorher.gebremstQuelle !== 'eanFotoOcr' ? { neuSpeichern: true } : {}) }
+      : {}),
     vorbefund: { lauf: vorher.lauf, quelle: vorher.quelle },
     heute: heuteKurz,
   };

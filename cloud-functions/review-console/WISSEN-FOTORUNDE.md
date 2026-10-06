@@ -240,6 +240,22 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
      beim Lesen eines 12-MP-Fotos um rund 200 MB und schrumpft nicht (gemessen
      über 127 Fotos: Prozess höchstens 284 MB); die Runde lag zuletzt bei
      höchstens 29 % von 1 GiB.
+     **Obergrenze der Bildgröße** (Prüfrunde 1 zur Barcode-Korrektur,
+     06.10.2026): der Speicher wächst mit der PIXELZAHL, und eine weiße Fläche
+     komprimiert fast auf nichts — 324 MP in 4,9 MB trieben den Leser auf
+     901 MB, 400 MP in 4,1 MB auf 1.114 MB. Die Upload-Regel (unter 8 MB) hält
+     so ein Bild nicht auf; über den Galerie-Weg lädt die App es unverändert
+     hoch. Zusammen mit der Runde wäre Cloud Run in Schritt 4c über 1 GiB
+     gelaufen und hätte die Instanz beendet — vor jedem Schreibvorgang, kein
+     Bericht, keine Freigabe, und am nächsten Morgen derselbe Kandidat wieder
+     (auch bei ausgeschaltetem Schalter, der Leser läuft für jeden Kandidaten).
+     Deshalb liest `strichcode.bildPruefen` VOR dem Dekodieren nur den
+     Dateikopf (sharp `metadata()`, entpackt nichts, ~1 ms): nur JPEG und PNG,
+     höchstens 64 MP (`MAX_PIXEL`). Sonst Fehler (`bild_zu_gross: B×H`,
+     `bildformat: …`, `bildkopf: …`) → keine Korrektur, gelbe Warnung
+     `barcode_leser_fehler`. Gemessen: 64 MP → Prozess 253 MB; größtes
+     Barcode-Foto in Produktion 48 MP (6000 × 8000, alle 4.459), die 127
+     Messfotos höchstens 12,5 MP — alle 96 Treffer bleiben.
      Bibliotheks-Fallen: Formatnamen MIT Bindestrich (`'EAN-13'`; `'EAN13'`
      liefert stumm nichts); die WASM-Datei IMMER aus dem Paket laden (ohne
      `wasmBinary` holt die Bibliothek sie zur Laufzeit von einem CDN).
@@ -299,7 +315,18 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
     eine Halte-Quelle (bestätigte Abweichung mit der verworfenen Nummer, nie
     vertraut, `werte.eanFotoHalteQuellen`). Vorher gab die Runde den Fall am
     nächsten Morgen frei, wenn das Foto unlesbar war oder die zweite Lesung die
-    gespeicherte Nummer las — während die Konsole ihn anhielt. Gerade nach
+    gespeicherte Nummer las — während die Konsole ihn anhielt.
+    **Verwerfen WÄHREND der Runde** (Prüfrunde 1 zur Barcode-Korrektur): die
+    Runde lädt zu Beginn und schreibt 10–20 min später. Die
+    Entscheidungs-Transaktion (Schritt 7) prüft deshalb, dass die EAN, mit der
+    gerechnet wurde (`werte.eanOf`), noch gilt und `eanKorrekturVerworfen`
+    sich nicht geändert hat — für den Fall selbst und für jeden Beleg einer
+    Ablehnung (Wochen-Sperre, Fotos wiederverwendet). Sonst: nichts
+    schreiben, morgen neu entscheiden (`uebersprungen`). Vorher gab die Runde
+    in diesem Fenster einen Fall frei, der mit der verworfenen Nummer
+    gerechnet war (eine Wochen-Sperre unter der gespeicherten Nummer blieb
+    ungeprüft), bzw. lehnte gegen einen Beleg ab, dessen Nummer nicht mehr
+    galt. Gerade nach
     einer FREIGABE wichtig: ohne Rückweg blieb eine falsch korrigierte Nummer
     für immer die EAN dieser Einreichung in der Wochen-Sperre — auch das
     Löschen von `eanKorrektur` von Hand half nicht (der Befund `korrigiert`
@@ -380,7 +407,13 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
     vorher `unsicher` war oder N zweimal gelesen hatte, steht nirgends mehr.
     Der Vermerk wandert beim Neuschreiben mit (`korrekturGebremst`), Hinweis
     „Befund des alten Codes ohne Vermerk", gelbe Warnung
-    `barcode_altcode_wartet`. Der Weg „heute selbst zweimal" (`heuteBestaetigt`)
+    `barcode_altcode_wartet`. Er gilt aus JEDER Quelle (Prüfrunde 1 zur
+    Barcode-Korrektur, `werte.eanFotoVorbefund`): typisch behält der alte Code
+    `eanFotoOcr` vom 06.10. (heute widersprochen oder nichts lesbar) und
+    schreibt nur den Rückfall mit dem neuen Lauf neu — bis dahin übernahm die
+    Runde nur den Vermerk der ERSTEN Quelle, schrieb den Rückfall ohne ihn neu
+    und korrigierte am Tag darauf doch. Steht der Vermerk nicht in
+    `eanFotoOcr`, schreibt die Runde ihn dort hinein (`neuSpeichern`). Der Weg „heute selbst zweimal" (`heuteBestaetigt`)
     bleibt nur für Befunde des NEUEN Codes mit ausdrücklichem
     `korrekturfaehig: false` (gebremste Runde ohne Speichern, Trockenlauf) und
     deren Rückfall. Am besten trotzdem vor dem nächsten Lauf des alten Codes
@@ -437,7 +470,12 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
        andere Nummer zeigt, die aber nie korrigiert wurde (ein Mensch gab den
        `ean_abweichend`-Fall mit force frei — gebremst, verworfen, Karton-
        oder Waagen-Code). Ihre Foto-Nummer zählt zu ihren Nummern
-       (`werte.eanFotoFreigegebenOf`, `policyOf.eanFotoFrei`). Anlass: K-Classic
+       (`werte.eanFotoFreigegebenOf`, `policyOf.eanFotoFrei`). Bei einer
+       VERWORFENEN Korrektur (Prüfrunde 1 zur Barcode-Korrektur) die
+       verworfene Nummer — auch wenn `eanFotoOcr` noch `korrigiert` sagt
+       (Verwerfen und force-Freigabe ohne Runde dazwischen, oder Verwerfen
+       nach der Freigabe). Vorher hing es vom Zeitpunkt der nächsten Runde
+       ab, ob die Nummer dazugehörte. Anlass: K-Classic
        Kartoffel Knödel (ecL21IfZ…_1, gespeichert 070012398358, Foto zweimal
        4012448397358, am 05.10. mit force freigegeben) — eine Einreichung mit
        der echten Nummer in derselben Woche wäre bezahlt worden.
@@ -470,7 +508,10 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
     - Scharfer Lauf mit Schalter an: die Runde vermerkt die Bremse am Befund
       (`eanFotoOcr.korrekturGebremst` und `review.rundeOffen.eanFoto.
       korrekturGebremst` = Lauf) — diese Fälle korrigiert sie auch später NIE,
-      ein Mensch entscheidet. Bericht: `eanKorrektur.gebremstHaelt`.
+      ein Mensch entscheidet. Bericht: `eanKorrektur.gebremstHaelt`. Konnte
+      `eanFotoOcr` nicht gespeichert werden, hält der Vermerk im Rückfall
+      allein (aus jeder Quelle, s. o.) und wird beim nächsten Lauf in
+      `eanFotoOcr` nachgetragen.
     - Ohne Speichern (Trockenlauf, Schalter aus): KEIN Vermerk — er wirkt
       dauerhaft wie eine Entscheidung (Prüfrunde 06.10.2026: sonst hätte der
       übliche Trockenlauf nach dem Ausrollen die Altfälle schon vor dem ersten
@@ -492,6 +533,26 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
     grund}]}`,
     `notbremse.korrektur`, `eanFoto.korrigiert`; im Dashboard „Barcode
     automatisch korrigiert" mit Liste alt → neu (im Trockenlauf „nur geplant").
+  - **Ausrollen — Reihenfolge** (Prüfrunde 1 zur Barcode-Korrektur, am
+    Live-Stand geprüft 06.10.2026: die Live-Rules sperren nur `eanFotoOcr`,
+    nicht `eanKorrektur`/`eanKorrekturVerworfen`; die Live-Seiten
+    `pruefen.html`/`tagesbericht.html` kennen weder Korrektur-Anzeige noch
+    „Korrektur verwerfen"):
+    1. `firestore:rules` — vorher Live-Stand holen und vergleichen (CLAUDE.md,
+       „Vor jedem Rules-Deploy den LIVE-Stand holen"), `npm run test:rules`
+       grün. Gehen die Functions vor den Rules live, darf ein Client
+       `eanKorrektur` samt erfundenem Zeugen beim Anlegen mitschicken: die
+       Konsole zeigte „Strichcode-Leser bestätigt …", ohne dass der Server je
+       gelesen hat (kein direkter Geldweg — `ean` kommt ohnehin vom Client —,
+       aber ein falsches Vertrauenssignal).
+    2. `hosting:md-receipt-admin` — sonst sieht der Mensch eine korrigierte EAN
+       ohne Hinweis und kann sie nicht verwerfen.
+    3. `functions:review-console` — allein, nicht zusammen mit einer anderen
+       Codebase; vorher den deployten Stand gegen diesen Zweig vergleichen.
+    4. Erst danach den Schalter `cashback_config/v1.barcodeKorrektur` auf
+       `true` setzen.
+    Mindestens die Rules müssen vor oder mit den Functions live gehen. Wegen
+    der Frist (Lauf um 08:00) alle drei im selben Zug.
   - **Übertragbare Lehre (Prüfrunde 06.10.2026, vier Funde derselben Art):**
     Ein Schutz, der an einem ZUSTAND hängt (korrigiert, gebremst, widersprochen),
     muss aus dem GESPEICHERTEN Zustand gerechnet werden, nicht aus dem

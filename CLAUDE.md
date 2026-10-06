@@ -3294,7 +3294,14 @@ Patrick, 02.10.: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche",
   Prüfrunde: ein Schutz, der an einem Zustand hängt, wird aus dem
   GESPEICHERTEN Zustand gerechnet, nie aus dem heutigen Ereignis — sonst
   gilt er nur einen Lauf; und eine Vertrauensregel muss kennen, was der alte
-  Code bis zum Ausrollen noch schreibt. Details: `cloud-functions/review-console/WISSEN-FOTORUNDE.md`.
+  Code bis zum Ausrollen noch schreibt. Prüfrunde 1 danach (06.10.): der Leser
+  dekodiert nur JPEG/PNG bis 64 MP, geprüft aus dem Dateikopf (sharp
+  `metadata()`) — ein weißes 400-MP-JPEG unter 8 MB trieb ihn auf 1,1 GB und
+  hätte die Runde jeden Morgen vor dem ersten Schreibvorgang beendet; ein
+  Bremsvermerk gilt aus JEDER Quelle; Schritt 7 prüft, dass die gerechnete
+  EAN beim Schreiben noch gilt (Verwerfen während des Laufs). Ausrollen in
+  dieser Reihenfolge: Rules → `hosting:md-receipt-admin` →
+  `functions:review-console` → erst dann der Schalter. Details: `cloud-functions/review-console/WISSEN-FOTORUNDE.md`.
 - **Anderer Markt innerhalb der Woche zählt NICHT als neue Erfassung**
   (Patrick 04.10.: „nein").
 - **Foto-Abgleich (md5) gegen ALLE früheren Einreichungen**, Preisfoto

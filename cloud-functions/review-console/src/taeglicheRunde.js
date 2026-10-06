@@ -64,6 +64,7 @@ const {
   eanOf, nameOf, preisOf, policyOf, einreichZeit, pruefzifferOk, vollstaendigkeitOf, preisHinweisOf, eanSchluessel, PREIS_ARTEN,
   eanFotoBefund, eanFotoBestaetigen, eanFotoOhneZweitlesung, eanFotoVorbefund, eanFotoMitVorbefund, eanFotoEintrag, EAN_HALTEN,
   eanAbgleichOf, eanKorrekturOf, eanKorrekturAus, eanKorrekturKandidat, strichcodeUrteil, eanFotoGegenFrueher, eanFotoKorrigiert, eanKorrekturEintrag, gtin14, eanNummern,
+  eanKorrekturVerworfen,
 } = require('./werte');
 const { liesBild, mitZeit, LESER } = require('./strichcode');
 const { SPERREN, ladeSperren, kontoSperreVon, sperreAusDaten } = require('./kontoSperre');
@@ -298,8 +299,11 @@ async function bildAudit(ai, bucket, x) {
 
 /**
  * Original des Barcode-Fotos (volle Auflösung, nicht die Kachel) mit dem
- * Strichcode-Leser lesen (src/strichcode.js). Wirft nie: Download-Fehler und
- * Zeitüberschreitung kommen als `{fehler}` zurück — keine Korrektur.
+ * Strichcode-Leser lesen (src/strichcode.js). Wirft nie: Download-Fehler,
+ * Zeitüberschreitung und ein zu großes Bild (über 64 MP oder kein JPEG/PNG,
+ * aus dem Dateikopf geprüft — sonst sprengt das Dekodieren den Speicher der
+ * Instanz, Prüfrunde 1 zur Barcode-Korrektur) kommen als `{fehler}` zurück —
+ * keine Korrektur.
  */
 async function stricheVomFoto(storage, pfad) {
   if (!pfad) return { fehler: 'kein_barcode_foto' };
@@ -1034,6 +1038,17 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   // 7) Schreiben — chronologisch, also jede Referenz vor dem Fall, der sich auf sie stützt.
   //    `geschrieben`: was in diesem Lauf tatsächlich gespeichert wurde.
   const imPlan = new Set(plan.map((p) => p.id));
+  const alleVon = new Map(alle.map((d) => [d.id, d.x]));
+  /**
+   * Gilt beim Schreiben noch die EAN, mit der die Regeln gerechnet haben
+   * (policyVon, also nach Rettung und Korrektur dieses Laufs)? Und ist eine
+   * Korrektur nicht inzwischen verworfen worden?
+   */
+  const effektiveEanGilt = (id, jetzt, geladen) => {
+    const pol = policyVon.get(id);
+    if (!pol || gtin14(eanOf(jetzt)) !== gtin14(pol.ean)) return false;
+    return eanKorrekturVerworfen(jetzt) === eanKorrekturVerworfen(geladen);
+  };
   const geschrieben = new Set();
   if (!dryRun) {
     for (const p of plan) {
@@ -1082,6 +1097,22 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
           const korr = p.eingabe && p.eingabe.eanFoto && p.eingabe.eanFoto.art === 'korrigiert' ? p.eingabe.eanFoto.gelesen : null;
           const amDok = korr ? eanKorrekturOf(s.data()) : null;
           if (korr && !(amDok && gtin14(amDok) === gtin14(korr))) return EAN_KORREKTUR_FEHLT;
+          // Die EAN, mit der gerechnet wurde, muss beim Schreiben noch gelten
+          // (Prüfrunde 1 zur Barcode-Korrektur, 06.10.2026). Die Runde lädt zu
+          // Beginn und schreibt 10–20 min später; verwirft in der Zeit jemand
+          // in der Konsole eine FRÜHER gespeicherte Korrektur, gilt wieder die
+          // gespeicherte Nummer — Doppel-Regel und Barcode-Halt wurden aber mit
+          // der korrigierten gerechnet (nachgestellt: Freigabe trotz
+          // `eanKorrekturVerworfen`). Dann nichts schreiben, morgen neu
+          // entscheiden. Ebenso für die Belege einer Ablehnung (Wochen-Sperre,
+          // Fotos wiederverwendet): gilt für einen Beleg nicht mehr die Nummer
+          // von vorhin, trägt er die Ablehnung nicht mehr.
+          if (!effektiveEanGilt(p.id, s.data(), p.x)) return 'uebersprungen';
+          for (const id of belege || []) {
+            if (!policyVon.has(id)) continue; // nicht geladen → kein Stand von vorhin zum Vergleich
+            const b = await tx.get(db.collection(COL).doc(id));
+            if (!b.exists || !effektiveEanGilt(id, b.data(), alleVon.get(id))) return 'uebersprungen';
+          }
           if (p.entscheidung === 'freigeben') {
             tx.update(p.ref, {
               status: 'approved', reviewedAt: FieldValue.serverTimestamp(), reviewedBy: ENTSCHEIDER, updatedAt: FieldValue.serverTimestamp(),
