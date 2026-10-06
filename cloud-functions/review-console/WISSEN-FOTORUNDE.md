@@ -367,7 +367,9 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   Antwort des Vortags steht nicht am Dokument — würde jeden Morgen neu
   gefragt, wüchse die Wahrscheinlichkeit einer Ablehnung mit jedem Tag, den
   der Fall auf Patrick wartet. Nur ein Befund „ablehnen" (von der Notbremse
-  zurückgehalten) darf bei heutiger Ablehn-Lesung abgelehnt werden. Folge:
+  zurückgehalten) darf bei heutiger Ablehn-Lesung abgelehnt werden — und nur,
+  wenn die Notbremse mit ihm zusammen nicht mehr greift (Abschnitt
+  Notbremse, „Übernommene Fälle"). Folge:
   ein am ersten Tag nur wegen „unklar" oder fehlender Antwort gehaltenes
   Bildschirmfoto lehnt die Runde nicht mehr selbst ab, es wartet auf die
   Konsole (gemessen selten: unklar 3 von 351, ohne Antwort 0 von 448).
@@ -469,7 +471,26 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   `preisBildschirm.preisBildschirmZaehlart`. `kassenbonMitMerkmal`,
   `bildschirmTrotzBon` (Bildprüfung „Bildschirm", Lesedienst „Kassenbon"),
   `kassenbonOhneLesedienstBon` (Bildprüfung „Kassenbon", Lesedienst las und
-  sah keinen — liegt), `kassenbonLesedienstOhneBon` + bis 20
+  sah keinen; `…Liegt` = davon mit scharfer Regel angehalten — in der
+  Beobachtung werden sie bezahlt, die Warnung sagt das), beide nur für Fälle
+  OHNE Befund eines Vortags (`review.rundeOffen.preisBildschirm`, beide
+  Modi; Nachprüfung 06.10.2026 — sonst kam „Lesung des Modells prüfen" jeden
+  Morgen wieder, solange ein Fall auf Patrick wartet), die übrigen getrennt
+  ohne Warnung (`bildschirmTrotzBonAusVortagen`,
+  `kassenbonOhneLesedienstBonAusVortagen`). „Befund eines Vortags" heißt:
+  von einem ECHTEN Lauf gemeldet (`fotoRundeRegeln.preisBildschirmGemeldet`,
+  Abschlussprüfung 06.10.2026). Ein manueller Trockenlauf schreibt den
+  Eintrag am Dokument, aber nie `aktuell` (den Morgen-Chat) — galt sein
+  Eintrag als gemeldet, fehlten danach im Morgen-Chat genau die
+  Fingerabdrücke einer geänderten Modell-Lesart (`preisquelle_bon_als_bildschirm`,
+  `preisquelle_bon_widerspruch`), ausgerechnet nach einem Kontroll-Trockenlauf
+  nach einem Deploy. Ein Trockenlauf NACH einem echten Lauf trägt das als
+  `review.rundeOffen.preisBildschirmGemeldet` (Lauf) weiter, damit er keine
+  Wiederholung auslöst. Dieselbe Regel gilt für „heute" gegen „aus Vortagen"
+  (`befundHalten`, `stattFreigabe`, `ausVortagen`, `preisquelle_haelt_viele`,
+  `preisbeleg_haelt_viele`): ein Befund, den nur ein Trockenlauf gesehen hat,
+  zählt am Morgen als heutiger — entschieden wird mit ihm wie bisher (er
+  hält weiter). `kassenbonLesedienstOhneBon` + bis 20
   `kassenbonLesedienstOhneBonFaelle` (dasselbe für ALLE solchen Fälle, auch
   ohne Merkmale — die werden bezahlt; Prüfrunde 3, siehe Lücken),
   `schalterUnbekannt` (nur bei unbekanntem Wert),
@@ -524,12 +545,17 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   Bildprüfung keinen, zählt der Filialname des Lesedienstes allein (TK Maxx).
   Unsere Märkte = erstes Wort jedes Namens in `discounter` (täglich gelesen,
   ~20 Dokumente; ein neu aufgenommener Markt wie Picnic gilt sofort) plus feste
-  Ketten und Vertriebslinien im Code (`UNSERE_KETTEN`: nahkauf, Marktkauf,
-  E center, Neukauf, nah & gut, diska, Eurospar/Interspar) — die sind auch der
+  Ketten und Vertriebslinien im Code (`UNSERE_KETTEN`/`UNSERE_FOLGEN`:
+  nahkauf, Marktkauf, E center, E aktiv, Neukauf, nah & gut / nah und gut,
+  diska, NP, Eurospar/Interspar, dazu EDEKA-Kaufleute mit eigenem Auftritt:
+  Scheck-in Center, Hieber, Zurheide) — die sind auch der
   Rückfall, wenn `discounter` nicht lesbar ist (gelbe Warnung). Ganze Wörter
-  („R E W E" wird zusammengezogen), Komposita nur mit Schlüsseln ab fünf
-  Buchstaben („Edekamarkt"), KEINE Tippfehler-Toleranz (die Bon-Pipeline
+  („R E W E" wird zusammengezogen, auch nach „Joh's"), Komposita nur mit
+  Schlüsseln ab fünf Buchstaben („Edekamarkt"; „NP" also nur als ganzes
+  Wort), KEINE Tippfehler-Toleranz (die Bon-Pipeline
   machte damit aus „Das" dm). dm-, Rossmann-, REWE-Online usw. gelten.
+  Antworten wie „unklar", „(nicht erkennbar)", „Kein Händler erkennbar",
+  „k. A." sind kein Händlername (sonst wäre jeder solche Beleg „fremd").
   **Am Dokument** nur `review.rundeOffen.grund: 'preis_beleg_unsicher'`,
   `preisBildschirm: {modus, befund: 'halten', seit, regeln: ['beleg'], art: 'beleg'}` und der
   Hinweis „Preisbeleg unsicher — …" — bewusst ohne „Warenkorb", „Händler",
@@ -590,11 +616,28 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
     Bon-Zeilen mit Kennzeichen 2/2 „kassenbon" + `steuer`.
   - Eine Antwort kam als Liste verpackt zurück (`[{…}]`) — wird jetzt
     ausgepackt (vorher: „Bildprüfung gescheitert").
+  - **Korrektur Nachprüfung 06.10.2026 (nur lesend, 16 echte EDEKA-/REWE-
+    Bons von Vertriebslinien und Kaufleuten als Preisfoto, je 2 Lesungen,
+    0,65 $; scratchpad `ehrlich-pb-r3-0610/inhaber.jsonl`):** die Stichprobe
+    vom 05.10. enthielt kaum Vertriebslinien. NP-Markt, „nah und gut",
+    Scheck-in Center, Hieber und Zurheide nannte die Bildprüfung in JEDER
+    Lesung beim eigenen Namen, nicht als EDEKA — mit dem damaligen Code
+    blieben 8 der 16 Bons (15 von 32 Lesungen) als „fremd" liegen, darunter
+    NP- und Zurheide-Bons, die die Bon-Pipeline als EDEKA bezahlt hatte. Seit
+    der Ergänzung der Linien (oben) bleibt keiner der 16 liegen. Gegenprobe
+    gegen alle 1.795 Händlernamen aus `receipts` und `crowd_uploads`: 14
+    Namen wechseln, alle auf „unser" und alle EDEKA/REWE, keiner zurück.
+    Wer so einen Fall in der Konsole sieht: die Kette steht oft nur in den
+    Eigenmarken (G&G/Gut & Günstig = EDEKA, ja! = REWE) — Hinweis dort.
+    Weiter liegen bleibt ein Kaufmann, dessen Name nicht in der Liste steht
+    und dessen Bon kein Kettenlogo trägt („Krummenerl" allein).
   - Erwartet im Betrieb: (1) etwa 3–5 pro Woche (rund jeder zehnte
     „Kassenbon" ohne Lesedienst-Kopf, 7 von 83 gemessen; davon kamen im
     September ~30, Anfang Oktober ~45 pro Woche, überwiegend Papierbons),
     (2) etwa 1–3 pro Woche (0,7 % der Bons mit gelesenem Kopf, gut die Hälfte
-    davon Inhaber-Märkte ohne Logo). Zusammen ~4–8 Fälle pro Woche
+    davon Inhaber-Märkte ohne Logo; ohne die Ergänzung vom 06.10. wären es
+    mehr gewesen — im Bon-Bestand stehen 13 Scheck-in-, 6 Hieber-, 6 Zurheide-
+    und 6 NP-Bons, alle jetzt erkannt). Zusammen ~4–8 Fälle pro Woche
     Mehrarbeit, nur scharf (vor der Nachmessung hier: ~3–5).
   **Bericht** `preisBildschirm.beleg`: `kassenbon` (befragt), `ohneMerkmale`,
   `fremderHaendler` (heutige Lesungen), `stattFreigabe` (nur am Morgen des
@@ -687,7 +730,13 @@ gesperrten Konten), dort als „Vorprüfung ok" mit Freigabe-Taste.
   `{grund, hinweis, zurueckgehalten, sperrend[], eanFoto, lauf, trocken, at}`
   (`fotoRundeRegeln.rundeOffenEintrag`). Im Trockenlauf bleibt jeder Fall
   offen; `geplant` sagt, was die Runde getan hätte (eine geplante Freigabe
-  ohne Befund hinterlässt nichts).
+  ohne Befund hinterlässt nichts). Dazu nach Bedarf `preisBildschirm`
+  (Abschnitt Bildschirmfoto), `notbremseEcht` (Merker eines echten
+  Notbremse-Halts, Abschnitt Notbremse) und `preisBildschirmGemeldet` (nur
+  im Trockenlauf: Lauf, in dem ein echter Lauf den Preis-Befund schon
+  gemeldet hat). Die beiden Merker verraten dem Einreicher (er liest das
+  Dokument selbst) nichts, was nicht schon `grund` bzw. `lauf` eines
+  früheren Eintrags sagten.
 - `sperrend` kommt aus den TATSACHEN, nicht aus dem gewählten Grund
   (`rundeBefunde`): gleiches Foto bei einem anderen Konto
   (`foto_fremdes_konto`), in einer älteren offenen (`foto_aeltere_offen`)
@@ -774,8 +823,7 @@ Freigaben laufen IMMER — sie sind die harmlose Richtung. Zurückgehalten
   Tag, ~0,6 %). Personen, nicht Fälle (Prüfrunde 2): Bildschirmfotos kommen
   gebündelt — im Lauf 2026-10-02_080004 vier von zwei Personen bei 126
   geprüften (3,2 %); als Fälle gezählt hätte die Bremse genau an einem Tag
-  gegriffen, an dem die Regel richtig lag, und die zurückgehaltenen Fälle
-  zählten mit ihrem Befund am Folgetag wieder mit. Die frühere Schätzung
+  gegriffen, an dem die Regel richtig lag. Die frühere Schätzung
   „fälschlich an einem von 170 Tagen" setzte unabhängige Fälle voraus und
   stimmte nicht (mit Fällen: 1 von 9 scharfen Läufen seit 26.09.). Seit 26.09.
   höchstens 2 Personen je Lauf. Vorher 5 und 5 % — das ließ eine Fehllesung
@@ -784,13 +832,91 @@ Freigaben laufen IMMER — sie sind die harmlose Richtung. Zurückgehalten
   trifft viele Personen, eine Welle eine oder zwei. Zählt wie „Preis fehlt" nicht in die Gesamtquote
   (`AUSSER_GESAMTQUOTE`, am Dokument über `review.reason`). Ein zurückgehaltener
   Ablehn-Befund steht am Fall und hält im nächsten Lauf weiter, solange der
-  Tag ihn nicht selbst wieder als „ablehnen" liest.
+  Tag ihn nicht selbst wieder als „ablehnen" liest. **Übernommene Fälle**
+  (an einem Vortag in einem ECHTEN Lauf von dieser Bremse zurückgehalten,
+  `review.rundeOffen.grund` bzw. der weitergetragene Merker
+  `review.rundeOffen.notbremseEcht`; Nachprüfung 06.10.2026, zwei Runden,
+  Abschlussprüfung 06.10.2026):
+  - **Ob die Bremse greift, zählt die ganze Kohorte mit** — alle noch
+    offenen Fälle, die sie zurückgehalten hat, ob sie heute wieder „ablehnen"
+    lesen, aus anderem Grund offen sind (Bildprüfung gescheitert, 429,
+    Zeitgrenze) oder gesperrt halten (heute anders gelesen). Zurückgehalten
+    werden nur die heutigen Ablehnungen. Eine Zwischenfassung zählte nur
+    frische Fälle — dann gab eine anhaltende Fehllesung mit wenigen neuen
+    Fällen (Tag 2: drei neue Personen, Schwelle vier) die gestern
+    zurückgehaltenen zur endgültigen Ablehnung frei, ohne jede Warnung
+    (nachgestellt: alle sieben `rejected`). Die nächste zählte nur, wer heute
+    „ablehnen" las — dann gab eine gescheiterte Bildprüfung bei EINEM Fall
+    (Tag 1: vier Personen gehalten, Tag 2: 429 bei einer) die übrigen drei
+    zur endgültigen Ablehnung frei, mit gelber Meldung „weniger Personen"
+    (nachgestellt, Abschlussprüfung). Ein Technikfehler entschied so
+    mittelbar über drei Ablehnungen — dieselbe Klasse, die die Sperre
+    `ablehnenGesperrt` beseitigt hat. Ebenso eine heute schwankende Lesung,
+    also gerade das Zeichen, dass dem Modell nicht zu trauen ist. Damit das
+    über mehrere Morgen hält, trägt jeder Lauf den Merker als
+    `notbremseEcht` weiter, solange der Fall offen bleibt und sein `grund`
+    ihn nicht selbst trägt. Gesperrte Konten liegen stumm und zählen nicht.
+  - **Rot nur, wenn die frischen Fälle allein greifen würden.** Hält die
+    Bremse nur dank der übernommenen, ist das kein neuer Befund, sondern ein
+    offener: gelbe Zeile `notbremse_vortage_bildschirm` („N … liegen seit …
+    bei der Notbremse und sind noch nicht entschieden — davon K heute aus
+    anderem Grund offen … — heute M neue mitgehalten. In der Konsole entscheiden,
+    und zwar alle auf einmal …"). Vorher kam derselbe rote
+    Alarm jeden Morgen, bis ein Mensch jeden Fall entschieden hatte, und legte
+    den Rückweg `preisBildschirmRegel: 'shadow'` nahe — der bezahlt alle
+    zurückgehaltenen am Morgen darauf. Solange die übernommenen offen sind
+    und die Schwelle halten, hält die Bremse auch neue Bildschirm-Ablehnungen
+    mit zurück (die haltende Richtung). Bericht: `notbremse.ausVortagen`
+    (die ganze Kohorte).
+  - **Greift sie nicht mehr**, lehnt die Runde einen übernommenen Fall ab,
+    der heute wieder „ablehnen" liest (wie in `preisBildschirmMitVorbefund`
+    vorgesehen). Das geht nur noch auf zwei Wegen: mehr geprüfte Fälle als
+    am Vortag (4 Personen ab 160 geprüften), oder ein Teil der Kohorte wurde
+    in der Konsole entschieden (Teilentscheidung, siehe unten). Gezählt
+    (`notbremse.ausVortagenAbgelehnt`, im Trockenlauf geplant) und gelb
+    gemeldet (`notbremse_vortage_abgelehnt_bildschirm`, mit beiden Ursachen
+    und dem Hinweis auf „Zurückholen" in der Konsole). Der rote Text am
+    ersten Morgen und die gelbe Zeile sagen vorher: alle auf einmal
+    entscheiden.
+  - Ein Trockenlauf hält nichts zurück und zählt nie als „schon
+    zurückgehalten" (nach Tagen mit ausgeschaltetem `fotoWorker` ist der
+    erste scharfe Lauf rot). Er überschreibt aber den Eintrag am Dokument —
+    deshalb trägt er den Merker eines echten Halts als
+    `review.rundeOffen.notbremseEcht` weiter (sonst wäre der nächste Morgen
+    wieder rot gewesen, und eine spätere Ablehnung nicht eigens gezählt).
+  **Offen für Patrick:** sollen übernommene Fälle bis zur Entscheidung in
+  der Konsole immer liegen bleiben (dieselbe Sperre wie `ablehnenGesperrt`)?
+  Dafür spricht der Rest-Weg oben: eine Ablehnung ist endgültig, und er
+  hängt an der Tagesmenge bzw. einer Teilentscheidung, nicht an einem
+  Menschen, der die übrigen angesehen hat. Nachgestellt (Abschlussprüfung
+  06.10.2026, Test „Befund 2"): Tag 1 hält die Bremse vier Personen, Patrick
+  gibt einen Fall frei, weil das Modell ein echtes Preisschild falsch las —
+  am Morgen darauf sind es drei Personen, die Bremse greift nicht mehr, und
+  die übrigen drei werden ohne Blick endgültig abgelehnt, obwohl ein Mensch
+  die Fehllesung gerade bestätigt hat. Bis zur Entscheidung warnen beide
+  Meldungen davor („alle auf einmal entscheiden"). Dagegen: jede ausgelöste
+  Bremse kostet dann Handarbeit, auch wenn das Modell richtig lag (Auslösen
+  ist selten: seit 26.09. höchstens 2 Personen je Lauf). Mit der Sperre
+  entfiele auch der Weg „mehr geprüfte Fälle".
 - Wochen-Sperre und alte 24-h-Sperre zählen wie „Preis fehlt" NICHT in die
   Gesamtquote — weder heute noch im 30-Tage-Schnitt (`AUSSER_GESAMTQUOTE`,
   geprüft an `rejectReason` UND `review.reason`). Gesperrte Konten brauchen
   keine Bremse: sie werden nicht abgelehnt.
 
 ## Bekannte Lücken (bewusst offen, Prüfrunde 02.10.2026)
+
+- **Komplett schwarzes Preisfoto** (App-Artefakt; ein Vorfall unter 4.429
+  Preisfotos: vier byteidentische schwarze JPEGs eines Kontos, 11.09.,
+  Android 6.0.15). Mit der Preisbeleg-Anweisung sagt die Bildprüfung dazu in
+  2 von 4 Lesungen „dieselbe Ansicht" → Ablehnung `gleiche_ansicht_mehrfach`
+  statt `preis_fehlt` (beides Ablehnung, nur der App-Text unterscheidet sich).
+  Bewusst NICHT über „dieselbe Ansicht nur mit Preis" gelöst (Nachprüfung
+  06.10.2026): alle drei echten Ablehnungen dieser Art seit 20.09. hatten
+  keinen Preis — sie hätten dann „Preis fehlt" bekommen, und ihr eigentlicher
+  Mangel (alles dieselbe Ansicht) stünde nicht im Text. Nur ein beim
+  Hochladen beschädigtes Preisfoto (`bild_defekt`, unser Fehler) geht vor und
+  bleibt liegen. Richtiger Weg: ein (fast) schwarzes Preisfoto als
+  `bild_defekt` erkennen und liegen lassen — eigener Auftrag.
 
 - **Lose Ware und Waagen-Codes fallen nie unter die Wochen-Sperre.** Ohne EAN
   gibt es keine Gruppe (19 Freigaben im Bestand); ein Waagen-Code mit

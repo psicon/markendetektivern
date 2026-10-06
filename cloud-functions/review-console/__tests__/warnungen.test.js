@@ -176,10 +176,30 @@ describe('Bildschirmfoto als Preisbeleg (04.10.2026)', () => {
   it('Notbremse der Regel erscheint rot wie jede Notbremse', () => {
     expect(codes(warnungen(basis({ notbremse: { bild: false, gesamt: false, bildschirm: true, text: ['Bei 6 von 60 …'] } })))).toEqual(['rot:notbremse']);
   });
+  // Nachprüfung 06.10.2026: hält die Bremse nur dank Fällen eines Vortags
+  // (bzw. wurden solche Fälle doch abgelehnt), meldet sie gelb, nicht rot.
+  it('… gelbe Einträge der Notbremse erscheinen gelb mit ihrem Code', () => {
+    const w = warnungen(basis({ notbremse: { bild: false, gesamt: false, bildschirm: true, text: [], gelb: [
+      { code: 'notbremse_vortage_bildschirm', text: '4 Bildschirm-Ablehnungen … liegen seit …' },
+      { code: 'notbremse_vortage_abgelehnt_bildschirm', text: '3 … heute abgelehnt' },
+    ] } }));
+    expect(codes(w)).toEqual(['gelb:notbremse_vortage_bildschirm', 'gelb:notbremse_vortage_abgelehnt_bildschirm']);
+    expect(w[0].text).toBe('Notbremse: 4 Bildschirm-Ablehnungen … liegen seit …');
+    // ältere Aufrufer ohne `gelb` bleiben unverändert
+    expect(warnungen(basis({ notbremse: { bild: false, gesamt: false, text: [] } }))).toEqual([]);
+  });
   // Prüfrunde 2 (04.10.2026)
   it('„Kassenbon", der Lesedienst las das Foto und sah keinen (gemessen nie) → gelb ab 2', () => {
     expect(warnungen(basis({ runde: runde({ preisBildschirmBonWiderspruch: 1 }) }))).toEqual([]);
     expect(codes(warnungen(basis({ runde: runde({ preisBildschirmBonWiderspruch: 2 }) })))).toEqual(['gelb:preisquelle_bon_widerspruch']);
+  });
+  // Nachprüfung 06.10.2026: „bleiben liegen" nur, wenn die Fälle wirklich liegen (scharfe Regel)
+  it('… der Text sagt, ob die Fälle liegen (scharf) oder in der Beobachtung bezahlt werden', () => {
+    const text = (liegt) => warnungen(basis({ runde: runde({ preisBildschirmBonWiderspruch: 3, preisBildschirmBonWiderspruchLiegt: liegt }) }))[0].text;
+    expect(text(3)).toMatch(/die Fälle bleiben liegen/);
+    expect(text(0)).toMatch(/in der Beobachtung hält die Runde sie nicht an/);
+    expect(text(0)).not.toMatch(/bleiben liegen/);
+    expect(text(1)).toMatch(/1 davon bleibt liegen, die übrigen hält die Runde in der Beobachtung nicht an/);
   });
   it('unbekannter Schalterwert ("true" als Text) → gelb, nennt den Wert', () => {
     expect(warnungen(basis({ runde: runde({ preisBildschirmSchalterUnbekannt: null }) }))).toEqual([]);

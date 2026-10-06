@@ -686,7 +686,7 @@
         // liest der Einreicher selbst).
         if (h.includes('preis_beleg_unsicher')) {
           return `<div class="folge zahlt-nicht">Preisbeleg: <b>unsicher — selbst ansehen</b>${beob}
-            <br><small>${seit} Zählt: Kassenbon (auch e-Bon, Online-Rechnung) eines unserer Märkte. Nicht: Warenkorb oder Bestellliste ohne Kauf, Rechnung eines fremden Händlers (z. B. Amazon). Ablehnen: A, dann 2.</small></div>`;
+            <br><small>${seit} Zählt: Kassenbon (auch e-Bon, Online-Rechnung) eines unserer Märkte — auch von EDEKA-/REWE-Kaufleuten und Vertriebslinien ohne Kettenlogo (NP, nah und gut, Scheck-in, Hieber, Zurheide, Inhabername wie Krummenerl), erkennbar an Eigenmarken auf dem Bon (G&amp;G / Gut &amp; Günstig = EDEKA, ja! = REWE) oder an der Anschrift. Nicht: Warenkorb oder Bestellliste ohne Kauf, Rechnung eines fremden Händlers (z. B. Amazon). Ablehnen: A, dann 2.</small></div>`;
         }
         if (!sicher && !h.includes('preis_bildschirm_unsicher')) return '';
         return `<div class="folge zahlt-nicht">Preisfoto: <b>${sicher ? 'Bildschirmfoto' : 'vielleicht ein Bildschirmfoto — selbst ansehen'}</b>${beob}

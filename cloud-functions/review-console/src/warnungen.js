@@ -24,7 +24,7 @@ const TAG_MS = 24 * 60 * 60 * 1000;
  * @param {{eingeschaltet:boolean, laeufeLetzte48h:number}} k.zweitpruefung
  * @param {{inPruefung:number, aeltesteTage:number|null, letzte24h:{gesamt:number, ohneAktion:number}}} k.bons
  * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number, aeltesteOffenTage?:number|null, fotoAbgleichGescheitert?:boolean, kontoSperrenUnlesbar?:boolean, eanHaltenNeu?:number, haltBefundNichtGespeichert?:number, eanFotoNichtGespeichert?:number, preisQuelleBefragt?:number, preisQuelleOhneAntwort?:number, preisBildschirmHalten?:number, preisBildschirmTrotzBon?:number, preisBildschirmBonWiderspruch?:number, preisBildschirmSchalterUnbekannt?:string|null, preisBelegSchalterUnbekannt?:string|null, preisKopfNichtAbrufbar?:number, preisBildschirmScharf?:boolean, preisBelegHalten?:number, preisBelegKassenbon?:number, preisBelegOhneAntwort?:number, preisBelegMaerkteUnlesbar?:boolean}} k.runde
- * @param {{bild:boolean, gesamt:boolean, text:string[]}} k.notbremse
+ * @param {{bild:boolean, gesamt:boolean, text:string[], gelb?:Array<{code:string, text:string}>}} k.notbremse
  * @param {{alt:string|null, neu:string}} k.regelVersion
  * @param {{scharf:boolean, bericht:object|null, abgebrochen?:boolean, laeuftNoch?:boolean, unbekannt?:boolean}} [k.bonRunde]
  * @returns {Array<{stufe:'rot'|'gelb', code:string, text:string}>}
@@ -138,12 +138,18 @@ function warnungen(k) {
     }
     // Gegenrichtung (Prüfrunde 2, 04.10.2026): die Bildprüfung nennt das
     // Preisfoto „Kassenbon", der Lesedienst las es und sah keinen — dort
-    // würde bezahlt. Gemessen 0 von 126; die Fälle bleiben liegen. Ein
-    // Preisbeleg-Halt mit Lesedienst-Bon zählt hier nicht (taeglicheRunde,
+    // würde bezahlt. Gemessen 0 von 126. Liegen bleiben die Fälle nur mit
+    // scharfer Regel (`…Liegt`); in der Beobachtung werden sie bezahlt — der
+    // Text sagt das, sonst sähe niemand sie sich an (Nachprüfung 06.10.2026).
+    // Ein Preisbeleg-Halt mit Lesedienst-Bon zählt hier nicht (taeglicheRunde,
     // kassenbonOhneLesedienstBon — Nachprüfung 05.10.2026).
     const bonWiderspruch = Number(r.preisBildschirmBonWiderspruch) || 0;
     if (bonWiderspruch >= 2) {
-      gelb('preisquelle_bon_widerspruch', `Bei ${bonWiderspruch} Einreichungen nannte die Bildprüfung das Preisfoto „Kassenbon", der Lesedienst sah dort keinen (normal nie) — die Fälle bleiben liegen. Preisfotos ansehen: Warenkorb oder Bestellübersicht statt Bon? Sonst Lesung des Modells prüfen.`);
+      const liegt = Math.min(Number(r.preisBildschirmBonWiderspruchLiegt) || 0, bonWiderspruch);
+      const folge = liegt === bonWiderspruch ? 'die Fälle bleiben liegen'
+        : liegt === 0 ? 'in der Beobachtung hält die Runde sie nicht an (bezahlt, sofern nichts anderes fehlt), mit scharfer Regel blieben sie liegen'
+          : `${liegt} davon ${liegt === 1 ? 'bleibt' : 'bleiben'} liegen, die übrigen hält die Runde in der Beobachtung nicht an`;
+      gelb('preisquelle_bon_widerspruch', `Bei ${bonWiderspruch} Einreichungen nannte die Bildprüfung das Preisfoto „Kassenbon", der Lesedienst sah dort keinen (normal nie) — ${folge}. Preisfotos im Tagesbericht ansehen: Warenkorb oder Bestellübersicht statt Bon? Sonst Lesung des Modells prüfen.`);
     }
     // Unbekannter Schalterwert (etwa "true" als Text): gilt als Beobachtung —
     // Bildschirmfotos werden weiter bezahlt, wer „scharf" erwartet, merkt es
@@ -188,6 +194,11 @@ function warnungen(k) {
     }
   }
   for (const t of (k.notbremse?.text || [])) rot('notbremse', `Notbremse: ${t}`);
+  // Gelb: die Bremse hält nur dank Fällen, die sie schon an einem Vortag
+  // zurückgehalten hat, bzw. solche Fälle wurden heute doch abgelehnt
+  // (fotoRundeRegeln.notbremse, Nachprüfung 06.10.2026) — kein neuer Befund,
+  // aber offen bzw. nachzusehen.
+  for (const g of (k.notbremse?.gelb || [])) gelb(g.code || 'notbremse_vortage', `Notbremse: ${g.text}`);
 
   // ── Bon-Runde (07:45) ────────────────────────────────────────────────
   const br = k.bonRunde;

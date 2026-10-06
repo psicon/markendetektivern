@@ -923,8 +923,14 @@ describe('Bildschirmfoto als Preisbeleg (Patrick 04.10.2026: „ja, bau das")', 
       expect(doc(id).review.rundeOffen).toMatchObject({ grund: 'preis_bildschirm_unsicher', preisBildschirm: { befund: 'halten' } });
     }
     expect(b).toMatchObject({ abgelehnt: 0 });
-    expect(b.preisBildschirm).toMatchObject({ bildschirmTrotzBon: 2, befundAblehnen: 0 });
+    expect(b.preisBildschirm).toMatchObject({ bildschirmTrotzBon: 2, bildschirmTrotzBonAusVortagen: 0, befundAblehnen: 0 });
     expect(b.warnungen.map((w) => w.code)).toContain('preisquelle_bon_als_bildschirm');
+    // Nachprüfung 06.10.2026: Tag 2 ohne Entscheidung in der Konsole, dieselbe
+    // Lesung — dieselben Fälle lösen die Warnung nicht jeden Morgen erneut aus.
+    const b2 = await scharf();
+    for (const id of ['ebon1', 'ebon2']) expect(doc(id).status).toBe('pending');
+    expect(b2.preisBildschirm).toMatchObject({ bildschirmTrotzBon: 0, bildschirmTrotzBonAusVortagen: 2, ausVortagen: 2 });
+    expect(b2.warnungen.map((w) => w.code)).not.toContain('preisquelle_bon_als_bildschirm');
   });
 
   it('scharf: erkennt der Lesedienst während des Laufs einen Kassenbon → die Ablehnung wird nicht geschrieben', async () => {
@@ -1165,8 +1171,27 @@ describe('Bildschirmfoto als Preisbeleg (Patrick 04.10.2026: „ja, bau das")', 
     }
     expect(doc('ebon').status).toBe('approved');
     expect(doc('papier').status).toBe('approved'); // Kamerafoto eines Papierbons
-    expect(b.preisBildschirm).toMatchObject({ kassenbonOhneLesedienstBon: 2, kassenbonMitMerkmal: 3 });
-    expect(b.warnungen.map((w) => w.code)).toContain('preisquelle_bon_widerspruch');
+    expect(b.preisBildschirm).toMatchObject({ kassenbonOhneLesedienstBon: 2, kassenbonOhneLesedienstBonLiegt: 2, kassenbonMitMerkmal: 3 });
+    expect(b.warnungen.find((w) => w.code === 'preisquelle_bon_widerspruch').text).toMatch(/die Fälle bleiben liegen/);
+    // Nachprüfung 06.10.2026: Tag 2 ohne Entscheidung — keine Wiederholung der Warnung
+    const b2 = await scharf();
+    for (const id of ['kb1', 'kb2']) expect(doc(id).status).toBe('pending');
+    expect(b2.preisBildschirm).toMatchObject({ kassenbonOhneLesedienstBon: 0, kassenbonOhneLesedienstBonAusVortagen: 2 });
+    expect(b2.warnungen.map((w) => w.code)).not.toContain('preisquelle_bon_widerspruch');
+  });
+
+  // Nachprüfung 06.10.2026: in der Beobachtung (Standard nach dem Deploy)
+  // werden diese Fälle bezahlt — die Warnung darf nicht „bleiben liegen" sagen.
+  it('Beobachtung: „Kassenbon" + Merkmale, Lesedienst sah keinen → freigegeben; Warnung sagt das', async () => {
+    schalter(undefined);
+    mitPreisfoto('kb1', 'kassenbon', png(1080, 2400), { priceImageKind: 'preisschild' });
+    mitPreisfoto('kb2', 'kassenbon', png(1080, 2400), { ean: '4000000000017', priceImageKind: 'preisschild' });
+    const b = await scharf();
+    for (const id of ['kb1', 'kb2']) expect(doc(id).status).toBe('approved');
+    expect(b.preisBildschirm).toMatchObject({ kassenbonOhneLesedienstBon: 2, kassenbonOhneLesedienstBonLiegt: 0 });
+    const w = b.warnungen.find((x) => x.code === 'preisquelle_bon_widerspruch');
+    expect(w.text).toMatch(/in der Beobachtung hält die Runde sie nicht an/);
+    expect(w.text).not.toMatch(/die Fälle bleiben liegen/);
   });
 
   // Prüfrunde 2 (04.10.2026): Zeitgrenze des ganzen Kopf-Schritts (3 min).
@@ -1793,9 +1818,273 @@ describe('Zwei Schalter: preisBildschirmRegel und preisBelegRegel wirken und end
     expect(b1.notbremse.bildschirm).toBe(true);
     for (let i = 0; i < 4; i++) expect(doc(`s${i}`).status).toBe('pending');
     expect(b1.preisBildschirm).toMatchObject({ befundAblehnen: 4, stattFreigabe: 4, ausVortagen: 0, vorbefund: 0 });
+    expect(b1.warnungen.find((w) => w.code === 'notbremse').text).toMatch(/Bildschirmfoto.*greift sie an einem späteren Morgen nicht mehr, lehnt die Runde sie ab/);
+    // Zweiter Lauf (Nachprüfung 06.10.2026, zweimal): dieselben vier zählen
+    // für das Ob weiter mit — die Bremse hält sie, bis ein Mensch entscheidet —,
+    // aber kein zweiter roter Alarm: nur eine gelbe Zeile „liegen seit …".
     const b2 = await scharf();
-    expect(b2.notbremse.bildschirm).toBe(true);
-    for (let i = 0; i < 4; i++) expect(doc(`s${i}`).status).toBe('pending');
+    expect(b2.notbremse).toMatchObject({ bildschirm: true, ausVortagen: { bildschirm: 4 } });
+    expect(b2.notbremse).not.toHaveProperty('ausVortagenAbgelehnt');
+    for (let i = 0; i < 4; i++) expect(doc(`s${i}`)).toMatchObject({ status: 'pending', review: { rundeOffen: { grund: 'notbremse_preis_bildschirm' } } });
     expect(b2.preisBildschirm).toMatchObject({ befundAblehnen: 0, stattFreigabe: 0, ausVortagen: 4, vorbefund: 4 });
+    expect(b2.warnungen.map((w) => w.code)).not.toContain('notbremse');
+    const gelb = b2.warnungen.find((w) => w.code === 'notbremse_vortage_bildschirm');
+    expect(gelb).toMatchObject({ stufe: 'gelb' });
+    expect(gelb.text).toMatch(/^Notbremse: 4 Bildschirm-Ablehnungen \(4 Personen\) liegen seit \d{4}-\d{2}-\d{2}_\S+ bei der Notbremse/);
+    expect(gelb.text).not.toMatch(/heute .* neue/);
+  });
+
+  // Nachprüfung 06.10.2026: eine anhaltende Fehllesung mit WENIGEN neuen
+  // Fällen gab die gestern zurückgehaltenen zur endgültigen Ablehnung frei —
+  // ohne jede Warnung. Jetzt zählen die übernommenen für das Ob mit.
+  it('zwei Morgen: Fehllesung hält an, Tag 2 drei neue Personen → alle sieben bleiben liegen, gelb statt rot', async () => {
+    schalter(true, 'shadow');
+    const schirm = (i) => {
+      const uid = `p${i}`;
+      einreichung(`s${i}`, { uid, ean: String(4000000000000 + i * 97), priceImageKind: 'preisschild' });
+      mockQuelle.set(preisPfad(`s${i}`, uid), 'bildschirm');
+      mockKopf.set(preisPfad(`s${i}`, uid), png(1080, 2400));
+    };
+    for (let i = 0; i < 4; i++) schirm(i);
+    const b1 = await scharf();
+    expect(b1.notbremse.bildschirm).toBe(true);
+    for (let i = 4; i < 7; i++) schirm(i);
+    dateSpy.mockImplementation(() => T0 + TAG_MS);
+    const b2 = await scharf();
+    for (let i = 0; i < 7; i++) expect(doc(`s${i}`)).toMatchObject({ status: 'pending', review: { rundeOffen: { grund: 'notbremse_preis_bildschirm', trocken: false } } });
+    expect(b2).toMatchObject({ abgelehnt: 0, notbremse: { bildschirm: true, ausVortagen: { bildschirm: 4 } } });
+    expect(b2.preisBildschirm).toMatchObject({ befundAblehnen: 3, ausVortagen: 4 });
+    expect(b2.warnungen.map((w) => w.code)).not.toContain('notbremse');
+    expect(b2.warnungen.find((w) => w.code === 'notbremse_vortage_bildschirm').text)
+      .toMatch(/4 Bildschirm-Ablehnungen \(4 Personen\) liegen seit .* — heute 3 neue \(3 Personen\) mitgehalten\. In der Konsole entscheiden/);
+    // Tag 3: nichts Neues, niemand hat entschieden — liegen weiter, weiter nur gelb
+    dateSpy.mockImplementation(() => T0 + 2 * TAG_MS);
+    const b3 = await scharf();
+    for (let i = 0; i < 7; i++) expect(doc(`s${i}`).status).toBe('pending');
+    expect(b3.notbremse).toMatchObject({ bildschirm: true, ausVortagen: { bildschirm: 7 } });
+    expect(b3.warnungen.map((w) => w.code)).not.toContain('notbremse');
+    expect(b3.warnungen.map((w) => w.code)).toContain('notbremse_vortage_bildschirm');
+  });
+
+  // Bis zur Abschlussprüfung 06.10.2026 stand hier: „greift die Bremse nicht
+  // mehr (ein Fall heute anders gelesen), werden die übrigen übernommenen
+  // abgelehnt". Eine schwankende Lesung ist aber gerade das Zeichen, dass dem
+  // Modell nicht zu trauen ist — der gesperrt haltende Fall zählt jetzt weiter
+  // mit (Test „Befund 1: ebenso, wenn ein übernommener Fall heute anders
+  // gelesen wird" unten).
+
+  it('ein manueller Trockenlauf zwischen zwei Morgen löscht den Merker „schon zurückgehalten" nicht (kein zweites Rot)', async () => {
+    schalter(true, 'shadow');
+    for (let i = 0; i < 4; i++) {
+      const uid = `p${i}`;
+      einreichung(`s${i}`, { uid, ean: String(4000000000000 + i * 97), priceImageKind: 'preisschild' });
+      mockQuelle.set(preisPfad(`s${i}`, uid), 'bildschirm');
+      mockKopf.set(preisPfad(`s${i}`, uid), png(1080, 2400));
+    }
+    expect((await scharf()).warnungen.map((w) => w.code)).toContain('notbremse');
+    await taeglicheRunde({ dryRun: true, projekt: 'p', bucketName: 'b', ausloeser: 'manuell' });
+    expect(doc('s0').review.rundeOffen).toMatchObject({ trocken: true, grund: 'notbremse_preis_bildschirm', notbremseEcht: 'notbremse_preis_bildschirm' });
+    dateSpy.mockImplementation(() => T0 + TAG_MS);
+    const b2 = await scharf();
+    for (let i = 0; i < 4; i++) expect(doc(`s${i}`)).toMatchObject({ status: 'pending', review: { rundeOffen: { trocken: false, grund: 'notbremse_preis_bildschirm' } } });
+    expect(doc('s0').review.rundeOffen).not.toHaveProperty('notbremseEcht');
+    expect(b2.notbremse).toMatchObject({ bildschirm: true, ausVortagen: { bildschirm: 4 } });
+    expect(b2.warnungen.map((w) => w.code)).not.toContain('notbremse');
+    expect(b2.warnungen.map((w) => w.code)).toContain('notbremse_vortage_bildschirm');
+  });
+
+  it('Trockenlauf: übernommene, die ein scharfer Lauf ablehnen würde, nennt die Warnung als geplant', async () => {
+    schalter(true, 'shadow');
+    for (let i = 0; i < 4; i++) {
+      const uid = `p${i}`;
+      einreichung(`s${i}`, { uid, ean: String(4000000000000 + i * 97), priceImageKind: 'preisschild' });
+      mockQuelle.set(preisPfad(`s${i}`, uid), 'bildschirm');
+      mockKopf.set(preisPfad(`s${i}`, uid), png(1080, 2400));
+    }
+    expect((await scharf()).notbremse.bildschirm).toBe(true);
+    // Einer wird in der Konsole entschieden → drei Personen, unter der Schwelle
+    mockStore.set('crowd_uploads/s0', { ...doc('s0'), status: 'approved', review: { decidedBy: 'admin', forced: false } });
+    dateSpy.mockImplementation(() => T0 + TAG_MS);
+    const t = await taeglicheRunde({ dryRun: true, projekt: 'p', bucketName: 'b', ausloeser: 'manuell' });
+    for (let i = 1; i < 4; i++) expect(doc(`s${i}`).status).toBe('pending');
+    expect(t.notbremse).toMatchObject({ ausVortagenAbgelehnt: { bildschirm: 3 } });
+    expect(t.warnungen.find((x) => x.code === 'notbremse_vortage_abgelehnt_bildschirm').text).toMatch(/würde ein scharfer Lauf heute ablehnen/);
+  });
+
+  it('Notbremse an Tag 2 nur wegen frischer Fälle; die übernommenen werden dann mitgehalten', async () => {
+    schalter(true, 'shadow');
+    const schirm = (i) => {
+      const uid = `p${i}`;
+      einreichung(`s${i}`, { uid, ean: String(4000000000000 + i * 97), priceImageKind: 'preisschild' });
+      mockQuelle.set(preisPfad(`s${i}`, uid), 'bildschirm');
+      mockKopf.set(preisPfad(`s${i}`, uid), png(1080, 2400));
+    };
+    for (let i = 0; i < 4; i++) schirm(i);
+    expect((await scharf()).notbremse.bildschirm).toBe(true);
+    for (let i = 4; i < 8; i++) schirm(i);
+    const b2 = await scharf();
+    expect(b2.notbremse).toMatchObject({ bildschirm: true, ausVortagen: { bildschirm: 4 } });
+    for (let i = 0; i < 8; i++) expect(doc(`s${i}`).status).toBe('pending');
+    expect(b2.preisBildschirm).toMatchObject({ befundAblehnen: 4, ausVortagen: 4 });
+  });
+
+  it('nach einem Trockenlauf zählt der erste scharfe Lauf dieselben Fälle voll (der Trockenlauf hielt nichts zurück)', async () => {
+    schalter(true, 'shadow');
+    for (let i = 0; i < 4; i++) {
+      const uid = `p${i}`;
+      einreichung(`s${i}`, { uid, ean: String(4000000000000 + i * 97), priceImageKind: 'preisschild' });
+      mockQuelle.set(preisPfad(`s${i}`, uid), 'bildschirm');
+      mockKopf.set(preisPfad(`s${i}`, uid), png(1080, 2400));
+    }
+    const t = await taeglicheRunde({ dryRun: true, projekt: 'p', bucketName: 'b', ausloeser: 'manuell' });
+    expect(t.notbremse.bildschirm).toBe(true);
+    expect(doc('s0').review.rundeOffen).toMatchObject({ grund: 'notbremse_preis_bildschirm', trocken: true });
+    const b = await scharf();
+    expect(b.notbremse).toMatchObject({ bildschirm: true });
+    expect(b.notbremse).not.toHaveProperty('ausVortagen');
+    for (let i = 0; i < 4; i++) expect(doc(`s${i}`).status).toBe('pending');
+  });
+});
+
+// Abschlussprüfung 06.10.2026 — drei Befunde, je mit dem echten Ablauf nachgestellt.
+describe('Abschlussprüfung 06.10.2026: Notbremse-Kohorte und Meldungen nach einem Trockenlauf', () => {
+  const { jpeg, png } = require('./helpers/bildKopfDaten');
+  const preisPfad = (id, uid = 'u1') => `crowduploads/${uid}/${id}/preis.jpg`;
+  const schalter = (bildschirm, beleg) => mockStore.set('cashback_config/v1', {
+    fotoWorker: true, ...(bildschirm === undefined ? {} : { preisBildschirmRegel: bildschirm }), ...(beleg === undefined ? {} : { preisBelegRegel: beleg }),
+  });
+  const eanVon = (i) => String(4000000000000 + i * 97);
+  /** Person p<i> reicht ein Bildschirmfoto ein (Merkmale + „bildschirm" → Ablehn-Befund). */
+  const schirm = (i) => {
+    const uid = `p${i}`;
+    einreichung(`s${i}`, { uid, ean: eanVon(i), priceImageKind: 'preisschild' });
+    mockQuelle.set(preisPfad(`s${i}`, uid), 'bildschirm');
+    mockKopf.set(preisPfad(`s${i}`, uid), png(1080, 2400));
+  };
+  const zeitplan = (dryRun) => taeglicheRunde({ dryRun, projekt: 'p', bucketName: 'b', ausloeser: 'zeitplan' });
+
+  // Befund 1: Ob die Bremse greift, zählte nur Fälle, die HEUTE „ablehnen"
+  // lesen. Scheiterte für einen übernommenen Fall die Bildprüfung, fiel er aus
+  // der Zählung — und die übrigen drei wurden endgültig abgelehnt. Ein
+  // Technikfehler entschied so mittelbar über drei Ablehnungen.
+  it('Befund 1: Tag 2 scheitert die Bildprüfung für einen übernommenen Fall → die übrigen bleiben liegen (gelb), auch an Tag 3', async () => {
+    schalter(true, 'shadow');
+    for (let i = 0; i < 4; i++) schirm(i);
+    expect((await scharf()).notbremse.bildschirm).toBe(true);
+    mockAudit.set(`crowduploads/${eanVon(0)}/s0/ean.jpg`, 'AUDIT_FEHLER');
+    dateSpy.mockImplementation(() => T0 + TAG_MS);
+    const b2 = await scharf();
+    for (let i = 0; i < 4; i++) expect(doc(`s${i}`).status).toBe('pending');
+    expect(b2).toMatchObject({ abgelehnt: 0, notbremse: { bildschirm: true, ausVortagen: { bildschirm: 4 } } });
+    expect(b2.notbremse).not.toHaveProperty('ausVortagenAbgelehnt');
+    // Der Merker überlebt einen Tag, an dem der Fall aus anderem Grund offen ist.
+    expect(doc('s0').review.rundeOffen).toMatchObject({ grund: 'bild_audit_gescheitert', trocken: false, notbremseEcht: 'notbremse_preis_bildschirm' });
+    expect(b2.warnungen.map((w) => w.code)).not.toContain('notbremse');
+    expect(b2.warnungen.map((w) => w.code)).not.toContain('notbremse_vortage_abgelehnt_bildschirm');
+    expect(b2.warnungen.find((w) => w.code === 'notbremse_vortage_bildschirm').text)
+      .toMatch(/4 Bildschirm-Ablehnungen \(4 Personen\) liegen seit .* — davon 1 heute aus anderem Grund offen/);
+    // Tag 3: Bildprüfung wieder da — s0 hält gesperrt, die übrigen weiter nur von der Bremse.
+    mockAudit.clear();
+    dateSpy.mockImplementation(() => T0 + 2 * TAG_MS);
+    const b3 = await scharf();
+    for (let i = 0; i < 4; i++) expect(doc(`s${i}`).status).toBe('pending');
+    expect(b3.notbremse).toMatchObject({ bildschirm: true, ausVortagen: { bildschirm: 4 } });
+    expect(b3.notbremse).not.toHaveProperty('ausVortagenAbgelehnt');
+    expect(doc('s0').review.rundeOffen).toMatchObject({ grund: 'preis_bildschirm_unsicher', notbremseEcht: 'notbremse_preis_bildschirm', preisBildschirm: { ablehnenGesperrt: true } });
+  });
+
+  it('Befund 1: ebenso, wenn ein übernommener Fall heute anders gelesen wird (er hält gesperrt) — die übrigen bleiben liegen', async () => {
+    schalter(true, 'shadow');
+    for (let i = 0; i < 4; i++) schirm(i);
+    expect((await scharf()).notbremse.bildschirm).toBe(true);
+    mockQuelle.set(preisPfad('s0', 'p0'), 'preisschild');
+    dateSpy.mockImplementation(() => T0 + TAG_MS);
+    const b2 = await scharf();
+    expect(doc('s0')).toMatchObject({ status: 'pending', review: { rundeOffen: { grund: 'preis_bildschirm_unsicher', notbremseEcht: 'notbremse_preis_bildschirm', preisBildschirm: { ablehnenGesperrt: true } } } });
+    for (let i = 1; i < 4; i++) expect(doc(`s${i}`)).toMatchObject({ status: 'pending', review: { rundeOffen: { grund: 'notbremse_preis_bildschirm' } } });
+    expect(b2).toMatchObject({ abgelehnt: 0, notbremse: { bildschirm: true, ausVortagen: { bildschirm: 4 } } });
+    expect(b2.warnungen.find((w) => w.code === 'notbremse_vortage_bildschirm').text).toMatch(/davon 1 heute aus anderem Grund offen/);
+  });
+
+  it('Befund 1, Gegenprobe: mehr geprüfte Einreichungen als am Vortag → die Bremse greift nicht mehr, die übernommenen werden abgelehnt (gezählt, gelb)', async () => {
+    schalter(true, 'shadow');
+    for (let i = 0; i < 4; i++) schirm(i);
+    expect((await scharf()).notbremse.bildschirm).toBe(true);
+    // 160 unauffällige neue: 4 Personen bei 164 geprüften = 2,4 % ≤ 2,5 %
+    for (let i = 0; i < 160; i++) einreichung(`n${i}`, { uid: `n${i}`, ean: String(4100000000000 + i * 97) });
+    dateSpy.mockImplementation(() => T0 + TAG_MS);
+    const b2 = await scharf();
+    for (let i = 0; i < 4; i++) expect(doc(`s${i}`)).toMatchObject({ status: 'rejected', rejectReason: 'fotos_unpassend' });
+    expect(b2.notbremse).toMatchObject({ bildschirm: false, ausVortagenAbgelehnt: { bildschirm: 4 } });
+    expect(b2.warnungen.find((w) => w.code === 'notbremse_vortage_abgelehnt_bildschirm').text)
+      .toMatch(/4 Bildschirm-Ablehnungen, die die Notbremse an einem Vortag zurückgehalten hatte, heute abgelehnt — die Bremse griff nicht mehr \(mehr geprüfte Einreichungen/);
+  });
+
+  // Befund 2: eine Teilentscheidung in der Konsole gibt die übrigen frei. Wie
+  // es richtig ist (alle zurückgehaltenen bis zur Konsole liegen lassen?), ist
+  // Patricks offene Frage (WISSEN-FOTORUNDE.md, Notbremse). Bis dahin: die
+  // Meldungen sagen es vorher, und die Ablehnung wird gelb gemeldet. Dieser
+  // Test hält das heutige Verhalten fest — entscheidet Patrick für das
+  // Liegenlassen, kippt er bewusst.
+  it('Befund 2: Patrick gibt einen zurückgehaltenen Fall von Hand frei → die Meldungen haben vorher gewarnt; am Morgen darauf werden die übrigen abgelehnt (gelb)', async () => {
+    schalter(true, 'shadow');
+    for (let i = 0; i < 4; i++) schirm(i);
+    const b1 = await scharf();
+    expect(b1.warnungen.find((w) => w.code === 'notbremse').text).toMatch(/alle auf einmal entscheiden: wer nur einzelne entscheidet, lässt die übrigen ablehnen/);
+    const b1b = await scharf();
+    expect(b1b.warnungen.find((w) => w.code === 'notbremse_vortage_bildschirm').text).toMatch(/In der Konsole entscheiden, und zwar alle auf einmal .* wer nur einzelne entscheidet, lässt die übrigen ablehnen/);
+    mockStore.set('crowd_uploads/s0', { ...doc('s0'), status: 'approved', review: { decidedBy: 'admin', forced: false } });
+    dateSpy.mockImplementation(() => T0 + TAG_MS);
+    const b2 = await scharf();
+    for (let i = 1; i < 4; i++) expect(doc(`s${i}`)).toMatchObject({ status: 'rejected', rejectReason: 'fotos_unpassend' });
+    expect(b2.notbremse).toMatchObject({ bildschirm: false, ausVortagenAbgelehnt: { bildschirm: 3 } });
+    expect(b2.warnungen.find((w) => w.code === 'notbremse_vortage_abgelehnt_bildschirm').text)
+      .toMatch(/oder ein Teil wurde inzwischen in der Konsole entschieden/);
+  });
+
+  // Befund 3: ein manueller Trockenlauf schreibt `review.rundeOffen`, aber nie
+  // `ops_tagesberichte/aktuell`. Galt sein Eintrag als „schon gemeldet", fehlte
+  // der Fingerabdruck des wahrscheinlichsten Modellfehlers im Morgen-Chat.
+  it('Befund 3: manueller Trockenlauf vor der Morgenrunde → die Widerspruchs-Warnung steht trotzdem in `aktuell`', async () => {
+    schalter(true, 'shadow');
+    einreichung('ebon1', { priceImageKind: 'kassenbon' });
+    mockQuelle.set(preisPfad('ebon1'), 'bildschirm'); mockKopf.set(preisPfad('ebon1'), png(1080, 2400));
+    einreichung('ebon2', { ean: '4000000000017', priceImageKind: 'preisschild', priceReceipt: { merchant: 'Lidl', zip: '10115' } });
+    mockQuelle.set(preisPfad('ebon2'), 'bildschirm'); mockKopf.set(preisPfad('ebon2'), png(1080, 2400));
+    const t = await taeglicheRunde({ dryRun: true, projekt: 'p', bucketName: 'b', ausloeser: 'manuell' });
+    expect(t.warnungen.map((w) => w.code)).toContain('preisquelle_bon_als_bildschirm');
+    expect(doc('ebon1').review.rundeOffen).toMatchObject({ trocken: true, preisBildschirm: { befund: 'halten' } });
+    expect(doc('ebon1').review.rundeOffen).not.toHaveProperty('preisBildschirmGemeldet');
+    const b = await zeitplan(false);
+    expect(b.preisBildschirm).toMatchObject({ bildschirmTrotzBon: 2, bildschirmTrotzBonAusVortagen: 0 });
+    expect(mockStore.get('ops_tagesberichte/aktuell').warnungen.map((w) => w.code)).toContain('preisquelle_bon_als_bildschirm');
+    // Danach gemeldet: ein Trockenlauf trägt das weiter, der nächste Morgen wiederholt die Warnung nicht.
+    await taeglicheRunde({ dryRun: true, projekt: 'p', bucketName: 'b', ausloeser: 'manuell' });
+    expect(doc('ebon1').review.rundeOffen).toMatchObject({ trocken: true, preisBildschirmGemeldet: b.lauf });
+    dateSpy.mockImplementation(() => T0 + TAG_MS);
+    const b2 = await zeitplan(false);
+    expect(b2.preisBildschirm).toMatchObject({ bildschirmTrotzBon: 0, bildschirmTrotzBonAusVortagen: 2 });
+    expect(b2.warnungen.map((w) => w.code)).not.toContain('preisquelle_bon_als_bildschirm');
+  });
+
+  it('Befund 3, gleiche Klasse: ein Halt, den nur ein Trockenlauf gesehen hat, zählt am Morgen als heutiger Befund („hält viele" bleibt sichtbar)', async () => {
+    schalter(true, 'shadow');
+    // Fünf abfotografierte Bildschirme (Kamerafoto 4:3, „bildschirm") → je ein Halt.
+    for (let i = 0; i < 5; i++) {
+      einreichung(`k${i}`, { uid: `k${i}`, ean: String(4200000000000 + i * 97), priceImageKind: 'preisschild' });
+      mockQuelle.set(preisPfad(`k${i}`, `k${i}`), 'bildschirm');
+      mockKopf.set(preisPfad(`k${i}`, `k${i}`), jpeg(3000, 4000));
+    }
+    const t = await taeglicheRunde({ dryRun: true, projekt: 'p', bucketName: 'b', ausloeser: 'manuell' });
+    expect(t.warnungen.map((w) => w.code)).toContain('preisquelle_haelt_viele');
+    const b = await zeitplan(false);
+    for (let i = 0; i < 5; i++) expect(doc(`k${i}`).status).toBe('pending');
+    expect(b.preisBildschirm).toMatchObject({ befundHalten: 5, stattFreigabe: 5, ausVortagen: 0 });
+    expect(mockStore.get('ops_tagesberichte/aktuell').warnungen.map((w) => w.code)).toContain('preisquelle_haelt_viele');
+    // Am Morgen darauf (gemeldet): nur noch „aus Vortagen", keine Wiederholung.
+    dateSpy.mockImplementation(() => T0 + TAG_MS);
+    const b2 = await zeitplan(false);
+    expect(b2.preisBildschirm).toMatchObject({ befundHalten: 0, stattFreigabe: 0, ausVortagen: 5 });
+    expect(b2.warnungen.map((w) => w.code)).not.toContain('preisquelle_haelt_viele');
   });
 });

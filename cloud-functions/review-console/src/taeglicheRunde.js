@@ -55,8 +55,8 @@ const logger = require('firebase-functions/logger');
 const { GoogleGenAI } = require('@google/genai');
 const { evaluateDuplicate, completenessCheck, dupZumSpeichern, appGrund, REASON } = require('./duplicatePolicy');
 const {
-  entscheideFall, bildBefund, fotoVorbefund, bildMitVorbefund, belegeVon, notbremse, nameAusLesungen, eanAusLesungen, rettungNichtGeschafft, rundeOffenEintrag,
-  BILD_GRUENDE, AUSSER_GESAMTQUOTE, KONTO_GESPERRT,
+  entscheideFall, bildBefund, fotoVorbefund, bildMitVorbefund, belegeVon, notbremse, nameAusLesungen, eanAusLesungen, rettungNichtGeschafft, rundeOffenEintrag, preisBildschirmGemeldet,
+  BILD_GRUENDE, AUSSER_GESAMTQUOTE, KONTO_GESPERRT, EIGENE_BREMSEN,
 } = require('./fotoRundeRegeln');
 // Werte-Helfer gemeinsam mit der Prüfkonsole (index.js/einreichung.js) — eine Quelle.
 const {
@@ -1146,6 +1146,16 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   const version = regelVersion(pbModus, belegModus);
   const zaehle = (liste, feld) => liste.reduce((a, p) => { const k = p[feld] || '?'; a[k] = (a[k] || 0) + 1; return a; }, {});
   const abgelehnt = plan.filter((p) => p.entscheidung === 'ablehnen' && !p.uebersprungen);
+  // Notbremse: Ablehnungen, die eine Bremse an einem Vortag zurückgehalten
+  // hatte und heute doch geschrieben wurden (im Trockenlauf: geplant), weil
+  // sie nicht mehr griff — eigens gezählt und gelb gemeldet (Nachprüfung
+  // 06.10.2026). Nach dem Schreiben gezählt: übersprungene oder nicht
+  // geschriebene Fälle sind dann schon offen.
+  const ausVortagenAbgelehnt = zaehle(abgelehnt.filter((p) => p.ausVortagAbgelehnt), 'ausVortagAbgelehnt');
+  for (const [schalter, n] of Object.entries(ausVortagenAbgelehnt)) {
+    const b = EIGENE_BREMSEN.find((x) => x.schalter === schalter);
+    if (b && b.textAbgelehnt) bremse.gelb.push({ code: `notbremse_vortage_abgelehnt_${schalter}`, text: b.textAbgelehnt(n, dryRun) });
+  }
   // Gesperrte Konten liegen stumm und dauerhaft — sie warten NICHT auf eine
   // Entscheidung und zählen deshalb getrennt (sonst füllten sie „wartet auf
   // dich" und die Warnung „wartet seit X Tagen" jeden Morgen).
@@ -1156,13 +1166,40 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   // Beobachtungswoche ist das die Messung: wie oft die Regel gegriffen hätte
   // und wie oft dadurch eine Freigabe weggefallen wäre (`stattFreigabe`).
   const pbAlle = [...pbVon.values()];
+  // Fälle, die schon an einem Vortag mit Befund liegen blieben (Eintrag
+  // `review.rundeOffen.preisBildschirm` am Dokument, scharf wie Beobachtung):
+  // die beiden Widerspruchs-Zähler unten zählen sie nicht erneut, sonst kam
+  // dieselbe Warnung „Lesung des Modells prüfen" jeden Morgen wieder, solange
+  // der Fall auf Patrick wartet (Nachprüfung 06.10.2026; wie pbFrischGehalten).
+  // „Schon gemeldet" heißt: von einem ECHTEN Lauf (fotoRundeRegeln.preisBildschirmGemeldet,
+  // Abschlussprüfung 06.10.2026). Ein manueller Trockenlauf schreibt den
+  // Eintrag, aber nie `aktuell` — galt er als gemeldet, fehlte die Warnung im
+  // Morgen-Chat, ausgerechnet nach einem Kontroll-Trockenlauf nach einem Deploy.
+  const pbSchonGemeldet = new Set(plan.filter((p) => {
+    const ro = p.x && p.x.review && typeof p.x.review === 'object' ? p.x.review.rundeOffen : null;
+    return !!preisBildschirmGemeldet(ro);
+  }).map((p) => p.id));
+  // Für die Zählung „heute" gegen „aus Vortagen" gilt dasselbe: ein Befund
+  // eines früheren Laufs, den nur ein Trockenlauf gesehen hat, ist im Bericht
+  // ein heutiger (entschieden wird mit ihm wie bisher — er hält weiter).
+  // Sonst fehlten nach einem Trockenlauf auch „hält viele" und „statt Freigabe".
+  const pbFallFuerBericht = (p) => {
+    const f = p.preisBildschirmFall;
+    if (!f || pbSchonGemeldet.has(p.id)) return f;
+    const { vor, vorWirkt, ...heute } = f;
+    return heute;
+  };
+  const pbAlleFrisch = [...pbVon].filter(([id]) => !pbSchonGemeldet.has(id)).map(([, e]) => e);
+  const pbAlleAlt = [...pbVon].filter(([id]) => pbSchonGemeldet.has(id)).map(([, e]) => e);
+  const istTrotzBon = (e) => e.quelle === 'bildschirm' && e.lesedienstBon;
+  const istBonWiderspruch = (e) => e.quelle === 'kassenbon' && e.befund === 'halten' && keinBonVon(e);
   const pbFaelle = plan.filter((p) => p.preisBildschirmFall);
   // Je Regel und nur an EINEM Morgen gezählt (preisBildschirm.preisBildschirmZaehlart,
   // Nachprüfung 05.10.2026): ein reiner Preisbeleg-Fall nicht in den Zeilen
   // der Bildschirm-Regel, und ein Fall, den ein Befund eines früheren Laufs
   // weiter hält, nur unter „aus Vortagen" — nicht jeden Morgen erneut als
   // „statt Freigabe".
-  const pbZaehl = new Map(pbFaelle.map((p) => [p.id, preisBildschirmZaehlart(p.preisBildschirmFall, p.entscheidung)]));
+  const pbZaehl = new Map(pbFaelle.map((p) => [p.id, preisBildschirmZaehlart(pbFallFuerBericht(p), p.entscheidung)]));
   const pbFrisch = (regel) => pbFaelle.filter((p) => pbZaehl.get(p.id).frisch.includes(regel));
   const pbAusVortagen = (regel) => pbFaelle.filter((p) => pbZaehl.get(p.id).ausVortagen.includes(regel)).length;
   const pbSchirmFrisch = pbFrisch(REGEL_BILDSCHIRM);
@@ -1171,7 +1208,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   // dieselbe Warnung auslösten, solange der Fall auf Patrick wartet). Ein
   // früherer Befund, dessen Regel zurückgenommen ist, hält nichts mehr — hält
   // heute die andere Regel, ist das ein frischer Halt.
-  const pbFrischGehalten = (grund) => plan.filter((p) => p.entscheidung === 'offen' && p.grund === grund && !(p.preisBildschirmFall && p.preisBildschirmFall.vorWirkt)).length;
+  const pbFrischGehalten = (grund) => plan.filter((p) => p.entscheidung === 'offen' && p.grund === grund && !(pbFallFuerBericht(p) && pbFallFuerBericht(p).vorWirkt)).length;
   const pbZaehle = (liste, f) => liste.reduce((a, x) => { const k = f(x); a[k] = (a[k] || 0) + 1; return a; }, {});
   const pbDatei = (e) => (e.kopf ? `${e.kopf.format} ${e.kopf.breite || '?'}×${e.kopf.hoehe || '?'}${e.kopf.kameraHersteller ? ' Kamera' : ''}` : (e.kopfFehler || null));
   // Prüfrunde 3 (04.10.2026): JEDER „Kassenbon", den der Lesedienst las und
@@ -1216,9 +1253,12 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     kassenbonMitMerkmal: pbAlle.filter((e) => e.quelle === 'kassenbon' && e.merkmal === true).length,
     // Bildprüfung „Bildschirm", Lesedienst „Kassenbon" — gemessen 0 von 167
     // Kassenbons; mehr deutet auf eine geänderte Lesart des Modells (Warnung).
-    bildschirmTrotzBon: pbAlle.filter((e) => e.quelle === 'bildschirm' && e.lesedienstBon).length,
+    // Nur Fälle ohne Befund eines Vortags; die übrigen getrennt, ohne Warnung.
+    bildschirmTrotzBon: pbAlleFrisch.filter(istTrotzBon).length,
+    bildschirmTrotzBonAusVortagen: pbAlleAlt.filter(istTrotzBon).length,
     // Bildprüfung „Kassenbon", der Lesedienst las das Foto und sah KEINEN
-    // Bon, und der Fall bleibt liegen — gemessen 0 von 126 (Prüfrunde 2,
+    // Bon, und der Befund lautet „liegen lassen" (wirkt nur scharf, siehe
+    // `…Liegt`) — gemessen 0 von 126 (Prüfrunde 2,
     // 04.10.2026). Mehr deutet auf eine geänderte Lesart oder auf
     // Warenkörbe/Bestellübersichten als „Bon" (Warnung
     // preisquelle_bon_widerspruch). NUR mit diesem Widerspruch: seit dem
@@ -1226,7 +1266,11 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     // von einem fremden Händler, obwohl der Lesedienst den Bon sah — das zählt
     // `beleg` (Nachprüfung 05.10.: sonst 11 von 189 Kassenbons hier, alle mit
     // Lesedienst-Bon, und eine Warnung etwa einmal pro Woche ohne Grund).
-    kassenbonOhneLesedienstBon: pbAlle.filter((e) => e.quelle === 'kassenbon' && e.befund === 'halten' && keinBonVon(e)).length,
+    kassenbonOhneLesedienstBon: pbAlleFrisch.filter(istBonWiderspruch).length,
+    // … davon heute wirklich angehalten (scharfe Regel) — in der Beobachtung
+    // werden sie bezahlt, die Warnung sagt das (Nachprüfung 06.10.2026).
+    kassenbonOhneLesedienstBonLiegt: pbAlleFrisch.filter((e) => istBonWiderspruch(e) && preisBildschirmLage(e, { scharf: true }).befund === 'halten').length,
+    kassenbonOhneLesedienstBonAusVortagen: pbAlleAlt.filter(istBonWiderspruch).length,
     // Alle davon, auch ohne Merkmale (bezahlt) — mit Fällen zum Ansehen.
     kassenbonLesedienstOhneBon: pbKassenbonOhneBon.length,
     kassenbonLesedienstOhneBonFaelle: pbKassenbonOhneBon.slice(0, 20).map((p) => {
@@ -1332,6 +1376,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     preisBelegMaerkteUnlesbar: preisBildschirm.beleg.maerkteUnlesbar,
     preisBildschirmTrotzBon: preisBildschirm.bildschirmTrotzBon,
     preisBildschirmBonWiderspruch: preisBildschirm.kassenbonOhneLesedienstBon,
+    preisBildschirmBonWiderspruchLiegt: preisBildschirm.kassenbonOhneLesedienstBonLiegt,
     preisBildschirmSchalterUnbekannt: pbSchalter.art === 'unbekannt' ? pbSchalter.roh : null,
     preisBelegSchalterUnbekannt: belegSchalter.art === 'unbekannt' ? belegSchalter.roh : null,
     preisKopfNichtAbrufbar: preisBildschirm.kopfNichtAbrufbar,
@@ -1367,7 +1412,15 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     bildpruefung: { versucht: runde.auditVersucht, gescheitert: runde.auditFehler, unpassend: plan.filter((p) => BILD_GRUENDE.has(p.grund) || BILD_GRUENDE.has(p.zurueckgehaltenGrund)).length },
     nichtGeschafft: runde.nichtGeschafft,
     schreibFehler: runde.schreibFehler,
-    notbremse: { bild: bremse.bild, gesamt: bremse.gesamt, preis: bremse.preis, woche: bremse.woche, bildschirm: bremse.bildschirm },
+    notbremse: {
+      bild: bremse.bild, gesamt: bremse.gesamt, preis: bremse.preis, woche: bremse.woche, bildschirm: bremse.bildschirm,
+      // Bildschirm-Bremse (Nachprüfung 06.10.2026): mitgehaltene Fälle aus
+      // Vortagen, und solche, die heute doch abgelehnt wurden (Bremse griff
+      // nicht mehr; im Trockenlauf geplant). Ob nur gelb gewarnt wurde, steht
+      // in `warnungen` (notbremse_vortage_*).
+      ...(bremse.ausVortagen ? { ausVortagen: bremse.ausVortagen } : {}),
+      ...(Object.keys(ausVortagenAbgelehnt).length ? { ausVortagenAbgelehnt } : {}),
+    },
     // Bildschirmfoto als Preisbeleg (Patrick 04.10.2026) — Zahlen und Fälle.
     preisBildschirm,
     // Neu 02.10.2026 (Entscheidungen Patrick): Nummer vom Barcode-Foto, Abgleich

@@ -241,6 +241,17 @@
 
       const MODUS_DE = (m) => (m === false ? 'aus' : m === true ? 'scharf' : 'Beobachtung');
       /**
+       * „Kassenbon", Lesedienst sah keinen: liegt der Fall wirklich? Nur mit
+       * scharfer Regel (`kassenbonOhneLesedienstBonLiegt`, seit 06.10.2026);
+       * ältere Berichte ohne das Feld behalten „liegt".
+       */
+      function kbLiegt(pb) {
+        const n = pb.kassenbonOhneLesedienstBon || 0;
+        const l = pb.kassenbonOhneLesedienstBonLiegt;
+        if (typeof l !== 'number' || l >= n) return 'liegt';
+        return l ? `${l} liegen, die übrigen in der Beobachtung nicht angehalten` : 'Beobachtung: nicht angehalten';
+      }
+      /**
        * Bildschirmfoto als Preisbeleg (Patrick 04.10.2026): in der
        * Beobachtungswoche die Messung — was die Regel getan HÄTTE. Danach, was
        * sie getan hat. Kassenbons (auch e-Bons) zählen immer; wie viele davon
@@ -293,7 +304,8 @@
         return `<section class="box"><h3>Preisfoto: Bildschirmfoto — ${MODUS_DE(pb.modus)}${unbekannt(pb.schalterUnbekannt)} · Preisbeleg — ${MODUS_DE(belegModus)}${unbekannt(pb.beleg && pb.beleg.schalterUnbekannt)}</h3>
           ${schirmZeilen}
           ${pb.bildschirmTrotzBon ? `<div class="zeile"><span>„Bildschirm", aber Lesedienst sah Kassenbon (nie abgelehnt)</span><span>${pb.bildschirmTrotzBon}</span></div>` : ''}
-          ${pb.kassenbonOhneLesedienstBon ? `<div class="zeile"><span>„Kassenbon", aber Lesedienst sah keinen (liegt)</span><span>${pb.kassenbonOhneLesedienstBon}</span></div>` : ''}
+          ${pb.kassenbonOhneLesedienstBon ? `<div class="zeile"><span>„Kassenbon", aber Lesedienst sah keinen (${kbLiegt(pb)})</span><span>${pb.kassenbonOhneLesedienstBon}</span></div>` : ''}
+          ${pb.bildschirmTrotzBonAusVortagen || pb.kassenbonOhneLesedienstBonAusVortagen ? `<div class="zeile"><span>dieselben Widersprüche bei Fällen aus Vortagen (schon gemeldet)</span><span>${(pb.bildschirmTrotzBonAusVortagen || 0) + (pb.kassenbonOhneLesedienstBonAusVortagen || 0)}</span></div>` : ''}
           ${pb.kassenbonLesedienstOhneBon ? `<div class="zeile"><span>„Kassenbon", Lesedienst sah keinen — alle, auch bezahlte (ansehen: Warenkorb statt Bon?)</span><span>${pb.kassenbonLesedienstOhneBon}</span></div>` : ''}
           ${kbListe ? `<div class="liste" style="margin-top:4px">${kbListe}</div>` : ''}
           ${belegModus === false ? '<div class="zeile"><span>Preisbeleg „Kassenbon" ausgeschaltet</span><span>–</span></div>' : belegZeilen(pb.beleg, belegBeob)}

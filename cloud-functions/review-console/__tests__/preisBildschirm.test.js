@@ -538,6 +538,14 @@ describe('Preisbeleg: Antworten der Bildprüfung', () => {
     for (const v of ['', ' ', '-', '…', 'unbekannt', 'Nicht erkennbar', 'keiner', 'n/a', null, 7]) expect(belegHaendlerOf(v)).toBeNull();
     expect(belegHaendlerOf('x'.repeat(100))).toHaveLength(60);
   });
+  it('belegHaendler: Antworten „kein Händler zu sehen" sind kein Name (Nachprüfung 06.10.2026) — sonst wäre der Beleg „fremd"', () => {
+    for (const v of ['unklar', 'nicht erkennbar.', 'keine Angabe', 'k.A.', 'k. A.', '(nicht erkennbar)', 'Kein Händler erkennbar', 'Unbekannter Händler', 'Nichts zu sehen', '„unklar"']) {
+      expect([v, belegHaendlerOf(v)]).toEqual([v, null]);
+    }
+    // „Kein"/„Nicht" nur als ganzes Wort; Klammern um einen echten Namen bleiben ein Name
+    expect(belegHaendlerOf('Keinath')).toBe('Keinath');
+    expect(belegHaendlerOf('EDEKA (vermutlich)')).toBe('EDEKA (vermutlich)');
+  });
   it('Händlerkopf des Lesedienstes: Name oder Anschrift in priceReceipt', () => {
     expect(lesedienstKopfOf({ priceReceipt: { merchant: 'REWE' } })).toBe(true);
     expect(lesedienstKopfOf({ priceReceipt: { zip: '44534' } })).toBe(true);
@@ -554,13 +562,18 @@ describe('Preisbeleg: ist der Händler einer unserer Märkte?', () => {
   const S = marktSchluessel(NAMEN);
   it('unsere Märkte, auch Online, Vertriebslinien und Schreibweisen der Bon-Köpfe', () => {
     for (const n of ['REWE', 'R E W E', 'REWE Lieferservice', 'Netto Marken-Discount', 'netto filiale 7978', 'dm-drogerie markt', 'Dirk Rossmann GmbH', 'Müller', 'Mueller',
-      'ALDI SÜD', 'Hofer KG', 'penny-markt gmbh', 'Kaufland.de', 'Lidl Plus', 'E center', 'E-Center Breil', 'EDEKA Center', 'Edekamarkt', 'Marktkauf Nientied', 'nahkauf', 'nah & gut', 'diska Freiberg', 'EUROSPAR', 'Billa']) {
+      'ALDI SÜD', 'Hofer KG', 'penny-markt gmbh', 'Kaufland.de', 'Lidl Plus', 'E center', 'E-Center Breil', 'EDEKA Center', 'Edekamarkt', 'Marktkauf Nientied', 'nahkauf', 'nah & gut', 'diska Freiberg', 'EUROSPAR', 'Billa',
+      // Nachprüfung 06.10.2026 (echte Bons, Bon-Pipeline: EDEKA bzw. REWE): Vertriebslinien und Kaufleute mit eigenem Auftritt
+      'NP-Markt Lachendorf', 'NP-Markt', 'Nah und Gut Haffner', 'nah und gut', 'nahundgut', "Joh's R E W E CENTER", 'Joh’s R E W E',
+      'Scheck-In Center', 'Scheck-in-Center Sinzheim', 'HIEBER', 'Zurheide! FEINE KOST']) {
       expect([n, unserMarkt(n, S)]).toEqual([n, true]);
     }
   });
   it('fremde Händler — und keine Teilwort-Treffer, keine Tippfehler-Toleranz', () => {
     for (const n of ['Amazon', 'Amazon EU S.à r.l., Niederlassung Deutschland', 'TK Maxx', 'Wreesmann Sonderpostenmarkt', 'Picnic', 'HIT', 'tegut',
-      'Sparkasse', 'Admiral', 'Das', 'denns BioMarkt', 'Krummenerl', 'NK Südfilialen GmbH']) {
+      'Sparkasse', 'Admiral', 'Das', 'denns BioMarkt', 'Krummenerl', 'NK Südfilialen GmbH',
+      // kurze Linie „NP" nur als ganzes Wort; „Scheck" allein ist keine Linie
+      'Snp', 'NPX Versand', 'Scheck Reisen']) {
       expect([n, unserMarkt(n, S)]).toEqual([n, false]);
     }
     expect(unserMarkt('', S)).toBeNull();
@@ -610,6 +623,16 @@ describe('Preisbeleg: Befund (nur bei „kassenbon")', () => {
     expect(bef({ haendler: 'Amazon', lesedienstHaendler: 'REWE Markt GmbH', lesedienstKopf: true }).grund).toBeNull();
     // kein Name → kein Urteil über den Händler
     expect(bef({ haendler: null, lesedienstHaendler: null })).toMatchObject({ grund: null, unser: null });
+    // „unklar" ist kein Name (Nachprüfung 06.10.2026): ohne Lesedienst-Namen kein Urteil, sonst zählt dessen Name
+    expect(bef({ haendler: 'unklar', lesedienstHaendler: null })).toMatchObject({ grund: null, unser: null });
+    expect(bef({ haendler: '(nicht erkennbar)', lesedienstHaendler: 'NP-Markt Stendal', lesedienstKopf: true })).toMatchObject({ grund: null, unser: true });
+    expect(bef({ haendler: 'k.A.', lesedienstHaendler: 'Amazon', lesedienstKopf: true }).grund).toBe('fremder_haendler');
+  });
+  it('Vertriebslinien und Kaufleute, wie die Bildprüfung sie nennt (Nachprüfung 06.10.2026, 16 echte Bons) → kein Halt', () => {
+    for (const [h, l] of [['NP-Markt', 'NP-Markt Lachendorf'], ['nah und gut', 'Nah und Gut Schiwietz'], ['Scheck-In Center', 'Scheck-In Center'],
+      ['Hieber', 'HIEBER'], ['Zurheide! Feine Kost', 'Zurheide! FEINE KOST'], ['REWE', "Joh's R E W E CENTER"]]) {
+      expect([h, bef({ haendler: h, lesedienstHaendler: l, lesedienstKopf: true }).grund]).toEqual([h, null]);
+    }
   });
   it('bekannte Grenze: ein Bon ohne Kettenlogo mit Inhabernamen gilt als fremd (gemessen 5 von 23, ein REWE-Markt) — liegt nur', () => {
     expect(bef({ haendler: 'Krummenerl', lesedienstHaendler: 'Krummenerl', lesedienstKopf: true }).grund).toBe('fremder_haendler');

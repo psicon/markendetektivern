@@ -218,9 +218,14 @@ function lesedienstOhneBonOf(x, zusatzArten = []) {
  *     Märkte heißen dort „Krummenerl" oder „NK Südfilialen GmbH" (im Bestand
  *     24 von 1.172 gelesenen Händlernamen, alle REWE/EDEKA). Die Bildprüfung
  *     nennt dort meist die Kette (18 von 23 gemessen); ein Bon OHNE Kettenlogo
- *     („Krummenerl", REWE) bleibt liegen (5 von 23, ein Markt) — ein Mensch
- *     sieht es dem Bon auch nicht an. Erkannt: Amazon, Wreesmann, TK Maxx
- *     (3 von 3).
+ *     („Krummenerl", REWE) bleibt liegen (5 von 23, ein Markt). Vertriebslinien
+ *     und Kaufleute mit eigenem Auftritt nennt sie dagegen beim eigenen Namen
+ *     (Nachprüfung 06.10.2026, 16 echte Bons: „NP-Markt", „nah und gut",
+ *     „Scheck-In Center", „Hieber", „Zurheide" in jeder Lesung) — sie stehen
+ *     deshalb in UNSERE_KETTEN/UNSERE_FOLGEN; damit blieb von den 16 keiner
+ *     mehr liegen. Wer den Fall ansieht, erkennt die Kette meist an den
+ *     Eigenmarken auf dem Bon (G&G = EDEKA, ja! = REWE; Hinweis in der
+ *     Konsole). Erkannt: Amazon, Wreesmann, TK Maxx (3 von 3).
  */
 
 /** Merkmale eines abgeschlossenen Einkaufs (Bildprüfung, `belegMerkmale`). */
@@ -246,10 +251,20 @@ function belegMerkmaleOf(v) {
   return out;
 }
 
-/** Antwort `belegHaendler` → Name oder null (leer, „unbekannt", „nicht erkennbar" …). */
+/**
+ * Antwort `belegHaendler` → Name oder null. Null sind auch Antworten, die
+ * sagen, dass KEIN Händler zu sehen ist („unklar", „(nicht erkennbar)",
+ * „Kein Händler erkennbar", „k. A.", „keine Angabe") — als Name genommen,
+ * machten sie jeden Beleg zum „fremden Händler" (Nachprüfung 06.10.2026).
+ * Geprüft am Kern ohne Satzzeichen/Klammern am Rand; „Kein"/„Nicht" nur als
+ * ganzes Wort („Keinath" bleibt ein Name).
+ */
 function belegHaendlerOf(v) {
   const s = typeof v === 'string' ? v.trim().replace(/\s+/g, ' ').slice(0, 60) : '';
-  if (!s || /^(?:-+|…|\.\.\.|keine?r?|unbekannt|nicht erkennbar|nicht lesbar|n\/?a|none|null)$/i.test(s)) return null;
+  const kern = s.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+  if (!kern) return null;
+  if (/^(?:nichts?|kein(?:e|er|en)?)\b/i.test(kern) || /^(?:unbekannt|unklar)/i.test(kern)) return null;
+  if (/^(?:k\. ?a|n\/?a|none|null)$/i.test(kern)) return null;
   return s;
 }
 
@@ -259,30 +274,40 @@ function lesedienstKopfOf(x) {
   return !!(b && typeof b === 'object' && (b.merchant || b.street || b.zip || b.city));
 }
 
-/** Kleinschreibung ohne Akzente, ß→ss, „R E W E" → „rewe", in Wörter zerlegt. */
+/**
+ * Kleinschreibung ohne Akzente, ß→ss, „R E W E" → „rewe", in Wörter zerlegt.
+ * Einzelbuchstaben werden nur zusammengezogen, wenn kein Wortrest davor
+ * steht — auch kein Apostroph: „Joh's R E W E" → joh, s, rewe (vorher „srewe",
+ * Nachprüfung 06.10.2026).
+ */
 function haendlerWoerter(s) {
   return String(s || '').toLowerCase().replace(/ß/g, 'ss').normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .replace(/(?<![a-z0-9])(?:[a-z][\s.]){2,}[a-z](?![a-z0-9])/g, (m) => m.replace(/[\s.]/g, ''))
+    .replace(/(?<![a-z0-9'’´`])(?:[a-z][\s.]){2,}[a-z](?![a-z0-9])/g, (m) => m.replace(/[\s.]/g, ''))
     .split(/[^a-z0-9]+/).filter(Boolean);
 }
 
 /**
  * Ketten unserer Märkte, fest im Code — der Rückfall, wenn die Collection
  * `discounter` nicht lesbar ist, und die Vertriebslinien, unter denen unsere
- * Märkte auf dem Bon stehen (wie cashback-pipeline/lib/merchant.js ALIASES).
+ * Märkte auf dem Bon stehen (wie cashback-pipeline/lib/merchant.js ALIASES,
+ * dazu NP und Kaufleute mit eigenem Auftritt, Nachprüfung 06.10.2026).
  * Stand 05.10.2026: 20 Einträge in `discounter` (DE/AT/CH).
  */
 const UNSERE_KETTEN = Object.freeze([
   'aldi', 'hofer', 'lidl', 'kaufland', 'rewe', 'edeka', 'penny', 'netto', 'norma', 'globus', 'dm', 'rossmann', 'muller', 'mueller', 'spar', 'billa',
   // REWE-Gruppe
   'nahkauf',
-  // EDEKA-Gruppe: Marktkauf, E center, Neukauf, nah & gut, diska (EDEKA Nordbayern)
-  'marktkauf', 'ecenter', 'neukauf', 'diska',
+  // EDEKA-Gruppe: Marktkauf, E center, Neukauf, nah & gut, diska (EDEKA Nordbayern), NP (EDEKA Minden-Hannover)
+  'marktkauf', 'ecenter', 'neukauf', 'diska', 'nahundgut', 'np',
+  // EDEKA-Kaufleute mit eigenem Auftritt, die die Bildprüfung beim eigenen
+  // Namen nennt (Nachprüfung 06.10.2026, je Bon in jeder Lesung): Scheck-in
+  // Center (auch als Folge unten), Hieber, Zurheide.
+  'scheckin', 'hieber', 'zurheide',
   // SPAR Österreich
   'eurospar', 'interspar',
 ]);
-/** Mehrteilige Linien (Wortfolgen): „E center", „E aktiv", „nah & gut". */
-const UNSERE_FOLGEN = Object.freeze([['e', 'center'], ['e', 'aktiv'], ['nah', 'gut']]);
+/** Mehrteilige Linien (Wortfolgen beliebiger Länge): „E center", „E aktiv", „nah & gut", „nah und gut", „Scheck-in". */
+const UNSERE_FOLGEN = Object.freeze([['e', 'center'], ['e', 'aktiv'], ['nah', 'gut'], ['nah', 'und', 'gut'], ['scheck', 'in']]);
 /** Wörter aus `discounter`-Namen, die keine Kette bezeichnen. */
 const NAME_STOPP = new Set(['markt', 'maerkte', 'markendiscount', 'discount', 'nord', 'sud', 'sued', 'suisse', 'schweiz', 'osterreich', 'de', 'at', 'ch', 'gmbh', 'kg', 'online']);
 
@@ -316,7 +341,7 @@ function unserMarkt(name, schluessel = marktSchluessel(null)) {
   if (!w.length) return null;
   if (w.some((x) => schluessel.has(x))) return true;
   if (w.some((x) => [...schluessel].some((k) => k.length >= 5 && x.length > k.length && x.startsWith(k)))) return true;
-  return UNSERE_FOLGEN.some(([a, b]) => w.some((x, i) => x === a && w[i + 1] === b));
+  return UNSERE_FOLGEN.some((folge) => w.some((_, i) => folge.every((t, j) => w[i + j] === t)));
 }
 
 /**
