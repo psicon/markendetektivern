@@ -73,7 +73,8 @@ const {
   preisBildschirmVorbefund, preisBildschirmMitVorbefund,
   PREIS_QUELLEN, PREIS_BILDSCHIRM, PREIS_BILDSCHIRM_UNSICHER, KOPF_BYTES,
   BELEG_MERKMALE, PREIS_BELEG_UNSICHER, BELEG_OHNE_MERKMALE, BELEG_FREMDER_HAENDLER,
-  belegMerkmaleOf, belegHaendlerOf, lesedienstKopfOf, preisBelegBefund, marktSchluessel, preisBildschirmHalteGrund, keinBonVon,
+  belegMerkmaleOf, belegHaendlerOf, lesedienstKopfOf, preisBelegBefund, marktSchluessel, keinBonVon,
+  REGEL_BILDSCHIRM, REGEL_BELEG, preisBildschirmZaehlart,
 } = require('./preisBildschirm');
 
 const COL = 'crowd_uploads';
@@ -1149,9 +1150,21 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   // und wie oft dadurch eine Freigabe weggefallen wäre (`stattFreigabe`).
   const pbAlle = [...pbVon.values()];
   const pbFaelle = plan.filter((p) => p.preisBildschirmFall);
+  // Je Regel und nur an EINEM Morgen gezählt (preisBildschirm.preisBildschirmZaehlart,
+  // Nachprüfung 05.10.2026): ein reiner Preisbeleg-Fall nicht in den Zeilen
+  // der Bildschirm-Regel, und ein Fall, den ein Befund eines früheren Laufs
+  // weiter hält, nur unter „aus Vortagen" — nicht jeden Morgen erneut als
+  // „statt Freigabe".
+  const pbZaehl = new Map(pbFaelle.map((p) => [p.id, preisBildschirmZaehlart(p.preisBildschirmFall, p.entscheidung)]));
+  const pbFrisch = (regel) => pbFaelle.filter((p) => pbZaehl.get(p.id).frisch.includes(regel));
+  const pbAusVortagen = (regel) => pbFaelle.filter((p) => pbZaehl.get(p.id).ausVortagen.includes(regel)).length;
+  const pbSchirmFrisch = pbFrisch(REGEL_BILDSCHIRM);
+  const pbBelegFrisch = pbFrisch(REGEL_BELEG);
   // Frische Halte-Befunde (ohne die eines früheren Laufs, die sonst täglich
-  // dieselbe Warnung auslösten, solange der Fall auf Patrick wartet).
-  const pbFrischGehalten = (grund) => plan.filter((p) => p.entscheidung === 'offen' && p.grund === grund && !(p.preisBildschirmFall && p.preisBildschirmFall.vorbefund)).length;
+  // dieselbe Warnung auslösten, solange der Fall auf Patrick wartet). Ein
+  // früherer Befund, dessen Regel zurückgenommen ist, hält nichts mehr — hält
+  // heute die andere Regel, ist das ein frischer Halt.
+  const pbFrischGehalten = (grund) => plan.filter((p) => p.entscheidung === 'offen' && p.grund === grund && !(p.preisBildschirmFall && p.preisBildschirmFall.vorWirkt)).length;
   const pbZaehle = (liste, f) => liste.reduce((a, x) => { const k = f(x); a[k] = (a[k] || 0) + 1; return a; }, {});
   const pbDatei = (e) => (e.kopf ? `${e.kopf.format} ${e.kopf.breite || '?'}×${e.kopf.hoehe || '?'}${e.kopf.kameraHersteller ? ' Kamera' : ''}` : (e.kopfFehler || null));
   // Prüfrunde 3 (04.10.2026): JEDER „Kassenbon", den der Lesedienst las und
@@ -1169,7 +1182,18 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   // Preisbeleg — sonst wurde nicht gefragt, und jeder „Kassenbon" sähe aus
   // wie einer ohne Antwort.
   const pbKassenbon = belegModus === false ? [] : pbAlle.filter((e) => e.quelle === 'kassenbon');
-  const pbBelegFaelle = plan.filter((p) => { const e = pbVon.get(p.id); return e && e.belegGrund; });
+  // Liste „Preisbeleg": heutige Befunde UND Fälle, die ein Preisbeleg-Befund
+  // trägt (auch aus einem früheren Lauf, wenn heute nichts mehr gefunden wird).
+  const pbRegelnVon = (p) => (p.preisBildschirmFall && Array.isArray(p.preisBildschirmFall.regeln) ? p.preisBildschirmFall.regeln : []);
+  const pbBelegFaelle = plan.filter((p) => { const e = pbVon.get(p.id); return (e && e.belegGrund) || pbRegelnVon(p).includes(REGEL_BELEG); });
+  // Liste oben: nur Fälle der Bildschirm-Regel (auch ein Halt nur wegen des Bildkopfs).
+  const pbSchirmFaelle = pbFaelle.filter((p) => pbRegelnVon(p).includes(REGEL_BILDSCHIRM) || p.preisBildschirmFall.kopf === true);
+  // Seit wann der Befund eines früheren Laufs steht (auch eine von der Notbremse zurückgehaltene Ablehnung).
+  const pbSeit = (p) => {
+    if (!p.preisBildschirmFall || !p.preisBildschirmFall.vorbefund) return null;
+    const e = (p.eingabe && p.eingabe.preisBildschirm) || {};
+    return (e.vorbefund && e.vorbefund.seit) || e.vorbefundSeit || 'früherer Lauf';
+  };
   const preisBildschirm = {
     // Schalter der Bildschirm-Regel; der des Preisbelegs steht unter `beleg.modus`.
     modus: pbModus,
@@ -1221,29 +1245,44 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       kassenbon: pbKassenbon.length,
       ohneMerkmale: pbKassenbon.filter((e) => e.belegGrund === BELEG_OHNE_MERKMALE).length,
       fremderHaendler: pbKassenbon.filter((e) => e.belegGrund === BELEG_FREMDER_HAENDLER).length,
-      // Ohne Regel freigegeben, mit scharfer Regel liegen geblieben.
-      stattFreigabe: pbFaelle.filter((p) => p.preisBildschirmFall.ohneRegel === 'freigeben' && preisBildschirmHalteGrund(p.eingabe.preisBildschirm) === PREIS_BELEG_UNSICHER).length,
+      // Ohne Regel freigegeben, mit scharfer Regel liegen geblieben — nur
+      // heutige Befunde (ein Fall, den beide Regeln halten, zählt auch hier).
+      stattFreigabe: pbBelegFrisch.filter((p) => p.preisBildschirmFall.ohneRegel === 'freigeben').length,
+      // Liegt weiter wegen eines Preisbeleg-Befunds eines früheren Laufs.
+      ausVortagen: pbAusVortagen(REGEL_BELEG),
       // Keine verwertbare Antwort auf „belegMerkmale" — ohne Händlerkopf des Lesedienstes bleibt der Fall dann liegen.
       merkmaleOhneAntwort: pbKassenbon.filter((e) => !e.beleg || e.beleg.merkmale === null).length,
       // Liste `discounter` nicht lesbar → Abgleich nur gegen die Ketten im Code (UNSERE_KETTEN).
       maerkteUnlesbar: !!maerkte.unlesbar,
       faelle: pbBelegFaelle.slice(0, 30).map((p) => {
-        const e = pbVon.get(p.id);
+        // Ein Fall aus einem früheren Lauf kann heute ohne Bildprüfung sein.
+        const e = pbVon.get(p.id) || {};
+        const b = e.beleg || {};
         return {
           id: p.id, name: String(nameOf(p.x) || '?').slice(0, 60), markt: p.x.marketName || null,
-          befund: e.belegGrund, entscheidung: p.uebersprungen ? 'uebersprungen' : p.entscheidung,
+          befund: e.belegGrund || null, entscheidung: p.uebersprungen ? 'uebersprungen' : p.entscheidung,
           ohneRegel: p.preisBildschirmFall ? p.preisBildschirmFall.ohneRegel : null,
-          haendler: e.beleg.haendler, lesedienstHaendler: e.beleg.lesedienstHaendler, merkmale: e.beleg.merkmale,
+          wirkt: !!(p.preisBildschirmFall && p.preisBildschirmFall.wirkt),
+          haendler: b.haendler ?? null, lesedienstHaendler: b.lesedienstHaendler ?? null, merkmale: b.merkmale ?? null,
           quelleGrund: e.grund || null,
+          vorbefund: pbSeit(p),
         };
       }),
     },
-    vorbefund: pbFaelle.filter((p) => p.preisBildschirmFall.vorbefund).length,
-    befundAblehnen: pbFaelle.filter((p) => p.preisBildschirmFall.befund === 'ablehnen').length,
+    // Fälle, die ein Befund eines früheren Laufs heute weiter liegen lässt
+    // (beide Regeln, jeder Fall einmal; je Regel: `ausVortagen`, `beleg.ausVortagen`).
+    vorbefund: pbFaelle.filter((p) => pbZaehl.get(p.id).ausVortagen.length).length,
+    // Bildschirm-Regel, nur heutige Befunde (preisBildschirmZaehlart).
+    befundAblehnen: pbSchirmFrisch.filter((p) => p.preisBildschirmFall.befund === 'ablehnen').length,
     // `halten` ändert nur etwas, wo sonst freigegeben würde.
-    befundHalten: pbFaelle.filter((p) => p.preisBildschirmFall.befund === 'halten' && p.preisBildschirmFall.ohneRegel === 'freigeben').length,
-    stattFreigabe: pbFaelle.filter((p) => p.preisBildschirmFall.ohneRegel === 'freigeben').length,
-    faelle: pbFaelle.slice(0, 50).map((p) => {
+    befundHalten: pbSchirmFrisch.filter((p) => p.preisBildschirmFall.befund === 'halten' && p.preisBildschirmFall.ohneRegel === 'freigeben').length,
+    stattFreigabe: pbSchirmFrisch.filter((p) => p.preisBildschirmFall.ohneRegel === 'freigeben').length,
+    // Liegt weiter wegen eines Befunds der Bildschirm-Regel aus einem früheren Lauf.
+    ausVortagen: pbAusVortagen(REGEL_BILDSCHIRM),
+    // Ein scharfer Befund eines früheren Laufs stand am Dokument, seine Regel
+    // ist zurückgenommen ('shadow' oder false) und der Fall heute freigegeben.
+    nachRuecknahmeFrei: plan.filter((p) => p.entscheidung === 'freigeben' && !p.uebersprungen && preisBildschirmVorbefund(p.x)).length,
+    faelle: pbSchirmFaelle.slice(0, 50).map((p) => {
       const e = p.eingabe.preisBildschirm;
       return {
         id: p.id, name: String(nameOf(p.x) || '?').slice(0, 60), markt: p.x.marketName || null,
@@ -1253,7 +1292,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
         quelle: e.quelle, quelleGrund: e.grund || null, merkmal: e.merkmal, lesedienstBon: !!e.lesedienstBon,
         // Preisbeleg (05.10.2026): welcher Befund, und welcher Händler genannt wurde.
         beleg: e.belegGrund || null, belegHaendler: (e.beleg && (e.beleg.haendler || e.beleg.lesedienstHaendler)) || null,
-        vorbefund: e.vorbefund ? e.vorbefund.seit || 'früherer Lauf' : null,
+        vorbefund: pbSeit(p),
         datei: pbDatei(e),
       };
     }),

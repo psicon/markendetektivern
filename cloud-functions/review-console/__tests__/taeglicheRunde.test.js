@@ -1329,7 +1329,10 @@ describe('Preisbeleg „Kassenbon": ohne Kassenbon-Merkmale oder fremder Händle
       expect.objectContaining({ id: 'korb', befund: 'ohne_merkmale', entscheidung: 'freigeben', ohneRegel: 'freigeben', merkmale: [] }),
       expect.objectContaining({ id: 'amazon', befund: 'fremder_haendler', haendler: 'Amazon', lesedienstHaendler: 'Amazon EU S.à r.l.' }),
     ]));
-    expect(b.preisBildschirm.faelle.find((f) => f.id === 'amazon')).toMatchObject({ beleg: 'fremder_haendler', belegHaendler: 'Amazon' });
+    // Nachprüfung 05.10.2026: ein reiner Preisbeleg-Fall zählt NICHT in den
+    // Zeilen der Bildschirm-Regel — nach deren Zahlen (~1 Fall pro Woche
+    // erwartet) wird sie scharf geschaltet — und steht nur in der Liste „Preisbeleg".
+    expect(b.preisBildschirm).toMatchObject({ befundAblehnen: 0, befundHalten: 0, stattFreigabe: 0, ausVortagen: 0, vorbefund: 0, faelle: [] });
     // Nachprüfung 05.10.2026: ein Beleg-Befund ist KEIN Widerspruch zum
     // Lesedienst — der sah hier jeweils einen Kassenbon. Die Zahl „Kassenbon,
     // aber Lesedienst sah keinen" und ihre Warnung bleiben stumm.
@@ -1517,6 +1520,39 @@ describe('Zwei Schalter: preisBildschirmRegel und preisBelegRegel wirken und end
     }
   });
 
+  // Nachprüfung 05.10.2026: mit `preisBelegRegel: false` fiel der Vorbefund
+  // ganz weg, und eine einzige neue „bildschirm"-Lesung lehnte den gehaltenen
+  // Fall endgültig ab — mit 'shadow' blieb er liegen. Beide Rückwege gleich.
+  it('Preisbeleg-Halt, Preisbeleg zurückgenommen (shadow oder false), heute „bildschirm" → bleibt liegen, nie abgelehnt', async () => {
+    for (const zurueck of ['shadow', false]) {
+      mockStore.clear(); mockListe.clear(); mockQuelle.clear(); mockBeleg.clear(); mockKopf.clear();
+      // Tag 1: Lesedienst hat das Preisfoto noch nicht eingeordnet; Bildprüfung „Kassenbon" ohne Merkmale → Preisbeleg hält
+      schalter(true, true);
+      einreichung('k', { ean: '4000000000017' });
+      mockQuelle.set(preisPfad('k'), 'kassenbon');
+      mockBeleg.set(preisPfad('k'), { belegHaendler: '', belegMerkmale: [] });
+      mockKopf.set(preisPfad('k'), png(1170, 2532));
+      await scharf();
+      expect(doc('k')).toMatchObject({ status: 'pending', review: { rundeOffen: { grund: 'preis_beleg_unsicher', preisBildschirm: { modus: true, befund: 'halten', regeln: ['beleg'] } } } });
+      // Tag 2: Preisbeleg zurückgenommen; der Lesedienst trägt inzwischen „sonstiges" ein, die Bildprüfung sagt „bildschirm"
+      schalter(true, zurueck);
+      mockStore.set('crowd_uploads/k', { ...doc('k'), priceImageKind: 'sonstiges' });
+      mockQuelle.set(preisPfad('k'), 'bildschirm');
+      const b2 = await scharf();
+      expect([zurueck, doc('k').status]).toEqual([zurueck, 'pending']);
+      expect(doc('k').rejectReason).toBeUndefined();
+      expect(b2.ablehnGruende).toEqual({});
+      expect(b2.offenGruende).toEqual({ preis_bildschirm_unsicher: 1 });
+      const lauf2 = doc('k').review.rundeOffen.lauf;
+      expect(doc('k').review.rundeOffen).toMatchObject({ grund: 'preis_bildschirm_unsicher', preisBildschirm: { modus: true, befund: 'halten', seit: lauf2, regeln: ['bildschirm'] } });
+      // Tag 3: dieselbe Lesung — der neue Halt der Bildschirm-Regel wird nicht zur Ablehnung
+      const b3 = await scharf();
+      expect([zurueck, doc('k').status]).toEqual([zurueck, 'pending']);
+      expect(b3.ablehnGruende).toEqual({});
+      expect(doc('k').review.rundeOffen.preisBildschirm).toMatchObject({ befund: 'halten', seit: lauf2, regeln: ['bildschirm'] });
+    }
+  });
+
   it('nur der Preisbeleg scharf, Bildschirm-Regel aus: Preisbeleg hält, Bildschirmfotos werden wie vor der Regel freigegeben', async () => {
     schalter(false, true);
     korb('korb', '4000000000017');
@@ -1540,8 +1576,10 @@ describe('Zwei Schalter: preisBildschirmRegel und preisBelegRegel wirken und end
     expect(doc('korb').status).toBe('approved');
     expect(doc('schirm')).toMatchObject({ status: 'rejected', review: { reason: 'preis_bildschirm' } });
     expect(b.preisBildschirm.beleg).toMatchObject({ modus: 'shadow', ohneMerkmale: 1, stattFreigabe: 1 });
-    expect(b.preisBildschirm.faelle.find((f) => f.id === 'korb')).toMatchObject({ wirkt: false, entscheidung: 'freigeben' });
+    expect(b.preisBildschirm.beleg.faelle.find((f) => f.id === 'korb')).toMatchObject({ wirkt: false, entscheidung: 'freigeben', ohneRegel: 'freigeben' });
+    expect(b.preisBildschirm.faelle.find((f) => f.id === 'korb')).toBeUndefined();
     expect(b.preisBildschirm.faelle.find((f) => f.id === 'schirm')).toMatchObject({ wirkt: true, entscheidung: 'ablehnen' });
+    expect(b.preisBildschirm).toMatchObject({ befundAblehnen: 1, befundHalten: 0, stattFreigabe: 1 });
   });
 
   it('unbekannter Wert von preisBelegRegel ("true" als Text) → Beobachtung, gelbe Warnung mit dem Wert; gültige Werte warnen nicht', async () => {
@@ -1559,5 +1597,89 @@ describe('Zwei Schalter: preisBildschirmRegel und preisBelegRegel wirken und end
       expect(w.preisBildschirm.beleg).not.toHaveProperty('schalterUnbekannt');
       expect(w.warnungen.map((x) => x.code)).not.toContain('preisbeleg_schalter_unbekannt');
     }
+  });
+
+  // ── Nachprüfung 05.10.2026: der Tagesbericht zählt je Regel und jeden Fall
+  // nur an EINEM Morgen. Nach diesen Zahlen wird entschieden, ob eine Regel
+  // scharf geschaltet wird — ein reiner Preisbeleg-Fall gehört nicht in die
+  // Zeilen der Bildschirm-Regel, und ein Fall, der auf Patrick wartet, nicht
+  // jeden Morgen erneut unter „statt Freigabe".
+  it('Bericht: ein Fall, den BEIDE Regeln halten, zählt in beiden Abschnitten; ein reiner Preisbeleg nur beim Preisbeleg', async () => {
+    schalter('shadow', 'shadow');
+    korb('korb', '4000000000017');
+    // „Kassenbon" mit Bildschirm-Merkmalen, der Lesedienst las ein Preisschild,
+    // und kein Kassenbon-Merkmal → Bildschirm-Verdacht UND Preisbeleg
+    einreichung('beide', { ean: '4000417025005', priceImageKind: 'preisschild' });
+    mockQuelle.set(preisPfad('beide'), 'kassenbon');
+    mockBeleg.set(preisPfad('beide'), { belegHaendler: '', belegMerkmale: [] });
+    mockKopf.set(preisPfad('beide'), png(1080, 2400));
+    const b = await scharf();
+    for (const id of ['korb', 'beide']) expect(doc(id).status).toBe('approved');
+    expect(b.preisBildschirm).toMatchObject({ befundAblehnen: 0, befundHalten: 1, stattFreigabe: 1, ausVortagen: 0, vorbefund: 0, nachRuecknahmeFrei: 0 });
+    expect(b.preisBildschirm.faelle.map((f) => f.id)).toEqual(['beide']);
+    expect(b.preisBildschirm.beleg).toMatchObject({ ohneMerkmale: 2, stattFreigabe: 2, ausVortagen: 0 });
+    expect(b.preisBildschirm.beleg.faelle.map((f) => f.id).sort()).toEqual(['beide', 'korb']);
+  });
+
+  it('Bericht, Preisbeleg scharf: Tag 1 „statt Freigabe", danach nur noch „aus Vortagen" — die Zahl wächst nicht mit den Tagen', async () => {
+    schalter('shadow', true);
+    korb('korb', '4000000000017');
+    const b1 = await scharf();
+    expect(doc('korb').status).toBe('pending');
+    expect(b1.preisBildschirm.beleg).toMatchObject({ ohneMerkmale: 1, stattFreigabe: 1, ausVortagen: 0 });
+    expect(b1.preisBildschirm).toMatchObject({ befundHalten: 0, stattFreigabe: 0, ausVortagen: 0, vorbefund: 0 });
+    const lauf1 = doc('korb').review.rundeOffen.lauf;
+    // Tag 2 und 3: das Modell liest einen vollständigen Bon — kein heutiger Befund, der Vorbefund hält
+    mockBeleg.set(preisPfad('korb'), { belegHaendler: 'REWE', belegMerkmale: VOLL });
+    for (let tag = 2; tag <= 3; tag++) {
+      const b = await scharf();
+      expect([tag, doc('korb').status]).toEqual([tag, 'pending']);
+      expect([tag, b.preisBildschirm.beleg]).toMatchObject([tag, { ohneMerkmale: 0, fremderHaendler: 0, stattFreigabe: 0, ausVortagen: 1 }]);
+      expect([tag, b.preisBildschirm]).toMatchObject([tag, { befundHalten: 0, stattFreigabe: 0, ausVortagen: 0, vorbefund: 1, nachRuecknahmeFrei: 0, faelle: [] }]);
+      expect(b.preisBildschirm.beleg.faelle).toEqual([expect.objectContaining({ id: 'korb', befund: null, entscheidung: 'offen', vorbefund: lauf1 })]);
+      // die Warnung „hält viele an" zählt nur frische Halte
+      expect(b.offenGruende).toEqual({ preis_beleg_unsicher: 1 });
+    }
+  });
+
+  it('Bericht, Bildschirm-Regel scharf: Tag 2 „aus Vortagen"; Tag 3 Regel zurückgenommen → „nach Rücknahme freigegeben", nicht „hält weiter"', async () => {
+    for (const zurueck of ['shadow', false]) {
+      mockStore.clear(); mockListe.clear(); mockQuelle.clear(); mockBeleg.clear(); mockKopf.clear();
+      schalter(true, 'shadow');
+      kamera('kamera', '4000417025005');
+      const b1 = await scharf();
+      expect(b1.preisBildschirm).toMatchObject({ befundHalten: 1, stattFreigabe: 1, ausVortagen: 0, vorbefund: 0 });
+      const lauf1 = doc('kamera').review.rundeOffen.lauf;
+      // Tag 2: dieselbe Lesung — der Fall lag schon, heute ändert sich nichts
+      const b2 = await scharf();
+      expect(doc('kamera').status).toBe('pending');
+      expect(b2.preisBildschirm).toMatchObject({ befundHalten: 0, stattFreigabe: 0, ausVortagen: 1, vorbefund: 1, nachRuecknahmeFrei: 0 });
+      expect(b2.preisBildschirm.faelle).toEqual([expect.objectContaining({ id: 'kamera', vorbefund: lauf1, entscheidung: 'offen', wirkt: true })]);
+      // Tag 3: Regel zurückgenommen → bezahlt; der Kasten meldet das, statt „hält weiter"
+      schalter(zurueck, 'shadow');
+      const b3 = await scharf();
+      expect([zurueck, doc('kamera').status]).toEqual([zurueck, 'approved']);
+      expect([zurueck, b3.preisBildschirm]).toMatchObject([zurueck, { ausVortagen: 0, vorbefund: 0, nachRuecknahmeFrei: 1, befundHalten: 0, stattFreigabe: 0 }]);
+      if (zurueck === 'shadow') expect(b3.preisBildschirm.faelle).toEqual([expect.objectContaining({ id: 'kamera', vorbefund: lauf1, entscheidung: 'freigeben', wirkt: false })]);
+    }
+  });
+
+  it('Bericht: eine von der Notbremse zurückgehaltene Ablehnung zählt nur am ersten Morgen als „Befund ablehnen"', async () => {
+    schalter(true, 'shadow');
+    // vier Personen → Bremse der Bildschirm-Regel (mindestens 4 Personen, > 2,5 %)
+    for (let i = 0; i < 4; i++) {
+      const uid = `p${i}`;
+      einreichung(`s${i}`, { uid, ean: String(4000000000000 + i * 97), priceImageKind: 'preisschild' });
+      mockQuelle.set(preisPfad(`s${i}`, uid), 'bildschirm');
+      mockKopf.set(preisPfad(`s${i}`, uid), png(1080, 2400));
+    }
+    const b1 = await scharf();
+    expect(b1.notbremse.bildschirm).toBe(true);
+    for (let i = 0; i < 4; i++) expect(doc(`s${i}`).status).toBe('pending');
+    expect(b1.preisBildschirm).toMatchObject({ befundAblehnen: 4, stattFreigabe: 4, ausVortagen: 0, vorbefund: 0 });
+    const b2 = await scharf();
+    expect(b2.notbremse.bildschirm).toBe(true);
+    for (let i = 0; i < 4; i++) expect(doc(`s${i}`).status).toBe('pending');
+    expect(b2.preisBildschirm).toMatchObject({ befundAblehnen: 0, stattFreigabe: 0, ausVortagen: 4, vorbefund: 4 });
   });
 });

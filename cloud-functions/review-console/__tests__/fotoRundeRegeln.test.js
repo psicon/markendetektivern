@@ -838,3 +838,76 @@ describe('Zwei Schalter in der Entscheidung (Nachprüfung 05.10.2026)', () => {
       .toMatchObject({ entscheidung: 'offen', grund: 'preis_beleg_unsicher' });
   });
 });
+
+// Nachprüfung 05.10.2026: der Tagesbericht zählt je Regel und jeden Fall nur an
+// EINEM Morgen (preisBildschirm.preisBildschirmZaehlart). Vorher stand ein
+// reiner Preisbeleg-Fall auch in den Zeilen der Bildschirm-Regel, und ein
+// scharf gehaltener Fall kam jeden Morgen erneut als „statt Freigabe" dazu.
+describe('Zählart im Tagesbericht: je Regel, nur an einem Morgen (Nachprüfung 05.10.2026)', () => {
+  const { preisBildschirmZaehlart, preisBildschirmMitVorbefund, preisBildschirmVorbefund, preisBildschirmEintrag } = require('../src/preisBildschirm');
+  const korb = (modus, belegModus) => ({ modus, belegModus, quelle: 'kassenbon', merkmal: false, lesedienstBon: true, lesedienstOhneBon: false, belegGrund: 'ohne_merkmale' });
+  const kamera = (modus, belegModus) => ({ modus, belegModus, quelle: 'bildschirm', merkmal: false, lesedienstOhneBon: true, belegGrund: null });
+  const schirm = (modus, belegModus) => ({ modus, belegModus, quelle: 'bildschirm', merkmal: true, lesedienstOhneBon: true, belegGrund: null });
+  const unauffaellig = (modus, belegModus) => ({ modus, belegModus, quelle: 'kassenbon', merkmal: false, lesedienstBon: true, belegGrund: null });
+  /** Ein Lauf: heutige Eingabe + Dokument → Entscheidung, Zählart und Eintrag fürs Dokument. */
+  const lauf = (heute, docVorher, modi, { notbremse = false } = {}) => {
+    const pb = preisBildschirmMitVorbefund(heute, preisBildschirmVorbefund(docVorher), modi);
+    const e = entscheideFall(fall({ preisBildschirm: pb }));
+    const entscheidung = notbremse && e.entscheidung === 'ablehnen' ? 'offen' : e.entscheidung;
+    const eintrag = preisBildschirmEintrag(pb, { lauf: 'L' });
+    return { e, entscheidung, zaehl: preisBildschirmZaehlart(e.preisBildschirmFall, entscheidung), doc: { review: { rundeOffen: { lauf: 'L', preisBildschirm: eintrag } } } };
+  };
+
+  it('Beobachtung, reiner Preisbeleg (Lesedienst sah den Bon): nur beim Preisbeleg, nicht bei der Bildschirm-Regel', () => {
+    const r = lauf(korb('shadow', 'shadow'), null, { bildschirm: 'shadow', beleg: 'shadow' });
+    expect(r.e).toMatchObject({ entscheidung: 'freigeben', preisBildschirmFall: { befund: 'halten', regeln: ['beleg'] } });
+    expect(r.zaehl).toEqual({ frisch: ['beleg'], ausVortagen: [] });
+  });
+  it('beide Regeln halten → in beiden Abschnitten; Halt nur wegen des Bildkopfs → Bildschirm-Regel', () => {
+    const beide = { ...korb('shadow', 'shadow'), merkmal: true, lesedienstBon: false, lesedienstOhneBon: true };
+    expect(lauf(beide, null, { bildschirm: 'shadow', beleg: 'shadow' }).zaehl).toEqual({ frisch: ['bildschirm', 'beleg'], ausVortagen: [] });
+    const kopf = { modus: true, belegModus: 'shadow', quelle: 'laden', merkmal: null, kopfGescheitert: true, belegGrund: null };
+    const r = lauf(kopf, null, { bildschirm: true, beleg: 'shadow' });
+    expect(r.e).toMatchObject({ entscheidung: 'offen', grund: 'preis_kopf_nicht_lesbar', preisBildschirmFall: { regeln: [], kopf: true } });
+    expect(r.zaehl).toEqual({ frisch: ['bildschirm'], ausVortagen: [] });
+  });
+  it('scharf gehalten: Tag 1 frisch, an jedem weiteren Morgen nur „aus Vortagen" — auch wenn die Regel heute erneut anschlägt', () => {
+    const modi = { bildschirm: 'shadow', beleg: true };
+    const t1 = lauf(korb('shadow', true), null, modi);
+    expect(t1.zaehl).toEqual({ frisch: ['beleg'], ausVortagen: [] });
+    let d = t1.doc;
+    for (const heute of [unauffaellig('shadow', true), korb('shadow', true), null]) {
+      const t = lauf(heute, d, modi);
+      expect(t.entscheidung).toBe('offen');
+      expect(t.zaehl).toEqual({ frisch: [], ausVortagen: ['beleg'] });
+      d = t.doc;
+    }
+  });
+  it('Regel zurückgenommen: der frühere Befund zählt weder als „aus Vortagen" noch als heutiger Befund', () => {
+    const t1 = lauf(kamera(true, 'shadow'), null, { bildschirm: true, beleg: 'shadow' });
+    expect(t1.entscheidung).toBe('offen');
+    const t2 = lauf(kamera('shadow', 'shadow'), t1.doc, { bildschirm: 'shadow', beleg: 'shadow' });
+    expect(t2.e).toMatchObject({ entscheidung: 'freigeben', preisBildschirmFall: { wirkt: false, vorbefund: true, vor: ['bildschirm'] } });
+    expect(t2.zaehl).toEqual({ frisch: [], ausVortagen: [] });
+  });
+  it('früherer Befund zurückgenommen, heute hält frisch die ANDERE Regel → zählt dort als heutiger Befund', () => {
+    const t1 = lauf(korb('shadow', true), null, { bildschirm: 'shadow', beleg: true });
+    const t2 = lauf(kamera(true, 'shadow'), t1.doc, { bildschirm: true, beleg: 'shadow' });
+    expect(t2.e).toMatchObject({ entscheidung: 'offen', grund: 'preis_bildschirm_unsicher', preisBildschirmFall: { vor: ['beleg'] } });
+    expect(t2.e.preisBildschirmFall.vorWirkt).toBeUndefined();
+    expect(t2.zaehl).toEqual({ frisch: ['bildschirm'], ausVortagen: [] });
+  });
+  it('von der Notbremse zurückgehaltene Ablehnung: Tag 1 frisch, Tag 2 „aus Vortagen" — liegt sie weiter; abgelehnt zählt sie nicht erneut', () => {
+    const modi = { bildschirm: true, beleg: 'shadow' };
+    const t1 = lauf(schirm(true, 'shadow'), null, modi, { notbremse: true });
+    expect(t1).toMatchObject({ entscheidung: 'offen', zaehl: { frisch: ['bildschirm'], ausVortagen: [] } });
+    const t2 = lauf(schirm(true, 'shadow'), t1.doc, modi, { notbremse: true });
+    expect(t2.e).toMatchObject({ entscheidung: 'ablehnen', preisBildschirmFall: { befund: 'ablehnen', vorbefund: true, vorWirkt: ['bildschirm'] } });
+    expect(t2.zaehl).toEqual({ frisch: [], ausVortagen: ['bildschirm'] });
+    expect(lauf(schirm(true, 'shadow'), t1.doc, modi).zaehl).toEqual({ frisch: [], ausVortagen: [] });
+  });
+  it('ohne Fall-Angaben → nichts', () => {
+    expect(preisBildschirmZaehlart(null, 'offen')).toEqual({ frisch: [], ausVortagen: [] });
+    expect(preisBildschirmZaehlart(undefined, 'freigeben')).toEqual({ frisch: [], ausVortagen: [] });
+  });
+});

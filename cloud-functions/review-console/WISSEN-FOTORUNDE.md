@@ -392,9 +392,17 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   alle von der Bildschirm-Regel angehaltenen Fälle frei (auch zurückgehaltene
   Bildschirm-Ablehnungen), sofern nichts anderes sie hält — sie werden bezahlt.
   `preisBelegRegel` auf `'shadow'` oder `false` ebenso für die Preisbeleg-Halte.
+  „Sofern nichts anderes sie hält" schließt die ANDERE Regel ein — und ein
+  gehaltener Fall wird dabei nie abgelehnt: liest die Bildschirm-Regel an dem
+  Morgen „ablehnen", hält sie ihn nur (`preis_bildschirm_unsicher`), bei
+  `'shadow'` wie bei `false` (Nachprüfung 05.10.2026: mit `false` wurde ein
+  Preisbeleg-Halt auf eine einzige neue „bildschirm"-Lesung hin endgültig
+  abgelehnt; `ablehnenGesperrt` in `preisBildschirmMitVorbefund`).
   Wer das nicht will, entscheidet die angehaltenen Fälle VOR dem Umschalten in
   der Konsole (Liste: Tagesbericht bzw. Konsole mit Hinweis
-  `preis_bildschirm_unsicher` / `preis_beleg_unsicher`).
+  `preis_bildschirm_unsicher` / `preis_beleg_unsicher`). Wie viele so bezahlt
+  wurden, steht am Morgen danach im Tagesbericht
+  (`preisBildschirm.nachRuecknahmeFrei`, „nach Rücknahme einer Regel freigegeben").
   **Schalter** `cashback_config/v1.preisBildschirmRegel`: `false` = aus
   (kein Bildkopf, kein Bildschirm-Befund, nichts am Dokument — die Frage nach
   der Preisquelle entfällt erst, wenn auch `preisBelegRegel` aus ist, denn der
@@ -435,15 +443,29 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   einem echten Preisfoto nachreicht, wird normal geprüft.
   **Bericht** `preisBildschirm`: Modus, Antworten je Quelle, Merkmal
   ja/nein/unbekannt, `befundAblehnen`, `befundHalten` (nur wo sonst
-  freigegeben), `stattFreigabe` (ohne die Regel bezahlt), `kassenbonMitMerkmal`,
+  freigegeben), `stattFreigabe` (ohne die Regel bezahlt) — diese drei NUR für
+  die Bildschirm-Regel (auch ein Halt nur wegen des nicht abrufbaren Bildkopfs)
+  und nur am Morgen des Befunds; ein reiner Preisbeleg-Fall zählt dort nicht,
+  ein Fall, den beide Regeln halten, in beiden Abschnitten (Nachprüfung
+  05.10.2026: vorher standen alle Preisbeleg-Fälle auch hier, und ein scharf
+  gehaltener Fall kam an jedem Morgen, an dem er auf Patrick wartete, erneut
+  dazu — genau die Zahlen, nach denen die Regeln scharf geschaltet werden).
+  `ausVortagen`: liegt weiter, weil ein Befund der Bildschirm-Regel aus einem
+  früheren Lauf heute wirkt (auch eine von der Notbremse zurückgehaltene
+  Ablehnung — die zählt nur am ersten Morgen als `befundAblehnen`);
+  `nachRuecknahmeFrei`: ein scharfer Befund stand am Fall, seine Regel ist
+  zurückgenommen, heute bezahlt. Die Zählung je Fall steht in
+  `preisBildschirm.preisBildschirmZaehlart`. `kassenbonMitMerkmal`,
   `bildschirmTrotzBon` (Bildprüfung „Bildschirm", Lesedienst „Kassenbon"),
   `kassenbonOhneLesedienstBon` (Bildprüfung „Kassenbon", Lesedienst las und
   sah keinen — liegt), `kassenbonLesedienstOhneBon` + bis 20
   `kassenbonLesedienstOhneBonFaelle` (dasselbe für ALLE solchen Fälle, auch
   ohne Merkmale — die werden bezahlt; Prüfrunde 3, siehe Lücken),
   `schalterUnbekannt` (nur bei unbekanntem Wert),
-  `kopfNichtAbrufbar`, `vorbefund` (aus früheren Läufen übernommen) und bis 50
-  Fälle mit Link in die Konsole, je Fall mit Antwort, Begründung und Datei.
+  `kopfNichtAbrufbar`, `vorbefund` (Fälle, die ein Befund früherer Läufe heute
+  weiter liegen lässt, beide Regeln, jeder Fall einmal) und bis 50 Fälle der
+  Bildschirm-Regel mit Link in die Konsole, je Fall mit Antwort, Begründung,
+  Datei und `vorbefund` (seit wann).
   **Kosten:** ~440 Eingabe- und ~25
   Ausgabe-Token je Fall im ohnehin laufenden Aufruf (~3 $ im Monat zum
   Listenpreis) plus ~120 Storage-Abrufe à 192 KB am Tag.
@@ -564,10 +586,15 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
     davon Inhaber-Märkte ohne Logo). Zusammen ~4–8 Fälle pro Woche
     Mehrarbeit, nur scharf (vor der Nachmessung hier: ~3–5).
   **Bericht** `preisBildschirm.beleg`: `kassenbon` (befragt), `ohneMerkmale`,
-  `fremderHaendler`, `stattFreigabe`, `merkmaleOhneAntwort`,
-  `maerkteUnlesbar`, bis 30 `faelle` (Befund, Händler laut Bildprüfung und
-  Lesedienst, Merkmale, Begründung); je Fall in `preisBildschirm.faelle`
-  zusätzlich `beleg`/`belegHaendler`. **Kosten:** ~300 Eingabe- und ~40
+  `fremderHaendler` (heutige Lesungen), `stattFreigabe` (nur am Morgen des
+  Befunds, auch wenn zusätzlich die Bildschirm-Regel hält), `ausVortagen`
+  (liegt weiter wegen eines Preisbeleg-Befunds eines früheren Laufs — nicht
+  erneut in `stattFreigabe`, Nachprüfung 05.10.2026), `merkmaleOhneAntwort`,
+  `maerkteUnlesbar`, bis 30 `faelle` (heutige Befunde und Fälle, die ein
+  Preisbeleg-Befund trägt: Befund, Händler laut Bildprüfung und Lesedienst,
+  Merkmale, Begründung, `wirkt`, `vorbefund`). Ein Fall, den auch die
+  Bildschirm-Regel hält, steht zusätzlich in `preisBildschirm.faelle`, dort mit
+  `beleg`/`belegHaendler`. **Kosten:** ~300 Eingabe- und ~40
   Ausgabe-Token mehr je Fall im ohnehin laufenden Aufruf (gemessen an 97
   gleichen Fällen; ~3 $ im Monat zum Listenpreis), ~20 Lesevorgänge
   `discounter` am Tag.

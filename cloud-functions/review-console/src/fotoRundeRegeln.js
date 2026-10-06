@@ -98,10 +98,10 @@ const AUSSER_GESAMTQUOTE = new Set([...EIGENE_BREMSEN.flatMap((b) => b.gruende),
  * @param {boolean} [f.preisBildDefekt]  Preisfoto kam beim Hochladen beschädigt an (unser Fehler, nicht der Einreichung)
  * @param {string|null} [f.ortAuffaellig]  Aufnahmeort passt nicht zum Markt (Ausland, anderes Land, Simulator)
  * @param {boolean} [f.namerLaeuft]  Der Lesedienst liest die Einreichung noch nach (namerNachlesenAb)
- * @param {{modus:false|'shadow'|true, belegModus:false|'shadow'|true, quelle:string|null, grund?:string|null, merkmal:boolean|null, lesedienstBon?:boolean, kopfGescheitert?:boolean, belegGrund?:string|null, befund:'ablehnen'|'halten'|null, vorbefund?:{befund:string, seit:string|null, regeln:string[]}}|null} [f.preisBildschirm]
+ * @param {{modus:false|'shadow'|true, belegModus:false|'shadow'|true, quelle:string|null, grund?:string|null, merkmal:boolean|null, lesedienstBon?:boolean, kopfGescheitert?:boolean, belegGrund?:string|null, befund:'ablehnen'|'halten'|null, vorbefund?:{befund:string, seit:string|null, regeln:string[]}, ablehnenGesperrt?:boolean}|null} [f.preisBildschirm]
  *   Bildschirmfoto bzw. Preisbeleg als Preisfoto (src/preisBildschirm.js), `modus` = Schalter der Bildschirm-Regel,
  *   `belegModus` = Schalter des Preisbelegs — null, wenn beide aus sind oder weder eine Bildprüfung noch ein scharfer Befund eines früheren Laufs vorliegt
- * @returns {{entscheidung:'freigeben'|'ablehnen'|'offen', grund:string|null, ctx:object, loseWare?:boolean, preisBildschirmFall?:{befund:string, ohneRegel:string, wirkt:boolean, vorbefund?:boolean}}}
+ * @returns {{entscheidung:'freigeben'|'ablehnen'|'offen', grund:string|null, ctx:object, loseWare?:boolean, preisBildschirmFall?:{befund:string, ohneRegel:string, wirkt:boolean, regeln:string[], kopf?:boolean, vor?:string[], vorWirkt?:string[], vorbefund?:boolean}}}
  */
 function entscheideFall(f) {
   const comp = f.comp || { ok: true, problems: [], missing: [] };
@@ -384,11 +384,25 @@ function freigabe(f, audit, extra = {}) {
   // scharfem Schalter — auch ein Befund eines früheren Laufs hält nur unter
   // dem Schalter seiner eigenen Regel (preisBildschirmLage). `wirkt` sagt dem
   // Bericht, ob der Befund heute etwas geändert hat.
+  // Für den Bericht je Regel (preisBildschirm.preisBildschirmZaehlart,
+  // Nachprüfung 05.10.2026): `regeln`/`kopf` = was beobachtet den Fall trägt,
+  // `vor` = davon aus einem früheren scharfen Lauf, `vorWirkt` = Regeln, deren
+  // früherer Befund heute WIRKT; `vorbefund` auch bei einer von der Notbremse
+  // zurückgehaltenen Ablehnung, die heute erneut „ablehnen" liest.
   const pb = f.preisBildschirm || null;
   const beob = preisBildschirmLage(pb);
   if (!beob.befund) return e;
   const wirkt = preisBildschirmLage(pb, { scharf: true });
-  const fallDazu = (x) => ({ ...x, preisBildschirmFall: { befund: beob.befund, ohneRegel: e.entscheidung, wirkt: !!wirkt.befund, ...(pb.vorbefund ? { vorbefund: true } : {}) } });
+  const fallDazu = (x) => ({
+    ...x,
+    preisBildschirmFall: {
+      befund: beob.befund, ohneRegel: e.entscheidung, wirkt: !!wirkt.befund,
+      regeln: beob.regeln, ...(beob.kopf ? { kopf: true } : {}),
+      ...(beob.vorRegeln.length ? { vor: beob.vorRegeln } : {}),
+      ...(wirkt.vorRegeln.length ? { vorWirkt: wirkt.vorRegeln } : {}),
+      ...(pb.vorbefund || pb.vorbefundSeit ? { vorbefund: true } : {}),
+    },
+  });
   if (!wirkt.befund) return fallDazu(e);
   const hinweis = preisBildschirmHinweis(pb);
   if (wirkt.befund === 'ablehnen') return fallDazu(ablehnen(PREIS_BILDSCHIRM, { hinweis }));

@@ -249,6 +249,10 @@
        * (`preisBildschirmRegel`, pb.modus) und Preisbeleg (`preisBelegRegel`,
        * pb.beleg.modus) wirken und enden getrennt. Ältere Berichte kennen nur
        * den einen Schalter — dann galt er für beide.
+       * Gezählt wird je Regel und nur an einem Morgen (Nachprüfung 05.10.2026):
+       * was ein Befund eines früheren Laufs weiter hält, steht unter „aus
+       * Vortagen", nicht erneut bei „statt Freigabe". Ältere Berichte ohne
+       * `ausVortagen` zählten beides zusammen — dort bleibt die alte Zeile.
        */
       function preisBildschirmBox(pb) {
         const belegModus = pb.beleg && 'modus' in pb.beleg ? pb.beleg.modus : pb.modus;
@@ -260,13 +264,15 @@
         // Je Fall: hat ein scharfer Schalter gewirkt? (`wirkt`, fehlt in älteren Berichten)
         const BEFUND = (f) => {
           const b = typeof f.wirkt === 'boolean' ? !f.wirkt : beob;
+          // Befund eines früheren scharfen Laufs, Regel zurückgenommen → heute bezahlt.
+          if (f.vorbefund && f.wirkt === false && f.entscheidung === 'freigeben') return 'nach Rücknahme der Regel freigegeben';
           return { ablehnen: b ? 'wäre abgelehnt' : 'abgelehnt', halten: b ? 'wäre liegen geblieben' : 'liegt bei dir' }[f.befund] || f.befund;
         };
         const liste = (pb.faelle || []).map((f) => `
           <div class="fall">
             <a href="pruefen.html?id=${encodeURIComponent(f.id)}">${esc(f.name || '?')}</a>
             <span class="leer">${esc(f.markt || '')} · ${esc(f.datei || '')}</span>
-            <span class="g">${f.befund === 'halten' && f.ohneRegel === 'ablehnen' ? 'Befund „liegen lassen" ohne Wirkung — aus anderem Grund abgelehnt' : `${esc(BEFUND(f))}${f.ohneRegel === 'freigeben' ? ' (sonst freigegeben)' : ''}`} · Bildprüfung: ${esc(f.quelle || 'keine Antwort')}${f.quelleGrund ? ` („${esc(f.quelleGrund)}")` : ''}${f.lesedienstBon ? ' · Lesedienst: Kassenbon' : ''}${f.beleg ? ` · Preisbeleg: ${esc(BELEG_DE[f.beleg] || f.beleg)}${f.belegHaendler ? ` (${esc(f.belegHaendler)})` : ''}` : ''}${f.vorbefund ? ` · Befund vom ${esc(f.vorbefund)}` : ''}</span>
+            <span class="g">${f.befund === 'halten' && f.ohneRegel === 'ablehnen' ? 'Befund „liegen lassen" ohne Wirkung — aus anderem Grund abgelehnt' : `${esc(BEFUND(f))}${f.ohneRegel === 'freigeben' && !(f.vorbefund && f.entscheidung === 'freigeben') ? ' (sonst freigegeben)' : ''}`} · Bildprüfung: ${esc(f.quelle || 'keine Antwort')}${f.quelleGrund ? ` („${esc(f.quelleGrund)}")` : ''}${f.lesedienstBon ? ' · Lesedienst: Kassenbon' : ''}${f.beleg ? ` · Preisbeleg: ${esc(BELEG_DE[f.beleg] || f.beleg)}${f.belegHaendler ? ` (${esc(f.belegHaendler)})` : ''}` : ''}${f.vorbefund ? ` · Befund vom ${esc(f.vorbefund)}` : ''}</span>
           </div>`).join('');
         // Prüfrunde 3 (04.10.2026): „Kassenbon", den der Lesedienst las und nicht
         // als Bon sah — ohne Bildschirm-Merkmale wird er bezahlt (Warenkorb?).
@@ -282,6 +288,7 @@
           <div class="zeile"><span>${beob ? 'wäre abgelehnt' : 'Befund „ablehnen"'}</span><span>${pb.befundAblehnen ?? 0}</span></div>
           <div class="zeile"><span>${beob ? 'wäre liegen geblieben' : 'Befund „liegen lassen"'}</span><span>${pb.befundHalten ?? 0}</span></div>
           <div class="zeile"><span>davon ohne Regel freigegeben</span><span>${pb.stattFreigabe ?? 0}</span></div>
+          ${pb.ausVortagen ? `<div class="zeile"><span>Bildschirm-Regel: aus Vortagen, liegt weiter</span><span>${pb.ausVortagen}</span></div>` : ''}
           <div class="zeile"><span>Kassenbons mit Bildschirm-Merkmalen (zählen)</span><span>${pb.kassenbonMitMerkmal ?? 0}</span></div>`;
         return `<section class="box"><h3>Preisfoto: Bildschirmfoto — ${MODUS_DE(pb.modus)}${unbekannt(pb.schalterUnbekannt)} · Preisbeleg — ${MODUS_DE(belegModus)}${unbekannt(pb.beleg && pb.beleg.schalterUnbekannt)}</h3>
           ${schirmZeilen}
@@ -291,7 +298,8 @@
           ${kbListe ? `<div class="liste" style="margin-top:4px">${kbListe}</div>` : ''}
           ${belegModus === false ? '<div class="zeile"><span>Preisbeleg „Kassenbon" ausgeschaltet</span><span>–</span></div>' : belegZeilen(pb.beleg, belegBeob)}
           ${pb.kopfNichtAbrufbar ? `<div class="zeile"><span>Preisfoto-Kopf nicht abrufbar (Technik)</span><span>${pb.kopfNichtAbrufbar}</span></div>` : ''}
-          ${pb.vorbefund ? `<div class="zeile"><span>Befund früherer Läufe hält weiter</span><span>${pb.vorbefund}</span></div>` : ''}
+          ${typeof pb.ausVortagen !== 'number' && pb.vorbefund ? `<div class="zeile"><span>Befund früherer Läufe hält weiter</span><span>${pb.vorbefund}</span></div>` : ''}
+          ${pb.nachRuecknahmeFrei ? `<div class="zeile"><span>nach Rücknahme einer Regel freigegeben (Befund früherer Läufe)</span><span>${pb.nachRuecknahmeFrei}</span></div>` : ''}
           <div class="zeile"><span>Bildprüfung: Laden / Bon / Bildschirm / kein Preis / unklar / ohne Antwort</span><span>${q.laden || 0} / ${q.kassenbon || 0} / ${q.bildschirm || 0} / ${q.keiner || 0} / ${q.unklar || 0} / ${q.ohne_antwort || 0}</span></div>
           <div class="zeile"><span>Datei wie Bildschirmfoto: ja / nein / unbekannt</span><span>${m.ja || 0} / ${m.nein || 0} / ${m.unbekannt || 0}</span></div>
           ${liste ? `<div class="liste" style="margin-top:8px">${liste}</div>` : ''}
@@ -313,12 +321,13 @@
           <div class="fall">
             <a href="pruefen.html?id=${encodeURIComponent(f.id)}">${esc(f.name || '?')}</a>
             <span class="leer">${esc(f.markt || '')}${f.haendler || f.lesedienstHaendler ? ` · Händler laut Beleg: ${esc(f.haendler || '–')}${f.lesedienstHaendler ? ` / Lesedienst: ${esc(f.lesedienstHaendler)}` : ''}` : ''}</span>
-            <span class="g">${esc(BELEG_DE[f.befund] || f.befund)} · ${esc(f.ohneRegel === 'freigeben' && beob ? 'freigegeben (wäre liegen geblieben)' : (ENTSCHIEDEN[f.entscheidung] || f.entscheidung || ''))}${Array.isArray(f.merkmale) ? ` · Merkmale: ${esc(f.merkmale.join(', ') || 'keine')}` : ' · Merkmale: keine Antwort'}${f.quelleGrund ? ` · „${esc(f.quelleGrund)}"` : ''}</span>
+            <span class="g">${esc(f.befund ? (BELEG_DE[f.befund] || f.befund) : 'heute kein Befund')} · ${esc(f.vorbefund && f.wirkt === false && f.entscheidung === 'freigeben' ? 'nach Rücknahme der Regel freigegeben' : f.ohneRegel === 'freigeben' && (typeof f.wirkt === 'boolean' ? !f.wirkt : beob) && f.entscheidung === 'freigeben' ? 'freigegeben (wäre liegen geblieben)' : (ENTSCHIEDEN[f.entscheidung] || f.entscheidung || ''))}${Array.isArray(f.merkmale) ? ` · Merkmale: ${esc(f.merkmale.join(', ') || 'keine')}` : f.befund ? ' · Merkmale: keine Antwort' : ''}${f.quelleGrund ? ` · „${esc(f.quelleGrund)}"` : ''}${f.vorbefund ? ` · Befund vom ${esc(f.vorbefund)}` : ''}</span>
           </div>`).join('');
         return `
           <div class="zeile"><span>Preisbeleg „Kassenbon": ohne Kassenbon-Merkmale (Warenkorb?)</span><span>${b.ohneMerkmale ?? 0}</span></div>
           <div class="zeile"><span>Preisbeleg „Kassenbon": fremder Händler (z. B. Amazon)</span><span>${b.fremderHaendler ?? 0}</span></div>
           <div class="zeile"><span>${beob ? 'davon wäre liegen geblieben (sonst freigegeben)' : 'davon liegen geblieben statt freigegeben'}</span><span>${b.stattFreigabe ?? 0}</span></div>
+          ${b.ausVortagen ? `<div class="zeile"><span>Preisbeleg: aus Vortagen, liegt weiter</span><span>${b.ausVortagen}</span></div>` : ''}
           ${b.merkmaleOhneAntwort ? `<div class="zeile"><span>Kassenbon: Merkmal-Frage ohne Antwort</span><span>${b.merkmaleOhneAntwort} von ${b.kassenbon ?? '?'}</span></div>` : ''}
           ${b.maerkteUnlesbar ? '<div class="zeile"><span>Liste unserer Märkte nicht lesbar (nur feste Ketten)</span><span>!</span></div>' : ''}
           ${liste ? `<div class="liste" style="margin-top:4px">${liste}</div>` : ''}`;

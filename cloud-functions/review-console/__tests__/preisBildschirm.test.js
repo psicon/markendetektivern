@@ -353,6 +353,29 @@ describe('Zwei Schalter: jede Regel hält nur unter ihrem eigenen', () => {
     expect(morgen(schirmAblehnen, { bildschirm: false, beleg: true }).befund).toBeNull();
     expect(morgen(belegHalt, { bildschirm: true, beleg: 'shadow' }).befund).toBeNull();
   });
+  // Nachprüfung 05.10.2026: mit `false` fiel der Vorbefund ganz weg, und eine
+  // heutige „bildschirm"-Lesung lehnte den gehaltenen Fall ab — mit `'shadow'`
+  // blieb er liegen. Beide Rückwege müssen sich gleich verhalten.
+  it('Preisbeleg-Halt, Preisbeleg zurückgenommen (shadow ODER false), heute liest die Bildschirm-Regel „ablehnen" → nur halten, nie ablehnen', () => {
+    const schirm = (modi) => ({ modus: modi.bildschirm, belegModus: modi.beleg, quelle: 'bildschirm', merkmal: true, lesedienstOhneBon: true, belegGrund: null });
+    for (const beleg of ['shadow', false]) {
+      const modi = { bildschirm: true, beleg };
+      const pb = preisBildschirmMitVorbefund(schirm(modi), preisBildschirmVorbefund(ro(belegHalt)), modi);
+      expect([beleg, preisBildschirmLage(pb, { scharf: true })]).toMatchObject([beleg, { befund: 'halten', grund: 'preis_bildschirm_unsicher', regeln: ['bildschirm'], vorRegeln: [] }]);
+      expect([beleg, preisBildschirmLage(pb).befund]).toEqual([beleg, 'halten']);
+      // Der neue Halt der Bildschirm-Regel wird weitergetragen (ab heute, ohne den zurückgenommenen Preisbeleg).
+      expect([beleg, preisBildschirmEintrag(pb, { lauf: 'L2' })]).toEqual([beleg, { modus: true, befund: 'halten', seit: 'L2', regeln: ['bildschirm'] }]);
+      // Am Tag darauf liest das Modell wieder „bildschirm": der Halt bleibt ein Halt.
+      const tag3 = preisBildschirmMitVorbefund(schirm(modi), preisBildschirmVorbefund(ro(preisBildschirmEintrag(pb, { lauf: 'L2' }))), modi);
+      expect([beleg, preisBildschirmLage(tag3, { scharf: true }).befund]).toEqual([beleg, 'halten']);
+    }
+    // Ohne Vorbefund lehnt dieselbe Lesung weiter ab (die Sperre hängt nur am gehaltenen Fall).
+    expect(preisBildschirmLage(preisBildschirmMitVorbefund(schirm({ bildschirm: true, beleg: false }), null, { bildschirm: true, beleg: false }), { scharf: true }).befund).toBe('ablehnen');
+    // Eine von der Notbremse zurückgehaltene Ablehnung ist kein Halt für einen Menschen: keine Sperre.
+    const ohneRegel = preisBildschirmMitVorbefund(schirm({ bildschirm: false, beleg: true }), preisBildschirmVorbefund(ro(schirmAblehnen)), { bildschirm: false, beleg: true });
+    expect(ohneRegel).not.toHaveProperty('ablehnenGesperrt');
+    expect(preisBildschirmLage(ohneRegel, { scharf: true }).befund).toBeNull();
+  });
   it('ältere Einträge ohne `regeln`: `art: beleg` = Preisbeleg, sonst Bildschirm-Regel; „ablehnen" immer Bildschirm-Regel', () => {
     const { regeln: _r1, ...schirmAlt } = schirmHalt;
     const { regeln: _r2, ...belegAlt } = belegHalt;
@@ -374,6 +397,21 @@ describe('Zwei Schalter: jede Regel hält nur unter ihrem eigenen', () => {
     expect(preisBildschirmLage({ ...schirm, modus: false, belegModus: true }).befund).toBeNull();
     // fehlt belegModus, gilt Beobachtung — der Schalter der Bildschirm-Regel schaltet den Preisbeleg nie mit
     expect(preisBildschirmLage({ ...korb, modus: true }, { scharf: true }).befund).toBeNull();
+  });
+  // Für den Tagesbericht (preisBildschirmZaehlart, Nachprüfung 05.10.2026).
+  it('Lage nennt, welche Regeln aus einem früheren Lauf stammen (`vorRegeln`) und ob nur der Bildkopf hält (`kopf`)', () => {
+    expect(morgen(belegHalt, { bildschirm: true, beleg: true })).toMatchObject({ vorRegeln: ['beleg'], kopf: false });
+    expect(morgen(belegHalt, { bildschirm: true, beleg: 'shadow' })).toMatchObject({ befund: null, vorRegeln: [] });
+    const beob = preisBildschirmLage(preisBildschirmMitVorbefund(heute({ bildschirm: true, beleg: 'shadow' }), preisBildschirmVorbefund(ro(belegHalt)), { bildschirm: true, beleg: 'shadow' }));
+    expect(beob).toMatchObject({ befund: 'halten', regeln: ['beleg'], vorRegeln: ['beleg'] });
+    // von der Notbremse zurückgehalten, heute erneut „ablehnen"
+    const schirm = { modus: true, belegModus: 'shadow', quelle: 'bildschirm', merkmal: true, lesedienstOhneBon: true, belegGrund: null };
+    const wieder = preisBildschirmMitVorbefund(schirm, preisBildschirmVorbefund(ro(schirmAblehnen)), { bildschirm: true, beleg: 'shadow' });
+    expect(preisBildschirmLage(wieder, { scharf: true })).toMatchObject({ befund: 'ablehnen', vorRegeln: ['bildschirm'], ausVorbefund: false });
+    expect(preisBildschirmLage(schirm, { scharf: true })).toMatchObject({ befund: 'ablehnen', vorRegeln: [] });
+    const kopf = { modus: true, belegModus: 'shadow', quelle: 'laden', merkmal: null, kopfGescheitert: true };
+    expect(preisBildschirmLage(kopf, { scharf: true })).toMatchObject({ befund: 'halten', regeln: [], kopf: true, grund: 'preis_kopf_nicht_lesbar' });
+    expect(preisBildschirmLage(null)).toMatchObject({ befund: null, vorRegeln: [], kopf: false });
   });
   it('Eintrag: `regeln` nur mit scharfem Befund; ein Kassenbon, den beide Regeln halten, trägt beide', () => {
     const beide = { modus: true, belegModus: true, quelle: 'kassenbon', merkmal: true, lesedienstOhneBon: true, belegGrund: 'fremder_haendler' };

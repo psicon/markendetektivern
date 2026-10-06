@@ -687,7 +687,11 @@ function vorbefundRegeln(v) {
  * „halten", preisBildschirmMitVorbefund) — auch nicht, wenn die Regel des
  * Vorbefunds zurückgenommen ist und heute die Bildschirm-Regel „ablehnen"
  * liest: der Fall liegt schon, und jeder weitere Morgen wäre eine neue
- * Chance auf eine Ablehnung, die an EINER Modellantwort hängt.
+ * Chance auf eine Ablehnung, die an EINER Modellantwort hängt. Das gilt für
+ * BEIDE Rückwege — bei `'shadow'` reist der Vorbefund mit (`vorbefund`), bei
+ * `false` fällt er weg, und `ablehnenGesperrt` hält die Sperre (Nachprüfung
+ * 05.10.2026: mit `false` wurde ein gehaltener Preisbeleg auf eine einzige
+ * neue „bildschirm"-Lesung hin abgelehnt, mit `'shadow'` blieb er liegen).
  *
  * Grund des Halts: ein übernommener Befund behält seine Art (Bildschirm geht
  * vor Preisbeleg); sonst Bildschirm-Verdacht vor Preisbeleg vor nicht
@@ -696,17 +700,23 @@ function vorbefundRegeln(v) {
  * Halt nur wegen des nicht abrufbaren Bildkopfs gehört nicht dazu (morgen
  * neu prüfen, wie foto_abgleich_gescheitert).
  *
+ * Für den Tagesbericht (preisBildschirmZaehlart, Nachprüfung 05.10.2026):
+ * `vorRegeln` = Regeln, deren Befund eines FRÜHEREN scharfen Laufs hier gilt
+ * (in `regeln` enthalten) — auch eine von der Notbremse zurückgehaltene
+ * Ablehnung, die heute erneut „ablehnen" liest (`vorbefundSeit`); `kopf` =
+ * die Bildschirm-Regel hält heute (auch) wegen des nicht abrufbaren Bildkopfs.
+ *
  * @param {object|null} pb  Eingabe der Runde (pbVon) bzw. preisBildschirmMitVorbefund
  * @param {{scharf?:boolean}} [o]
- * @returns {{befund:'ablehnen'|'halten'|null, regeln:string[], grund:string|null, ausVorbefund:boolean}}
+ * @returns {{befund:'ablehnen'|'halten'|null, regeln:string[], grund:string|null, ausVorbefund:boolean, vorRegeln:string[], kopf:boolean}}
  */
 function preisBildschirmLage(pb, { scharf = false } = {}) {
-  const leer = { befund: null, regeln: [], grund: null, ausVorbefund: false };
+  const leer = { befund: null, regeln: [], grund: null, ausVorbefund: false, vorRegeln: [], kopf: false };
   if (!pb || typeof pb !== 'object') return leer;
   const gilt = (r) => (scharf ? schalterVon(pb, r) === true : schalterVon(pb, r) !== false);
   const t = preisBildschirmTeile(pb);
-  if (!pb.vorbefund && t.bildschirm === 'ablehnen' && gilt(REGEL_BILDSCHIRM)) {
-    return { befund: 'ablehnen', regeln: [REGEL_BILDSCHIRM], grund: PREIS_BILDSCHIRM, ausVorbefund: false };
+  if (!pb.vorbefund && pb.ablehnenGesperrt !== true && t.bildschirm === 'ablehnen' && gilt(REGEL_BILDSCHIRM)) {
+    return { befund: 'ablehnen', regeln: [REGEL_BILDSCHIRM], grund: PREIS_BILDSCHIRM, ausVorbefund: false, vorRegeln: pb.vorbefundSeit ? [REGEL_BILDSCHIRM] : [], kopf: false };
   }
   const vor = pb.vorbefund ? vorbefundRegeln(pb.vorbefund).filter(gilt) : [];
   const regeln = new Set(vor);
@@ -723,7 +733,7 @@ function preisBildschirmLage(pb, { scharf = false } = {}) {
   else if (regeln.has(REGEL_BILDSCHIRM)) grund = PREIS_BILDSCHIRM_UNSICHER;
   else if (regeln.has(REGEL_BELEG)) grund = PREIS_BELEG_UNSICHER;
   else grund = PREIS_KOPF_NICHT_LESBAR;
-  return { befund: 'halten', regeln: geordnet, grund, ausVorbefund: vor.length > 0 };
+  return { befund: 'halten', regeln: geordnet, grund, ausVorbefund: vor.length > 0, vorRegeln: REGELN.filter((r) => vor.includes(r)), kopf: nurKopf };
 }
 
 /**
@@ -743,6 +753,38 @@ function preisBildschirmHalteGrund(pb) {
 }
 
 /**
+ * Wie ein Fall im Tagesbericht zählt — je Regel und nur an EINEM Morgen
+ * (Nachprüfung 05.10.2026). Vorher zählte jeder Fall mit Befund in den
+ * Zeilen der Bildschirm-Regel, auch ein reiner Preisbeleg-Fall, und ein
+ * scharf gehaltener Fall erneut an jedem Morgen, an dem er auf Patrick
+ * wartete — beides blähte genau die Zahlen auf, nach denen die Regeln scharf
+ * geschaltet werden.
+ *
+ *  - Wirkt heute ein Befund eines früheren scharfen Laufs (`vorWirkt`), lag
+ *    der Fall schon: er zählt NUR unter `ausVortagen` (je Regel dieses
+ *    Befunds, und nur solange er offen bleibt) — nicht noch einmal als
+ *    heutiger Befund, auch wenn heute eine Regel erneut anschlägt.
+ *  - Sonst `frisch`: die Regeln, deren HEUTIGER Befund den Fall trägt — die
+ *    Bildschirm-Regel auch bei einem Halt nur wegen des nicht abrufbaren
+ *    Bildkopfs (`kopf`). Ein Befund eines früheren Laufs, dessen Regel
+ *    zurückgenommen ist (`vor`), zählt nicht als heutiger Befund.
+ *
+ * @param {{regeln?:string[], vor?:string[], vorWirkt?:string[], kopf?:boolean}|null} f  preisBildschirmFall (fotoRundeRegeln.freigabe)
+ * @param {string} entscheidung  endgültige Entscheidung des Laufs (nach Notbremse und Schreiben)
+ * @returns {{frisch:string[], ausVortagen:string[]}}
+ */
+function preisBildschirmZaehlart(f, entscheidung) {
+  if (!f || typeof f !== 'object') return { frisch: [], ausVortagen: [] };
+  const liste = (v) => (Array.isArray(v) ? REGELN.filter((r) => v.includes(r)) : []);
+  const vorWirkt = liste(f.vorWirkt);
+  if (vorWirkt.length) return { frisch: [], ausVortagen: entscheidung === 'offen' ? vorWirkt : [] };
+  const vor = liste(f.vor);
+  const heute = new Set(liste(f.regeln));
+  if (f.kopf === true) heute.add(REGEL_BILDSCHIRM);
+  return { frisch: REGELN.filter((r) => heute.has(r) && !vor.includes(r)), ausVortagen: [] };
+}
+
+/**
  * Hinweis für den Menschen — landet in `review.rundeOffen.hinweis`, also an
  * einem Dokument, das der Einreicher selbst lesen darf (firestore.rules
  * `crowd_uploads` read für den Eigentümer; die App lädt das ganze Dokument,
@@ -750,7 +792,7 @@ function preisBildschirmHalteGrund(pb) {
  * nie woran es hängt (Dateiformat, Seitenverhältnis, Kamerahersteller, die
  * Begründung des Modells) — sonst lädt der Hinweis zum Umgehen ein
  * (Gegenprüfung 04.10.2026; vgl. kontoSperre). Die Einzelheiten stehen nur
- * im Tagesbericht (`preisBildschirm.faelle`, nur für Admins).
+ * im Tagesbericht (`preisBildschirm.faelle` bzw. `preisBildschirm.beleg.faelle`, nur für Admins).
  * Beschrieben wird, was WIRKT (preisBildschirmLage scharf); wirkt nichts,
  * das Beobachtete.
  */
@@ -850,6 +892,17 @@ function preisBildschirmVorbefund(x) {
  * reist er nur noch zur Beobachtung mit und hält nichts mehr
  * (preisBildschirmLage). Der Schalter der anderen Regel berührt ihn nie.
  *
+ * Auch mit `false` lehnt der heutige Lauf einen gehaltenen Fall nicht ab
+ * (Nachprüfung 05.10.2026): nimmt der Schalter ALLE Regeln des früheren
+ * Halts weg, bleibt nur die Sperre — `ablehnenGesperrt` am heutigen Befund.
+ * Liest die Bildschirm-Regel heute „ablehnen", hält sie den Fall dann nur
+ * (preis_bildschirm_unsicher), genau wie beim Rückweg über `'shadow'`. Vorher
+ * wurde ein Preisbeleg-Halt nach `preisBelegRegel: false` auf eine einzige
+ * neue „bildschirm"-Lesung hin endgültig abgelehnt. Eine von der Notbremse
+ * zurückgehaltene Ablehnung (Vorbefund „ablehnen") ist kein Halt für einen
+ * Menschen — ihre Regel ist die Bildschirm-Regel, und ist die aus, lehnt heute
+ * ohnehin nichts ab.
+ *
  * @param {object|null} heute  Eingabe der Runde (pbVon) oder null (keine Bildprüfung heute)
  * @param {{befund:string, seit:string|null, regeln?:string[]}|null} vorher  preisBildschirmVorbefund
  * @param {{bildschirm:false|'shadow'|true, beleg:false|'shadow'|true}} modi  heutige Schalter je Regel
@@ -859,7 +912,11 @@ function preisBildschirmMitVorbefund(heute, vorher, modi) {
   const m = { [REGEL_BILDSCHIRM]: modusPreisBildschirm(modi.bildschirm), [REGEL_BELEG]: modusPreisBeleg(modi.beleg) };
   if (m[REGEL_BILDSCHIRM] === false && m[REGEL_BELEG] === false) return null;
   const vor = vorher ? vorbefundRegeln(vorher).filter((r) => m[r] !== false) : [];
-  if (!vor.length) return heute;
+  if (!vor.length) {
+    if (!heute || !vorher || vorher.befund !== 'halten') return heute;
+    const gesperrt = { ...heute, ablehnenGesperrt: true };
+    return { ...gesperrt, befund: preisBildschirmLage(gesperrt).befund };
+  }
   const heuteBefund = heute ? preisBildschirmLage(heute).befund : null;
   if (heuteBefund === 'ablehnen' && vorher.befund === 'ablehnen') return { ...heute, vorbefundSeit: vorher.seit };
   return {
@@ -877,7 +934,7 @@ module.exports = {
   modusPreisBildschirm, modusPreisBeleg, schalterRohOf, preisQuelleOf, lesedienstBonOf, lesedienstOhneBonOf, bildKopf, tiffKennung, bildschirmMerkmal, kameraFormat,
   preisBildschirmBefund, keinBonVon, preisBildschirmHalteGrund, preisBildschirmHinweis, preisBildschirmEintrag,
   preisBildschirmVorbefund, preisBildschirmMitVorbefund,
-  REGEL_BILDSCHIRM, REGEL_BELEG, REGELN, preisBildschirmTeile, preisBildschirmLage, vorbefundRegeln,
+  REGEL_BILDSCHIRM, REGEL_BELEG, REGELN, preisBildschirmTeile, preisBildschirmLage, vorbefundRegeln, preisBildschirmZaehlart,
   BELEG_MERKMALE, PREIS_BELEG_UNSICHER, BELEG_OHNE_MERKMALE, BELEG_FREMDER_HAENDLER, UNSERE_KETTEN,
   belegMerkmaleOf, belegHaendlerOf, lesedienstKopfOf, haendlerWoerter, marktSchluessel, unserMarkt, preisBelegBefund, belegGrundOf,
 };
