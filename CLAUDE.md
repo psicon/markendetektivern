@@ -3251,6 +3251,82 @@ Patrick, 02.10.: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche",
   ein einmal angehaltener Fall wird nie automatisch aufgehoben. Ausnahme nur
   am ersten Tag (Patrick 04.10.: „ja"): liest die zweite Lesung die
   gespeicherte Nummer, war die erste eine Fehllesung → weiter.
+- **Eindeutige Barcode-Fälle korrigiert die Morgenrunde selbst** (Patrick
+  06.10.2026: „ja"). Tatsächliches Verfahren: das Modell liest das
+  Barcode-Foto zweimal gleich (Bildprüfung + zweite Lesung — zwei Aufrufe
+  DESSELBEN Modells, also NICHT unabhängig: auf Fotos ohne lesbare Ziffern
+  erfindet es gültige GTINs, gemessen 06.10.) UND gültige GTIN UND kein
+  Waagen-/Händlercode/Karton UND — Pflicht-Zeuge — der feste Strichcode-Leser
+  (`src/strichcode.js`, zxing-wasm 2.2.4, liest die Striche, nicht die
+  Ziffern) liest HEUTE auf dem Original-Foto die neue Nummer und NICHT die
+  gespeicherte. Liest er nichts, etwas anderes oder scheitert er → keine
+  Korrektur, ein Mensch entscheidet. Gemessen 06.10.: 96 von 127 echten
+  Barcode-Fotos gelesen (Median 86 ms), 5 Abweichungen zu OpenCV/Apple Vision;
+  von 9 geplanten Korrekturen bestätigt 6, 3 bleiben beim Menschen; bei
+  Fusilli/Vollkornbrot/Melitta/Farfalle las er die gespeicherte Nummer (das
+  Modell hatte erfunden). Eine gespeicherte Korrektur ohne Zeugen gilt nicht
+  (`eanKorrekturOf`). WASM IMMER aus dem Paket laden (sonst CDN),
+  Formatnamen mit Bindestrich (`'EAN-13'`). Dann gilt die
+  Foto-Nummer als EAN (`eanKorrektur`, nur Server; `ean` bleibt die
+  gespeicherte für Audit), alle weiteren Regeln rechnen mit ihr. Das gilt auch
+  für schon angehaltene `ean_abweichend`-Fälle, deren gespeicherte Lesungen das
+  erfüllen — Patricks „ja" hebt für GENAU diese Klasse „nie automatisch
+  aufheben" auf, solange die heutige Lesung nicht widerspricht.
+  `ean_unsicher` bleibt beim Menschen — auch ein alter `ean_unsicher` gegen
+  zwei gleiche spätere Lesungen; widersprechen sich die Lesungen über Tage,
+  wird der Halt `unsicher` und nie korrigiert. Ohne Bildprüfung am selben
+  Morgen keine Korrektur aus einem alten Halt. Die Wochen-Sperre läuft
+  zusätzlich über alle zugehörigen Nummern (gespeichert/korrigiert, eigene
+  und frühere Einreichungen), an JEDEM Tag; trifft sie dort, bleibt der Fall
+  liegen (`ean_alt_doppelt`), sonst käme ein schon bezahltes Produkt mit
+  einem fremden Strichcode-Foto durch. Eigene Notbremse (≥ 8 und > 10 % der
+  heute NEU geprüften Fälle → keine Korrektur; nur im scharfen Lauf Vermerk am
+  Befund: diese Fälle nie automatisch). Eigener Schalter
+  `cashback_config/v1.barcodeKorrektur` — NUR `true` wendet an, sonst nur
+  Vorschlag im Bericht (nach dem Ausrollen von Patrick einzuschalten). Eine
+  falsche Korrektur nimmt die Prüfkonsole einzeln zurück („Korrektur
+  verwerfen", `eanKorrekturVerworfen`, danach nie wieder korrigiert). Der
+  Trockenlauf speichert weder Korrektur noch Bremsvermerk. Befunde des
+  ALTEN Codes ohne Vermerk aus einem Lauf nach `2026-10-06_080038` werden
+  NIE automatisch korrigiert (er verschluckt Widersprüche und überschreibt
+  `unsicher`; gebremst `altcode_<lauf>`, gelbe Warnung) — trotzdem vor dem
+  nächsten 08:00-Lauf ausrollen. Eine verworfene Korrektur hält auch in der
+  Runde (Vermerk ist selbst Halte-Quelle); eine frühere andere Foto-Lesung
+  (etwa `gleich`) gegen heute zweimal F → `unsicher`; eine eigene Freigabe mit
+  bestätigt abweichender Foto-Nummer zählt mit dieser Nummer zu den
+  verwandten (`ean_alt_doppelt`, nur Halt). Die EAN einer
+  Einreichung IMMER über `werte.eanOf` lesen, nie `ean` allein — die App
+  zeigt in „Meine Einreichungen" weiter die gescannte `ean`
+  (`app/product-submit/index.tsx`), auch nach einer Korrektur (offen, braucht
+  einen App-Build). Lehre der
+  Prüfrunde: ein Schutz, der an einem Zustand hängt, wird aus dem
+  GESPEICHERTEN Zustand gerechnet, nie aus dem heutigen Ereignis — sonst
+  gilt er nur einen Lauf; und eine Vertrauensregel muss kennen, was der alte
+  Code bis zum Ausrollen noch schreibt. Prüfrunde 1 danach (06.10.): der Leser
+  dekodiert nur Baseline-JPEG (seit Prüfrunde 3: ein 0,42-MB-PNG trieb ihn
+  über den Kopf hinweg auf 872 MB) bis 64 MP, geprüft aus dem Dateikopf (sharp
+  `metadata()`) — ein weißes 400-MP-JPEG unter 8 MB trieb ihn auf 1,1 GB und
+  hätte die Runde jeden Morgen vor dem ersten Schreibvorgang beendet; ein
+  Bremsvermerk gilt aus JEDER Quelle; Schritt 7 prüft, dass die gerechnete
+  EAN beim Schreiben noch gilt (Verwerfen während des Laufs). Prüfrunde 2
+  (06.10.): die 64-MP-Grenze reicht nicht, der Speicher hängt an der
+  Kodierung (progressiv/CMYK/16-Bit-PNG bis 1,4 GB bei 64 MP unter 8 MB) —
+  `strichcode.dekodierBytes` schätzt ihn aus dem Kopf, dekodiert wird nur bis
+  320 MB (an allen Kodierungen nachgemessen); der Leser bestätigt nur, wenn
+  er F und KEINE weitere Nummer liest (zwei Codes auf dem Foto = nicht
+  eindeutig, Mensch); ein `unsicher` aus dem Rückfall gewinnt vor
+  `abweichend` in `eanFotoOcr`; Schritt 4c schreibt Befunde nur noch in einer
+  Transaktion an offene Einreichungen (`eanFotoOcr` einer Freigabe ist
+  Eingabe der Wochen-Sperre). Ausrollen in
+  dieser Reihenfolge: Rules → `hosting:md-receipt-admin` →
+  `functions:review-console` → erst dann der Schalter. **Rückweg NUR der
+  Schalter** (`barcodeKorrektur: false`): nach der ersten gespeicherten
+  Korrektur nie Code ohne `eanOf` mit Korrektur ausrollen (kein Rollback auf
+  fe89647e) — sonst steht eine korrigierte Freigabe wieder unter der alten
+  Nummer und dasselbe Produkt wird in der Woche doppelt bezahlt. Die Zweige
+  `claude/preisfoto-bildschirm`, `claude/bon-doppelzahlung` und
+  `claude/produktsuche-speicherung` müssen diesen Zweig vor jedem Deploy von
+  `review-console` oder `hosting:md-receipt-admin` aufnehmen. Details: `cloud-functions/review-console/WISSEN-FOTORUNDE.md`.
 - **Anderer Markt innerhalb der Woche zählt NICHT als neue Erfassung**
   (Patrick 04.10.: „nein").
 - **Eindeutig falsche Barcode-Nummer korrigiert die Morgenrunde selbst**
@@ -3258,8 +3334,10 @@ Patrick, 02.10.: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche",
   Ladencode → Foto-Nummer gilt, alle Regeln laufen mit ihr weiter; das gilt
   auch für schon angehaltene `ean_abweichend`-Fälle dieser Klasse.
   `ean_unsicher` (zweite Lesung fehlt/weicht ab) bleibt beim Menschen.
-  Zweig `claude/barcode-korrektur`. Ursache der falschen Nummern (bisher nur
-  Android, rechte EAN-Hälfte oft richtig) wird untersucht.
+  Umgesetzt mit Prüfrunden (Absatz oben): korrigiert wird nur, wenn
+  zusätzlich der feste Strichcode-Leser die Nummer bestätigt. Ursache der
+  falschen Nummern: der Barcode-Schritt im Assistenten übernimmt die erste
+  Lesung der Android-Kamera ungeprüft (Untersuchung 06.10.2026).
 - **Foto-Abgleich (md5) gegen ALLE früheren Einreichungen**, Preisfoto
   ausgenommen; eine Kopie bleibt immer freigabefähig. Die Gründe, mit denen die
   Runde einen Fall liegen lässt, stehen in `review.rundeOffen` (nur Server).

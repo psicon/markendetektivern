@@ -29,16 +29,23 @@
  *
  * Ausroll-Reihenfolge seit 26.09.2026 (effektive Werte aus src/werte.js),
  * ergänzt 02.10.2026 (Wochen-Sperre, Barcode-Foto, Kontosperre):
- *  1. firestore.rules — sperrt die Namer-/Nachlese-Felder und `eanFotoOcr`
- *     beim Anlegen. Vorher vertraute die Konsole fälschbaren Werten; ginge
- *     diese Codebase zuerst live, könnte ein Client `eanFotoOcr` mit der
- *     gespeicherten Nummer vorbelegen.
+ *  1. firestore.rules — sperrt die Namer-/Nachlese-Felder, `eanFotoOcr` und
+ *     (seit 06.10.2026) `eanKorrektur` + `eanKorrekturVerworfen` beim Anlegen.
+ *     Vorher vertraute die Konsole fälschbaren Werten; ginge diese Codebase
+ *     zuerst live, könnte ein Client `eanFotoOcr` mit der gespeicherten Nummer
+ *     vorbelegen bzw. eine „korrigierte" EAN mitschicken, die vor `ean` gilt.
  *  2. diese Codebase SOLO (Multi-Codebase-Deploys flaken, CLAUDE.md).
  *  3. hosting:md-receipt-admin — pruefen.html fällt zwar auf die Rohfelder
- *     zurück, zeigt nachgelesene Werte aber erst mit dieser Codebase.
+ *     zurück, zeigt nachgelesene Werte aber erst mit dieser Codebase (und den
+ *     Knopf „Korrektur verwerfen" erst mit Hosting).
  *  4. Gutschrift-Seite der Kontosperre (cashback-pipeline, crowd-upload-reward,
  *     survey-reward; Zweig claude/reward-sperre).
  *  5. ERST DANN `cashback_sperren/{uid}` anlegen.
+ *  Barcode-Korrektur (06.10.2026): rechnet nach dem Ausrollen nur, bis
+ *  `cashback_config/v1.barcodeKorrektur` auf `true` steht (Entscheidung
+ *  Patrick). Läuft der alte Stand noch einmal (Zeitplan 08:00), sind dessen
+ *  Barcode-Befunde für die Korrektur nicht vertraut — die betroffenen Fälle
+ *  brauchen dann eine neue doppelte Lesung (werte.LETZTER_LAUF_OHNE_VERMERK).
  */
 
 const admin = require('firebase-admin');
@@ -49,9 +56,9 @@ const { REASON, dupZumSpeichern, ms, appGrund } = require('./src/duplicatePolicy
 const { SPERREN, ladeSperren, kontoSperreVon, sperreAusDaten } = require('./src/kontoSperre');
 const {
   INDEX_FELDER, safeStatus, rowOf, stripPolicy, precheckOf, precheckFuerFall,
-  nachbarnAus, nachbarnVon, gruppiereNachEan, eanIndex, baueFotoListe,
+  nachbarnAus, nachbarnVon, verwandteAus, verwandteVon, gruppiereNachEan, eanIndex, baueFotoListe,
 } = require('./src/einreichung');
-const { eanVarianten } = require('./src/werte');
+const { eanVarianten, eanKorrekturOf, eanKorrekturVerworfen } = require('./src/werte');
 const { ortVonEinreichung, ortVonBon, ortsverzeichnisAusBons } = require('./src/ort');
 const { pruefeOrtsanforderung } = require('./src/locationGate');
 const { kachelUrl, pruefeKachelAnfrage, MIN_SCHLUESSEL } = require('./src/kachel');
@@ -107,46 +114,70 @@ function noteFor(reason, ctx = {}) {
 }
 
 /**
+ * Die Felder, in denen eine Nummer einer Einreichung stehen kann: gescannt/
+ * getippt (`ean`), nachgelesen (`eanRescueOcr`), von der Morgenrunde
+ * korrigiert (`eanKorrektur.ean`, 06.10.2026) — und die Nummer vom
+ * Barcode-Foto (`eanFotoOcr.ean`, Prüfrunde 06.10.2026): eine FREIGEGEBENE
+ * Einreichung mit bestätigt abweichender Foto-Nummer ist mit dieser Nummer
+ * verwandt (werte.eanFotoFreigegebenOf, nur Halt `ean_alt_doppelt`). Gezählt
+ * wird danach nur, wessen EFFEKTIVE EAN passt (werte.eanOf, nachbarnAus) bzw.
+ * wer eine Nummer teilt (verwandteAus) — ein Treffer nur über `eanFotoOcr.ean`
+ * ist kein Nachbar. Index: Einzelfeld-Index auf `eanFotoOcr.ean` ist Standard
+ * (geprüft 06.10.2026: keine Ausnahme für crowd_uploads).
+ */
+const EAN_FELDER = ['ean', 'eanRescueOcr', 'eanKorrektur.ean', 'eanFotoOcr.ean'];
+
+/**
  * Alle Einreichungen zu einer EAN-Menge (Chunks à 30 für `in`-Queries), über
- * BEIDE EAN-Felder: eine nur nachgelesene EAN (`eanRescueOcr`) ist genauso
- * Nachbar wie eine gescannte — die Runde gruppiert über eanOf. Abgefragt wird
- * jede Schreibweise derselben GTIN (werte.eanVarianten: „0" + EAN-13 ist
- * derselbe Artikel, Prüfrunde 02.10.2026). Ergebnis je GTIN — nachschlagen
- * mit nachbarnVon(byEan, ean).
+ * ALLE EAN-Felder (EAN_FELDER): eine nur nachgelesene oder korrigierte EAN ist
+ * genauso Nachbar wie eine gescannte — die Runde gruppiert über eanOf.
+ * Abgefragt wird jede Schreibweise derselben GTIN (werte.eanVarianten: „0" +
+ * EAN-13 ist derselbe Artikel, Prüfrunde 02.10.2026). Ergebnis je GTIN —
+ * nachschlagen mit nachbarnVon(byEan, ean).
  */
 async function loadByEans(eans) {
   const list = [...new Set(eans.filter(Boolean).flatMap(eanVarianten))];
   const docs = [];
   for (let i = 0; i < list.length; i += 30) {
     const chunk = list.slice(i, i + 30);
-    const [gescannt, nachgelesen] = await Promise.all([
-      db.collection(COL).where('ean', 'in', chunk).get(),
-      db.collection(COL).where('eanRescueOcr', 'in', chunk).get(),
-    ]);
-    docs.push(...gescannt.docs, ...nachgelesen.docs);
+    const snaps = await Promise.all(EAN_FELDER.map((f) => db.collection(COL).where(f, 'in', chunk).get()));
+    for (const sn of snaps) docs.push(...sn.docs);
   }
   return gruppiereNachEan(docs);
 }
 
 /**
- * Nachbarn derselben effektiven EAN IN der Transaktion — beide Abfragen, sonst
- * sieht die Doppel-Regel eine parallele Freigabe über das andere Feld nicht.
- * Nacheinander gelesen: alle Reads stehen vor dem ersten Write, parallele
- * Transaktions-Reads bringen bei zwei Abfragen nichts.
+ * Einreichungen zu einer oder mehreren EANs IN der Transaktion — alle Felder,
+ * sonst sieht die Doppel-Regel eine parallele Freigabe über ein anderes Feld
+ * nicht. Alle Schreibweisen aller Nummern in EINER `in`-Abfrage je Feld
+ * (höchstens 2 × 8 Werte, `in` erlaubt 30). Nacheinander gelesen: alle Reads
+ * stehen vor dem ersten Write, parallele Transaktions-Reads bringen bei
+ * mehreren Abfragen nichts.
  */
-async function nachbarnInTx(tx, ean, ohneId) {
-  const varianten = eanVarianten(ean); // höchstens 8 — `in` erlaubt 30
-  const gescannt = await tx.get(db.collection(COL).where('ean', 'in', varianten));
-  const nachgelesen = await tx.get(db.collection(COL).where('eanRescueOcr', 'in', varianten));
-  return nachbarnAus([...gescannt.docs, ...nachgelesen.docs], ean, ohneId);
+async function eanDocsInTx(tx, eans) {
+  const varianten = [...new Set(eans.filter(Boolean).flatMap(eanVarianten))];
+  if (!varianten.length) return [];
+  const docs = [];
+  for (const f of EAN_FELDER) docs.push(...(await tx.get(db.collection(COL).where(f, 'in', varianten))).docs);
+  return docs;
 }
+
+/** Nachbarn derselben effektiven EAN IN der Transaktion (eanDocsInTx + nachbarnAus). */
+async function nachbarnInTx(tx, ean, ohneId) {
+  return nachbarnAus(await eanDocsInTx(tx, [ean]), ean, ohneId);
+}
+
+/** Alle Nummern einer Zeile für die Abfragen: effektive, nach einer Korrektur die gespeicherte, bei einer Freigabe die bestätigte Foto-Nummer (werte.eanNummern). */
+const nummernVon = (row) => [row.anzeigeEan, row.eanKorrektur ? row.eanKorrektur.vorher : null, row._policy ? row._policy.eanFotoFrei : null].filter(Boolean);
 
 /**
  * Zusatz-Eingaben der Vorprüfung für EINEN Fall außerhalb einer Transaktion:
- * Kontosperre (Lesefehler → 'unbekannt') und die Einreichungen unter der
- * Nummer vom Barcode-Foto, wenn sie von der gespeicherten abweicht.
+ * Kontosperre (Lesefehler → 'unbekannt'), die Einreichungen unter der
+ * Nummer vom Barcode-Foto, wenn sie von der gespeicherten abweicht, und die
+ * VERWANDTEN Einreichungen (verwandteRows, 06.10.2026) aus `byEan` — der muss
+ * über alle Nummern der Zeile geladen sein (nummernVon).
  */
-async function fallOptionen(row) {
+async function fallOptionen(row, byEan) {
   const fotoEan = row.eanFoto && row.eanFoto.art === 'abweichend' ? row.eanFoto.gelesen : null;
   const [sperre, fotoEanRows] = await Promise.all([
     row.userId
@@ -154,7 +185,7 @@ async function fallOptionen(row) {
       : null,
     fotoEan ? loadByEans([fotoEan]).then((m) => nachbarnVon(m, fotoEan)) : null,
   ]);
-  return { kontoSperre: sperre, fotoEanRows };
+  return { kontoSperre: sperre, fotoEanRows, verwandteRows: byEan ? verwandteVon(byEan, row) : null };
 }
 
 /**
@@ -243,11 +274,18 @@ exports.reviewListUploads = onCall({ region: REGION, memory: '512MiB', timeoutSe
   // Effektive EAN (auch nur nachgelesen) — wie reviewCases und die Runde.
   // Auch die Nummern vom Barcode-Foto, wo sie abweichen (Doppel-Regel dort, 02.10.2026).
   const fotoEan = (r) => (r.eanFoto && r.eanFoto.art === 'abweichend' ? r.eanFoto.gelesen : null);
+  // Alle Nummern (bei korrigierter auch die gespeicherte): verwandte Einreichungen (06.10.2026).
   const [byEan, sperren] = await Promise.all([
-    allPending.length ? loadByEans([...allPending.map((r) => r.anzeigeEan), ...allPending.map(fotoEan)]) : new Map(),
+    allPending.length ? loadByEans([...allPending.flatMap(nummernVon), ...allPending.map(fotoEan)]) : new Map(),
     ladeSperren(db),
   ]);
-  const opts = (r) => ({ kontoSperre: kontoSperreVon(sperren, r.userId), fotoEanRows: fotoEan(r) ? nachbarnVon(byEan, fotoEan(r)) : null });
+  const opts = (r) => ({
+    kontoSperre: kontoSperreVon(sperren, r.userId),
+    fotoEanRows: fotoEan(r) ? nachbarnVon(byEan, fotoEan(r)) : null,
+    // Nur für die offenen vollständig geladen; entschiedene Zeilen der Liste
+    // zeigen ohnehin ihr gespeichertes Urteil.
+    verwandteRows: verwandteVon(byEan, r),
+  });
   const preById = new Map(allPending.map((r) => [r.id, precheckOf(r, nachbarnVon(byEan, r.anzeigeEan), opts(r))]));
   let lockedPendingCount = 0;
   for (const pre of preById.values()) if (pre.verdict === 'locked') lockedPendingCount++;
@@ -285,17 +323,15 @@ exports.reviewGetUpload = onCall({ region: REGION }, async (req) => {
   const d = await db.collection(COL).doc(id).get();
   if (!d.exists) throw new HttpsError('not-found', 'Einreichung nicht gefunden.');
   const row = rowOf(d);
-  // Nachbarn über BEIDE EAN-Felder und jede Schreibweise, gezählt nach
+  // Nachbarn über ALLE EAN-Felder und jede Schreibweise, gezählt nach
   // effektiver EAN — dasselbe Urteil wie reviewCases und die Runde.
-  const varianten = eanVarianten(row.anzeigeEan);
-  const [gescannt, nachgelesen, sameUserSnap] = await Promise.all([
-    row.anzeigeEan ? db.collection(COL).where('ean', 'in', varianten).get() : null,
-    row.anzeigeEan ? db.collection(COL).where('eanRescueOcr', 'in', varianten).get() : null,
+  const [byEan, sameUserSnap] = await Promise.all([
+    nummernVon(row).length ? loadByEans(nummernVon(row)) : new Map(),
     row.userId ? db.collection(COL).where('userId', '==', row.userId).get() : null,
   ]);
-  const sameEan = row.anzeigeEan ? nachbarnAus([...gescannt.docs, ...nachgelesen.docs], row.anzeigeEan, id) : [];
+  const sameEan = row.anzeigeEan ? nachbarnVon(byEan, row.anzeigeEan).filter((r) => r.id !== id) : [];
   const sameUser = sameUserSnap ? sameUserSnap.docs.map(rowOf).filter((r) => r.id !== id).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)).slice(0, 30) : [];
-  const precheck = precheckFuerFall(row, sameEan, await fallOptionen(row));
+  const precheck = precheckFuerFall(row, sameEan, await fallOptionen(row, byEan));
   const prior = precheck.dup && precheck.dup.priorId ? sameEan.find((r) => r.id === precheck.dup.priorId) : null;
   return { row: stripPolicy(row), precheck, prior: prior ? stripPolicy(prior) : null, sameEan: sameEan.map(stripPolicy), sameUser: sameUser.map(stripPolicy) };
 });
@@ -306,7 +342,17 @@ exports.reviewGetUpload = onCall({ region: REGION }, async (req) => {
 // die Rücknahme im Prüf-Werkzeug. Bewusst nur aus 'rejected': eine Freigabe
 // hat bereits gebucht, die nimmt man nicht per Klick zurück. Der bisherige
 // Grund bleibt in `review.wiedereroeffnet` (Doppel-Gründe → `hold`, precheckOf).
-const DECISIONS = new Set(['approve', 'reject', 'hold', 'unhold', 'reopen']);
+// 'ean_korrektur_verwerfen' (Prüfrunde 06.10.2026): ein Mensch nimmt die
+// Barcode-Korrektur der Morgenrunde zurück („die gespeicherte Nummer stimmt").
+// Setzt nur `eanKorrekturVerworfen` — danach gilt wieder `ean` in Runde,
+// Konsole und jeder künftigen Doppel-Prüfung (werte.eanKorrekturOf), und die
+// Runde korrigiert diese Einreichung nie wieder (werte.eanKorrekturAus).
+// In JEDEM Status: gerade nach einer Freigabe zählt die Nummer für die
+// Wochen-Sperre künftiger Einreichungen. Entscheidet nichts — eine offene
+// Einreichung bleibt offen (die Fotos zeigen ja weiter die andere Nummer:
+// die Konsole hält mit `ean_abweichend`, Freigabe dann mit force + Notiz).
+// Einweg, mit Pflicht-Notiz; `eanKorrektur` bleibt für das Audit stehen.
+const DECISIONS = new Set(['approve', 'reject', 'hold', 'unhold', 'reopen', 'ean_korrektur_verwerfen']);
 
 exports.reviewDecideUploads = onCall({ region: REGION, timeoutSeconds: 120 }, async (req) => {
   const adminUid = assertAdmin(req);
@@ -318,9 +364,11 @@ exports.reviewDecideUploads = onCall({ region: REGION, timeoutSeconds: 120 }, as
   const force = p.force === true;
   if (!ids.length) throw new HttpsError('invalid-argument', 'ids fehlt.');
   if (ids.length > MAX_BATCH) throw new HttpsError('invalid-argument', `Maximal ${MAX_BATCH} IDs pro Aufruf.`);
-  if (!DECISIONS.has(decision)) throw new HttpsError('invalid-argument', 'decision muss approve|reject|hold|unhold sein.');
+  if (!DECISIONS.has(decision)) throw new HttpsError('invalid-argument', 'decision muss approve|reject|hold|unhold|reopen|ean_korrektur_verwerfen sein.');
   if ((decision === 'reject' || decision === 'hold') && !reason) throw new HttpsError('invalid-argument', 'reason fehlt.');
   if (decision === 'reopen' && ids.length > 20) throw new HttpsError('invalid-argument', 'Rücknahme nur für einzelne Einreichungen.');
+  if (decision === 'ean_korrektur_verwerfen' && ids.length !== 1) throw new HttpsError('invalid-argument', 'Korrektur nur für eine einzelne Einreichung verwerfen.');
+  if (decision === 'ean_korrektur_verwerfen' && (!note || note.trim().length < 3)) throw new HttpsError('invalid-argument', 'Verwerfen braucht eine Notiz (warum die gespeicherte Nummer stimmt).');
   if (decision === 'approve' && force && !note) throw new HttpsError('invalid-argument', 'force braucht eine Notiz.');
 
   // Chronologisch verarbeiten (älteste zuerst): sonst sieht bei zwei offenen
@@ -360,11 +408,15 @@ exports.reviewDecideUploads = onCall({ region: REGION, timeoutSeconds: 120 }, as
           // Tatsachen JETZT: alle Einreichungen derselben effektiven EAN (Reads
           // in der Transaktion, damit ein paralleler Approve derselben EAN kollidiert)
           // — und unter der Nummer vom Barcode-Foto, wenn sie abweicht.
-          const others = row.anzeigeEan ? await nachbarnInTx(tx, row.anzeigeEan, id) : [];
+          // Über alle Nummern der Zeile (06.10.2026): dieselben Treffer liefern
+          // die Nachbarn der effektiven EAN und die VERWANDTEN Einreichungen.
+          const docs = await eanDocsInTx(tx, nummernVon(row));
+          const others = row.anzeigeEan ? nachbarnAus(docs, row.anzeigeEan, id) : [];
+          const verwandteRows = verwandteAus(docs, row, id);
           const fotoEan = row.eanFoto && row.eanFoto.art === 'abweichend' ? row.eanFoto.gelesen : null;
           const fotoEanRows = fotoEan ? await nachbarnInTx(tx, fotoEan, id) : null;
           // `row` aus der Transaktion trägt `rundeOffen` (Befunde der Morgenrunde) — precheckOf hält damit an.
-          const precheck = precheckOf(row, others, { fotoEanRows });
+          const precheck = precheckOf(row, others, { fotoEanRows, verwandteRows });
           if (precheck.verdict !== 'ok' && !force) {
             return { id, outcome: 'blocked', reason: precheck.reasons[0] || precheck.verdict, precheck };
           }
@@ -398,6 +450,21 @@ exports.reviewDecideUploads = onCall({ region: REGION, timeoutSeconds: 120 }, as
           if (row.status !== 'pending') return { id, outcome: 'skipped', reason: `status_${row.status}` };
           tx.update(ref, { holdReasons: [...new Set([...(row.holdReasons || []), reason])], reviewNote: note || noteFor(reason, { note }), reviewedAt: ts, reviewedBy: adminUid, updatedAt: ts });
           return { id, outcome: 'held', reason };
+        }
+
+        if (decision === 'ean_korrektur_verwerfen') {
+          const x = snap.data() || {};
+          const korrigiert = eanKorrekturOf(x);
+          if (!korrigiert) return { id, outcome: 'skipped', reason: eanKorrekturVerworfen(x) ? 'schon_verworfen' : 'keine_korrektur' };
+          tx.update(ref, {
+            eanKorrekturVerworfen: {
+              by: adminUid, at: ts, notiz: note.trim(),
+              // Was verworfen wurde und in welchem Zustand — fürs Audit.
+              ean: korrigiert, vorher: String(x.ean).replace(/\D/g, '').slice(0, 14), status: row.status,
+            },
+            updatedAt: ts,
+          });
+          return { id, outcome: 'korrektur_verworfen', ean: korrigiert };
         }
 
         if (decision === 'reopen') {
@@ -851,12 +918,17 @@ exports.reviewCases = onCall({ region: REGION, memory: '512MiB', timeoutSeconds:
   const rows = present.map(rowOf);
   // Auch unter der Nummer vom Barcode-Foto, wo sie abweicht (02.10.2026).
   const fotoEan = (r) => (r.eanFoto && r.eanFoto.art === 'abweichend' ? r.eanFoto.gelesen : null);
-  const eans = [...new Set([...rows.map((r) => r.anzeigeEan), ...rows.map(fotoEan)].filter(Boolean))];
+  // Alle Nummern (bei korrigierter auch die gespeicherte): verwandte Einreichungen (06.10.2026).
+  const eans = [...new Set([...rows.flatMap(nummernVon), ...rows.map(fotoEan)].filter(Boolean))];
   const [byEan, sperren] = await Promise.all([eans.length ? loadByEans(eans) : new Map(), ladeSperren(db)]);
   const cases = await Promise.all(present.map(async (s, i) => {
     const row = rows[i];
     const nachbarn = nachbarnVon(byEan, row.anzeigeEan);
-    const pre = precheckFuerFall(row, nachbarn, { kontoSperre: kontoSperreVon(sperren, row.userId), fotoEanRows: fotoEan(row) ? nachbarnVon(byEan, fotoEan(row)) : null });
+    const pre = precheckFuerFall(row, nachbarn, {
+      kontoSperre: kontoSperreVon(sperren, row.userId),
+      fotoEanRows: fotoEan(row) ? nachbarnVon(byEan, fotoEan(row)) : null,
+      verwandteRows: verwandteVon(byEan, row),
+    });
     const defekt = new Set(row.bildDefekt.map((b) => b.slot));
     const bilder = await Promise.all(REQUIRED_STEPS_ORDER.map(async (step) => {
       const path = row.images && row.images[step];
@@ -1109,7 +1181,8 @@ exports.fotoRundeTaeglich = onSchedule(
   async () => {
     const cfg = (await db.doc('cashback_config/v1').get()).data() || {};
     const scharf = cfg.fotoWorker === true;
-    const bericht = await taeglicheRunde({ dryRun: !scharf, projekt: PROJEKT, ausloeser: 'zeitplan', preisBildschirmRegel: cfg.preisBildschirmRegel ?? null, preisBelegRegel: cfg.preisBelegRegel ?? null });
+    // Schalter der Barcode-Korrektur aus demselben Lesen (nur true wendet an).
+    const bericht = await taeglicheRunde({ dryRun: !scharf, projekt: PROJEKT, ausloeser: 'zeitplan', preisBildschirmRegel: cfg.preisBildschirmRegel ?? null, preisBelegRegel: cfg.preisBelegRegel ?? null, barcodeKorrektur: cfg.barcodeKorrektur ?? null });
     logger.info(scharf ? 'Morgenrunde scharf gelaufen' : 'Morgenrunde als Trockenlauf (Schalter fotoWorker steht nicht auf true)', { lauf: bericht.lauf });
   },
 );
@@ -1131,7 +1204,7 @@ exports.fotoRundeManuell = onRequest(
     }
     const cfg = (await db.doc('cashback_config/v1').get()).data() || {};
     const scharf = req.query.scharf === '1' && cfg.fotoWorker === true;
-    const bericht = await taeglicheRunde({ dryRun: !scharf, projekt: PROJEKT, ausloeser: 'manuell', preisBildschirmRegel: cfg.preisBildschirmRegel ?? null, preisBelegRegel: cfg.preisBelegRegel ?? null });
+    const bericht = await taeglicheRunde({ dryRun: !scharf, projekt: PROJEKT, ausloeser: 'manuell', preisBildschirmRegel: cfg.preisBildschirmRegel ?? null, preisBelegRegel: cfg.preisBelegRegel ?? null, barcodeKorrektur: cfg.barcodeKorrektur ?? null });
     // Nur Zahlen zurück — die Listen (Einreichungs-IDs beginnen mit der uid)
     // stehen im Bericht in Firestore und im Dashboard, nicht in einer HTTP-Antwort.
     const { lauf, dryRun, geprueft, freigegeben, abgelehnt, offen, gebuchtCents, warnungen: warn } = bericht;

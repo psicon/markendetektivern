@@ -29,7 +29,7 @@ const zahlDe = (n) => Number(n).toLocaleString('de-DE');
  * @param {Array<{id:string, kind:string, active:boolean, startAt:number, endAt:number, budgetRemainingCents?:number, budgetTotalCents?:number}>} k.aktionen
  * @param {{eingeschaltet:boolean, laeufeLetzte48h:number}} k.zweitpruefung
  * @param {{inPruefung:number, aeltesteTage:number|null, letzte24h:{gesamt:number, ohneAktion:number}}} k.bons
- * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number, aeltesteOffenTage?:number|null, fotoAbgleichGescheitert?:boolean, kontoSperrenUnlesbar?:boolean, eanHaltenNeu?:number, haltBefundNichtGespeichert?:number, eanFotoNichtGespeichert?:number, preisQuelleBefragt?:number, preisQuelleOhneAntwort?:number, preisBildschirmHalten?:number, preisBildschirmTrotzBon?:number, preisBildschirmBonWiderspruch?:number, preisBildschirmSchalterUnbekannt?:string|null, preisBelegSchalterUnbekannt?:string|null, preisKopfNichtAbrufbar?:number, preisBildschirmScharf?:boolean, preisBelegHalten?:number, preisBelegKassenbon?:number, preisBelegOhneAntwort?:number, preisBelegMaerkteUnlesbar?:boolean}} k.runde
+ * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number, aeltesteOffenTage?:number|null, fotoAbgleichGescheitert?:boolean, kontoSperrenUnlesbar?:boolean, eanHaltenNeu?:number, haltBefundNichtGespeichert?:number, eanFotoNichtGespeichert?:number, preisQuelleBefragt?:number, preisQuelleOhneAntwort?:number, preisBildschirmHalten?:number, preisBildschirmTrotzBon?:number, preisBildschirmBonWiderspruch?:number, preisBildschirmSchalterUnbekannt?:string|null, preisBelegSchalterUnbekannt?:string|null, preisKopfNichtAbrufbar?:number, preisBildschirmScharf?:boolean, preisBelegHalten?:number, preisBelegKassenbon?:number, preisBelegOhneAntwort?:number, preisBelegMaerkteUnlesbar?:boolean, korrekturGebremst?:{anzahl:number, geprueft:number, alle?:number, vermerkt?:boolean}|null, korrekturNichtGespeichert?:number, korrekturGebremstWartet?:number, korrekturAufgeschoben?:number, korrekturSchalterUnbekannt?:string|null, korrekturAltcodeWartet?:number, korrekturLeserFehler?:number}} k.runde
  * @param {{bild:boolean, gesamt:boolean, text:string[], gelb?:Array<{code:string, text:string}>}} k.notbremse
  * @param {{alt:string|null, neu:string}} k.regelVersion
  * @param {{scharf:boolean, bericht:object|null, abgebrochen?:boolean, laeuftNoch?:boolean, unbekannt?:boolean}} [k.bonRunde]
@@ -198,6 +198,49 @@ function warnungen(k) {
       rot('preisfoto_kopf_nicht_abrufbar', `Bei ${ohneKopf} von ${befragt} geprüften Einreichungen war der Anfang des Preisfotos nicht abrufbar (Storage/Zeitgrenze) — mit scharfer Regel gibt die Runde sie nicht frei, heute also kaum Freigaben. Storage prüfen; die Fälle sind morgen wieder dran.`);
     } else if (ohneKopf >= 3) {
       gelb('preisfoto_kopf_nicht_abrufbar', `Bei ${ohneKopf} Einreichungen war der Anfang des Preisfotos nicht abrufbar (Storage/Zeitgrenze) — mit scharfer Regel bleiben sie liegen (Kassenbon nur, wenn der Lesedienst dort keinen Bon sah), bis die Runde ihn lesen kann.`);
+    }
+    // Barcode-Korrektur (Entscheidung Patrick 06.10.2026). Korrigiert die Runde
+    // auffällig viel, liegt es eher am Modell — dann korrigiert sie heute gar
+    // nichts (fotoRundeRegeln.korrekturBremse), die Fälle liegen wie früher.
+    // Gerechnet nur über die heute NEU geprüften Fälle (Prüfrunde 06.10.2026):
+    // der liegende Bestand besteht fast nur aus Abweichungen und verzerrte den Anteil.
+    if (r.korrekturGebremst) {
+      const { anzahl, geprueft, vermerkt } = r.korrekturGebremst;
+      const anteil = `${anzahl} von ${geprueft} neu geprüften Barcode-Nummern korrigiert (${geprueft ? Math.round((100 * anzahl) / geprueft) : 0} %, normal unter 5 %)`;
+      rot('barcode_korrektur_gebremst', vermerkt === false
+        ? `Die Runde hätte heute ${anteil} — eher ein Lesefehler des Modells. Keine davon korrigiert. Trockenlauf bzw. Schalter aus: nichts dauerhaft vermerkt, eine spätere Korrektur dieser Fälle braucht eine neue doppelte Lesung.`
+        : `Die Runde hätte heute ${anteil} — eher ein Lesefehler des Modells. Keine davon wurde korrigiert, auch später nicht automatisch: die Fälle warten auf dich.`);
+    }
+    // Von einer FRÜHEREN Notbremse angehaltene Fälle liegen noch (sie werden
+    // nie automatisch korrigiert, Prüfrunde 06.10.2026) — erinnern, bis entschieden.
+    if (r.korrekturGebremstWartet > 0) {
+      gelb('barcode_korrektur_gebremst_wartet', `${r.korrekturGebremstWartet} Fälle hat eine frühere Notbremse der Barcode-Korrektur angehalten — die Runde korrigiert sie nicht mehr selbst, sie warten auf dich.`);
+    }
+    // Befunde des ALTEN Codes ohne Vermerk (werte.eanFotoHalteQuellen,
+    // Prüfrunde 06.10.2026): er lief nach dem 06.10. noch einmal. Diese Fälle
+    // korrigiert die Runde nie selbst — ob ein früheres `unsicher` überschrieben
+    // wurde, ist nicht mehr zu sehen.
+    if (r.korrekturAltcodeWartet > 0) {
+      gelb('barcode_altcode_wartet', `${r.korrekturAltcodeWartet} Fälle tragen einen Barcode-Befund des alten Codes ohne Vermerk (er lief nach dem 06.10. noch einmal) — die Runde korrigiert sie nicht selbst, sie warten auf dich.`);
+    }
+    // Strichcode-Leser (Pflicht-Zeuge der Korrektur) gescheitert: Download,
+    // Laden der WASM-Datei oder Zeit. Dort keine Korrektur — fällt er ganz
+    // aus, korrigiert die Runde still gar nichts mehr.
+    if (r.korrekturLeserFehler > 0) {
+      gelb('barcode_leser_fehler', `Der Strichcode-Leser ist bei ${r.korrekturLeserFehler} Korrektur-Kandidaten gescheitert — dort keine Barcode-Korrektur, die Fälle liegen wie vorher. Häuft sich das: Logs von fotoRundeTaeglich ansehen.`);
+    }
+    if (r.korrekturNichtGespeichert > 0) {
+      gelb('barcode_korrektur_nicht_gespeichert', `${r.korrekturNichtGespeichert} Barcode-Korrekturen konnten nicht gespeichert werden — diese Fälle bleiben wie vor der Korrektur liegen und sind morgen wieder dran.`);
+    }
+    // Mehr Korrekturen aus früheren Läufen als die Tagesgrenze (fotoRundeRegeln.KORREKTUR_ALT_MAX).
+    if (r.korrekturAufgeschoben > 0) {
+      gelb('barcode_korrektur_aufgeschoben', `${r.korrekturAufgeschoben} Barcode-Korrekturen aus früheren Läufen liegen über der Tagesgrenze — sie folgen in den nächsten Läufen. Ungewöhnlich viele: lief die Korrektur einige Tage nicht?`);
+    }
+    // Schalter `barcodeKorrektur`: nur true wendet an (Prüfrunde 06.10.2026).
+    if (r.korrekturSchalterUnbekannt) {
+      gelb('barcode_korrektur_schalter_unbekannt', r.korrekturSchalterUnbekannt === 'nicht lesbar'
+        ? 'Der Schalter barcodeKorrektur war nicht lesbar — heute keine Barcode-Korrektur, die Fälle liegen wie vorher.'
+        : `Schalter barcodeKorrektur hat den Wert ${r.korrekturSchalterUnbekannt} — gilt als aus. An nur mit true (Typ boolean), aus mit false.`);
     }
   }
   for (const t of (k.notbremse?.text || [])) rot('notbremse', `Notbremse: ${t}`);

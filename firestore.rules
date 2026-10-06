@@ -170,7 +170,12 @@ service cloud.firestore {
         'eanRescueAt', 'eanRescueQuelle',
         // Nummer vom Barcode-Foto (Morgenrunde, 02.10.2026) — die Prüfkonsole
         // hält bei Abweichung an; ein mitgeschickter Wert gäbe „stimmt" vor.
-        'eanFotoOcr',
+        // `eanKorrektur` (06.10.2026): die korrigierte EAN gilt in Runde und
+        // Konsole VOR `ean` — mitgeschickt wäre sie eine selbst gewählte EAN
+        // ohne jeden Abgleich. `eanKorrekturVerworfen`: ein Mensch hat die
+        // Korrektur in der Prüfkonsole zurückgenommen — mitgeschickt schaltete
+        // die Korrektur für diese Einreichung ab.
+        'eanFotoOcr', 'eanKorrektur', 'eanKorrekturVerworfen',
         // Prüfung (Morgenrunde + Prüfkonsole). `review` umfasst auch
         // `review.rundeOffen` (Halte-Grund der Morgenrunde, 02.10.2026) — die
         // Prüfkonsole hält damit an; ein mitgeschickter leerer Eintrag gäbe vor,

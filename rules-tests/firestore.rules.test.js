@@ -492,6 +492,10 @@ describe('Ratings, Feedback, Telemetrie, Push-Tokens', () => {
       exifGps: { lat: 1, lon: 2 },
       // 02.10.2026: wer „Foto-Nummer stimmt" vorgibt, umginge die Prüfung der Konsole.
       eanFotoOcr: { ean: '4061458000001', befund: 'gleich' },
+      // 06.10.2026: die korrigierte EAN gilt vor `ean` — vorbelegt wäre sie eine EAN ohne Abgleich.
+      eanKorrektur: { ean: '4061458000001', vorher: '4000417025005', aus: 'heute' },
+      // 06.10.2026 (Prüfrunde): schaltete die Korrektur der eigenen Einreichung ab.
+      eanKorrekturVerworfen: { by: 'alice', notiz: 'x' },
     };
     for (const [feld, wert] of Object.entries(faelle)) {
       await assertFails(setDoc(doc(alice(), `crowd_uploads/angriff_${feld}`), { ...appAnlage(), [feld]: wert }));
@@ -514,7 +518,7 @@ describe('Ratings, Feedback, Telemetrie, Push-Tokens', () => {
     'priceRescueOcr', 'manufacturerRescueOcr', 'rescueAt', 'rescueQuelle',
     'productNameRescueAt', 'productNameRescueQuelle',
     'eanRescueAt', 'eanRescueQuelle',
-    'eanFotoOcr',
+    'eanFotoOcr', 'eanKorrektur', 'eanKorrekturVerworfen',
     'review', 'reviewedBy', 'reviewedAt', 'reviewNote', 'holdReasons',
     'rejectReason', 'loseWare', 'frischwareOhneAngaben',
     'rewardResult', 'rewardCents', 'rewardNotCreditedReason',
@@ -524,8 +528,8 @@ describe('Ratings, Feedback, Telemetrie, Push-Tokens', () => {
     'journeyLocationMatch', 'userLocationBackfilled',
   ];
 
-  test('ANGRIFF: JEDES Feld der Sperrliste beim Anlegen scheitert (48 Felder)', async () => {
-    expect(SERVER_FELDER).toHaveLength(48);
+  test('ANGRIFF: JEDES Feld der Sperrliste beim Anlegen scheitert (50 Felder)', async () => {
+    expect(SERVER_FELDER).toHaveLength(50);
     expect(new Set(SERVER_FELDER).size).toBe(SERVER_FELDER.length);
     for (const feld of SERVER_FELDER) {
       await assertFails(setDoc(doc(alice(), `crowd_uploads/liste_${feld}`), { ...appAnlage(), [feld]: 'x' }));

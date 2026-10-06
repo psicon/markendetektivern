@@ -11,7 +11,10 @@
  * gegen Doppel geprüft.
  */
 const { evaluateDuplicate, completenessCheck, ms } = require('./duplicatePolicy');
-const { eanOf, nameOf, preisOf, policyOf, herstellerAnzeige, vollstaendigkeitOf, herkunftOf, eanFotoBefund, eanSchluessel, EAN_HALTEN } = require('./werte');
+const {
+  eanOf, nameOf, preisOf, policyOf, herstellerAnzeige, vollstaendigkeitOf, herkunftOf, eanFotoBefund, eanSchluessel, EAN_HALTEN,
+  eanAbgleichOf, eanKorrekturOf, durchKorrekturErledigt, eanNummern, teilenNummer, eanKorrekturVerworfen,
+} = require('./werte');
 const { RUNDE_SPERREND, DOPPEL_GRUENDE } = require('./fotoRundeRegeln');
 const { PREIS_BILDSCHIRM, PREIS_BILDSCHIRM_UNSICHER, PREIS_BELEG_UNSICHER } = require('./preisBildschirm');
 
@@ -53,13 +56,19 @@ function bildDefektOf(x) {
  *  - Ergibt die Neuberechnung `zweifelhaft` (falsche Prüfziffer, weit weg von
  *    der gespeicherten Nummer), kann die Konsole keine zweite Lesung machen →
  *    `unsicher` (fail-closed).
+ *  - Korrigiert (Morgenrunde, `eanKorrektur`, 06.10.2026): verglichen wird mit
+ *    der KORRIGIERTEN Nummer (werte.eanAbgleichOf) — die Foto-Nummer ist sie,
+ *    also `gleich`. Der Befund, aus dem die Korrektur entstand, hält nicht mehr
+ *    (werte.durchKorrekturErledigt); ein späterer gegen die korrigierte Nummer
+ *    schon. Steht `befund: 'korrigiert'` ohne gültige Korrektur da, ergibt die
+ *    Neuberechnung gegen die gespeicherte Nummer `abweichend` (fail-closed).
  */
 function eanFotoZeile(x) {
   const o = x.eanFotoOcr;
   if (!o || typeof o !== 'object') return null;
-  const b = eanFotoBefund(x.ean, o.ean);
+  const b = eanFotoBefund(eanAbgleichOf(x), o.ean);
   let art = b.art;
-  if (EAN_HALTEN.has(o.befund)) art = o.befund === 'abweichend' && b.art === 'abweichend' ? 'abweichend' : 'unsicher';
+  if (EAN_HALTEN.has(o.befund) && !durchKorrekturErledigt(x, o)) art = o.befund === 'abweichend' && b.art === 'abweichend' ? 'abweichend' : 'unsicher';
   else if (b.art === 'zweifelhaft') art = 'unsicher';
   const zweit = typeof o.zweit === 'string' ? o.zweit.replace(/\D/g, '').slice(0, 14) || null : null;
   return {
@@ -68,6 +77,41 @@ function eanFotoZeile(x) {
     ...(typeof o.bestaetigt === 'boolean' ? { bestaetigt: o.bestaetigt } : {}),
     at: ms(o.at),
   };
+}
+
+/**
+ * Korrigierte Barcode-Nummer (`eanKorrektur`, nur Server) — bereinigt, nur
+ * wenn gültig (werte.eanKorrekturOf), sonst null. Eine verworfene Korrektur
+ * (`eanKorrekturVerworfen`) gilt nicht mehr; sie steht in eanKorrekturVerworfenZeile.
+ */
+function eanKorrekturZeile(x) {
+  const neu = eanKorrekturOf(x);
+  if (!neu) return null;
+  const k = x.eanKorrektur;
+  // Strichcode-Leser (Pflicht-Zeuge, Prüfrunde 06.10.2026) — ohne ihn gäbe es `neu` nicht (eanKorrekturOf).
+  const z = k.zeuge && typeof k.zeuge === 'object' ? k.zeuge : null;
+  return {
+    ean: neu,
+    vorher: String(x.ean).replace(/\D/g, '').slice(0, 14),
+    aus: k.aus === 'heute' || k.aus === 'vorbefund' ? k.aus : null,
+    lauf: typeof k.lauf === 'string' ? k.lauf.slice(0, 40) : null,
+    at: ms(k.at),
+    zeuge: z ? {
+      gelesen: (Array.isArray(z.gelesen) ? z.gelesen : []).map((g) => String(g).replace(/\D/g, '').slice(0, 14)).filter(Boolean).slice(0, 4),
+      leser: typeof z.leser === 'string' ? z.leser.slice(0, 40) : null,
+    } : null,
+  };
+}
+
+/**
+ * Von einem Menschen verworfene Barcode-Korrektur (`eanKorrekturVerworfen`,
+ * Prüfkonsole, Prüfrunde 06.10.2026) — fürs Audit in der Anzeige, sonst null.
+ */
+function eanKorrekturVerworfenZeile(x) {
+  if (!eanKorrekturVerworfen(x)) return null;
+  const v = x.eanKorrekturVerworfen;
+  const nr = (w) => (w == null ? null : String(w).replace(/\D/g, '').slice(0, 14) || null);
+  return { ean: nr(v.ean), vorher: nr(v.vorher), at: ms(v.at), notiz: typeof v.notiz === 'string' ? v.notiz.slice(0, 200) : null };
 }
 
 const SPERREND = new Set(RUNDE_SPERREND);
@@ -152,6 +196,11 @@ function rowOf(d) {
     anzeigeName: nameOf(x),
     anzeigeEan: eanOf(x),
     eanFoto: eanFotoZeile(x),
+    // Von der Morgenrunde korrigierte Nummer (06.10.2026) — `ean` oben bleibt
+    // die gespeicherte; precheckOf prüft die Doppel-Regel auch unter ihr.
+    eanKorrektur: eanKorrekturZeile(x),
+    // Von einem Menschen verworfen (Prüfrunde 06.10.2026): es gilt wieder `ean`.
+    eanKorrekturVerworfen: eanKorrekturVerworfenZeile(x),
     herkunft,
     images: x.images ?? {},
     bildDefekt: bildDefektOf(x),
@@ -233,6 +282,18 @@ const OHNE_DOPPEL = { verdict: 'ok', reason: null, priorId: null, priorUserId: n
  *    (Prüfrunde 2, 02.10.2026). Freigabe dann nur mit force + Notiz. Der
  *    nächste Lauf aktualisiert oder entfernt den Eintrag; jede Entscheidung
  *    ersetzt `review` und nimmt ihn mit.
+ *  - Korrigierte Barcode-Nummer (`row.eanKorrektur`, Morgenrunde 06.10.2026):
+ *    `sameEanRows` und die Doppel-Regel laufen mit der korrigierten (effektiven)
+ *    EAN. Mit `verwandteRows` (alle Einreichungen, die mit dieser eine Nummer
+ *    teilen — effektiv oder ursprünglich gespeichert, je Seite; verwandteVon/
+ *    verwandteAus) wird sie ein zweites Mal gerechnet (`dupAlt`). Sperrt oder
+ *    hält sie dort, während die Gruppe der effektiven EAN nichts fand → `hold`
+ *    (`ean_alt_doppelt`) — sonst schöbe ein fremder Strichcode auf dem
+ *    Barcode-Foto ein diese Woche schon bezahltes Produkt aus der Sperre; das
+ *    gilt auch für eine Einreichung OHNE Korrektur, deren Nummer die
+ *    ursprüngliche einer früheren, korrigierten ist (Prüfrunde 06.10.2026).
+ *    Korrigiert, aber ohne `verwandteRows` → `hold` (`ean_alt_ungeprueft`,
+ *    fail-closed).
  *  - Zurückgeholte Ablehnung als Doppel bzw. mit wiederverwendeten Fotos
  *    (`row.wiedereroeffnet`, DOPPEL_GRUENDE) → `hold` mit
  *    `zurueckgeholt_doppel` (Schlussprüfung 03.10.2026). Das Zurückholen
@@ -244,7 +305,7 @@ const OHNE_DOPPEL = { verdict: 'ok', reason: null, priorId: null, priorUserId: n
  *    (Befund „ablehnen") bzw. `preis_bildschirm_unsicher` (Befund „halten")
  *    bzw. `preis_beleg_unsicher` (Befund „halten" aus dem Preisbeleg, 05.10.2026).
  */
-function precheckOf(row, sameEanRows, { kontoSperre = null, fotoEanRows = null } = {}) {
+function precheckOf(row, sameEanRows, { kontoSperre = null, fotoEanRows = null, verwandteRows = null } = {}) {
   const completeness = completenessCheck(row._komplett, REQUIRED_STEPS);
   const others = (sameEanRows || []).filter((r) => r.id !== row.id).map((r) => r._policy);
   const dup = row._policy.ean ? evaluateDuplicate(row._policy, others) : OHNE_DOPPEL;
@@ -264,6 +325,17 @@ function precheckOf(row, sameEanRows, { kontoSperre = null, fotoEanRows = null }
       dupFoto = evaluateDuplicate({ ...row._policy, ean: ef.gelesen }, fotoEanRows.filter((r) => r.id !== row.id).map((r) => r._policy));
       if (dupFoto.verdict === 'locked') reasons.push('foto_nummer_doppelt');
     }
+    if (verdict === 'ok') verdict = 'hold';
+  }
+  let dupAlt = null;
+  if (verwandteRows && row._policy.ean) {
+    dupAlt = evaluateDuplicate(row._policy, verwandteRows.filter((r) => r.id !== row.id).map((r) => r._policy));
+    if (dupAlt.verdict !== 'ok' && dup.verdict === 'ok') {
+      reasons.push('ean_alt_doppelt');
+      if (verdict === 'ok') verdict = 'hold';
+    }
+  } else if (row.eanKorrektur) {
+    reasons.push('ean_alt_ungeprueft');
     if (verdict === 'ok') verdict = 'hold';
   }
   const runde = row.status === 'pending' && row.rundeOffen ? row.rundeOffen : null;
@@ -288,7 +360,7 @@ function precheckOf(row, sameEanRows, { kontoSperre = null, fotoEanRows = null }
   const pbRunde = runde && runde.preisBildschirm ? runde.preisBildschirm : null;
   const pb = pbRunde ? pbRunde.befund : null;
   if (pb) hinweise.push(pb === 'ablehnen' ? PREIS_BILDSCHIRM : pbRunde.art === 'beleg' ? PREIS_BELEG_UNSICHER : PREIS_BILDSCHIRM_UNSICHER);
-  return { verdict, reasons, missing: completeness.missing, dup, hinweise, ...(dupFoto ? { dupFoto } : {}), ...(kontoSperre ? { kontoSperre } : {}) };
+  return { verdict, reasons, missing: completeness.missing, dup, hinweise, ...(dupFoto ? { dupFoto } : {}), ...(dupAlt ? { dupAlt } : {}), ...(kontoSperre ? { kontoSperre } : {}) };
 }
 
 /**
@@ -332,26 +404,64 @@ function nachbarnAus(docs, ean, ohneId) {
   return eindeutigeZeilen(docs).filter((r) => r.id !== ohneId && eanSchluessel(r.anzeigeEan) === key);
 }
 
-/** Treffer beider Abfragen → Zeilen je GTIN (Schlüssel: werte.eanSchluessel). Nachschlagen mit nachbarnVon. */
+/**
+ * Alle Einreichungen aus den Treffern, die mit `row` eine Nummer teilen
+ * (werte.teilenNummer: effektive oder ursprünglich gespeicherte, je Seite) —
+ * die Eingabe `verwandteRows` von precheckOf. Die Treffer müssen über ALLE
+ * Nummern von `row` abgefragt sein (anzeigeEan und eanKorrektur.vorher), über
+ * die Felder `ean`, `eanRescueOcr`, `eanKorrektur.ean`.
+ */
+function verwandteAus(docs, row, ohneId) {
+  return eindeutigeZeilen(docs).filter((r) => r.id !== ohneId && teilenNummer(r._policy, row._policy));
+}
+
+/**
+ * Treffer der Abfragen → Zeilen je GTIN (Schlüssel: werte.eanSchluessel), jede
+ * Zeile unter JEDER ihrer Nummern (werte.eanNummern: effektiv und — nach einer
+ * Korrektur — ursprünglich gespeichert). Nachschlagen: nachbarnVon (nur
+ * effektive EAN, für die Doppel-Regel) bzw. verwandteVon (alle Nummern).
+ */
 function gruppiereNachEan(docs) {
   const out = new Map();
   for (const r of eindeutigeZeilen(docs)) {
-    const key = eanSchluessel(r.anzeigeEan);
-    if (!key) continue;
-    if (!out.has(key)) out.set(key, []);
-    out.get(key).push(r);
+    for (const key of eanNummern(r._policy)) {
+      if (!out.has(key)) out.set(key, []);
+      out.get(key).push(r);
+    }
   }
   return out;
 }
 
-/** Einträge einer EAN aus gruppiereNachEan/eanIndex — in jeder Schreibweise. */
+/** Einträge einer EAN aus gruppiereNachEan/eanIndex, deren EFFEKTIVE EAN sie ist — in jeder Schreibweise. */
 function nachbarnVon(byEan, ean) {
   const key = eanSchluessel(ean);
-  return (key && byEan.get(key)) || [];
+  return ((key && byEan.get(key)) || []).filter((r) => eanSchluessel(r._policy ? r._policy.ean : r.ean) === key);
+}
+
+/**
+ * Alle Einträge aus gruppiereNachEan/eanIndex, die mit `row` eine Nummer teilen
+ * (verwandteRows für precheckOf), ohne `row` selbst. Vollständig nur, wenn der
+ * Index über alle Nummern von `row` geladen wurde (loadByEans: anzeigeEan UND
+ * eanKorrektur.vorher; die Warteschlange liest den ganzen Bestand).
+ */
+function verwandteVon(byEan, row) {
+  const gesehen = new Set([row.id]);
+  const out = [];
+  for (const key of eanNummern(row._policy)) {
+    for (const r of byEan.get(key) || []) {
+      if (gesehen.has(r.id)) continue;
+      gesehen.add(r.id);
+      out.push(r);
+    }
+  }
+  return out;
 }
 
 /** Felder, die der EAN-Index der Warteschlange aus dem Bestand liest (select). */
-const INDEX_FELDER = ['userId', 'ean', 'eanRescueOcr', 'marketId', 'status', 'createdAt', 'priceOcr', 'priceRescueOcr', 'manufacturerOcr'];
+// `eanKorrekturVerworfen` gehört dazu: ohne es hielte der Index eine verworfene
+// Korrektur für gültig (werte.eanKorrekturOf) und gruppierte falsch.
+// `eanFotoOcr`: bestätigt abweichende Foto-Nummer einer Freigabe (werte.eanFotoFreigegebenOf, Prüfrunde 06.10.2026).
+const INDEX_FELDER = ['userId', 'ean', 'eanRescueOcr', 'eanKorrektur', 'eanKorrekturVerworfen', 'eanFotoOcr', 'marketId', 'status', 'createdAt', 'priceOcr', 'priceRescueOcr', 'manufacturerOcr'];
 
 /**
  * EAN-Nachbarschafts-Index der Warteschlange aus dem schlanken Bestand.
@@ -365,10 +475,11 @@ function eanIndex(docs) {
   const index = new Map();
   for (const d of docs) {
     const policy = policyOf(d.id, d.data() || {}, d.createTime);
-    const key = eanSchluessel(policy.ean);
-    if (!key) continue;
-    if (!index.has(key)) index.set(key, []);
-    index.get(key).push({ ...policy, _policy: policy });
+    // Unter JEDER Nummer (wie gruppiereNachEan) — nachbarnVon filtert auf die effektive.
+    for (const key of eanNummern(policy)) {
+      if (!index.has(key)) index.set(key, []);
+      index.get(key).push({ ...policy, _policy: policy });
+    }
   }
   return index;
 }
@@ -389,10 +500,11 @@ function baueFotoListe(openDocs, byEan, p, q, kontoSperre = () => null) {
     const pre = precheckOf(r, nachbarnVon(byEan, r.anzeigeEan), {
       kontoSperre: sperre,
       fotoEanRows: r.eanFoto && r.eanFoto.art === 'abweichend' ? nachbarnVon(byEan, r.eanFoto.gelesen) : null,
+      verwandteRows: verwandteVon(byEan, r),
     });
     return {
       id: r.id, userId: r.userId, productName: r.anzeigeName, ean: r.anzeigeEan,
-      nameNachgelesen: r.herkunft.nameQuelle === 'nachgelesen', eanNachgelesen: r.herkunft.eanNachgelesen,
+      nameNachgelesen: r.herkunft.nameQuelle === 'nachgelesen', eanNachgelesen: r.herkunft.eanNachgelesen, eanKorrigiert: !!r.eanKorrektur,
       marketName: r.marketName || r.marketId, createdAt: r.createdAt, campaignId: r.campaignId,
       priceCents: r.priceCents, manufacturer: r.manufacturer, priceImageKind: r.priceImageKindAnzeige,
       stepCount: r.stepCount, verdict: pre.verdict, reasons: pre.reasons, hinweise: pre.hinweise,
@@ -413,5 +525,5 @@ function baueFotoListe(openDocs, byEan, p, q, kontoSperre = () => null) {
 
 module.exports = {
   REQUIRED_STEPS, INDEX_FELDER, safeStatus, rowOf, stripPolicy, precheckOf, precheckFuerFall,
-  nachbarnAus, nachbarnVon, gruppiereNachEan, eanIndex, baueFotoListe, bildDefektOf, eanFotoZeile, rundeOffenOf, wiedereroeffnetOf, preisBildschirmOf,
+  nachbarnAus, nachbarnVon, verwandteAus, verwandteVon, gruppiereNachEan, eanIndex, baueFotoListe, bildDefektOf, eanFotoZeile, rundeOffenOf, wiedereroeffnetOf, preisBildschirmOf, eanKorrekturZeile, eanKorrekturVerworfenZeile,
 };
