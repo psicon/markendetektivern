@@ -51,7 +51,9 @@ Notbremse zurückhält — das steht im Bericht unter `wartetAufDich`.
    Arbeitszeit). Ein Halte-Befund eines früheren Laufs gilt weiter, bis ein
    Mensch in der Konsole entscheidet — außer der Halt erfüllt das Kriterium
    der Barcode-Korrektur (siehe dort). Die Runde
-   legt das Ergebnis in `eanFotoOcr` ab (als Ganzes ersetzt), auch im Trockenlauf.
+   legt das Ergebnis in `eanFotoOcr` ab (als Ganzes ersetzt), auch im
+   Trockenlauf — in einer Transaktion und nur an einer noch OFFENEN
+   Einreichung (Prüfrunde 2 zur Barcode-Korrektur, siehe dort).
    **Barcode korrigieren** (seit 06.10.2026): eine vom Modell zweimal gleich
    gelesene, gültige Foto-Nummer (kein Waagen-Code), die der feste
    Strichcode-Leser auf dem ORIGINAL des Barcode-Fotos bestätigt, wird zur EAN
@@ -222,6 +224,22 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
      Zeit) → KEINE Korrektur, der Fall liegt wie vor dem 06.10.
      (`ean_abweichend`), und der Hinweis nennt, was der Leser las. Das gilt
      für Korrekturen aus heutigen Lesungen UND aus alten Befunden.
+     **Nur F, keine weitere Nummer** (Prüfrunde 2 zur Barcode-Korrektur,
+     06.10.2026; eigene Verschärfung, schwächt keine Vorgabe Patricks ab):
+     liest der Leser neben F eine weitere GTIN G — auch wenn S nicht darunter
+     ist —, bestätigt er nichts (`widerspricht`, `mehrdeutig: true`, Hinweis
+     „mehrere Strichcodes, nicht eindeutig"). Er belegt dann nur, dass F
+     irgendwo auf dem Foto steht; welcher Code zum Produkt gehört, entschieden
+     sonst allein die zwei Lesungen desselben Modells. Ebenso, wenn er so
+     viele Codes liefert, wie er höchstens liefert (`maxNumberOfSymbols` 4,
+     `voll`) — S könnte fehlen. Anlass: Jean Luc Weichkäse (FAzktQbW…_1,
+     gespeichert 4316268678124, Regalfoto) — der Leser liest 42509042 (Deckel)
+     und 4316268688703 (Feta daneben), beide hätten als bestätigt gegolten;
+     Milbona Strudel (nF6dTW1c…) — dazu ein UPC-E aus dem unscharfen
+     Hintergrund. An den 127 Fotos: 3 mit zwei verschiedenen Nummern (2,4 %,
+     eines davon ein Fehllesen der linken Hälfte), keines an der Grenze von
+     4 Treffern. Gilt auch für gespeicherte Korrekturen (`eanKorrekturOf`
+     rechnet mit derselben Regel; am 06.10. stand keine im Bestand).
      Messung 06.10.2026 an 127 echten Barcode-Fotos (Android): 96 gelesen,
      Median 86 ms, höchstens 249 ms je 12-MP-Foto; 91× dieselbe Nummer wie
      OpenCV/Apple Vision, 5× eine andere (bei schlechten Fotos verliest er
@@ -237,9 +255,10 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
      auch bei ausgeschaltetem Schalter (der Vorschlag im Bericht zählt nur,
      was er bestätigt). Die Notbremse zählt weiter die Kandidaten nach den
      Modell-Lesungen (die strengere Wahl). Speicher: der WASM-Speicher wächst
-     beim Lesen eines 12-MP-Fotos um rund 200 MB und schrumpft nicht (gemessen
-     über 127 Fotos: Prozess höchstens 284 MB); die Runde lag zuletzt bei
-     höchstens 29 % von 1 GiB.
+     bei einem baseline-JPEG 4:2:0 um rund 2 Byte je Pixel (48 MP → ~100 MB)
+     und schrumpft nicht (nach allen 127 Fotos 122 MiB, Prozess höchstens
+     284 MB; Prüfrunde 2 korrigiert die frühere Angabe „12 MP → rund
+     200 MB"); die Runde lag zuletzt bei höchstens 29 % von 1 GiB.
      **Obergrenze der Bildgröße** (Prüfrunde 1 zur Barcode-Korrektur,
      06.10.2026): der Speicher wächst mit der PIXELZAHL, und eine weiße Fläche
      komprimiert fast auf nichts — 324 MP in 4,9 MB trieben den Leser auf
@@ -254,8 +273,36 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
      höchstens 64 MP (`MAX_PIXEL`). Sonst Fehler (`bild_zu_gross: B×H`,
      `bildformat: …`, `bildkopf: …`) → keine Korrektur, gelbe Warnung
      `barcode_leser_fehler`. Gemessen: 64 MP → Prozess 253 MB; größtes
-     Barcode-Foto in Produktion 48 MP (6000 × 8000, alle 4.459), die 127
-     Messfotos höchstens 12,5 MP — alle 96 Treffer bleiben.
+     Barcode-Foto in Produktion 48 MP (6000 × 8000, alle 4.459); unter den
+     127 Messfotos ist eines mit 48 MP, eines mit 16 MP, der Rest höchstens
+     12,6 MP (nachgezählt in Prüfrunde 2; vorher stand hier „höchstens
+     12,5 MP") — alle 96 Treffer bleiben.
+     **Die Pixelgrenze allein reicht nicht** (Prüfrunde 2 zur
+     Barcode-Korrektur, 06.10.2026): der Speicher hängt an der KODIERUNG.
+     stb_image dekodiert im WASM-Speicher immer in voller Auflösung, ein
+     progressives JPEG hält alle Koeffizienten, CMYK hat vier Kanäle, ein PNG
+     mit 16 Bit RGBA acht Byte je Pixel, und der Entpack-Puffer wächst durch
+     Verdoppeln. Gemessen (Wachstum des WASM-Speichers je Pixel, frischer
+     Prozess, 12/24/48 MP): JPEG baseline 4:2:0 ≤ 2,2 B/px, 4:4:4 3,7, CMYK
+     4,5; progressiv 4:4:4 10,5, CMYK 12,8; PNG RGB 8 Bit 8,1, RGBA 8 Bit
+     interlaced 15,9, RGBA 16 Bit interlaced 32. Mit 64 MP und unter 8 MB:
+     progressiv CMYK 952 MB, PNG RGBA 16 Bit 1,4 GB (Messung der Prüfrunde) —
+     die Runde wäre in Schritt 4c über 1 GiB gelaufen, jeden Morgen erneut.
+     Deshalb schätzt `strichcode.dekodierBytes` aus dem Kopf eine OBERE Grenze
+     (JPEG: (B+16)(H+16) × (Kanäle × 1,25, progressiv 3,75, + 1); PNG:
+     (B·H+H) × (4,5 × Kanäle × Byte je Wert + 2); unbekannte Angaben wie die
+     teuerste Variante), und nur bis `MAX_DEKODIER_BYTES` = 320 MB wird
+     dekodiert, sonst Fehler `bild_zu_aufwendig: B×H …`. Nachgemessen an
+     je einem Bild GENAU an der Grenze für 14 Kodierungen: WASM-Speicher
+     höchstens 289 MiB, Prozess höchstens 362 MB; drei Grenzbilder
+     gleichzeitig 413 MB (der WASM-Speicher wird wiederverwendet, er addiert
+     sich nicht). Zusammen mit der Runde (~300 MB) bleibt die Instanz unter
+     ~700 MB. Alle 127 echten Fotos (baseline 4:2:0, bis 48 MP; das größte
+     Schätzung 229 MB) passieren die Prüfung, alle 96 Treffer bleiben; ein
+     baseline-JPEG mit 64 MP gerade noch (305 MB). Ein Test vergleicht die
+     Schätzung mit dem echten WASM-Wachstum (`__tests__/strichcode.test.js`).
+     Wer zxing-wasm aktualisiert oder die Leseoptionen ändert, misst die
+     Faktoren neu (Messweg im Kommentar von `src/strichcode.js`).
      Bibliotheks-Fallen: Formatnamen MIT Bindestrich (`'EAN-13'`; `'EAN13'`
      liefert stumm nichts); die WASM-Datei IMMER aus dem Paket laden (ohne
      `wasmBinary` holt die Bibliothek sie zur Laufzeit von einem CDN).
@@ -438,6 +485,16 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
     Lesungen (`ean_unsicher` bleibt beim Menschen); bis dahin ersetzte eine
     heute bestätigte Abweichung JEDEN alten Befund und machte ihn am Folgetag
     korrigierbar. Bericht: `eanKorrektur.uneinigUeberTage`.
+    **Ein `unsicher` aus IRGENDEINER Quelle gewinnt** (`werte.eanFotoVorbefund`,
+    Prüfrunde 2 zur Barcode-Korrektur, 06.10.2026). Bis dahin kam die Art
+    des alten Befunds immer aus `eanFotoOcr`: scheiterte das Speichern des
+    `unsicher` (es stand nur im Rückfall `review.rundeOffen`), sperrte es die
+    Korrektur genau einen Tag; Schritt 7b schrieb den Rückfall danach aus dem
+    `abweichend` von `eanFotoOcr` neu, und an einem der nächsten Tage
+    korrigierte die Runde doch (mit dem Test-Harness nachgestellt: Tag 2
+    zweimal F oder unlesbar, Tag 3 Leser F → freigegeben). Jetzt wird das
+    `unsicher` übernommen und in `eanFotoOcr` nachgetragen (die Quelle ist
+    nicht `eanFotoOcr` → neu geschrieben).
     Dasselbe gilt OHNE haltenden alten Befund (`werte.eanFotoGegenFrueher`,
     Runde 3): las ein früherer Lauf das Foto als eine andere gültige Nummer —
     typisch `gleich` (Scanner und Foto stimmten überein), der Fall lag aus
@@ -479,6 +536,16 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
        Kartoffel Knödel (ecL21IfZ…_1, gespeichert 070012398358, Foto zweimal
        4012448397358, am 05.10. mit force freigegeben) — eine Einreichung mit
        der echten Nummer in derselben Woche wäre bezahlt worden.
+       Weil `eanFotoOcr` einer Freigabe damit eine Eingabe der Wochen-Sperre
+       ist, schreibt Schritt 4c JEDEN Befund nur noch in einer Transaktion
+       an eine noch offene Einreichung (Prüfrunde 2 zur Barcode-Korrektur,
+       wie 7b). Vorher überschrieb ein blindes `update` den Befund einer
+       Einreichung, die ein Mensch während des Laufs freigegeben hatte (etwa
+       `abweichend` F → `unsicher`): F fiel aus ihren Nummern, und eine
+       Einreichung derselben Person mit F wurde am nächsten Tag bezahlt.
+       Bericht: `eanFotoEntschiedenInzwischen` (nicht geschrieben, weil
+       inzwischen entschieden). Kosten: eine Transaktion je Befund
+       (höchstens rund 100 am Tag).
     Die Prüfung hängt an der GESPEICHERTEN Korrektur, nicht am heutigen
     Befund: bis zur Prüfrunde rechnete die Runde sie nur am Tag der Korrektur
     — am nächsten Morgen (Foto bestätigt die korrigierte Nummer, „gleich")
@@ -529,8 +596,8 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
     vorgeschlagenFaelle[{…, zeuge}], gespeichert, uneinigUeberTage,
     gebremstHaelt, kandidaten, leser: {bestaetigt, widerspricht,
     nicht_gelesen, fehler}, leserFaelle[{id, vorher, neu, aus, urteil,
-    gelesen, fehler?}], faelle[{id, vorher, neu, aus, zeuge, entscheidung,
-    grund}]}`,
+    gelesen, mehrdeutig?, fehler?}], faelle[{id, vorher, neu, aus, zeuge,
+    entscheidung, grund}]}`, `eanFotoEntschiedenInzwischen`,
     `notbremse.korrektur`, `eanFoto.korrigiert`; im Dashboard „Barcode
     automatisch korrigiert" mit Liste alt → neu (im Trockenlauf „nur geplant").
   - **Ausrollen — Reihenfolge** (Prüfrunde 1 zur Barcode-Korrektur, am
@@ -553,6 +620,25 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
        `true` setzen.
     Mindestens die Rules müssen vor oder mit den Functions live gehen. Wegen
     der Frist (Lauf um 08:00) alle drei im selben Zug.
+    **Rückweg ist AUSSCHLIESSLICH der Schalter** `barcodeKorrektur: false`
+    (Prüfrunde 2 zur Barcode-Korrektur, 06.10.2026). Kein Code-Rollback von
+    `review-console` auf einen Stand ohne diesen Zweig (etwa fe89647e), sobald
+    die erste Korrektur gespeichert ist: dort gilt `eanOf = ean ||
+    gerettetEan`, `eanKorrektur` wird nicht beachtet. Eine korrigierte
+    Freigabe A (Person U, S → F) stünde dann wieder unter S; reicht U das
+    Produkt innerhalb von 7 Tagen mit F ein, greift keine Sperre — doppelt
+    bezahlt. Bis zur ersten gespeicherten Korrektur ist ein Rollback
+    folgenlos, danach nicht mehr. Dasselbe gilt für die offenen Zweige, die
+    `cloud-functions/review-console` bzw. `receipt-admin-web` ändern, diesen
+    Zweig aber nicht enthalten (geprüft 06.10.2026 mit `git log
+    93fc5ea2..<zweig>`: `claude/preisfoto-bildschirm`,
+    `claude/bon-doppelzahlung`, `claude/produktsuche-speicherung`): sie
+    müssen ihn VOR jedem Deploy von `functions:review-console` oder
+    `hosting:md-receipt-admin` aufnehmen — ohne ihn fehlen außerdem die
+    Korrektur-Anzeige und „Korrektur verwerfen" in der Konsole. Allgemeine
+    Regel (CLAUDE.md): vor jedem Functions-Deploy `git log
+    <deploy-zweig>..<anderer-zweig> -- cloud-functions/review-console` in
+    BEIDE Richtungen prüfen.
   - **Übertragbare Lehre (Prüfrunde 06.10.2026, vier Funde derselben Art):**
     Ein Schutz, der an einem ZUSTAND hängt (korrigiert, gebremst, widersprochen),
     muss aus dem GESPEICHERTEN Zustand gerechnet werden, nicht aus dem

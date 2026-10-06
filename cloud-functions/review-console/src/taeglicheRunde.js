@@ -300,10 +300,10 @@ async function bildAudit(ai, bucket, x) {
 /**
  * Original des Barcode-Fotos (volle Auflösung, nicht die Kachel) mit dem
  * Strichcode-Leser lesen (src/strichcode.js). Wirft nie: Download-Fehler,
- * Zeitüberschreitung und ein zu großes Bild (über 64 MP oder kein JPEG/PNG,
- * aus dem Dateikopf geprüft — sonst sprengt das Dekodieren den Speicher der
- * Instanz, Prüfrunde 1 zur Barcode-Korrektur) kommen als `{fehler}` zurück —
- * keine Korrektur.
+ * Zeitüberschreitung und ein zu großes Bild (über 64 MP, kein JPEG/PNG oder
+ * über 320 MB geschätzter Dekodier-Speicher, aus dem Dateikopf geprüft — sonst
+ * sprengt das Dekodieren den Speicher der Instanz, Prüfrunden 1 und 2 zur
+ * Barcode-Korrektur) kommen als `{fehler}` zurück — keine Korrektur.
  */
 async function stricheVomFoto(storage, pfad) {
   if (!pfad) return { fehler: 'kein_barcode_foto' };
@@ -317,7 +317,10 @@ async function stricheVomFoto(storage, pfad) {
 function leserText(u) {
   if (!u) return null;
   if (u.art === 'bestaetigt') return `Strichcode-Leser bestätigt ${u.gelesen.join(', ')}`;
-  if (u.art === 'widerspricht') return `Strichcode-Leser liest ${u.gelesen.join(', ')}${u.liestGespeicherte ? ' (darunter die gespeicherte Nummer)' : ''} — keine automatische Korrektur`;
+  if (u.art === 'widerspricht') {
+    const zusatz = u.liestGespeicherte ? ' (darunter die gespeicherte Nummer)' : u.mehrdeutig ? ' (mehrere Strichcodes, nicht eindeutig)' : '';
+    return `Strichcode-Leser liest ${u.gelesen.join(', ')}${zusatz} — keine automatische Korrektur`;
+  }
   if (u.art === 'nicht_gelesen') return 'Strichcode-Leser findet keinen Strichcode — keine automatische Korrektur';
   return `Strichcode-Leser gescheitert (${u.fehler || u.art}) — keine automatische Korrektur`;
 }
@@ -656,9 +659,11 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   //     Aufrufe desselben Modells, das auf Fotos ohne lesbare Ziffern gültige
   //     GTINs erfindet. Angewandt wird ein Kandidat deshalb nur, wenn der feste
   //     Strichcode-Leser (src/strichcode.js) HEUTE auf dem Original des
-  //     Barcode-Fotos die neue Nummer liest und die gespeicherte nicht
-  //     (werte.eanKorrekturAus/strichcodeUrteil). Liest er nichts, etwas
-  //     anderes oder scheitert er → keine Korrektur, der Fall liegt wie vor dem
+  //     Barcode-Fotos die neue Nummer liest und keine andere — weder die
+  //     gespeicherte noch eine weitere (werte.eanKorrekturAus/strichcodeUrteil,
+  //     Prüfrunde 2). Liest er nichts, etwas anderes, mehrere Nummern oder
+  //     scheitert er (auch: Bild zu aufwendig zu dekodieren,
+  //     strichcode.bildPruefen) → keine Korrektur, der Fall liegt wie vor dem
   //     06.10. Gelesen wird nur für die Kandidaten, mit Zeitgrenze
   //     (Arbeitszeit, Download) und höchstens PARALLEL_STRICHE gleichzeitig;
   //     auch bei ausgeschaltetem Schalter (der Bericht zeigt, was er täte).
@@ -717,7 +722,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       leserVon.set(id, u);
       const art = u.art === 'nicht_gelaufen' ? 'fehler' : u.art;
       korrekturStand.leser[art]++;
-      if (korrekturStand.leserFaelle.length < 100) korrekturStand.leserFaelle.push({ id, vorher: k.vorher, neu: k.ean, aus: k.aus, urteil: art, gelesen: u.gelesen, ...(u.fehler ? { fehler: u.fehler } : {}) });
+      if (korrekturStand.leserFaelle.length < 100) korrekturStand.leserFaelle.push({ id, vorher: k.vorher, neu: k.ean, aus: k.aus, urteil: art, gelesen: u.gelesen, ...(u.mehrdeutig ? { mehrdeutig: true } : {}), ...(u.fehler ? { fehler: u.fehler } : {}) });
       const kk = eanKorrekturAus(dVon.get(id).x, heuteVon.get(id) || null, stricheVon.get(id));
       if (kk) korrekturVon.set(id, kk);
     }
@@ -760,7 +765,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   };
 
   const refVon = new Map(pending.map((d) => [d.id, d.ref]));
-  const eanFotoStand = { nichtGespeichert: 0, nichtGespeichertHalten: 0 };
+  const eanFotoStand = { nichtGespeichert: 0, nichtGespeichertHalten: 0, entschiedenInzwischen: 0 };
   // Ein übernommener alter Befund wird nicht neu geschrieben — außer er stand
   // nur im Rückfall (`review.rundeOffen.eanFoto`), weil `eanFotoOcr` damals
   // nicht gespeichert werden konnte, oder er bekommt einen Bremsvermerk.
@@ -774,8 +779,24 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       const korrektur = b.art === 'korrigiert' ? eanKorrekturEintrag(b.korrektur, LESER) : null;
       const befundFeld = (x) => ({ ...eanFotoEintrag(x), at: FieldValue.serverTimestamp(), quelle: `${MODELL}/vertex, Bildprüfung der Morgenrunde`, lauf });
       try {
+        // Jeder Befund nur an einer noch OFFENEN Einreichung, in einer
+        // Transaktion (Prüfrunde 2 zur Barcode-Korrektur, 06.10.2026): seit
+        // diesem Zweig ist `eanFotoOcr` einer FREIGABE eine Eingabe der
+        // Wochen-Sperre (werte.eanFotoFreigegebenOf). Gab ein Mensch den Fall
+        // während des Laufs frei (force), überschrieb ein blindes `update` die
+        // bestätigte Foto-Nummer etwa mit `unsicher` — sie fiel aus den Nummern
+        // der Freigabe, und eine Einreichung derselben Person mit dieser Nummer
+        // wurde am nächsten Tag bezahlt. Nebenbei war der Befund weg, auf
+        // dessen Grundlage der Mensch entschieden hatte. Wie Schritt 7b.
         if (!korrektur) {
-          await refVon.get(id).update({ eanFotoOcr: befundFeld(b) });
+          const ausgang = await db.runTransaction(async (tx) => {
+            const snap = await tx.get(refVon.get(id));
+            if (!snap.exists) return 'weg';
+            if (snap.data().status !== 'pending') return 'entschieden';
+            tx.update(refVon.get(id), { eanFotoOcr: befundFeld(b) });
+            return 'gespeichert';
+          });
+          if (ausgang !== 'gespeichert') eanFotoStand.entschiedenInzwischen++;
           return;
         }
         // Korrektur und Befund in EINEM Schreibvorgang: entweder beides oder
@@ -783,7 +804,10 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
         // 06.10.2026): hat inzwischen ein Mensch entschieden (etwa „die
         // Scanner-Nummer stimmt", force), darf die Runde die EAN dieser
         // Entscheidung nicht nachträglich umschreiben. Dann nur der Befund
-        // davor (Tatsache über die Fotos), die Korrektur entfällt.
+        // davor (Tatsache über die Fotos), die Korrektur entfällt. Dieser
+        // Befund nimmt der Freigabe keine Nummer weg: er ist die bestätigte
+        // Abweichung, aus der die Korrektur entstand, und jede haltende Quelle
+        // sagte schon dieselbe Nummer (werte.eanKorrekturKandidat).
         const ausgang = await db.runTransaction(async (tx) => {
           const snap = await tx.get(refVon.get(id));
           if (!snap.exists) return 'weg';
@@ -1331,6 +1355,8 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     // nachprüfbar, oder fremdes Konto bis zur Entscheidung in der Konsole).
     fotoVorbefund: { haelt: plan.filter((p) => p.eingabe && p.eingabe.bild && p.eingabe.bild.vorbefund).length },
     eanFotoNichtGespeichert: eanFotoStand.nichtGespeichert,
+    // Barcode-Befund nicht geschrieben, weil inzwischen entschieden (oder gelöscht) — Schritt 4c.
+    eanFotoEntschiedenInzwischen: eanFotoStand.entschiedenInzwischen,
     // Was die Prüfkonsole von der Runde erfährt (review.rundeOffen).
     rundeOffen: rundeOffenStand,
     fotoAbgleich: { dateien: liste ? liste.size : null, gescheitert: liste == null, unvollstaendig: zuBearbeiten.filter((d) => !fotoVollstaendig(d.id)).length },

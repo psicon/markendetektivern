@@ -701,7 +701,8 @@ describe('Prüfrunde 06.10.2026 (Runde 3): Strichcode-Leser als Pflicht-Zeuge, v
     const k = { ean: F, vorher: S };
     expect(strichcodeUrteil(k, { gelesen: [F] })).toEqual({ art: 'bestaetigt', gelesen: [F] });
     expect(strichcodeUrteil(k, { gelesen: ['0' + F] })).toMatchObject({ art: 'bestaetigt' }); // UPC/0-Präfix: dieselbe GTIN
-    expect(strichcodeUrteil(k, { gelesen: [F, Y] })).toMatchObject({ art: 'bestaetigt' }); // zweiter Code, aber nicht S
+    // zweiter Code, nicht S: seit Prüfrunde 2 zur Barcode-Korrektur nicht eindeutig (siehe unten)
+    expect(strichcodeUrteil(k, { gelesen: [F, Y] })).toMatchObject({ art: 'widerspricht', liestGespeicherte: false, mehrdeutig: true });
     expect(strichcodeUrteil(k, { gelesen: [F, S] })).toMatchObject({ art: 'widerspricht', liestGespeicherte: true }); // zwei Codes, darunter S
     expect(strichcodeUrteil(k, { gelesen: [S] })).toMatchObject({ art: 'widerspricht', liestGespeicherte: true });
     expect(strichcodeUrteil(k, { gelesen: [Y] })).toMatchObject({ art: 'widerspricht', liestGespeicherte: false });
@@ -898,5 +899,78 @@ describe('Prüfrunde 1 zur Barcode-Korrektur (06.10.2026): Bremse aus jeder Quel
     // nicht verworfen: die Korrektur gilt (eanOf = F), die Foto-Nummer ist dann die effektive, nicht `eanFotoFrei`
     const gilt = { ...a, eanKorrekturVerworfen: undefined };
     expect(policyOf('g', gilt)).toMatchObject({ ean: F, eanVorher: S, eanFotoFrei: null });
+  });
+});
+
+describe('Prüfrunde 2 zur Barcode-Korrektur (06.10.2026): mehrdeutiger Leser, `unsicher` aus dem Rückfall', () => {
+  const {
+    strichcodeUrteil, eanKorrekturAus, eanKorrekturKandidat, eanKorrekturEintrag, eanKorrekturOf, eanFotoBefund, eanFotoBestaetigen,
+    eanFotoVorbefund, eanFotoMitVorbefund, eanFotoEintrag,
+  } = require('../src/werte');
+  const S = '4316268678124'; // gespeichert (Jean Luc Weichkäse, FAzktQbW…_1)
+  const F = '42509042'; // EAN-8 auf dem Deckel
+  const G = '4316268688703'; // EAN-13 der Feta-Packung daneben
+  const zweimal = (n) => eanFotoBestaetigen(eanFotoBefund(S, n), n);
+  const nichtLesbar = eanFotoBefund(S, '');
+  const k = { ean: F, vorher: S };
+
+  it('Leser liest zwei verschiedene Nummern, keine davon S → keine Korrektur, egal welche das Modell zweimal nennt', () => {
+    // gemessen am echten Foto: der Leser liest [42509042, 4316268688703]
+    expect(strichcodeUrteil(k, { gelesen: [F, G] })).toEqual({ art: 'widerspricht', gelesen: [F, G], liestGespeicherte: false, mehrdeutig: true });
+    expect(strichcodeUrteil({ ean: G, vorher: S }, { gelesen: [F, G] })).toMatchObject({ art: 'widerspricht', mehrdeutig: true });
+    expect(eanKorrekturAus({ ean: S }, zweimal(F), { gelesen: [F, G] })).toBeNull();
+    expect(eanKorrekturAus({ ean: S }, zweimal(G), { gelesen: [F, G] })).toBeNull();
+    // dieselbe GTIN in zwei Schreibweisen (UPC-A/EAN-13) ist EINE Nummer → bestätigt
+    const U = '036000291452';
+    expect(strichcodeUrteil({ ean: U, vorher: S }, { gelesen: ['0' + U, U] })).toMatchObject({ art: 'bestaetigt' });
+    // nur F → bestätigt wie bisher
+    expect(strichcodeUrteil(k, { gelesen: [F] })).toEqual({ art: 'bestaetigt', gelesen: [F] });
+  });
+
+  it('Leser an seiner Treffergrenze (`voll`) → S könnte fehlen, keine Korrektur', () => {
+    expect(strichcodeUrteil(k, { gelesen: [F], voll: true })).toMatchObject({ art: 'widerspricht', mehrdeutig: true });
+    expect(eanKorrekturAus({ ean: S }, zweimal(F), { gelesen: [F], voll: true })).toBeNull();
+    expect(eanKorrekturAus({ ean: S }, zweimal(F), { gelesen: [F], voll: false })).toMatchObject({ ean: F });
+  });
+
+  it('gespeicherte Korrektur mit mehrdeutigem Zeugen gilt nicht (eanKorrekturOf rechnet mit derselben Regel)', () => {
+    const e = eanKorrekturEintrag({ ean: F, vorher: S, lesungen: [F, F], aus: 'heute', zeuge: { art: 'striche', gelesen: [F, G] } }, 'zxing-wasm 2.2.4');
+    expect(eanKorrekturOf({ ean: S, eanKorrektur: e })).toBeNull();
+    const eins = eanKorrekturEintrag({ ean: F, vorher: S, lesungen: [F, F], aus: 'heute', zeuge: { art: 'striche', gelesen: [F] } }, 'zxing-wasm 2.2.4');
+    expect(eanKorrekturOf({ ean: S, eanKorrektur: eins })).toBe(F);
+  });
+
+  // eanFotoOcr sagt `abweichend` F (vertraut), der Rückfall `unsicher` (Speichern von eanFotoOcr scheiterte am Vortag).
+  const N = '4000417025005';
+  const M = '4061464833821';
+  const unsicherNurImRueckfall = () => ({
+    ean: M,
+    eanFotoOcr: { ean: N, befund: 'abweichend', bestaetigt: true, zweit: N, korrekturfaehig: true, lauf: 'L0' },
+    review: { rundeOffen: { lauf: 'L1', eanFoto: { befund: 'unsicher', ean: N, zweit: M, grund: 'lesungen_uneinig_tage' } } },
+  });
+
+  it('eanFotoVorbefund: ein `unsicher` aus dem Rückfall gewinnt vor einem `abweichend` in eanFotoOcr', () => {
+    const v = eanFotoVorbefund(unsicherNurImRueckfall());
+    expect(v).toMatchObject({ befund: 'unsicher', quelle: 'rundeOffen', gelesen: N, korrekturfaehig: false });
+    // ohne den Rückfall: wie bisher die erste Quelle
+    const nur = { ...unsicherNurImRueckfall(), review: undefined };
+    expect(eanFotoVorbefund(nur)).toMatchObject({ befund: 'abweichend', quelle: 'eanFotoOcr', korrekturfaehig: true });
+  });
+
+  it('… und bleibt `unsicher`, was auch gelesen wird — in eanFotoOcr neu zu schreiben, nie korrigiert', () => {
+    const x = unsicherNurImRueckfall();
+    const v = eanFotoVorbefund(x);
+    const M2 = (n) => eanFotoBestaetigen(eanFotoBefund(M, n), n);
+    for (const heute of [M2(N), eanFotoBefund(M, ''), null]) {
+      const b = eanFotoMitVorbefund(heute, v);
+      expect(b).toMatchObject({ art: 'unsicher', vorbefund: { quelle: 'rundeOffen' } });
+      expect(eanFotoEintrag(b)).toMatchObject({ befund: 'unsicher', ean: N });
+      expect(eanKorrekturKandidat(x, heute)).toBeNull();
+    }
+    // Nach dem Neuschreiben (eanFotoOcr unsicher, Rückfall unsicher) ebenso
+    const danach = { ...x, eanFotoOcr: { ...eanFotoEintrag(eanFotoMitVorbefund(M2(N), v)), lauf: 'L2' } };
+    expect(eanFotoVorbefund(danach)).toMatchObject({ befund: 'unsicher', quelle: 'eanFotoOcr' });
+    expect(eanKorrekturKandidat(danach, M2(N))).toBeNull();
+    expect(eanKorrekturKandidat(danach, nichtLesbar)).toBeNull();
   });
 });

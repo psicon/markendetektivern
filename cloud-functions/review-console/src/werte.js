@@ -383,7 +383,17 @@ const EAN_HALTEN = new Set(['abweichend', 'unsicher']);
 function eanFotoVorbefund(x) {
   const quellen = eanFotoHalteQuellen(x);
   if (!quellen.length) return null;
-  const [erste] = quellen;
+  // Der strengere Halt gewinnt (Prüfrunde 2 zur Barcode-Korrektur, 06.10.2026):
+  // ein `unsicher` aus IRGENDEINER Quelle, sonst die erste (`eanFotoOcr`).
+  // Bis dahin kam die Art immer aus `eanFotoOcr`; ein `unsicher`, das nur im
+  // Rückfall `review.rundeOffen` stand (Speichern von `eanFotoOcr`
+  // gescheitert), sperrte die Korrektur nur an diesem einen Tag. Schritt 7b
+  // schrieb den Rückfall danach aus dem `abweichend` von `eanFotoOcr` neu, das
+  // `unsicher` war weg, und die Runde korrigierte den Fall an einem der
+  // nächsten Tage doch — gegen „`ean_unsicher` bleibt beim Menschen".
+  // Kommt der übernommene Befund nicht aus `eanFotoOcr`, schreibt die Runde
+  // ihn dort hinein (taeglicheRunde `altUnveraendert` prüft die Quelle).
+  const erste = quellen.find((q) => q.befund === 'unsicher') || quellen[0];
   const gleich = (q) => q.befund === erste.befund && q.bestaetigt === erste.bestaetigt
     && (q.gelesen ? !!erste.gelesen && gtin14(q.gelesen) === gtin14(erste.gelesen) : !erste.gelesen);
   const g = quellen.find((q) => q.gebremst);
@@ -585,8 +595,12 @@ function eanFotoMitVorbefund(heute, vorher) {
       : { zweit: vorher.zweit }),
     // Bremsvermerk (eanFotoVorbefund, aus jeder Quelle) geht mit; stand er
     // nicht in `eanFotoOcr`, wird der Befund dort neu geschrieben (`neuSpeichern`,
-    // taeglicheRunde `altUnveraendert`) — sonst hinge er allein am Rückfall. Ein `unsicher`
-    // braucht keinen: er wird ohnehin nie korrigiert.
+    // taeglicheRunde `altUnveraendert`) — sonst hinge er allein am Rückfall. Ein
+    // `unsicher` braucht keinen Bremsvermerk (er wird nie korrigiert), muss aber
+    // ebenso in `eanFotoOcr` landen, wenn er nur im Rückfall stand: das leistet
+    // die Quelle (`vorbefund.quelle` ≠ 'eanFotoOcr' → neu geschrieben), und
+    // eanFotoVorbefund wählt ihn vor einem `abweichend` (Prüfrunde 2 zur
+    // Barcode-Korrektur, 06.10.2026).
     ...(vorher.gebremst && vorher.befund === 'abweichend'
       ? { korrekturGebremst: vorher.gebremst, ...(vorher.gebremstQuelle !== 'eanFotoOcr' ? { neuSpeichern: true } : {}) }
       : {}),
@@ -638,9 +652,10 @@ function eanFotoEintrag(b) {
  *     Packungsindikator).
  *  3. PFLICHT-ZEUGE: der feste Strichcode-Leser (src/strichcode.js, ZXing auf
  *     den Strichen, nicht auf den Ziffern) liest HEUTE auf dem Original des
- *     Barcode-Fotos F und NICHT die gespeicherte Nummer (strichcodeUrteil).
- *     Liest er nichts, etwas anderes, beide Nummern oder scheitert er, wird
- *     nicht korrigiert — der Fall bleibt wie vor dem 06.10. liegen.
+ *     Barcode-Fotos F und NUR F — nicht die gespeicherte Nummer und keine
+ *     weitere (strichcodeUrteil). Liest er nichts, etwas anderes, beide
+ *     Nummern, F neben einer weiteren Nummer oder scheitert er, wird nicht
+ *     korrigiert — der Fall bleibt wie vor dem 06.10. liegen.
  * Dann gilt die Foto-Nummer als EAN der Einreichung, und alle weiteren Regeln
  * rechnen mit ihr.
  *
@@ -688,9 +703,10 @@ function eanKorrekturVerworfen(x) {
  * korrigierbare Nummer, und `vorher` ist genau die gespeicherte `ean` (eine
  * Korrektur gilt nur für die Nummer, die sie korrigiert hat) — und kein Mensch
  * sie verworfen hat (eanKorrekturVerworfen) — und der Strichcode-Leser hat
- * sie bezeugt (`zeuge`: art 'striche', liest die neue, nicht die gespeicherte
- * Nummer; Prüfrunde 06.10.2026). Eine Korrektur ohne diesen Zeugen gilt nicht
- * (fail-closed: geschrieben wird sie nur mit ihm, eanKorrekturEintrag).
+ * sie bezeugt (`zeuge`: art 'striche', liest die neue und keine andere
+ * Nummer — Prüfrunde 06.10.2026, Prüfrunde 2 zur Barcode-Korrektur). Eine
+ * Korrektur ohne diesen Zeugen gilt nicht (fail-closed: geschrieben wird sie
+ * nur mit ihm, eanKorrekturEintrag).
  * @returns {string|null}
  */
 function eanKorrekturOf(x) {
@@ -705,7 +721,12 @@ function eanKorrekturOf(x) {
   return neu;
 }
 
-/** Gespeicherter Zeuge (`eanKorrektur.zeuge`) in der Form des Lesers ({gelesen}) — sonst null. */
+/**
+ * Gespeicherter Zeuge (`eanKorrektur.zeuge`) in der Form des Lesers ({gelesen}) — sonst null.
+ * strichcodeUrteil rechnet damit nach derselben Regel wie am Tag der Korrektur:
+ * ein gespeicherter Zeuge mit mehreren verschiedenen Nummern bestätigt nichts
+ * (im Bestand gab es am 06.10.2026 keine gespeicherte Korrektur).
+ */
 function zeugeAlsStriche(z) {
   if (!z || typeof z !== 'object' || z.art !== 'striche' || !Array.isArray(z.gelesen)) return null;
   return { gelesen: z.gelesen.map(ziffern).filter(Boolean) };
@@ -714,26 +735,42 @@ function zeugeAlsStriche(z) {
 /**
  * Urteil des Strichcode-Lesers (strichcode.liesBild) über eine Korrektur
  * gespeichert S → Foto F (Prüfrunde 06.10.2026):
- *  - `bestaetigt`: liest F und NICHT S — nur dann wird korrigiert,
+ *  - `bestaetigt`: liest F, und NUR F — nur dann wird korrigiert,
  *  - `widerspricht`: liest S (auch neben F: zwei Codes auf dem Foto, darunter
- *    die gespeicherte Nummer, ist nicht eindeutig) oder nur andere Nummern,
+ *    die gespeicherte Nummer, ist nicht eindeutig), nur andere Nummern, oder
+ *    mehrere verschiedene Nummern (`mehrdeutig`, s. u.),
  *  - `nicht_gelesen`: keine Striche gefunden,
  *  - `fehler`: Download, Laden oder Lesen gescheitert, Zeit abgelaufen,
  *  - `nicht_gelaufen`: kein Ergebnis übergeben.
  * Alles außer `bestaetigt` heißt: keine Korrektur (fail-closed).
+ *
+ * `mehrdeutig` (Prüfrunde 2 zur Barcode-Korrektur, 06.10.2026; eigene
+ * Verschärfung, keine Vorgabe Patricks wird abgeschwächt): liest der Leser
+ * neben F eine weitere GTIN G — auch wenn S nicht darunter ist —, bestätigt er
+ * F nicht. Er zeigt dann nur, dass F irgendwo auf dem Foto steht; welcher der
+ * beiden Codes zum Produkt gehört, entschieden allein die zwei Lesungen
+ * desselben Modells, deren Abhängigkeit der Zeuge ja beseitigen soll.
+ * Gemessen an den 127 Barcode-Fotos vom 06.10.: 3 mit zwei verschiedenen
+ * gültigen Nummern (EAN-8 auf dem Deckel neben dem EAN-13 einer
+ * Nachbarpackung; ein UPC-E aus dem unscharfen Hintergrund; ein Fehllesen
+ * der linken Hälfte). Ebenso, wenn der Leser so viele Codes liefert, wie er
+ * höchstens liefert (`voll`, strichcode.nummernAus) — S könnte fehlen.
+ * Ein solcher Fall bleibt wie vor dem 06.10. beim Menschen.
  * @param {{ean:string, vorher:string}} k  Korrektur-Kandidat
- * @param {{gelesen?:string[], fehler?:string}|null|undefined} striche
- * @returns {{art:'bestaetigt'|'widerspricht'|'nicht_gelesen'|'fehler'|'nicht_gelaufen', gelesen:string[], fehler?:string, liestGespeicherte?:boolean}}
+ * @param {{gelesen?:string[], voll?:boolean, fehler?:string}|null|undefined} striche
+ * @returns {{art:'bestaetigt'|'widerspricht'|'nicht_gelesen'|'fehler'|'nicht_gelaufen', gelesen:string[], fehler?:string, liestGespeicherte?:boolean, mehrdeutig?:true}}
  */
 function strichcodeUrteil(k, striche) {
   if (!striche || typeof striche !== 'object') return { art: 'nicht_gelaufen', gelesen: [] };
   if (striche.fehler) return { art: 'fehler', gelesen: [], fehler: String(striche.fehler).slice(0, 120) };
-  const gelesen = (Array.isArray(striche.gelesen) ? striche.gelesen : []).map(ziffern).filter((g) => g && pruefzifferOk(g)).slice(0, 4);
+  const alle = (Array.isArray(striche.gelesen) ? striche.gelesen : []).map(ziffern).filter((g) => g && pruefzifferOk(g));
+  const gelesen = alle.slice(0, 4);
   if (!gelesen.length) return { art: 'nicht_gelesen', gelesen: [] };
   const hat = (nr) => !!ziffern(nr) && gelesen.some((g) => gtin14(g) === gtin14(nr));
   const liestGespeicherte = hat(k && k.vorher);
-  if (hat(k && k.ean) && !liestGespeicherte) return { art: 'bestaetigt', gelesen };
-  return { art: 'widerspricht', gelesen, liestGespeicherte };
+  const mehrdeutig = new Set(alle.map(gtin14)).size > 1 || striche.voll === true;
+  if (hat(k && k.ean) && !liestGespeicherte && !mehrdeutig) return { art: 'bestaetigt', gelesen };
+  return { art: 'widerspricht', gelesen, liestGespeicherte, ...(mehrdeutig ? { mehrdeutig: true } : {}) };
 }
 
 /**
@@ -892,7 +929,7 @@ function eanKorrekturKandidat(x, heute) {
 /**
  * Korrektur, die angewandt werden darf: Kandidat (eanKorrekturKandidat) UND der
  * Strichcode-Leser hat HEUTE auf dem Original des Barcode-Fotos die neue
- * Nummer gelesen und die gespeicherte nicht (strichcodeUrteil `bestaetigt`) —
+ * Nummer gelesen, und nur sie (strichcodeUrteil `bestaetigt`) —
  * egal, ob der Kandidat aus heutigen Lesungen oder aus einem alten Befund
  * stammt. Ohne Leser-Ergebnis (`striche` fehlt), bei einem Fehler, ohne
  * Treffer oder bei einem Widerspruch: null (fail-closed, der Fall bleibt wie

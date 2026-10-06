@@ -3299,9 +3299,25 @@ Patrick, 02.10.: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche",
   `metadata()`) — ein weißes 400-MP-JPEG unter 8 MB trieb ihn auf 1,1 GB und
   hätte die Runde jeden Morgen vor dem ersten Schreibvorgang beendet; ein
   Bremsvermerk gilt aus JEDER Quelle; Schritt 7 prüft, dass die gerechnete
-  EAN beim Schreiben noch gilt (Verwerfen während des Laufs). Ausrollen in
+  EAN beim Schreiben noch gilt (Verwerfen während des Laufs). Prüfrunde 2
+  (06.10.): die 64-MP-Grenze reicht nicht, der Speicher hängt an der
+  Kodierung (progressiv/CMYK/16-Bit-PNG bis 1,4 GB bei 64 MP unter 8 MB) —
+  `strichcode.dekodierBytes` schätzt ihn aus dem Kopf, dekodiert wird nur bis
+  320 MB (an allen Kodierungen nachgemessen); der Leser bestätigt nur, wenn
+  er F und KEINE weitere Nummer liest (zwei Codes auf dem Foto = nicht
+  eindeutig, Mensch); ein `unsicher` aus dem Rückfall gewinnt vor
+  `abweichend` in `eanFotoOcr`; Schritt 4c schreibt Befunde nur noch in einer
+  Transaktion an offene Einreichungen (`eanFotoOcr` einer Freigabe ist
+  Eingabe der Wochen-Sperre). Ausrollen in
   dieser Reihenfolge: Rules → `hosting:md-receipt-admin` →
-  `functions:review-console` → erst dann der Schalter. Details: `cloud-functions/review-console/WISSEN-FOTORUNDE.md`.
+  `functions:review-console` → erst dann der Schalter. **Rückweg NUR der
+  Schalter** (`barcodeKorrektur: false`): nach der ersten gespeicherten
+  Korrektur nie Code ohne `eanOf` mit Korrektur ausrollen (kein Rollback auf
+  fe89647e) — sonst steht eine korrigierte Freigabe wieder unter der alten
+  Nummer und dasselbe Produkt wird in der Woche doppelt bezahlt. Die Zweige
+  `claude/preisfoto-bildschirm`, `claude/bon-doppelzahlung` und
+  `claude/produktsuche-speicherung` müssen diesen Zweig vor jedem Deploy von
+  `review-console` oder `hosting:md-receipt-admin` aufnehmen. Details: `cloud-functions/review-console/WISSEN-FOTORUNDE.md`.
 - **Anderer Markt innerhalb der Woche zählt NICHT als neue Erfassung**
   (Patrick 04.10.: „nein").
 - **Foto-Abgleich (md5) gegen ALLE früheren Einreichungen**, Preisfoto

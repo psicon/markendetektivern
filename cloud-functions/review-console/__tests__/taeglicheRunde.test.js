@@ -626,14 +626,15 @@ describe('Prüfrunde 2 (02.10.2026): Barcode-Befund hält über Tage, Konsole er
     einreichung('k', { ean: KFS });
     mockAudit.set(doc('k').images.ean, ANDERE);
     mockZweit.set(doc('k').images.ean, 'FEHLER'); // unbestätigt → keine Korrektur
-    mockLage.updateFehler = (pfad, daten) => !!daten.eanFotoOcr;
+    // Befund ohne Korrektur: seit Prüfrunde 2 zur Barcode-Korrektur in einer Transaktion (nur an offenen Einreichungen)
+    mockLage.txUpdateFehler = (pfad, daten) => !!daten.eanFotoOcr;
     const b = await scharf();
     expect(doc('k').eanFotoOcr).toBeUndefined();
     expect(b.eanFotoNichtGespeichert).toBe(1);
     expect(b.warnungen.map((w) => w.code)).toContain('barcode_befund_nicht_gespeichert');
     expect(rundeOffen('k')).toMatchObject({ sperrend: ['ean_abweichend'], eanFoto: { befund: 'abweichend', ean: ANDERE, bestaetigt: false } });
     // nächster Morgen: das Foto ist heute unlesbar — gehalten wird trotzdem
-    mockLage.updateFehler = () => false;
+    mockLage.txUpdateFehler = () => false;
     mockAudit.set(doc('k').images.ean, '');
     mockWrites.length = 0;
     const b2 = await scharf();
@@ -2021,5 +2022,145 @@ describe('Prüfrunde 1 zur Barcode-Korrektur (06.10.2026): Verwerfen während de
     const b2 = await scharf();
     expect(doc('b').status).toBe('pending');
     expect(b2.wartetAufDich.find((x) => x.id === 'b')).toMatchObject({ grund: 'ean_alt_doppelt' });
+  });
+});
+
+describe('Prüfrunde 2 zur Barcode-Korrektur (06.10.2026): mehrdeutiger Leser, `unsicher` nur im Rückfall, Freigabe während des Laufs', () => {
+  const GESTERN = '2026-10-05_080000';
+  const DRITTE = '4001382088125';
+  const morgen = (n = 1) => dateSpy.mockImplementation(() => T0 + n * TAG_MS);
+  const BEFUND = { befund: 'abweichend', ean: ANDERE, bestaetigt: true, zweit: ANDERE, korrekturfaehig: true };
+  const mitHalt = (extra = {}) => ({
+    eanFotoOcr: { ...BEFUND, lauf: GESTERN },
+    review: { rundeOffen: { lauf: GESTERN, grund: 'ean_abweichend', sperrend: ['ean_abweichend'], eanFoto: { ...BEFUND } } },
+    ...extra,
+  });
+  /** Speichern von eanFotoOcr scheitert (vorübergehend) — der Befund steht dann nur im Rückfall review.rundeOffen. */
+  const eanFotoOcrScheitert = () => { mockLage.txUpdateFehler = (pfad, daten) => !!daten.eanFotoOcr; };
+
+  it('Leser liest F und eine weitere Nummer (keine davon die gespeicherte) → keine Korrektur, liegt; Hinweis und Bericht nennen es', async () => {
+    einreichung('k');
+    mockAudit.set(doc('k').images.ean, ANDERE); // Modell: zweimal ANDERE
+    striche('k', ANDERE, DRITTE); // etwa der Code einer Nachbarpackung
+    const b = await scharf();
+    // bis zu dieser Prüfrunde: korrigiert und freigegeben
+    expect(doc('k').status).toBe('pending');
+    expect(doc('k').eanKorrektur).toBeUndefined();
+    const f = b.wartetAufDich.find((x) => x.id === 'k');
+    expect(f).toMatchObject({ grund: 'ean_abweichend' });
+    expect(f.hinweis).toMatch(/mehrere Strichcodes, nicht eindeutig/);
+    expect(b.eanKorrektur).toMatchObject({ korrigiert: 0, kandidaten: 1, leser: { bestaetigt: 0, widerspricht: 1, nicht_gelesen: 0, fehler: 0 } });
+    expect(b.eanKorrektur.leserFaelle).toEqual([{ id: 'k', vorher: EAN, neu: ANDERE, aus: 'heute', urteil: 'widerspricht', gelesen: [ANDERE, DRITTE], mehrdeutig: true }]);
+    // Treffergrenze des Lesers erreicht → ebenso
+    mockStore.clear(); mockListe.clear(); mockAudit.clear(); mockStriche.clear();
+    mockStore.set('cashback_config/v1', { fotoWorker: true, barcodeKorrektur: true });
+    einreichung('v');
+    mockAudit.set(doc('v').images.ean, ANDERE);
+    mockStriche.set(doc('v').images.ean, { gelesen: [ANDERE], voll: true });
+    await scharf();
+    expect(doc('v').status).toBe('pending');
+    expect(doc('v').eanKorrektur).toBeUndefined();
+  });
+
+  describe('`unsicher` nur im Rückfall (Speichern von eanFotoOcr scheiterte) bleibt `unsicher`', () => {
+    it('Tag 2 zweimal F, Tag 3 unlesbar — der Leser liest jeweils F → nie korrigiert, eanFotoOcr wird `unsicher`', async () => {
+      einreichung('k', mitHalt());
+      // Tag 1: das Foto zeigt heute die GESPEICHERTE Nummer → Widerspruch über Tage → unsicher; eanFotoOcr nicht speicherbar
+      mockAudit.set(doc('k').images.ean, EAN);
+      eanFotoOcrScheitert();
+      await scharf();
+      expect(doc('k').eanFotoOcr).toMatchObject({ befund: 'abweichend', ean: ANDERE });
+      expect(doc('k').review.rundeOffen.eanFoto).toMatchObject({ befund: 'unsicher' });
+      mockLage.txUpdateFehler = () => false;
+      // Tag 2: zweimal ANDERE, Leser ANDERE
+      mockAudit.set(doc('k').images.ean, ANDERE);
+      striche('k', ANDERE);
+      morgen();
+      const b2 = await scharf();
+      expect(doc('k').eanKorrektur).toBeUndefined();
+      expect(b2.wartetAufDich.find((x) => x.id === 'k')).toMatchObject({ grund: 'ean_unsicher' });
+      // der Halt steht jetzt auch in eanFotoOcr (bis dahin: `abweichend`, korrekturfähig)
+      expect(doc('k').eanFotoOcr).toMatchObject({ befund: 'unsicher', ean: ANDERE });
+      expect(doc('k').review.rundeOffen.eanFoto).toMatchObject({ befund: 'unsicher' });
+      // Tag 3: unlesbar, Leser ANDERE — bis zu dieser Prüfrunde: korrigiert und freigegeben
+      mockAudit.set(doc('k').images.ean, '');
+      morgen(2);
+      await scharf();
+      expect(doc('k').eanKorrektur).toBeUndefined();
+      expect(doc('k').status).toBe('pending');
+    });
+
+    it('Tag 2 unlesbar, Tag 3 zweimal F + Leser F → nie korrigiert', async () => {
+      einreichung('k', mitHalt());
+      mockAudit.set(doc('k').images.ean, EAN);
+      eanFotoOcrScheitert();
+      await scharf();
+      mockLage.txUpdateFehler = () => false;
+      mockAudit.set(doc('k').images.ean, '');
+      striche('k', ANDERE);
+      morgen();
+      await scharf();
+      expect(doc('k').eanFotoOcr).toMatchObject({ befund: 'unsicher' });
+      mockAudit.set(doc('k').images.ean, ANDERE);
+      morgen(2);
+      await scharf();
+      expect(doc('k').eanKorrektur).toBeUndefined();
+      expect(doc('k').status).toBe('pending');
+    });
+
+    it('Gegenprobe: Widerspruch ohne Schreibfehler gespeichert → ebenso nie korrigiert', async () => {
+      einreichung('k', mitHalt());
+      mockAudit.set(doc('k').images.ean, EAN);
+      await scharf();
+      expect(doc('k').eanFotoOcr).toMatchObject({ befund: 'unsicher' });
+      mockAudit.set(doc('k').images.ean, ANDERE);
+      striche('k', ANDERE);
+      morgen();
+      await scharf();
+      mockAudit.set(doc('k').images.ean, '');
+      morgen(2);
+      await scharf();
+      expect(doc('k').eanKorrektur).toBeUndefined();
+      expect(doc('k').status).toBe('pending');
+    });
+  });
+
+  describe('Freigabe durch einen Menschen während des Laufs: der Barcode-Befund wird nicht mehr überschrieben', () => {
+    it('Konsole gibt C (Foto bestätigt ANDERE) mit force frei, die Runde liest heute die gespeicherte → eanFotoOcr bleibt; morgen liegt die eigene Einreichung mit ANDERE', async () => {
+      einreichung('c', mitHalt({ createdAt: T0 - 2 * TAG_MS }));
+      mockAudit.set(doc('c').images.ean, EAN); // heute: Widerspruch über Tage → `unsicher`
+      mockLage.nachAudit = () => {
+        if (doc('c').status === 'pending') mockStore.set('crowd_uploads/c', { ...doc('c'), status: 'approved', review: { forced: true, forcedNote: 'Foto zeigt ANDERE', decidedBy: 'patrick' } });
+      };
+      const b = await scharf();
+      mockLage.nachAudit = null;
+      // bis zu dieser Prüfrunde: eanFotoOcr `unsicher` → ANDERE fiel aus den Nummern der Freigabe
+      expect(doc('c').status).toBe('approved');
+      expect(doc('c').eanFotoOcr).toMatchObject({ befund: 'abweichend', ean: ANDERE, bestaetigt: true, lauf: GESTERN });
+      expect(b.eanFotoEntschiedenInzwischen).toBe(1);
+      expect(b.eanFotoNichtGespeichert).toBe(0);
+      morgen();
+      einreichung('n', { ean: ANDERE, createdAt: T0 + TAG_MS - 3600 * 1000 });
+      const b2 = await scharf();
+      expect(doc('n').status).toBe('pending');
+      expect(b2.wartetAufDich.find((x) => x.id === 'n')).toMatchObject({ grund: 'ean_alt_doppelt' });
+    });
+
+    it('Gegenprobe: Freigabe nach dem Lauf (Befund unverändert) → die eigene Einreichung mit ANDERE liegt ebenso', async () => {
+      einreichung('c', { createdAt: T0 - 2 * TAG_MS, status: 'approved', eanFotoOcr: { ...BEFUND, lauf: GESTERN } });
+      morgen();
+      einreichung('n', { ean: ANDERE, createdAt: T0 + TAG_MS - 3600 * 1000 });
+      const b = await scharf();
+      expect(doc('n').status).toBe('pending');
+      expect(b.wartetAufDich.find((x) => x.id === 'n')).toMatchObject({ grund: 'ean_alt_doppelt' });
+    });
+
+    it('offene Einreichung: Befund wird wie bisher geschrieben (in einer Transaktion)', async () => {
+      einreichung('k', mitHalt());
+      mockAudit.set(doc('k').images.ean, EAN);
+      const b = await scharf();
+      expect(doc('k').eanFotoOcr).toMatchObject({ befund: 'unsicher', grund: 'lesungen_uneinig_tage' });
+      expect(b.eanFotoEntschiedenInzwischen).toBe(0);
+    });
   });
 });

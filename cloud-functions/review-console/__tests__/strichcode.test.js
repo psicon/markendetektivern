@@ -9,7 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
-const { liesBild, bildPruefen, nummernAus, mitZeit, LESER, LESE_OPTIONEN, MAX_PIXEL, BILD_FORMATE } = require('../src/strichcode');
+const { liesBild, bildPruefen, dekodierBytes, nummernAus, mitZeit, LESER, LESE_OPTIONEN, MAX_PIXEL, MAX_DEKODIER_BYTES, BILD_FORMATE } = require('../src/strichcode');
 
 let schreiber;
 const echtesFetch = global.fetch;
@@ -35,11 +35,22 @@ describe('nummernAus (rein)', () => {
       { isValid: true, format: 'EAN-13', text: '4061464833821' },
       { isValid: true, format: 'UPC-A', text: '0036000291452' },
       { isValid: true, format: 'EAN-13', text: '0036000291452' }, // dieselbe GTIN
-      { isValid: true, format: 'EAN-13', text: '4061464833828' }, // Prüfziffer falsch
       { isValid: true, format: 'QRCode', text: '4000417025005' }, // falsches Format
-      { isValid: false, format: 'EAN-8', text: '96385074' },
     ])).toEqual({ gelesen: ['4061464833821', '0036000291452'] });
+    expect(nummernAus([
+      { isValid: true, format: 'EAN-13', text: '4061464833828' }, // Prüfziffer falsch
+      { isValid: false, format: 'EAN-8', text: '96385074' },
+    ])).toEqual({ gelesen: [] });
     expect(nummernAus([])).toEqual({ gelesen: [] });
+  });
+  it('Treffergrenze erreicht (`maxNumberOfSymbols`) → `voll`: weitere Codes, auch die gespeicherte Nummer, können fehlen', () => {
+    expect(LESE_OPTIONEN.maxNumberOfSymbols).toBe(4);
+    const t = (text, format = 'EAN-13') => ({ isValid: true, format, text });
+    // dieselbe GTIN viermal (etwa mehrere gleiche Etiketten) — zählt als voll, gelesen bleibt eine Nummer
+    expect(nummernAus([t('4061464833821'), t('4061464833821'), t('4061464833821'), t('4061464833821')])).toEqual({ gelesen: ['4061464833821'], voll: true });
+    expect(nummernAus([t('4061464833821'), t('4061464833821'), t('4061464833821')])).toEqual({ gelesen: ['4061464833821'] });
+    // QR-Codes zählen nicht mit (anderes Format, nicht gesucht)
+    expect(nummernAus([t('4061464833821'), t('4061464833821'), t('4061464833821'), t('x', 'QRCode')])).toEqual({ gelesen: ['4061464833821'] });
   });
   it('nicht dekodierbares Bild (Ergebnis mit `error`) → Fehler, kein „nichts gelesen"', () => {
     expect(nummernAus([{ isValid: false, format: 'None', text: '', error: 'Failed to load image from memory' }])).toEqual({ fehler: 'bild: Failed to load image from memory' });
@@ -148,4 +159,104 @@ describe('bildPruefen / liesBild: zu große Bilder werden nie dekodiert', () => 
     expect(await liesBild(await sharp(quelle).webp().toBuffer())).toEqual({ fehler: 'bildformat: webp' });
     expect(await liesBild(await sharp(quelle).tiff().toBuffer())).toEqual({ fehler: 'bildformat: tiff' });
   }, 30000);
+});
+
+/**
+ * Speicher hängt an der KODIERUNG, nicht an der Pixelzahl (Prüfrunde 2 zur
+ * Barcode-Korrektur, 06.10.2026): ein progressives CMYK-JPEG mit 64 MP trieb
+ * den Leser auf 952 MB, ein PNG mit 16 Bit RGBA interlaced auf 1,4 GB — beide
+ * unter 8 MB groß und unter der Pixelgrenze.
+ */
+describe('bildPruefen / dekodierBytes: Dekodier-Speicher aus dem Dateikopf geschätzt', () => {
+  const zlib = require('zlib');
+  const jpegMitKopf = (buf, breite, hoehe) => {
+    const b = Buffer.from(buf);
+    for (let i = 2; i + 9 < b.length; i++) {
+      if (b[i] === 0xff && (b[i + 1] === 0xc0 || b[i + 1] === 0xc2)) {
+        b.writeUInt16BE(hoehe, i + 5);
+        b.writeUInt16BE(breite, i + 7);
+        return b;
+      }
+    }
+    throw new Error('kein SOF gefunden');
+  };
+  const pngMitKopf = (buf, breite, hoehe) => {
+    const b = Buffer.from(buf);
+    b.writeUInt32BE(breite, 16);
+    b.writeUInt32BE(hoehe, 20);
+    b.writeUInt32BE(zlib.crc32(b.subarray(12, 29)), 29);
+    return b;
+  };
+  const MB = 1000 * 1000;
+
+  it('Grenze 320 MB; Schätzung je Kodierung (über allen gemessenen Werten)', () => {
+    expect(MAX_DEKODIER_BYTES).toBe(320 * MB);
+    const px = (b, h) => ({ width: b, height: h });
+    // JPEG: (B+16)(H+16) × (Kanäle × 1,25 bzw. progressiv 3,75 + 1)
+    expect(dekodierBytes({ format: 'jpeg', channels: 3, isProgressive: false, ...px(984, 984) })).toBe(1000 * 1000 * 4.75);
+    expect(dekodierBytes({ format: 'jpeg', channels: 4, isProgressive: true, ...px(984, 984) })).toBe(1000 * 1000 * 16);
+    // fehlende Angaben zählen wie die teuerste Variante
+    expect(dekodierBytes({ format: 'jpeg', channels: 3, ...px(984, 984) })).toBe(1000 * 1000 * 12.25);
+    expect(dekodierBytes({ format: 'jpeg', isProgressive: false, ...px(984, 984) })).toBe(1000 * 1000 * 6);
+    // PNG: (B·H + H) × (4,5 × Kanäle × Byte je Wert + 2)
+    expect(dekodierBytes({ format: 'png', channels: 4, depth: 'ushort', ...px(1000, 1000) })).toBe(1001000 * 38);
+    expect(dekodierBytes({ format: 'png', channels: 3, depth: 'uchar', ...px(1000, 1000) })).toBe(1001000 * 15.5);
+    expect(dekodierBytes({ format: 'png', channels: 3, ...px(1000, 1000) })).toBe(1001000 * 29); // Bittiefe unbekannt → 16 Bit
+    // anderes Format oder keine Abmessungen → unendlich (nie dekodiert)
+    expect(dekodierBytes({ format: 'webp', channels: 3, ...px(10, 10) })).toBe(Infinity);
+    expect(dekodierBytes({ format: 'jpeg', channels: 3 })).toBe(Infinity);
+    expect(dekodierBytes(null)).toBe(Infinity);
+    // Das größte Barcode-Foto in Produktion (48 MP, baseline 4:2:0) und ein baseline-JPEG mit 64 MP bleiben darunter
+    expect(dekodierBytes({ format: 'jpeg', channels: 3, isProgressive: false, ...px(6000, 8000) })).toBeLessThan(MAX_DEKODIER_BYTES);
+    expect(dekodierBytes({ format: 'jpeg', channels: 3, isProgressive: false, ...px(8000, 8000) })).toBeLessThanOrEqual(MAX_DEKODIER_BYTES);
+  });
+
+  it('progressives JPEG mit 8000 × 8000 im Kopf → bild_zu_aufwendig, entschieden allein aus dem Kopf; 4000 × 4000 geht', async () => {
+    const klein = await sharp(await png('4061464833821', 'EAN-13')).flatten({ background: '#ffffff' }).jpeg({ progressive: true, chromaSubsampling: '4:4:4' }).toBuffer();
+    expect((await sharp(klein).metadata()).isProgressive).toBe(true);
+    expect(await liesBild(jpegMitKopf(klein, 8000, 8000))).toEqual({ fehler: 'bild_zu_aufwendig: 8000x8000 jpeg progressiv 3K, ~787 MB' });
+    expect(await bildPruefen(jpegMitKopf(klein, 4000, 4000))).toBeNull();
+    // baseline mit denselben Abmessungen bleibt erlaubt (Grenze wie bisher die Pixelzahl)
+    const baseline = await sharp(await png('4061464833821', 'EAN-13')).flatten({ background: '#ffffff' }).jpeg().toBuffer();
+    expect(await bildPruefen(jpegMitKopf(baseline, 8000, 8000))).toBeNull();
+  }, 30000);
+
+  it('PNG mit 16 Bit RGBA und 4000 × 4000 im Kopf → bild_zu_aufwendig; 2000 × 2000 geht', async () => {
+    const rgba16 = await sharp(await png('4061464833821', 'EAN-13')).ensureAlpha().toColourspace('rgb16').png().toBuffer();
+    expect(await sharp(rgba16).metadata()).toMatchObject({ format: 'png', channels: 4, depth: 'ushort' });
+    expect(await liesBild(pngMitKopf(rgba16, 4000, 4000))).toEqual({ fehler: 'bild_zu_aufwendig: 4000x4000 png 4K 16bit, ~608 MB' });
+    expect(await bildPruefen(pngMitKopf(rgba16, 2000, 2000))).toBeNull();
+  }, 30000);
+
+  it('kleine Bilder jeder Kodierung werden weiter gelesen (progressiv, CMYK, 16 Bit, interlaced)', async () => {
+    const quelle = await sharp(await png('4000417025005', 'EAN-13')).flatten({ background: '#ffffff' }).toBuffer();
+    expect(await liesBild(await sharp(quelle).jpeg({ progressive: true }).toBuffer())).toEqual({ gelesen: ['4000417025005'] });
+    expect(await liesBild(await sharp(quelle).toColourspace('cmyk').jpeg().toBuffer())).toEqual({ gelesen: ['4000417025005'] });
+    expect(await liesBild(await sharp(quelle).toColourspace('rgb16').png({ progressive: true }).toBuffer())).toEqual({ gelesen: ['4000417025005'] });
+  }, 30000);
+
+  it('Schätzung liegt über dem tatsächlichen Wachstum des WASM-Speichers (Gegenprobe mit dem echten Leser)', async () => {
+    // Leser laden (aus dem Paket), dann das Modul ohne neue Einstellungen holen: dieselbe Instanz.
+    await liesBild(await png('4000417025005', 'EAN-13'));
+    const zx = require('zxing-wasm/reader');
+    const modul = await zx.prepareZXingModule({ fireImmediately: true });
+    const groesse = () => modul.HEAPU8.buffer.byteLength;
+    const quelle = await sharp(await png('4000417025005', 'EAN-13')).flatten({ background: '#ffffff' }).toBuffer();
+    const flaeche = (b, h, ch = 3) => sharp({ create: { width: b, height: h, channels: ch, background: ch === 4 ? { r: 255, g: 255, b: 255, alpha: 1 } : '#ffffff' } }).composite([{ input: quelle, gravity: 'centre' }]);
+    // die beiden teuersten Kodierungen je Pixel (gemessen 12,8 bzw. 33 Byte je Pixel)
+    // (das zweite Bild braucht mehr als das erste, sonst wüchse der Speicher nicht und die Probe wäre leer)
+    const bilder = [
+      await flaeche(1800, 2400).toColourspace('cmyk').jpeg({ progressive: true, chromaSubsampling: '4:4:4' }).toBuffer(),
+      await flaeche(1500, 2000, 4).toColourspace('rgb16').png({ progressive: true }).toBuffer(),
+    ];
+    const basis = groesse();
+    for (const bild of bilder) {
+      const m = await sharp(bild).metadata();
+      const vorher = groesse();
+      expect(await liesBild(bild)).toEqual({ gelesen: ['4000417025005'] });
+      // Der WASM-Speicher wächst (sonst sagte die Probe nichts) — aber nie über Grundbedarf + Schätzung.
+      expect(groesse()).toBeGreaterThan(vorher);
+      expect(groesse()).toBeLessThanOrEqual(basis + dekodierBytes(m));
+    }
+  }, 60000);
 });
