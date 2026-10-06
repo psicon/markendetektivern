@@ -394,17 +394,28 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   `preisBelegRegel` auf `'shadow'` oder `false` ebenso für die Preisbeleg-Halte.
   „Sofern nichts anderes sie hält" schließt die ANDERE Regel ein — und ein
   gehaltener Fall wird dabei nie abgelehnt: liest die Bildschirm-Regel an dem
-  Morgen „ablehnen", hält sie ihn nur (`preis_bildschirm_unsicher`), bei
-  `'shadow'` wie bei `false` (Nachprüfung 05.10.2026: mit `false` wurde ein
-  Preisbeleg-Halt auf eine einzige neue „bildschirm"-Lesung hin endgültig
-  abgelehnt; `ablehnenGesperrt` in `preisBildschirmMitVorbefund`).
+  oder einem späteren Morgen „ablehnen", hält sie ihn nur
+  (`preis_bildschirm_unsicher`), bei `'shadow'` wie bei `false` (Nachprüfung
+  05.10.2026: mit `false` wurde ein Preisbeleg-Halt auf eine einzige neue
+  „bildschirm"-Lesung hin endgültig abgelehnt). Dafür steht am Fall die
+  Sperre `review.rundeOffen.preisBildschirm.ablehnenGesperrt` (+
+  `gesperrtSeit`), bis ein Mensch in der Konsole entscheidet — auch ohne
+  Befund, auch an einem Morgen ohne Bildprüfung, auch im Trockenlauf und bei
+  ausgeschalteten Regeln (Nachprüfung 06.10.2026: vorher lebte sie nur im
+  Lauf; scheiterte am Morgen der Rücknahme die Bildprüfung oder lag der Fall
+  aus anderem Grund ohne Befund, war sie am Tag darauf weg). Die Konsole zeigt
+  zu einer Sperre allein keinen Hinweis und gibt ohne Notiz frei. Eine
+  übersprungene Ablehnung (Preis bzw. Kassenbon während des Laufs gefunden)
+  lässt den Eintrag des Vortags seitdem unverändert stehen, statt ihn samt
+  Sperre zu entfernen.
   Wer das nicht will, entscheidet die angehaltenen Fälle VOR dem Umschalten in
   der Konsole (Liste: Tagesbericht bzw. Konsole mit Hinweis
   `preis_bildschirm_unsicher` / `preis_beleg_unsicher`). Wie viele so bezahlt
   wurden, steht am Morgen danach im Tagesbericht
   (`preisBildschirm.nachRuecknahmeFrei`, „nach Rücknahme einer Regel freigegeben").
   **Schalter** `cashback_config/v1.preisBildschirmRegel`: `false` = aus
-  (kein Bildkopf, kein Bildschirm-Befund, nichts am Dokument — die Frage nach
+  (kein Bildkopf, kein Bildschirm-Befund, nichts am Dokument außer einer
+  bestehenden Sperre gegen eine Ablehnung — die Frage nach
   der Preisquelle entfällt erst, wenn auch `preisBelegRegel` aus ist, denn der
   Preisbeleg braucht die Antwort „kassenbon"); `'shadow'` =
   Beobachtung, entschieden wird wie bisher; `true` = scharf (wirkt nur, wenn

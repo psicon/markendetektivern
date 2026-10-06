@@ -936,6 +936,21 @@ describe('Bildschirmfoto als Preisbeleg (Patrick 04.10.2026: „ja, bau das")', 
     expect(b).toMatchObject({ abgelehnt: 0 });
   });
 
+  // Nachprüfung 06.10.2026: ein übersprungener Fall hat heute kein Urteil —
+  // vorher entfernte die Runde dabei den Eintrag des Vortags samt allem, was
+  // weiter gelten sollte (etwa der Sperre gegen eine Ablehnung).
+  it('… übersprungen: der Eintrag des Vortags bleibt unverändert', async () => {
+    schalter(true);
+    const alt = { grund: 'bild_audit_gescheitert', hinweis: 'Bildprüfung gescheitert', sperrend: [], lauf: 'L0', trocken: false, preisBildschirm: { modus: 'shadow', befund: 'halten', seit: 'L0' } };
+    mitPreisfoto('spaet', 'bildschirm', png(1080, 2400), { review: { rundeOffen: alt } });
+    mockLage.nachAudit = () => { const d = doc('spaet'); mockStore.set('crowd_uploads/spaet', { ...d, priceImageKind: 'kassenbon' }); };
+    const b = await scharf();
+    expect(doc('spaet').status).toBe('pending');
+    expect(b).toMatchObject({ abgelehnt: 0 });
+    expect(doc('spaet').review.rundeOffen).toEqual(alt);
+    expect(mockWrites.filter((w) => w.path === 'crowd_uploads/spaet' && w.data['review.rundeOffen'] !== undefined)).toEqual([]);
+  });
+
   // Gegenprüfung 04.10.2026: ein angehaltener Fall wird nie automatisch frei.
   it('scharf: Befund vom Vortag hält weiter — auch wenn das Modell heute „Laden" sagt oder die Bildprüfung scheitert', async () => {
     schalter(true);
@@ -1551,6 +1566,107 @@ describe('Zwei Schalter: preisBildschirmRegel und preisBelegRegel wirken und end
       expect(b3.ablehnGruende).toEqual({});
       expect(doc('k').review.rundeOffen.preisBildschirm).toMatchObject({ befund: 'halten', seit: lauf2, regeln: ['bildschirm'] });
     }
+  });
+
+  // Nachprüfung 06.10.2026: die Sperre gegen eine automatische Ablehnung
+  // stand nur im Speicher des Laufs. Gespeichert wurde sie nur, wenn am
+  // Rücknahme-Morgen ein neuer scharfer Befund entstand — scheiterte an dem
+  // Morgen die Bildprüfung (429, Zeitgrenze) oder lag der Fall aus anderem
+  // Grund und wurde ohne Befund gelesen, war sie am nächsten Morgen weg, und
+  // eine einzige „bildschirm"-Lesung lehnte den gehaltenen Fall endgültig ab.
+  /** Tag 1: beide Regeln scharf, „Kassenbon" ohne Merkmale → Preisbeleg hält. */
+  async function belegHaltTag1(extra = {}) {
+    schalter(true, true);
+    einreichung('k', { ean: '4000000000017', ...extra });
+    mockQuelle.set(preisPfad('k'), 'kassenbon');
+    mockBeleg.set(preisPfad('k'), { belegHaendler: '', belegMerkmale: [] });
+    mockKopf.set(preisPfad('k'), png(1170, 2532));
+    await scharf();
+    expect(doc('k')).toMatchObject({ status: 'pending', review: { rundeOffen: { preisBildschirm: { modus: true, befund: 'halten', regeln: ['beleg'], ablehnenGesperrt: true } } } });
+    return doc('k').review.rundeOffen.lauf;
+  }
+  /** Lesedienst „sonstiges", Bildprüfung „bildschirm", PNG im Bildschirmformat → ohne Sperre eine Ablehnung. */
+  function bildschirmLesung() {
+    mockStore.set('crowd_uploads/k', { ...doc('k'), priceImageKind: 'sonstiges' });
+    mockQuelle.set(preisPfad('k'), 'bildschirm');
+  }
+
+  it('Preisbeleg-Halt; Tag 2 Rücknahme (shadow oder false) und die Bildprüfung scheitert; Tag 3 „bildschirm" → bleibt liegen, nie abgelehnt', async () => {
+    for (const zurueck of ['shadow', false]) {
+      mockStore.clear(); mockListe.clear(); mockQuelle.clear(); mockBeleg.clear(); mockKopf.clear(); mockAudit.clear();
+      const lauf1 = await belegHaltTag1();
+      // Tag 2: Preisbeleg zurückgenommen, die Bildprüfung scheitert für diesen Fall
+      schalter(true, zurueck);
+      mockAudit.set('crowduploads/4000000000017/k/ean.jpg', 'AUDIT_FEHLER');
+      await scharf();
+      expect([zurueck, doc('k').status]).toEqual([zurueck, 'pending']);
+      // Die Sperre steht am Fall. Bei false ist sie der ganze Eintrag (kein Befund, die
+      // Konsole zeigt dazu keinen Hinweis); bei 'shadow' reist an diesem Morgen
+      // zusätzlich der Vorbefund als Beobachtung mit.
+      const pb2 = doc('k').review.rundeOffen.preisBildschirm;
+      if (zurueck === false) expect(pb2).toEqual({ ablehnenGesperrt: true, gesperrtSeit: lauf1 });
+      else expect(pb2).toEqual({ modus: 'shadow', befund: 'halten', seit: lauf1, art: 'beleg', ablehnenGesperrt: true, gesperrtSeit: lauf1 });
+      // Tag 3: Bildprüfung wieder da, sie liest „bildschirm"
+      mockAudit.delete('crowduploads/4000000000017/k/ean.jpg');
+      bildschirmLesung();
+      const b3 = await scharf();
+      expect([zurueck, doc('k').status]).toEqual([zurueck, 'pending']);
+      expect(doc('k').rejectReason).toBeUndefined();
+      expect(b3.ablehnGruende).toEqual({});
+      expect(doc('k').review.rundeOffen).toMatchObject({ grund: 'preis_bildschirm_unsicher', preisBildschirm: { modus: true, befund: 'halten', regeln: ['bildschirm'], ablehnenGesperrt: true, gesperrtSeit: lauf1 } });
+      // Tag 4: dieselbe Lesung — weiter nur gehalten
+      await scharf();
+      expect([zurueck, doc('k').status]).toEqual([zurueck, 'pending']);
+    }
+  });
+
+  it('Preisbeleg-Halt; Fall liegt am Rücknahme-Morgen aus anderem Grund (Ort auffällig) und wird ohne Befund gelesen → Tag 3 „bildschirm" lehnt nicht ab', async () => {
+    for (const zurueck of ['shadow', false]) {
+      mockStore.clear(); mockListe.clear(); mockQuelle.clear(); mockBeleg.clear(); mockKopf.clear(); mockAudit.clear();
+      // Aufnahmeort in Belgien, Markt DE → ort_auffaellig (liegt, bis ein Mensch entscheidet)
+      const lauf1 = await belegHaltTag1({ capture: { gps: { lat: 50.85, lon: 4.35, accuracyM: 5 } }, marketLand: 'DE' });
+      // Tag 2: Preisbeleg zurückgenommen; die Bildprüfung liest einen vollständigen Bon vom Kamerafoto → kein Befund
+      schalter(true, zurueck);
+      mockBeleg.set(preisPfad('k'), { belegHaendler: 'REWE', belegMerkmale: VOLL });
+      mockKopf.set(preisPfad('k'), jpeg(3000, 4000));
+      await scharf();
+      expect([zurueck, doc('k').status]).toEqual([zurueck, 'pending']);
+      expect([zurueck, doc('k').review.rundeOffen.grund]).toEqual([zurueck, 'ort_auffaellig']);
+      expect([zurueck, doc('k').review.rundeOffen.preisBildschirm]).toMatchObject([zurueck, { ablehnenGesperrt: true, gesperrtSeit: lauf1 }]);
+      // Tag 3: „bildschirm" auf einem Bildschirmformat — ohne Sperre stünde hier „fotos_unpassend"
+      mockKopf.set(preisPfad('k'), png(1170, 2532));
+      bildschirmLesung();
+      const b3 = await scharf();
+      expect([zurueck, doc('k').status]).toEqual([zurueck, 'pending']);
+      expect(b3.ablehnGruende).toEqual({});
+      expect(doc('k').review.rundeOffen).toMatchObject({ grund: 'ort_auffaellig', preisBildschirm: { befund: 'halten', ablehnenGesperrt: true, gesperrtSeit: lauf1 } });
+    }
+  });
+
+  it('ein Trockenlauf mit geplanter Freigabe löscht die Sperre nicht', async () => {
+    const lauf1 = await belegHaltTag1();
+    // Tag 2: Preisbeleg aus, unauffällige Lesung — scharf wäre der Fall jetzt bezahlt; als Trockenlauf bleibt er liegen
+    schalter(true, false);
+    mockBeleg.set(preisPfad('k'), { belegHaendler: 'REWE', belegMerkmale: VOLL });
+    mockKopf.set(preisPfad('k'), jpeg(3000, 4000));
+    await taeglicheRunde({ dryRun: true, projekt: 'p', bucketName: 'b', ausloeser: 'manuell' });
+    expect(doc('k').status).toBe('pending');
+    expect(doc('k').review.rundeOffen).toMatchObject({ geplant: 'freigeben', trocken: true, preisBildschirm: { ablehnenGesperrt: true, gesperrtSeit: lauf1 } });
+    // Tag 3 scharf: „bildschirm" → nur gehalten
+    mockKopf.set(preisPfad('k'), png(1170, 2532));
+    bildschirmLesung();
+    await scharf();
+    expect(doc('k').status).toBe('pending');
+    expect(doc('k').review.rundeOffen.grund).toBe('preis_bildschirm_unsicher');
+  });
+
+  it('ohne früheren Halt lehnt dieselbe Lesung ab — die Sperre hängt nur am gehaltenen Fall', async () => {
+    schalter(true, false);
+    einreichung('k', { ean: '4000000000017' });
+    mockKopf.set(preisPfad('k'), png(1170, 2532));
+    bildschirmLesung();
+    await scharf();
+    expect(doc('k')).toMatchObject({ status: 'rejected', rejectReason: 'fotos_unpassend', review: { reason: 'preis_bildschirm' } });
   });
 
   it('nur der Preisbeleg scharf, Bildschirm-Regel aus: Preisbeleg hält, Bildschirmfotos werden wie vor der Regel freigegeben', async () => {

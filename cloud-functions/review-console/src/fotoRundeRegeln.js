@@ -541,13 +541,19 @@ function rundeBefunde(eingabe) {
  *  - `eanFoto`: Halte-Befund der Barcode-Nummer als Rückfall für die nächste
  *    Runde, falls `eanFotoOcr` nicht gespeichert werden konnte (eanFotoVorbefund).
  *  - `preisBildschirm`: Befund der Bildschirm-Regel bzw. des Preisbelegs
- *    `{modus, befund, seit, regeln?, art?}` (src/preisBildschirm.js) — Hinweis
- *    in der Konsole, und ein scharfer Befund gilt im nächsten Lauf weiter,
- *    je Regel unter deren Schalter (preisBildschirmVorbefund). Keine
- *    Sperre: die Konsole gibt ohne Notiz frei, wer hinsieht, entscheidet.
+ *    `{modus, befund, seit, regeln?, art?, ablehnenGesperrt?, gesperrtSeit?}`
+ *    (src/preisBildschirm.js) — Hinweis in der Konsole, und ein scharfer
+ *    Befund gilt im nächsten Lauf weiter, je Regel unter deren Schalter
+ *    (preisBildschirmVorbefund). Hat eine scharfe Regel den Fall einmal
+ *    angehalten, steht dazu die Sperre gegen eine automatische Ablehnung —
+ *    auch allein, ohne Befund (Nachprüfung 06.10.2026). Keine Sperre für die
+ *    Konsole: sie gibt ohne Notiz frei, wer hinsieht, entscheidet.
  *  - Im Trockenlauf (`trocken`) bleibt auch ein geplanter Entscheid offen —
  *    `geplant` sagt, was die Runde getan hätte. Eine geplante Freigabe ohne
- *    sperrenden Befund hinterlässt nichts.
+ *    sperrenden Befund hinterlässt nichts — außer der Fall trägt die Sperre
+ *    gegen eine Ablehnung: scharf wäre er jetzt bezahlt, als Trockenlauf
+ *    bleibt er liegen, und ohne die Sperre könnte ihn der nächste scharfe
+ *    Lauf auf eine einzige „bildschirm"-Lesung hin ablehnen.
  * Gesperrte Konten bekommen nichts (sie liegen stumm, die Konsole liest die
  * Sperre selbst). null = nichts zu hinterlassen (ein alter Eintrag wird entfernt).
  *
@@ -562,7 +568,9 @@ function rundeBefunde(eingabe) {
 function rundeOffenEintrag(p, { lauf, trocken = false } = {}) {
   if (!p || p.grund === KONTO_GESPERRT) return null;
   const sperrend = rundeBefunde(p.eingabe);
-  if (p.entscheidung === 'freigeben' && !sperrend.length) return null;
+  const pbEintrag = p.eingabe ? preisBildschirmEintrag(p.eingabe.preisBildschirm, { lauf }) : null;
+  const pbSperre = !!(trocken && pbEintrag && pbEintrag.ablehnenGesperrt === true);
+  if (p.entscheidung === 'freigeben' && !sperrend.length && !pbSperre) return null;
   const ef = p.eingabe && p.eingabe.eanFoto;
   const eanHalt = ef && (ef.art === 'abweichend' || ef.art === 'unsicher' || ef.art === 'zweifelhaft');
   const bild = p.eingabe && p.eingabe.bild;
@@ -571,7 +579,6 @@ function rundeOffenEintrag(p, { lauf, trocken = false } = {}) {
   const hinweis = p.grund === 'foto_fremdes_konto' && !(bild && bild.vorbefund)
     ? `Gleiches Foto bei ${fremd || 'einer'} Einreichung${fremd === 1 || !fremd ? '' : 'en'} eines anderen Kontos — welche, steht im Tagesbericht`
     : (p.ctx && p.ctx.hinweis) ? String(p.ctx.hinweis).slice(0, 300) : null;
-  const pbEintrag = p.eingabe ? preisBildschirmEintrag(p.eingabe.preisBildschirm, { lauf }) : null;
   return {
     grund: p.grund || null,
     ...(p.entscheidung !== 'offen' ? { geplant: p.entscheidung } : {}),
@@ -585,12 +592,13 @@ function rundeOffenEintrag(p, { lauf, trocken = false } = {}) {
       befund: ef.art === 'abweichend' ? 'abweichend' : 'unsicher', ean: ef.gelesen || ef.roh || null,
       ...(ef.art === 'abweichend' ? { bestaetigt: ef.bestaetigt === true } : { zweit: ef.zweit || null }),
     } : null,
-    // Bildschirmfoto als Preisbeleg (04.10.2026) — nur mit Befund, und nur
-    // Modus, Befund, `seit` und die tragenden Regeln
-    // (preisBildschirm.preisBildschirmEintrag: was das Urteil trägt, steht nur
-    // im Tagesbericht). Die Konsole zeigt daraus einen Hinweis
-    // (einreichung.precheckOf), der nächste Lauf übernimmt einen scharfen
-    // Befund je Regel (preisBildschirmVorbefund).
+    // Bildschirmfoto als Preisbeleg (04.10.2026) — nur mit Befund oder
+    // Sperre, und nur Modus, Befund, `seit`, die tragenden Regeln und die
+    // Sperre gegen eine Ablehnung (preisBildschirm.preisBildschirmEintrag:
+    // was das Urteil trägt, steht nur im Tagesbericht). Die Konsole zeigt aus
+    // einem Befund einen Hinweis (einreichung.precheckOf), der nächste Lauf
+    // übernimmt einen scharfen Befund je Regel und die Sperre
+    // (preisBildschirmVorbefund).
     ...(pbEintrag ? { preisBildschirm: pbEintrag } : {}),
     lauf: lauf || null,
     trocken: !!trocken,

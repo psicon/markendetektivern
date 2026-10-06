@@ -1056,7 +1056,9 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   //     Auch im Trockenlauf (dann bleibt jeder Fall offen; `geplant` sagt,
   //     was die Runde getan hätte). Ein Eintrag eines früheren Laufs, der
   //     heute nicht mehr zutrifft, wird entfernt — außer seine Foto-Befunde
-  //     gelten weiter (fotoRundeRegeln.bildMitVorbefund). Gesperrte Konten:
+  //     gelten weiter (fotoRundeRegeln.bildMitVorbefund) oder er trägt die
+  //     Sperre gegen eine Ablehnung (preisBildschirm.preisBildschirmEintrag);
+  //     ein übersprungener Fall behält ihn unverändert. Gesperrte Konten:
   //     nichts (sie liegen stumm), auch nicht, wenn die Sperre erst beim
   //     Schreiben auffiel. In einer Transaktion: hat inzwischen jemand
   //     entschieden, bleibt das Dokument unberührt.
@@ -1064,8 +1066,13 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   if (schreibtAngaben) {
     const kandidaten = plan.filter((p) => p.grund !== KONTO_GESPERRT && p.grund !== KONTO_GESPERRT_IM_LAUF && !geschrieben.has(p.id));
     await arbeite(kandidaten, async (p) => {
-      // Übersprungen (Status geändert, Preis inzwischen gefunden): heute kein Urteil.
-      const eintrag = p.uebersprungen ? null : rundeOffenEintrag(p, { lauf, trocken: dryRun });
+      // Übersprungen (Status geändert, Preis bzw. Kassenbon inzwischen
+      // gefunden): heute kein Urteil — der Eintrag des Vortags bleibt, wie er
+      // ist. Vorher wurde er entfernt, und mit ihm, was weiter gelten soll,
+      // etwa die Sperre gegen eine Ablehnung (preisBildschirm.preisBildschirmEintrag,
+      // Nachprüfung 06.10.2026). Ein entschiedener Fall bekäme ohnehin nichts.
+      if (p.uebersprungen) return;
+      const eintrag = rundeOffenEintrag(p, { lauf, trocken: dryRun });
       const alt = !!(p.x.review && typeof p.x.review === 'object' && p.x.review.rundeOffen);
       if (!eintrag && !alt) return;
       try {

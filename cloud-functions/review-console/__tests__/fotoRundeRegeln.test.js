@@ -739,7 +739,7 @@ describe('Bildschirmfoto als Preisbeleg (Patrick 04.10.2026: „ja, bau das")', 
       const p = plan({ preisBildschirm: { ...pb(true, 'laden', true), kopf: { format: 'jpg', breite: 900, hoehe: 900, kameraHersteller: null } } });
       const e = rundeOffenEintrag(p, { lauf: 'L' });
       expect(e).toMatchObject({ grund: 'preis_bildschirm_unsicher', sperrend: [] });
-      expect(e.preisBildschirm).toEqual({ modus: true, befund: 'halten', seit: 'L', regeln: ['bildschirm'] });
+      expect(e.preisBildschirm).toEqual({ modus: true, befund: 'halten', seit: 'L', regeln: ['bildschirm'], ablehnenGesperrt: true, gesperrtSeit: 'L' });
       expect(JSON.stringify(e)).not.toMatch(/Statusleiste|jpg|900|merkmal|"quelle"|kamera/i);
     });
     it('Notbremse hält einen Ablehn-Befund zurück → steht als Befund am Dokument (der nächste Lauf übernimmt ihn)', () => {

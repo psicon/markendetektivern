@@ -688,10 +688,14 @@ function vorbefundRegeln(v) {
  * Vorbefunds zurückgenommen ist und heute die Bildschirm-Regel „ablehnen"
  * liest: der Fall liegt schon, und jeder weitere Morgen wäre eine neue
  * Chance auf eine Ablehnung, die an EINER Modellantwort hängt. Das gilt für
- * BEIDE Rückwege — bei `'shadow'` reist der Vorbefund mit (`vorbefund`), bei
- * `false` fällt er weg, und `ablehnenGesperrt` hält die Sperre (Nachprüfung
- * 05.10.2026: mit `false` wurde ein gehaltener Preisbeleg auf eine einzige
- * neue „bildschirm"-Lesung hin abgelehnt, mit `'shadow'` blieb er liegen).
+ * BEIDE Rückwege und für jeden folgenden Morgen: `ablehnenGesperrt` steht am
+ * Fall, bis ein Mensch entscheidet (preisBildschirmEintrag). Bei `'shadow'`
+ * reist am Morgen der Rücknahme zusätzlich der Vorbefund zur Beobachtung mit
+ * (`vorbefund`, für den Bericht), weitergetragen wird danach nur die Sperre
+ * (Nachprüfung 05.10.2026: mit `false` wurde ein gehaltener Preisbeleg auf
+ * eine einzige neue „bildschirm"-Lesung hin abgelehnt, mit `'shadow'` blieb er
+ * liegen; Nachprüfung 06.10.2026: an einem Morgen ohne Bildprüfung oder ohne
+ * Befund ging die Sperre verloren).
  *
  * Grund des Halts: ein übernommener Befund behält seine Art (Bildschirm geht
  * vor Preisbeleg); sonst Bildschirm-Verdacht vor Preisbeleg vor nicht
@@ -830,26 +834,57 @@ function preisBildschirmHinweis(pb = {}) {
  *  - `seit`: Lauf, in dem der übernommene Befund zuerst stand, sonst dieser Lauf.
  *  - `art: 'beleg'`: der Halt-Grund ist der Preisbeleg — für den Hinweis in
  *    der Konsole. Bewusst nur „beleg", nicht welcher der beiden Befunde.
+ *  - `ablehnenGesperrt` + `gesperrtSeit`: die Sperre gegen eine automatische
+ *    Ablehnung (siehe unten) und der Lauf, in dem eine scharfe Regel den Fall
+ *    zuerst angehalten hat. Steht auch OHNE heutigen Befund da — dann ist sie
+ *    der ganze Eintrag (`{ablehnenGesperrt, gesperrtSeit}`; die Konsole zeigt
+ *    dazu keinen Hinweis, einreichung.preisBildschirmOf verlangt einen Befund).
  * Ein Halt NUR wegen des nicht abrufbaren Bildkopfs landet hier nicht: er ist
  * kein Befund über das Foto, sondern ein Technikfehler — der Grund steht in
  * `review.rundeOffen.grund` (PREIS_KOPF_NICHT_LESBAR), und der nächste Lauf
  * prüft neu, statt den Halt für immer zu übernehmen (wie
  * foto_abgleich_gescheitert, das auch nicht weitergetragen wird).
+ *
+ * Sperre (Nachprüfung 06.10.2026): ein Fall, den eine SCHARFE Regel einmal
+ * angehalten hat, wird von der Runde nie mehr auf eine Bildschirm-Lesung hin
+ * abgelehnt — auch nicht, nachdem seine Regel zurückgenommen ist
+ * (preisBildschirmMitVorbefund). Vorher stand sie nur im Speicher des Laufs
+ * und überlebte nur, wenn am Morgen der Rücknahme ein neuer scharfer Befund
+ * entstand: scheiterte an dem Morgen die Bildprüfung (429, Zeitgrenze), oder
+ * lag der Fall aus einem anderen Grund (Ort auffällig) und wurde ohne Befund
+ * gelesen, war sie am nächsten Morgen weg — und eine einzige
+ * „bildschirm"-Antwort lehnte den Fall endgültig ab. Ein Technikfehler
+ * entschied so mittelbar über eine Ablehnung. Die Sperre hält, bis ein Mensch
+ * in der Konsole entscheidet (jede Entscheidung dort ersetzt `review`).
+ * Sie sagt nichts darüber, woran der Halt hing — das Dokument liest der
+ * Einreicher selbst.
  */
 function preisBildschirmEintrag(pb, { lauf = null } = {}) {
   if (!pb) return null;
   const wirkt = preisBildschirmLage(pb, { scharf: true });
   const scharf = wirkt.regeln.length > 0;
   const l = scharf ? wirkt : preisBildschirmLage(pb);
-  if (!l.regeln.length) return null;
   const s = (v) => (typeof v === 'string' && v ? v.slice(0, 40) : null);
-  const seitVor = l.ausVorbefund ? s(pb.vorbefund && pb.vorbefund.seit) : l.befund === 'ablehnen' ? s(pb.vorbefundSeit) : null;
+  let befund = null;
+  if (l.regeln.length) {
+    const seitVor = l.ausVorbefund ? s(pb.vorbefund && pb.vorbefund.seit) : l.befund === 'ablehnen' ? s(pb.vorbefundSeit) : null;
+    befund = {
+      modus: scharf ? true : 'shadow',
+      befund: l.befund,
+      seit: seitVor || s(lauf),
+      ...(scharf ? { regeln: l.regeln } : {}),
+      ...(l.grund === PREIS_BELEG_UNSICHER ? { art: 'beleg' } : {}),
+    };
+  }
+  // Gesperrt: heute hält eine scharfe Regel den Fall, oder die Sperre eines
+  // früheren Laufs reist mit (preisBildschirmMitVorbefund). Eine von der
+  // Notbremse zurückgehaltene Ablehnung sperrt nicht (`befund: 'ablehnen'`).
+  const haeltHeute = scharf && wirkt.befund === 'halten';
+  if (!haeltHeute && pb.ablehnenGesperrt !== true) return befund;
   return {
-    modus: scharf ? true : 'shadow',
-    befund: l.befund,
-    seit: seitVor || s(lauf),
-    ...(scharf ? { regeln: l.regeln } : {}),
-    ...(l.grund === PREIS_BELEG_UNSICHER ? { art: 'beleg' } : {}),
+    ...(befund || {}),
+    ablehnenGesperrt: true,
+    gesperrtSeit: s(pb.gesperrtSeit) || (haeltHeute && befund ? befund.seit : null) || s(lauf),
   };
 }
 
@@ -859,14 +894,21 @@ function preisBildschirmEintrag(pb, { lauf = null } = {}) {
  * werte.eanFotoVorbefund). Ein Befund aus der Beobachtung hält nichts.
  * `regeln`: welche Regeln ihn tragen (vorbefundRegeln) — er hält je Regel nur
  * unter deren Schalter (preisBildschirmLage).
- * @returns {{befund:'ablehnen'|'halten', seit:string|null, regeln:string[]}|null}
+ * Die Sperre gegen eine automatische Ablehnung (`ablehnenGesperrt`,
+ * preisBildschirmEintrag) kommt mit — auch an einem Eintrag ohne scharfen
+ * Befund; dann `befund: null` (hält nichts, sperrt nur die Ablehnung).
+ * @returns {{befund:'ablehnen'|'halten'|null, seit:string|null, regeln:string[], ablehnenGesperrt?:true, gesperrtSeit?:string|null}|null}
  */
 function preisBildschirmVorbefund(x) {
   const ro = x && x.review && typeof x.review === 'object' && x.review.rundeOffen && typeof x.review.rundeOffen === 'object' ? x.review.rundeOffen : null;
   const pb = ro && ro.preisBildschirm && typeof ro.preisBildschirm === 'object' ? ro.preisBildschirm : null;
-  if (!pb || pb.modus !== true || !(pb.befund === 'ablehnen' || pb.befund === 'halten')) return null;
+  if (!pb) return null;
   const s = (v) => (typeof v === 'string' && v ? v.slice(0, 40) : null);
-  return { befund: pb.befund, seit: s(pb.seit) || s(ro.lauf), regeln: vorbefundRegeln(pb) };
+  const sperre = pb.ablehnenGesperrt === true ? { ablehnenGesperrt: true, gesperrtSeit: s(pb.gesperrtSeit) } : null;
+  if (pb.modus !== true || !(pb.befund === 'ablehnen' || pb.befund === 'halten')) {
+    return sperre ? { befund: null, seit: null, regeln: [], ...sperre } : null;
+  }
+  return { befund: pb.befund, seit: s(pb.seit) || s(ro.lauf), regeln: vorbefundRegeln(pb), ...(sperre || {}) };
 }
 
 /**
@@ -889,12 +931,14 @@ function preisBildschirmVorbefund(x) {
  * Aufheben kann nur ein Mensch in der Konsole (jede Entscheidung dort ersetzt
  * `review`) — oder der Schalter DER REGEL, die den Befund trägt
  * (Nachprüfung 05.10.2026): `false` nimmt ihren Befund weg, in `'shadow'`
- * reist er nur noch zur Beobachtung mit und hält nichts mehr
- * (preisBildschirmLage). Der Schalter der anderen Regel berührt ihn nie.
+ * hält er nichts mehr und reist nur an diesem Morgen zur Beobachtung mit
+ * (preisBildschirmLage) — am Dokument steht danach nur noch die Sperre gegen
+ * eine Ablehnung (siehe unten). Der Schalter der anderen Regel berührt ihn nie.
  *
  * Auch mit `false` lehnt der heutige Lauf einen gehaltenen Fall nicht ab
  * (Nachprüfung 05.10.2026): nimmt der Schalter ALLE Regeln des früheren
- * Halts weg, bleibt nur die Sperre — `ablehnenGesperrt` am heutigen Befund.
+ * Halts weg, bleibt nur die Sperre — `ablehnenGesperrt` am heutigen Befund
+ * (bei `'shadow'` ebenso, neben dem mitreisenden Vorbefund).
  * Liest die Bildschirm-Regel heute „ablehnen", hält sie den Fall dann nur
  * (preis_bildschirm_unsicher), genau wie beim Rückweg über `'shadow'`. Vorher
  * wurde ein Preisbeleg-Halt nach `preisBelegRegel: false` auf eine einzige
@@ -903,29 +947,47 @@ function preisBildschirmVorbefund(x) {
  * Menschen — ihre Regel ist die Bildschirm-Regel, und ist die aus, lehnt heute
  * ohnehin nichts ab.
  *
+ * Die Sperre reist mit, bis ein Mensch entscheidet (Nachprüfung 06.10.2026):
+ * `ablehnenGesperrt` + `gesperrtSeit` stehen am Ergebnis, sobald der frühere
+ * Lauf den Fall angehalten hatte (Vorbefund „halten") oder selbst schon eine
+ * Sperre trug — auch OHNE heutige Bildprüfung und auch, wenn beide Schalter
+ * aus sind. Dann ist das Ergebnis eine Eingabe ohne Befund, die nur die
+ * Sperre trägt (preisBildschirmEintrag schreibt sie zurück). Vorher gab dieser
+ * Weg `null` bzw. eine herabgestufte Beobachtung zurück, und am Morgen darauf
+ * lehnte eine einzige „bildschirm"-Lesung den Fall ab.
+ *
  * @param {object|null} heute  Eingabe der Runde (pbVon) oder null (keine Bildprüfung heute)
- * @param {{befund:string, seit:string|null, regeln?:string[]}|null} vorher  preisBildschirmVorbefund
+ * @param {{befund:string|null, seit:string|null, regeln?:string[], ablehnenGesperrt?:boolean, gesperrtSeit?:string|null}|null} vorher  preisBildschirmVorbefund
  * @param {{bildschirm:false|'shadow'|true, beleg:false|'shadow'|true}} modi  heutige Schalter je Regel
  */
 function preisBildschirmMitVorbefund(heute, vorher, modi) {
   if (!modi || typeof modi !== 'object') throw new TypeError('preisBildschirmMitVorbefund: Schalter je Regel erwartet ({bildschirm, beleg})');
   const m = { [REGEL_BILDSCHIRM]: modusPreisBildschirm(modi.bildschirm), [REGEL_BELEG]: modusPreisBeleg(modi.beleg) };
-  if (m[REGEL_BILDSCHIRM] === false && m[REGEL_BELEG] === false) return null;
-  const vor = vorher ? vorbefundRegeln(vorher).filter((r) => m[r] !== false) : [];
+  const gesperrtVorher = !!vorher && (vorher.ablehnenGesperrt === true || vorher.befund === 'halten');
+  const sperre = gesperrtVorher
+    ? { ablehnenGesperrt: true, gesperrtSeit: vorher.gesperrtSeit || (vorher.befund === 'halten' ? vorher.seit : null) || null }
+    : null;
+  // Ohne heutige Bildprüfung: eine Eingabe ohne jeden Befund, nur die Schalter (und ggf. die Sperre).
+  const ohneLesung = { quelle: null, grund: null, merkmal: null, lesedienstBon: false, lesedienstOhneBon: false, kopfGescheitert: false, belegGrund: null };
+  if (m[REGEL_BILDSCHIRM] === false && m[REGEL_BELEG] === false) {
+    return sperre ? { ...ohneLesung, modus: false, belegModus: false, befund: null, ...sperre } : null;
+  }
+  const vor = vorher && vorher.befund ? vorbefundRegeln(vorher).filter((r) => m[r] !== false) : [];
   if (!vor.length) {
-    if (!heute || !vorher || vorher.befund !== 'halten') return heute;
-    const gesperrt = { ...heute, ablehnenGesperrt: true };
+    if (!sperre) return heute;
+    const gesperrt = { ...(heute || { ...ohneLesung, modus: m[REGEL_BILDSCHIRM], belegModus: m[REGEL_BELEG] }), ...sperre };
     return { ...gesperrt, befund: preisBildschirmLage(gesperrt).befund };
   }
   const heuteBefund = heute ? preisBildschirmLage(heute).befund : null;
-  if (heuteBefund === 'ablehnen' && vorher.befund === 'ablehnen') return { ...heute, vorbefundSeit: vorher.seit };
+  if (heuteBefund === 'ablehnen' && vorher.befund === 'ablehnen' && !sperre) return { ...heute, vorbefundSeit: vorher.seit };
   return {
-    ...(heute || { quelle: null, grund: null, merkmal: null, lesedienstBon: false, lesedienstOhneBon: false, kopfGescheitert: false, belegGrund: null }),
+    ...(heute || ohneLesung),
     modus: m[REGEL_BILDSCHIRM],
     belegModus: m[REGEL_BELEG],
     befund: 'halten',
     vorbefund: { befund: vorher.befund, seit: vorher.seit, regeln: vor },
     heute: heuteBefund,
+    ...(sperre || {}),
   };
 }
 
