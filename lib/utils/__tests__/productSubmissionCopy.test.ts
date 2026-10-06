@@ -39,7 +39,7 @@ describe('productSubmissionCopy (86cbam5ep)', () => {
   });
 
   it('Copy-Ton: nie „abgelehnt"/„falsch"/„Fehler" in Nutzer-Texten', () => {
-    const codes = ['ean_fehlt', 'kein_produktname', 'produkt_bereits_verguetet', 'doppelt_eingereicht', 'bilder_wiederverwendet', 'fotos_unpassend', 'preis_fehlt', 'sperre_woche_gleicher_nutzer', 'unbekannt'];
+    const codes = ['ean_fehlt', 'kein_produktname', 'produkt_bereits_verguetet', 'doppelt_eingereicht', 'bilder_wiederverwendet', 'fotos_unpassend', 'preis_fehlt', 'sperre_woche_gleicher_nutzer', 'preis_bildschirm', 'unbekannt'];
     for (const code of codes) {
       const c = describeSubmission({ status: 'rejected', rejectReason: code });
       expect(`${c.label} ${c.headline} ${c.body}`).not.toMatch(/abgelehnt|falsch|Fehler/i);
@@ -63,6 +63,16 @@ describe('productSubmissionCopy (86cbam5ep)', () => {
       expect(`${c.headline} ${c.body}`).not.toMatch(/Preis|Hersteller|Markt|nächsten Tag/);
     }
     expect(describeSubmission({ status: 'rejected', rejectReason: 'sperre_woche_gleicher_nutzer' }).body).toMatch(/nächster Woche/);
+  });
+
+  // 04.10.2026: Bildschirmfoto als Preisbeleg. Der Server schreibt vorerst
+  // `fotos_unpassend` (alle Versionen kennen ihn); der eigene Text liegt bereit.
+  it('preis_bildschirm hat einen eigenen Text und nennt, was zählt (Preisschild, Kassenbon, e-Bon)', () => {
+    const c = describeSubmission({ status: 'rejected', rejectReason: 'preis_bildschirm' });
+    expect(c.headline).not.toBe('Diese Einreichung konnte nicht gezählt werden');
+    expect(c.headline).toMatch(/Bildschirm/);
+    expect(c.body).toMatch(/Preisschild/);
+    expect(c.body).toMatch(/e-Bon/);
   });
 
   it('primaryReasonCode bevorzugt holdReasons und strippt den Suffix', () => {

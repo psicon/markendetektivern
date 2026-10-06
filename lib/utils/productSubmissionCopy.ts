@@ -108,6 +108,14 @@ const REASON_COPY: Record<string, { headline: string; body: string }> = {
     headline: 'Auf dem Preisfoto war kein Preis zu sehen',
     body: 'Beim nächsten Produkt einfach das Preisschild am Regal oder deinen Kassenbon fotografieren — dann zählt der Datensatz.',
   },
+  // 04.10.2026 (Patrick: Bildschirmfotos als Preisbeleg erkennen). Der Server
+  // schreibt vorerst `fotos_unpassend` ans Dokument, weil ältere App-Versionen
+  // diesen Code nicht kennen (review-console/src/duplicatePolicy.js,
+  // APP_GRUND) — er stellt um, sobald diese Version verbreitet ist.
+  preis_bildschirm: {
+    headline: 'Das Preisfoto zeigte einen Bildschirm',
+    body: 'Beim nächsten Produkt einfach das Preisschild im Markt oder deinen Kassenbon fotografieren — ein e-Bon aus der Händler-App zählt auch.',
+  },
 };
 
 const DEFAULT_HELD = {

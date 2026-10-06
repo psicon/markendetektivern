@@ -136,7 +136,13 @@ describe('appGrund — Code am Dokument für die App (Entscheidung Patrick 02.10
     expect(appGrund(REASON.SAME_USER)).toBe('doppelt_eingereicht');
   });
   test('alle anderen Codes bleiben', () => {
-    for (const c of ['unvollstaendig', 'preis_fehlt', 'konto_gesperrt', 'bilder_wiederverwendet', 'doppelt_eingereicht']) expect(appGrund(c)).toBe(c);
+    for (const c of ['unvollstaendig', 'preis_fehlt', 'konto_gesperrt', 'bilder_wiederverwendet', 'doppelt_eingereicht', 'fotos_unpassend']) expect(appGrund(c)).toBe(c);
+  });
+  // Patrick 04.10.2026: „dann Ablehnung mit fotos_unpassend" — Text in jeder
+  // App-Version seit 05.09.; preis_fehlt behauptete „kein Preis zu sehen".
+  test('Bildschirmfoto als Preisbeleg erscheint als fotos_unpassend', () => {
+    expect(appGrund('preis_bildschirm')).toBe('fotos_unpassend');
+    expect(appGrund('preis_bildschirm_unsicher')).toBe('preis_bildschirm_unsicher'); // wird nie abgelehnt, nur gehalten
   });
 });
 

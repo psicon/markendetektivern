@@ -13,6 +13,7 @@
 const { evaluateDuplicate, completenessCheck, ms } = require('./duplicatePolicy');
 const { eanOf, nameOf, preisOf, policyOf, herstellerAnzeige, vollstaendigkeitOf, herkunftOf, eanFotoBefund, eanSchluessel, EAN_HALTEN } = require('./werte');
 const { RUNDE_SPERREND, DOPPEL_GRUENDE } = require('./fotoRundeRegeln');
+const { PREIS_BILDSCHIRM, PREIS_BILDSCHIRM_UNSICHER, PREIS_BELEG_UNSICHER } = require('./preisBildschirm');
 
 const REQUIRED_STEPS = ['front', 'rueckseite', 'hersteller', 'ean', 'naehrwerte', 'zutaten', 'preis'];
 const SLOTS = new Set(REQUIRED_STEPS);
@@ -80,16 +81,36 @@ const kurz = (v, n) => (typeof v === 'string' && v ? v.slice(0, n) : null);
 function rundeOffenOf(x) {
   const r = x.review && typeof x.review === 'object' ? x.review.rundeOffen : null;
   if (!r || typeof r !== 'object') return null;
+  const pb = preisBildschirmOf(r.preisBildschirm);
   return {
     grund: kurz(r.grund, 60),
     geplant: r.geplant === 'freigeben' || r.geplant === 'ablehnen' ? r.geplant : null,
     hinweis: kurz(r.hinweis, 300),
     zurueckgehalten: kurz(r.zurueckgehalten, 60),
     sperrend: Array.isArray(r.sperrend) ? [...new Set(r.sperrend.filter((c) => SPERREND.has(c)))] : [],
+    // Befund der Bildschirm-Regel (Bildschirmfoto als Preisbeleg, 04.10.2026).
+    ...(pb ? { preisBildschirm: pb } : {}),
     lauf: kurz(r.lauf, 40),
     trocken: r.trocken === true,
     at: ms(r.at),
   };
+}
+
+/**
+ * `review.rundeOffen.preisBildschirm` bereinigt: nur bekannte Werte (sie
+ * landen in der Oberfläche). Die Konsole übernimmt den BEFUND der Runde —
+ * nachrechnen kann sie ihn nicht, denn woran er hängt (Antwort des Modells,
+ * Dateimerkmale), steht bewusst nicht am Dokument (preisBildschirm.preisBildschirmEintrag).
+ * `review` ist server-only (firestore.rules), vorgeben kann ihn niemand.
+ * `art: 'beleg'`: der Halt kommt aus dem Preisbeleg („Kassenbon" ohne
+ * Kassenbon-Merkmale oder von einem fremden Händler, 05.10.2026).
+ * Ohne gültigen Befund → null.
+ */
+function preisBildschirmOf(v) {
+  if (!v || typeof v !== 'object') return null;
+  const befund = v.befund === 'ablehnen' || v.befund === 'halten' ? v.befund : null;
+  if (!befund) return null;
+  return { befund, modus: v.modus === true ? true : 'shadow', seit: kurz(v.seit, 40), ...(befund === 'halten' && v.art === 'beleg' ? { art: 'beleg' } : {}) };
 }
 
 /**
@@ -218,6 +239,10 @@ const OHNE_DOPPEL = { verdict: 'ok', reason: null, priorId: null, priorUserId: n
  *    ersetzt `review` und löscht `rejectReason` — ohne diesen Vermerk stand
  *    eine Runden-Ablehnung wegen wiederverwendeter Fotos danach als „ok" da
  *    (den md5-Abgleich kann die Konsole nicht selbst), F gab ohne Notiz frei.
+ *  - Bildschirmfoto als Preisbeleg (04.10.2026): der Befund der Runde aus
+ *    `row.rundeOffen.preisBildschirm` als Hinweis `preis_bildschirm`
+ *    (Befund „ablehnen") bzw. `preis_bildschirm_unsicher` (Befund „halten")
+ *    bzw. `preis_beleg_unsicher` (Befund „halten" aus dem Preisbeleg, 05.10.2026).
  */
 function precheckOf(row, sameEanRows, { kontoSperre = null, fotoEanRows = null } = {}) {
   const completeness = completenessCheck(row._komplett, REQUIRED_STEPS);
@@ -255,6 +280,14 @@ function precheckOf(row, sameEanRows, { kontoSperre = null, fotoEanRows = null }
   else if (kontoSperre === 'unbekannt') { reasons.unshift('kontosperre_unbekannt'); if (verdict === 'ok') verdict = 'hold'; }
 
   const hinweise = row.priceCents ? [] : ['preis_nicht_gelesen'];
+  // Bildschirmfoto als Preisbeleg (04.10.2026): der Befund, den die
+  // Morgenrunde am Fall hinterlassen hat (preisBildschirm.preisBildschirmBefund)
+  // — die Konsole liest weder Modell noch Bildkopf selbst. Hinweis, keine
+  // Sperre: wer hinsieht, entscheidet (eine Ablehnung mit „Fotos passen
+  // nicht" ist derselbe Code wie in der Runde).
+  const pbRunde = runde && runde.preisBildschirm ? runde.preisBildschirm : null;
+  const pb = pbRunde ? pbRunde.befund : null;
+  if (pb) hinweise.push(pb === 'ablehnen' ? PREIS_BILDSCHIRM : pbRunde.art === 'beleg' ? PREIS_BELEG_UNSICHER : PREIS_BILDSCHIRM_UNSICHER);
   return { verdict, reasons, missing: completeness.missing, dup, hinweise, ...(dupFoto ? { dupFoto } : {}), ...(kontoSperre ? { kontoSperre } : {}) };
 }
 
@@ -380,5 +413,5 @@ function baueFotoListe(openDocs, byEan, p, q, kontoSperre = () => null) {
 
 module.exports = {
   REQUIRED_STEPS, INDEX_FELDER, safeStatus, rowOf, stripPolicy, precheckOf, precheckFuerFall,
-  nachbarnAus, nachbarnVon, gruppiereNachEan, eanIndex, baueFotoListe, bildDefektOf, eanFotoZeile, rundeOffenOf, wiedereroeffnetOf,
+  nachbarnAus, nachbarnVon, gruppiereNachEan, eanIndex, baueFotoListe, bildDefektOf, eanFotoZeile, rundeOffenOf, wiedereroeffnetOf, preisBildschirmOf,
 };

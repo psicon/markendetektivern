@@ -139,6 +139,96 @@ describe('Barcode-Nummer und Halte-Gründe (Prüfrunde 2, 02.10.2026)', () => {
   });
 });
 
+describe('Bildschirmfoto als Preisbeleg (04.10.2026)', () => {
+  const runde = (over) => ({ ...basis().runde, ...over });
+  it('Bildprüfung beantwortet die Preisquelle nicht mehr (> 25 %, mind. 8 befragt) → gelb', () => {
+    expect(warnungen(basis({ runde: runde({ preisQuelleBefragt: 100, preisQuelleOhneAntwort: 2 }) }))).toEqual([]);
+    expect(codes(warnungen(basis({ runde: runde({ preisQuelleBefragt: 40, preisQuelleOhneAntwort: 11 }) })))).toEqual(['gelb:preisquelle_ohne_antwort']);
+    expect(warnungen(basis({ runde: runde({ preisQuelleBefragt: 6, preisQuelleOhneAntwort: 6 }) }))).toEqual([]); // kleiner Tag
+    expect(warnungen(basis({ runde: runde({ preisQuelleBefragt: 0 }) }))).toEqual([]); // Schalter aus
+  });
+  it('viele Fälle wegen unsicherer Preisquelle angehalten (≥ 5 und > 5 %) → gelb', () => {
+    expect(warnungen(basis({ runde: runde({ auditVersucht: 120, preisBildschirmHalten: 2 }) }))).toEqual([]);
+    expect(codes(warnungen(basis({ runde: runde({ auditVersucht: 80, preisBildschirmHalten: 5 }) })))).toEqual(['gelb:preisquelle_haelt_viele']);
+    expect(warnungen(basis({ runde: runde({ auditVersucht: 120, preisBildschirmHalten: 5 }) }))).toEqual([]);
+  });
+  it('„Bildschirm", obwohl der Lesedienst einen Kassenbon sah (gemessen nie) → gelb ab 2', () => {
+    expect(warnungen(basis({ runde: runde({ preisBildschirmTrotzBon: 1 }) }))).toEqual([]);
+    expect(codes(warnungen(basis({ runde: runde({ preisBildschirmTrotzBon: 2 }) })))).toEqual(['gelb:preisquelle_bon_als_bildschirm']);
+  });
+  it('Kopf des Preisfotos nicht abrufbar (Storage) → gelb ab 3', () => {
+    expect(warnungen(basis({ runde: runde({ preisKopfNichtAbrufbar: 2 }) }))).toEqual([]);
+    expect(codes(warnungen(basis({ runde: runde({ preisKopfNichtAbrufbar: 3 }) })))).toEqual(['gelb:preisfoto_kopf_nicht_abrufbar']);
+  });
+  // Prüfrunde 3 (04.10.2026): scharf hält ein fehlender Kopf jede Freigabe aus
+  // dem Laden an — bei einer Storage-Störung ein Tag ohne Freigaben.
+  it('Kopf nicht abrufbar, scharf, > 25 % der befragten (mind. 8) → rot; Beobachtung oder wenige → gelb', () => {
+    const k = (over) => codes(warnungen(basis({ runde: runde(over) })));
+    expect(k({ preisBildschirmScharf: true, preisQuelleBefragt: 120, preisKopfNichtAbrufbar: 120 })).toEqual(['rot:preisfoto_kopf_nicht_abrufbar']);
+    expect(k({ preisBildschirmScharf: true, preisQuelleBefragt: 40, preisKopfNichtAbrufbar: 11 })).toEqual(['rot:preisfoto_kopf_nicht_abrufbar']);
+    expect(k({ preisBildschirmScharf: true, preisQuelleBefragt: 40, preisKopfNichtAbrufbar: 10 })).toEqual(['gelb:preisfoto_kopf_nicht_abrufbar']);
+    expect(k({ preisBildschirmScharf: true, preisQuelleBefragt: 6, preisKopfNichtAbrufbar: 6 })).toEqual(['gelb:preisfoto_kopf_nicht_abrufbar']); // kleiner Tag
+    expect(k({ preisBildschirmScharf: false, preisQuelleBefragt: 120, preisKopfNichtAbrufbar: 120 })).toEqual(['gelb:preisfoto_kopf_nicht_abrufbar']);
+    expect(k({ preisBildschirmScharf: true, preisQuelleBefragt: 120, preisKopfNichtAbrufbar: 2 })).toEqual([]);
+    const text = warnungen(basis({ runde: runde({ preisBildschirmScharf: true, preisQuelleBefragt: 120, preisKopfNichtAbrufbar: 120 }) }))[0].text;
+    expect(text).toMatch(/120 von 120 .*kaum Freigaben/);
+  });
+  it('Notbremse der Regel erscheint rot wie jede Notbremse', () => {
+    expect(codes(warnungen(basis({ notbremse: { bild: false, gesamt: false, bildschirm: true, text: ['Bei 6 von 60 …'] } })))).toEqual(['rot:notbremse']);
+  });
+  // Nachprüfung 06.10.2026: hält die Bremse nur dank Fällen eines Vortags
+  // (bzw. wurden solche Fälle doch abgelehnt), meldet sie gelb, nicht rot.
+  it('… gelbe Einträge der Notbremse erscheinen gelb mit ihrem Code', () => {
+    const w = warnungen(basis({ notbremse: { bild: false, gesamt: false, bildschirm: true, text: [], gelb: [
+      { code: 'notbremse_vortage_bildschirm', text: '4 Bildschirm-Ablehnungen … liegen seit …' },
+      { code: 'notbremse_vortage_abgelehnt_bildschirm', text: '3 … heute abgelehnt' },
+    ] } }));
+    expect(codes(w)).toEqual(['gelb:notbremse_vortage_bildschirm', 'gelb:notbremse_vortage_abgelehnt_bildschirm']);
+    expect(w[0].text).toBe('Notbremse: 4 Bildschirm-Ablehnungen … liegen seit …');
+    // ältere Aufrufer ohne `gelb` bleiben unverändert
+    expect(warnungen(basis({ notbremse: { bild: false, gesamt: false, text: [] } }))).toEqual([]);
+  });
+  // Prüfrunde 2 (04.10.2026)
+  it('„Kassenbon", der Lesedienst las das Foto und sah keinen (gemessen nie) → gelb ab 2', () => {
+    expect(warnungen(basis({ runde: runde({ preisBildschirmBonWiderspruch: 1 }) }))).toEqual([]);
+    expect(codes(warnungen(basis({ runde: runde({ preisBildschirmBonWiderspruch: 2 }) })))).toEqual(['gelb:preisquelle_bon_widerspruch']);
+  });
+  // Nachprüfung 06.10.2026: „bleiben liegen" nur, wenn die Fälle wirklich liegen (scharfe Regel)
+  it('… der Text sagt, ob die Fälle liegen (scharf) oder in der Beobachtung bezahlt werden', () => {
+    const text = (liegt) => warnungen(basis({ runde: runde({ preisBildschirmBonWiderspruch: 3, preisBildschirmBonWiderspruchLiegt: liegt }) }))[0].text;
+    expect(text(3)).toMatch(/die Fälle bleiben liegen/);
+    expect(text(0)).toMatch(/in der Beobachtung hält die Runde sie nicht an/);
+    expect(text(0)).not.toMatch(/bleiben liegen/);
+    expect(text(1)).toMatch(/1 davon bleibt liegen, die übrigen hält die Runde in der Beobachtung nicht an/);
+  });
+  it('unbekannter Schalterwert ("true" als Text) → gelb, nennt den Wert', () => {
+    expect(warnungen(basis({ runde: runde({ preisBildschirmSchalterUnbekannt: null }) }))).toEqual([]);
+    const w = warnungen(basis({ runde: runde({ preisBildschirmSchalterUnbekannt: '"true" (Text)' }) }));
+    expect(codes(w)).toEqual(['gelb:preisbildschirm_schalter_unbekannt']);
+    expect(w[0].text).toMatch(/"true" \(Text\).*Beobachtung.*boolean/);
+  });
+});
+
+describe('Preisbeleg „Kassenbon" (Entscheidung Claude im Auftrag Patricks, 04.10.2026)', () => {
+  const runde = (over) => ({ ...basis().runde, ...over });
+  it('viele Fälle wegen unsicheren Preisbelegs angehalten (≥ 5 und > 5 %) → gelb; normal 4–8 pro Woche', () => {
+    expect(warnungen(basis({ runde: runde({ auditVersucht: 120, preisBelegHalten: 2 }) }))).toEqual([]);
+    expect(codes(warnungen(basis({ runde: runde({ auditVersucht: 80, preisBelegHalten: 5 }) })))).toEqual(['gelb:preisbeleg_haelt_viele']);
+    expect(warnungen(basis({ runde: runde({ auditVersucht: 120, preisBelegHalten: 5 }) }))).toEqual([]);
+  });
+  it('Merkmal-Frage bei „Kassenbon" ohne Antwort (> 25 %, mind. 8) → gelb', () => {
+    expect(warnungen(basis({ runde: runde({ preisBelegKassenbon: 40, preisBelegOhneAntwort: 10 }) }))).toEqual([]);
+    const w = warnungen(basis({ runde: runde({ preisBelegKassenbon: 40, preisBelegOhneAntwort: 11 }) }));
+    expect(codes(w)).toEqual(['gelb:preisbeleg_ohne_antwort']);
+    expect(w[0].text).toMatch(/11 von 40/);
+    expect(warnungen(basis({ runde: runde({ preisBelegKassenbon: 6, preisBelegOhneAntwort: 6 }) }))).toEqual([]); // kleiner Tag
+  });
+  it('Liste unserer Märkte nicht lesbar → gelb', () => {
+    expect(warnungen(basis({ runde: runde({ preisBelegMaerkteUnlesbar: false }) }))).toEqual([]);
+    expect(codes(warnungen(basis({ runde: runde({ preisBelegMaerkteUnlesbar: true }) })))).toEqual(['gelb:preisbeleg_maerkte_unlesbar']);
+  });
+});
+
 describe('Produktsuche (unbekannte Barcodes)', () => {
   const { produktsucheLage } = require('../src/produktsuche');
   const zaehler = (over) => ({ bearbeitet: 120, gefunden: 58, keineDaten: 50, fehler: 2, uebersprungen: 10, serperRest: 9000, ...over });

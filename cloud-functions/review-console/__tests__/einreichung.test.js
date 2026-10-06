@@ -370,3 +370,58 @@ describe('Zurückgeholte Ablehnung (review.wiedereroeffnet, Schlussprüfung 03.1
     expect(l.rows[0]).toMatchObject({ verdict: 'hold', reasons: ['zurueckgeholt_doppel'] });
   });
 });
+
+describe('Bildschirmfoto als Preisbeleg: Befund der Runde als Hinweis in der Konsole (04.10.2026)', () => {
+  const sauber = (extra = {}) => rowOf(doc('k', basis({ ean: GUELTIG, productNameOcr: 'Skyr', priceOcr: { priceCents: 129 }, ...extra })));
+  const mitBefund = (pb, extra = {}) => sauber({ review: { rundeOffen: { grund: 'preis_bildschirm_unsicher', sperrend: [], lauf: 'L', preisBildschirm: pb } }, ...extra });
+
+  it('Befund „ablehnen" → Hinweis preis_bildschirm, Urteil bleibt ok (keine Sperre)', () => {
+    const p = precheckOf(mitBefund({ modus: true, befund: 'ablehnen', seit: 'L' }), []);
+    expect(p).toMatchObject({ verdict: 'ok', reasons: [], hinweise: ['preis_bildschirm'] });
+  });
+  it('Befund „halten" → Hinweis preis_bildschirm_unsicher, auch aus der Beobachtung', () => {
+    for (const pb of [{ modus: true, befund: 'halten' }, { modus: 'shadow', befund: 'halten' }]) {
+      expect(precheckOf(mitBefund(pb), []).hinweise).toEqual(['preis_bildschirm_unsicher']);
+    }
+  });
+  // Gegenprüfung 04.10.2026: woran der Befund hängt (Antwort des Modells,
+  // Dateimerkmale), steht nicht mehr am Dokument — die Konsole übernimmt ihn.
+  it('die Konsole übernimmt den Befund der Runde; ohne gültigen Befund kein Hinweis', () => {
+    expect(precheckOf(mitBefund({ modus: true, befund: 'loeschen' }), []).hinweise).toEqual([]);
+    expect(precheckOf(mitBefund({ quelle: 'bildschirm', merkmal: true }), []).hinweise).toEqual([]);
+  });
+  it('zusammen mit „Preis nicht gelesen"', () => {
+    const r = mitBefund({ modus: true, befund: 'ablehnen' }, { priceOcr: null });
+    expect(precheckOf(r, []).hinweise).toEqual(['preis_nicht_gelesen', 'preis_bildschirm']);
+  });
+  it('nur bei offenen Einreichungen', () => {
+    expect(precheckOf(mitBefund({ modus: true, befund: 'ablehnen' }, { status: 'approved' }), []).hinweise).toEqual([]);
+  });
+  it('Warteschlange: gelber Punkt über den Hinweis', () => {
+    const l = baueFotoListe([doc('k', basis({ ean: GUELTIG, productNameOcr: 'Skyr', priceOcr: { priceCents: 129 }, review: { rundeOffen: { grund: 'x', sperrend: [], preisBildschirm: { modus: true, befund: 'halten' } } } }))], new Map(), {}, '');
+    expect(l.rows[0]).toMatchObject({ verdict: 'ok', hinweise: ['preis_bildschirm_unsicher'] });
+  });
+  it('rundeOffenOf: nur bekannte Werte, nichts ohne gültigen Befund', () => {
+    expect(rundeOffenOf({ review: { rundeOffen: { grund: 'x', preisBildschirm: { befund: 'halten', modus: 'scharf', seit: 's'.repeat(60), quelle: 'bildschirm', merkmal: true } } } }).preisBildschirm)
+      .toEqual({ befund: 'halten', modus: 'shadow', seit: 's'.repeat(40) });
+    expect(rundeOffenOf({ review: { rundeOffen: { grund: 'x', preisBildschirm: { befund: '<b>' } } } })).not.toHaveProperty('preisBildschirm');
+    expect(rundeOffenOf({ review: { rundeOffen: { grund: 'x' } } })).not.toHaveProperty('preisBildschirm');
+  });
+});
+
+describe('Preisbeleg „Kassenbon" in der Konsole (Entscheidung Claude im Auftrag Patricks, 04.10.2026)', () => {
+  const sauber = (extra = {}) => rowOf(doc('k', basis({ ean: GUELTIG, productNameOcr: 'Skyr', priceOcr: { priceCents: 129 }, ...extra })));
+  const mitBefund = (pb) => sauber({ review: { rundeOffen: { grund: 'preis_beleg_unsicher', sperrend: [], lauf: 'L', preisBildschirm: pb } } });
+  it('Befund „halten" aus dem Preisbeleg → Hinweis preis_beleg_unsicher (keine Sperre), auch aus der Beobachtung', () => {
+    for (const modus of [true, 'shadow']) {
+      expect(precheckOf(mitBefund({ modus, befund: 'halten', art: 'beleg' }), [])).toMatchObject({ verdict: 'ok', reasons: [], hinweise: ['preis_beleg_unsicher'] });
+    }
+  });
+  it('rundeOffenOf übernimmt `art` nur als „beleg" und nur bei „halten"', () => {
+    expect(rundeOffenOf({ review: { rundeOffen: { grund: 'x', preisBildschirm: { befund: 'halten', modus: true, art: 'beleg' } } } }).preisBildschirm)
+      .toEqual({ befund: 'halten', modus: true, seit: null, art: 'beleg' });
+    expect(rundeOffenOf({ review: { rundeOffen: { grund: 'x', preisBildschirm: { befund: 'halten', modus: true, art: '<b>' } } } }).preisBildschirm).not.toHaveProperty('art');
+    expect(rundeOffenOf({ review: { rundeOffen: { grund: 'x', preisBildschirm: { befund: 'ablehnen', modus: true, art: 'beleg' } } } }).preisBildschirm).not.toHaveProperty('art');
+    expect(precheckOf(mitBefund({ modus: true, befund: 'ablehnen', art: 'beleg' }), []).hinweise).toEqual(['preis_bildschirm']);
+  });
+});

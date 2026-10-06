@@ -267,6 +267,26 @@ describe('Befunde der Morgenrunde (review.rundeOffen, Prüfrunde 2, 02.10.2026)'
     expect((await entscheide({ ids: ['k'], decision: 'approve' })).results[0].outcome).toBe('approved');
   });
 
+  // Nachprüfung 06.10.2026: die Sperre der Morgenrunde gegen eine automatische
+  // Ablehnung (Bildschirmfoto/Preisbeleg) gilt nur für die Runde. Die Konsole
+  // zeigt dazu keinen Hinweis, gibt ohne Notiz frei, und jede Entscheidung
+  // nimmt sie mit — danach entscheidet ein Mensch, nicht mehr die Runde.
+  it('Sperre der Runde gegen eine Ablehnung: kein Hinweis, Freigabe ohne force, die Entscheidung nimmt sie mit', async () => {
+    const sperre = { preisBildschirm: { ablehnenGesperrt: true, gesperrtSeit: '2026-10-05_080000' } };
+    lege('f', rundeOffen('ort_auffaellig', { sperrend: [], ...sperre }));
+    lege('a', rundeOffen('ort_auffaellig', { sperrend: [], ...sperre }));
+    const q = await konsole.reviewQueue({ ...admin, data: { type: 'photos' } });
+    for (const id of ['f', 'a']) expect(q.rows.find((r) => r.id === id).verdict).toBe('ok');
+    const c = await konsole.reviewCases({ ...admin, data: { type: 'photos', ids: ['f'] } });
+    expect(c.cases[0].precheck.hinweise.filter((h) => h.startsWith('preis_bildschirm') || h.startsWith('preis_beleg'))).toEqual([]);
+    expect(c.cases[0].row.rundeOffen).not.toHaveProperty('preisBildschirm');
+    expect((await entscheide({ ids: ['f'], decision: 'approve' })).results[0].outcome).toBe('approved');
+    expect(doc('f').review.rundeOffen).toBeUndefined();
+    await entscheide({ ids: ['a'], decision: 'reject', reason: 'fotos_unpassend' });
+    expect(doc('a').status).toBe('rejected');
+    expect(doc('a').review.rundeOffen).toBeUndefined();
+  });
+
   it('Ablehnung nimmt den Eintrag mit; „Zurückstellen" (hold) lässt ihn stehen', async () => {
     lege('a', rundeOffen('foto_fremdes_konto'));
     lege('h', rundeOffen('foto_fremdes_konto'));

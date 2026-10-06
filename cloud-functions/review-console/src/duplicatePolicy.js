@@ -71,12 +71,22 @@ const REASON = Object.freeze({
  *    Umstellen (Eintrag hier entfernen), sobald diese Version bei praktisch
  *    allen Nutzern läuft — alte Versionen zeigten sonst den Standardtext.
  *
+ * Bildschirmfoto als Preisbeleg → `fotos_unpassend` (Patrick 04.10.2026:
+ * „dann Ablehnung mit fotos_unpassend"). Dessen Text („Ein Foto passte nicht
+ * zum Schritt — zum Beispiel das Regal statt des Preisschilds …") steht seit
+ * 05.09.2026 in jeder Version. `preis_fehlt` wäre falsch: dessen Text sagt
+ * „kein Preis zu sehen", und es gibt ihn erst ab 6.0.20. Ein eigener Text
+ * liegt unter `preis_bildschirm` für eine spätere Version bereit (wie oben).
+ * Literal statt Import aus src/preisBildschirm.js: keine Abhängigkeit der
+ * Doppel-Regel von der Bildschirm-Regel.
+ *
  * Der interne Grund bleibt in `review.reason` am Dokument, damit Bericht,
  * Notbremse und Auswertungen die Wochen-Sperre von anderen Doppeln trennen.
  */
 const APP_GRUND = Object.freeze({
   [REASON.SAME_USER_WEEK]: REASON.PENDING_OLDER,
   [REASON.SAME_USER]: REASON.PENDING_OLDER,
+  preis_bildschirm: 'fotos_unpassend',
 });
 const appGrund = (code) => APP_GRUND[code] || code;
 
