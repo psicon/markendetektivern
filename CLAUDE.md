@@ -2743,6 +2743,12 @@ werden muss (mehrfach durchexerziert, sonst 1 h verloren):
   Bei kombiniertem Multi-Codebase-Deploy flaket Gen1 reproduzierbar beim
   Cold-Load („Function … is not defined") → einzelne Codebase solo redeployen
   geht durch.
+  Eine NEUE Funktion mit `retry: true` bricht `--non-interactive` mit „Pass the
+  --force option to deploy functions with a failure policy" ab, BEVOR etwas
+  ausgerollt wird. `--force` bestätigt dann auch das Löschen von Funktionen,
+  die im lokalen Stand fehlen — vorher mit `gcloud functions list` (Label
+  `firebase-functions-codebase`) prüfen, dass jede Live-Funktion der Codebase
+  im Quelltext steht (06.10.2026, external-product-lookup).
 - Gemini: Secret `GEMINI_API_KEY` + `@google/genai`, Modell
   `gemini-3.5-flash`, Setup in `cloud-functions/ai-product-comparison`
   (wiederverwendbar). Key lesen: `firebase-tools functions:secrets:access`.
@@ -3911,6 +3917,32 @@ den Versuchen `review` / `config_unavailable` (wie `ocr_unavailable`).
   bezahlten Originals dessen Gutschrift (`reprocess_to_rejected`). Jetzt: ein
   bezahlter Bon wird von 5b nie abgelehnt (Log `vorpruefung-doppel-schon-bezahlt`),
   die Kopie lehnt ihr eigener Lauf ab. Siehe Regel „Bestandsschutz" unten.
+
+## Ausrollstand 06.10.2026, abends (Patrick: „alles ausrollen", „ja")
+
+Ausgerollt aus `feat/rnfirebase-migration` (Stand `a673955f`, alle vier
+Zweige vom 04.–06.10. zusammengeführt, 3.943 Tests + 66 Rules-Tests grün):
+Firestore-Rules (Sperrliste `eanKorrektur`/`eanKorrekturVerworfen`),
+`hosting:md-receipt-admin`, `functions:review-console` (zweimal, zuletzt mit
+der Notbremse-Sperre), `functions:cashback-pipeline`, `functions:nutrition-scraper`,
+`functions:external-misses-processor`, `functions:external-product-lookup`
+(neu: Trigger `onNutritionScrapeFuerExterne`). Index `status`+`rang` auf
+`external_lookup_misses` angelegt (REST). Daten: `.backfill-doppel-person.js`
+(6.783 Einträge, VERIFY grün, `doppelBestandIndexiert: true`), Nachpflege
+Produktsuche (19.060 Ränge, 21.105 Produkte mit `storedAt`/`fetchedAt`, 665
+Namen repariert), `_meta/produktsuche` = `{ shopBilder: true }` (übrige Werte
+Standard: 1 Suche je Lauf, 120 am Tag — Tempo 3/450 erst nach Tagesbericht
+und Stichprobe). Schalter: `barcodeKorrektur: true` (Patrick 06.10.: „ja");
+`preisBildschirmRegel`/`preisBelegRegel` fehlen = Beobachtung; Doppelbon-
+Schalter unverändert (Standard), `ocrPrompt` unverändert (v1.4).
+NICHT ausgerollt: `nutrition-backfill` (zurückgestellt, functions.config()),
+die App-Korrektur des Barcode-Scanners (`claude/barcode-scanner-fix`, kommt
+mit dem nächsten App-Build; vorher einmal auf einem echten Android-Gerät den
+Barcode-Schritt durchklicken).
+Offen danach: Doppelbon-Schalter nach der Anleitung im Abschnitt
+„Ausrollen (Reihenfolge, Nachtrag 05.10.2026)" schrittweise auf 'shadow'/true;
+Preisfoto-Regeln nach einer Woche Beobachtung; Lieferanschrift-Bereinigung
+(`.bereinige-lieferanschrift-0410.js`) wartet auf Patricks Freigabe.
 
 ## Produktentscheidung 20.09.2026: lose Ware wird angenommen
 
