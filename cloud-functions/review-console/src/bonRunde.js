@@ -223,6 +223,12 @@ async function bonRunde({ dryRun = false, projekt, bucketName, schluessel = null
               if (r.ok) {
                 let grund = r.capReason || null;
                 if (r.status === 'no_reward' && !grund) grund = (await db.doc(`receipts/${b.id}`).get()).get('rejectReason') || null;
+                // Doppel-Schutz in der Buchung (04.10.2026): auf eine Freigabe
+                // kann der Resolver `rejected` antworten — derselbe Bon ist schon
+                // bezahlt. Kein Fehler der Runde und keine eigene Ablehnung:
+                // eigener Zähler `doppelImResolver`, die Reservierung kommt
+                // zurück (nichts gebucht).
+                if (aufruf.decision === 'approve' && r.status === 'rejected') grund = r.rejectReason || grund;
                 eintrag.ergebnis = { http: r.http, status: r.status || null, grund, gebuchtCents: Number(r.creditedCents) || 0 };
                 await db.doc(`receipts/${b.id}`).set({ reviewConsole: { decidedBy: 'worker-bonrunde', decision: aufruf.decision, reason: aufruf.reason || null, at: FieldValue.serverTimestamp() } }, { merge: true }).catch(() => {});
               } else if (r.code === 'netzwerk' || r.http >= 500) {
@@ -236,7 +242,10 @@ async function bonRunde({ dryRun = false, projekt, bucketName, schluessel = null
                 // Hat inzwischen ein Mensch in der Konsole entschieden, ist es nicht
                 // unser Ergebnis — nicht mitzählen, seinen Vermerk nicht überschreiben.
                 const fremd = nach.reviewConsole && nach.reviewConsole.decidedBy && nach.reviewConsole.decidedBy !== 'worker-bonrunde';
-                const passt = !fremd && (aufruf.decision === 'approve' ? ['approved', 'no_reward'].includes(nach.status) : nach.status === 'rejected');
+                // Auf eine Freigabe passt auch die Ablehnung als Doppel, die der
+                // Resolver seit 04.10.2026 selbst setzt (derselbe Bon ist bezahlt).
+                const doppelAblehnung = nach.status === 'rejected' && /^duplicate_content_/.test(String(nach.rejectReason || '')) && nach.reviewDecision === 'approve';
+                const passt = !fremd && (aufruf.decision === 'approve' ? ['approved', 'no_reward'].includes(nach.status) || doppelAblehnung : nach.status === 'rejected');
                 if (passt) {
                   unklar = false; // Stand bestätigt — steckt im frischen Budget
                   eintrag.ergebnis = { http: 0, status: nach.status, grund: nach.rejectReason || null, gebuchtCents: nach.status === 'approved' ? Number(nach.cashbackCents) || 0 : 0, nachgelesen: true };
@@ -285,6 +294,10 @@ async function bonRunde({ dryRun = false, projekt, bucketName, schluessel = null
     freigegeben: dryRun ? freigabe.length : freigabe.filter((p) => p.ergebnis?.status === 'approved').length,
     // Freigaben, die der Server ohne Prämie abschloss (Tages-/Wochen-/Kopf-Deckel, Budget):
     gedeckelt: freigabe.filter((p) => p.ergebnis?.status === 'no_reward').length,
+    // Freigaben, die der Server als Doppel ablehnte (derselbe Bon schon bezahlt,
+    // Doppel-Schutz in der Buchung seit 04.10.2026) — weder freigegeben noch
+    // von der Runde abgelehnt.
+    doppelImResolver: freigabe.filter((p) => p.ergebnis?.status === 'rejected').length,
     budgetEnde: freigabe.filter((p) => p.ergebnis?.grund === 'campaign_budget_exhausted').length,
     abgelehnt: zaehle('ablehnen'),
     offen: zaehle('offen'),

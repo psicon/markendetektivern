@@ -118,8 +118,10 @@ test('Rückweg per Env: CASHBACK_OCR_PRO_MODEL=gemini-2.5-pro → der alte Aufru
   const out = await robust.extractReceiptRobust(Buffer.from('x'), 'image/jpeg', { extract, enhance });
   const esk = extract.aufrufe[5];
   // Keine Denk-Konfiguration, kein Standort (Modell-Standard europe-west4) —
-  // aber ein Zeitlimit, damit auch der Rückweg das Laufbudget einhält.
-  expect(esk).toEqual({ mime: 'image/jpeg', model: 'gemini-2.5-pro', timeoutMs: 170000 });
+  // aber ein Zeitlimit, damit auch der Rückweg das Laufbudget einhält. Der
+  // Prompt wird seit dem Schalter (05.10.2026) ausdrücklich übergeben — ohne
+  // Angabe v1.4, also derselbe Text wie zuvor über die Modul-Voreinstellung.
+  expect(esk).toEqual({ mime: 'image/jpeg', model: 'gemini-2.5-pro', timeoutMs: 170000, ...require('../lib/prompt').promptOptionen('v1.4') });
   expect(out.robust.escalationModel).toBe('gemini-2.5-pro');
 });
 

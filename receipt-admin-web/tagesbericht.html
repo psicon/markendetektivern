@@ -146,6 +146,10 @@
         pruefgrund_lauf_zeitgrenze: 'Verarbeitung zu langsam (Technik)',
         pruefgrund_ocr_zeitbudget: 'Verarbeitung zu langsam (Technik)',
         pruefgrund_forensics_software: 'Bearbeitungsspuren (Forensik)',
+        pruefgrund_bild_aehnlich_bezahlt: 'Bild ähnelt bezahltem Bon',
+        pruefgrund_bild_aehnlich_offen: 'Bild ähnelt einem noch offenen Bon',
+        pruefgrund_seite_abweichend: 'Weiterer Belegteil, Uhrzeit/Nummer/Datum anders',
+        pruefgrund_bild_nicht_pruefbar: 'Bild nicht prüfbar (PDF/HEIC/abgeschnitten)',
         zweitlesung_gescheitert: 'Zweitlesung gescheitert (Technik)',
         kein_kassenbon: 'Zweitlesung: kein Kassenbon',
         manipulationsverdacht: 'Zweitlesung: Bearbeitungsspuren',
@@ -176,6 +180,9 @@
         veraendert: 'Bon wurde zwischendurch neu verarbeitet',
         zeit_abgelaufen: 'Zeit abgelaufen — morgen wieder dran',
         resolver_netzwerk: 'Server nicht erreicht',
+        // Nachprüfung 06.10.2026: Prüfregel (Bild / weiterer Belegteil) in der
+        // Buchung getroffen — der Resolver hat festgehalten, ein Mensch entscheidet.
+        resolver_halten: 'Doppel-Verdacht beim Buchen — an Menschen übergeben',
         resolver_504: 'Server-Zeitüberschreitung',
         artikelzahl_knapp: 'Artikelzahl knapp an einer Betragsgrenze',
         artikelzahl_widerspricht: 'Artikelzahl passt nicht',
@@ -397,6 +404,7 @@
             ${kachel(br.abgelehnt ?? 0, `${br.dryRun ? 'würde ablehnen' : 'abgelehnt'} (doppelt)`, 'var(--nein)')}
             ${kachel(br.offen ?? 0, 'wartet auf dich', 'var(--offen)')}
             ${br.gedeckelt ? kachel(br.gedeckelt, 'freigegeben, aber ohne Prämie (Limit/Budget)') : ''}
+            ${br.doppelImResolver ? kachel(br.doppelImResolver, 'freigegeben, aber derselbe Bon war schon bezahlt (abgelehnt)', 'var(--nein)') : ''}
             ${kachel(euro(br.gebuchtCents || 0), 'gebucht', 'var(--geld)')}
           </div>
           ${offen.length ? `<div class="liste">${offen.map((f) => `<div class="fall"><a href="pruefen.html?tab=receipts&id=${encodeURIComponent(f.id)}">${esc(f.markt || 'Bon')} · ${esc(f.datum || '')}</a><span class="leer">${esc(wort[f.entscheidung] || f.entscheidung)}</span><span class="g">${esc(g(f.grund))}${f.hinweis ? ' · ' + esc(gHinweis(f.hinweis).slice(0, 140)) : ''}</span></div>`).join('')}</div>` : '<div class="leer">Nichts offen.</div>'}

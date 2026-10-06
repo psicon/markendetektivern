@@ -224,7 +224,7 @@ describe('Laufbudget und Fortsetzung', () => {
     expect(extract.aufrufe).toHaveLength(4);
     for (const a of extract.aufrufe) expect(a.beginn + a.timeoutMs).toBeLessThanOrEqual(ZEIT.budgetMs);
     const stand = wieFirestore(err.zwischenstand);
-    expect(stand).toMatchObject({ v: 1, laeufe: 1, flash: 1, enh: 0, esk: 0, ersatz: 3, zeitAbbrueche: 3, maxFlash: 3, promptVersion: 'v1.4' });
+    expect(stand).toMatchObject({ v: 1, laeufe: 1, flash: 1, enh: 0, esk: 0, ersatz: 3, zeitAbbrueche: 3, maxFlash: 3, promptVersion: require('../lib/prompt').VERSION });
     expect(stand.reads).toHaveLength(1);
     expect(stand.reads[0]).toMatchObject({ stufe: 'flash', parsed: { totalCents: 368 } });
     expect(stand.reads[0].raw).toBeUndefined();

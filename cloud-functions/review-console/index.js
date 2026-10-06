@@ -172,12 +172,30 @@ const BON_URTEIL = {
   duplicate_content_cross_user: 'locked',
   bon_date_future: 'hold',
   ocr_unavailable: 'hold',
+  // Konfiguration nicht lesbar (dritte Prüfrunde 06.10.2026, cashback-pipeline
+  // verarbeiteCashback) — technischer Ausfall, keine Aussage über den Bon.
+  config_unavailable: 'hold',
   // Lauf zu langsam (03.10.2026, cashback-pipeline laufzeitPruefen) —
   // technischer Ausfall wie ocr_unavailable, keine Aussage über den Bon.
   lauf_zeitgrenze: 'hold',
   ocr_zeitbudget: 'hold',
   ocr_confidence_none: 'hold',
   mensch_hat_entschieden: 'hold',
+  // Nachprüfung 05.10.2026 (cashback-pipeline Regel bild): Bild ähnelt einem
+  // bezahlten Bon derselben Person — ein Mensch vergleicht die beiden.
+  bild_aehnlich_bezahlt: 'hold',
+  // … gegen einen Bon, der noch nicht entschieden war (Nachprüfung 06.10.2026,
+  // zweite Runde; die Pipeline wartet vorher bis zu vier Läufe darauf).
+  bild_aehnlich_offen: 'hold',
+  // Nachprüfung 06.10.2026 (cashback-pipeline Regel seiteAbweichend, nur mit
+  // doppelSeiteAbweichend: true): sieht aus wie ein weiterer Abschnitt bzw.
+  // eine weitere Seite eines bezahlten Belegs, nur Uhrzeit, Bestellnummer
+  // oder (App) der Tag weichen ab — ein Mensch vergleicht die beiden.
+  seite_abweichend: 'hold',
+  // Abschlussprüfung 06.10.2026 (cashback-pipeline `capture.bildNichtLesbar`):
+  // die Datei ist kein Bild, das die Bildprüfung lesen kann (PDF, HEIC,
+  // abgeschnitten) — der Abgleich mit früheren Bons fehlt, ein Mensch sieht hin.
+  bild_nicht_pruefbar: 'hold',
 };
 const bonUrteil = (row) => BON_URTEIL[row.reviewReason] || (row.reconOk === false ? 'hold' : 'ok');
 
@@ -445,6 +463,9 @@ const RECEIPT_LIST_FIELDS = [
   // Ergebnis der feldweisen Prüfung — ohne das ist der Beobachtungs-Modus
   // blind: er schriebe ein Feld, das niemand liest.
   'ocrFieldAgreement',
+  // Doppel-Schutz in der Buchung und Belegart (04.10.2026) — aus demselben
+  // Grund: der Beobachtungs-Modus der Doppel-Regeln braucht einen Leser.
+  'doppelPruefung', 'belegart',
 ];
 
 function receiptRowOf(d) {
@@ -454,6 +475,17 @@ function receiptRowOf(d) {
     // Ergebnis der feldweisen Prüfung (86cbet2w1). Im Beobachtungs-Modus steht
     // hier, was das Gate im Dauer-Modus entschieden hätte.
     ocrFieldAgreement: x.ocrFieldAgreement ?? null,
+    // Doppel-Prüfung der Buchung: Schalterstand und Treffer (Regel, Modus,
+    // Gegen-Bon, Anteil gleicher Artikel). Nur für Admins sichtbar.
+    doppelPruefung: x.doppelPruefung
+      ? {
+          modi: x.doppelPruefung.modi ?? null,
+          treffer: Array.isArray(x.doppelPruefung.treffer) ? x.doppelPruefung.treffer : [],
+          at: ms(x.doppelPruefung.at),
+        }
+      : null,
+    // Prompt v1.5: kassenbon | app_kassenbon | online_bestellung | sonstiges.
+    belegart: x.belegart ?? null,
     status: safeReceiptStatus(x.status),
     userId: x.userId ?? null,
     campaignId: x.campaignId ?? null,
@@ -565,7 +597,10 @@ exports.reviewDecideReceipt = onCall({ region: REGION, timeoutSeconds: 90, secre
   const reason = p.reason ? String(p.reason) : '';
   if (!receiptId) throw new HttpsError('invalid-argument', 'receiptId fehlt.');
   if (!resolverEntscheidungGueltig(decision, reason)) throw new HttpsError('invalid-argument', 'decision=approve|reject[&reason]|no_reward&reason=daily_cap_reached|weekly_cap_reached|per_user_cap_reached');
-  const r = await resolverAufruf({ receiptId, decision, reason, duplicateOf: p.duplicateOf || null, priorStatus: p.priorStatus || null, schluessel: CASHBACK_ADMIN_KEY.value() });
+  // doppelStand: Stand der Zeile „Doppel-Prüfung", den der Prüfer sah (vierte
+  // Prüfrunde 06.10.2026) — nur damit quittiert die Freigabe deren Treffer.
+  const doppelStand = p.doppelStand == null || p.doppelStand === '' || !Number.isFinite(Number(p.doppelStand)) ? null : Number(p.doppelStand);
+  const r = await resolverAufruf({ receiptId, decision, reason, duplicateOf: p.duplicateOf || null, priorStatus: p.priorStatus || null, doppelStand, schluessel: CASHBACK_ADMIN_KEY.value() });
   logger.info('[review-console] receipt decision', { adminUid, receiptId, decision, reason, http: r.http, code: r.code });
   // 409 = fachlich (nicht in review / campaign_missing / no_cashback_computed) — als Ergebnis zurückgeben, kein Exception-Rauschen.
   if (!r.ok) return r;

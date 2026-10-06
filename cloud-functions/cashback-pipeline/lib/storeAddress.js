@@ -14,8 +14,12 @@
  *   3. `parsed.merchant` — nur wenn die Kopfzeile selbst eine PLZ trägt.
  *
  * Ausgabe: { street, zip, city, country, source, complete } oder null.
- * Alles sind Angaben zum HÄNDLER (Geschäftsadresse), keine personenbezogenen
- * Daten des Nutzers.
+ * Gemeint ist die Anschrift des HÄNDLERS (Filiale). Auf Online-Bestellungen
+ * steht im Kopf aber die Liefer- bzw. Rechnungsanschrift des KUNDEN, einmal mit
+ * Vor- und Nachnamen (bon_mtu6wj0anmcck4, Prüfung 04.10.2026) — das sind
+ * personenbezogene Daten. Bei einem Online-Merkmal (lib/belegart.js: Belegart
+ * laut Modell oder Stichwort wie „Lieferadresse" im Kopf, auch im Bestand ohne
+ * Belegart) gibt die Funktion deshalb immer null zurück.
  *
  * Fallen, gegen die der Parser gebaut ist (alle aus echten Bons bzw. dem
  * Rollen-Review vom 05.09.2026):
@@ -39,6 +43,8 @@
  */
 
 'use strict';
+
+const { onlineMerkmal } = require('./belegart');
 
 const COUNTRIES = new Set(['DE', 'AT', 'CH']);
 
@@ -341,6 +347,8 @@ function stripMerchantPrefix(street, merchantName) {
  */
 function deriveStoreAddress(parsed, fallbackCountry = null) {
   if (!parsed || typeof parsed !== 'object') return null;
+  // Online-Bestellung: im Kopf steht die Anschrift des Kunden, keine Filiale.
+  if (onlineMerkmal(parsed)) return null;
   const hint = normalizeCountry(parsed.bonCountry) || normalizeCountry(fallbackCountry);
   const merchantName = clean(parsed.merchant);
 

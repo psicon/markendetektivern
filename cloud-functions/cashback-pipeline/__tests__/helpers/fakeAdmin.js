@@ -9,15 +9,34 @@
  * Fehler-Einspritzung: `fake.fehler.add(pfad)` lässt jeden Lesevorgang auf
  * diesem Dokument (bzw. dieser Sammlung bei Abfragen) scheitern — auch in
  * Transaktionen. So lässt sich „Sperre nicht lesbar" nachstellen.
+ *
+ * Gleichzeitigkeit (Doppel-Schutz 04.10.2026): Transaktionen merken sich die
+ * Version jedes gelesenen Dokuments (auch eines nicht vorhandenen) und jeder
+ * abgefragten Sammlung. Hat sich davon bis zum Ende des Callbacks etwas
+ * geändert, wird der Callback wiederholt — wie Firestore, das zwei
+ * gleichzeitige Transaktionen auf denselben Daten nacheinander ausführt.
+ *
+ * Bilder: `fake.dateien.set(pfad, Buffer)` legt eine Datei in den Speicher;
+ * fehlt sie, liefert der Download den Platzhalter 'bon' (wie bisher).
  */
 
 function erstelleFakeAdmin() {
   const store = new Map();
   const fehler = new Set();
+  const versionen = new Map(); // Dokumentpfad → Zähler
+  const sammlungsVersionen = new Map(); // Sammlungspfad → Zähler
+  const dateien = new Map(); // Storage-Pfad → Buffer
+  const elternVon = (pfad) => pfad.split('/').slice(0, -1).join('/');
+  const geaendert = (pfad) => {
+    versionen.set(pfad, (versionen.get(pfad) || 0) + 1);
+    const eltern = elternVon(pfad);
+    sammlungsVersionen.set(eltern, (sammlungsVersionen.get(eltern) || 0) + 1);
+  };
   const benutzer = new Map(); // uid → UserRecord-artig
   const tokens = new Map(); // idToken → uid
   let jetzt = Date.now();
   let naechsteId = 0;
+  const statistik = { wiederholungen: 0 };
 
   const istPlatzhalter = (v) => v && typeof v === 'object' && typeof v.__op === 'string';
   const istZeit = (v) => v && typeof v === 'object' && typeof v.toMillis === 'function';
@@ -95,6 +114,7 @@ function erstelleFakeAdmin() {
 
   function schreiben(pfad, daten, opt) {
     store.set(pfad, opt && opt.merge ? zusammenfuehren(store.get(pfad), daten) : zusammenfuehren(undefined, daten));
+    geaendert(pfad);
   }
   function aendern(pfad, daten) {
     if (!store.has(pfad)) {
@@ -103,6 +123,11 @@ function erstelleFakeAdmin() {
       throw e;
     }
     store.set(pfad, aktualisieren(store.get(pfad), daten));
+    geaendert(pfad);
+  }
+  function loeschen(pfad) {
+    store.delete(pfad);
+    geaendert(pfad);
   }
 
   function ref(pfad) {
@@ -114,8 +139,17 @@ function erstelleFakeAdmin() {
         return snap(pfad);
       },
       set: async (d, o) => schreiben(pfad, d, o),
+      // Wie Firestore: scheitert mit ALREADY_EXISTS (6), wenn es das Dokument gibt.
+      create: async (d) => {
+        if (store.has(pfad)) {
+          const e = new Error(`ALREADY_EXISTS: ${pfad}`);
+          e.code = 6;
+          throw e;
+        }
+        schreiben(pfad, d);
+      },
       update: async (d) => aendern(pfad, d),
-      delete: async () => store.delete(pfad),
+      delete: async () => loeschen(pfad),
       collection: (sub) => sammlung(`${pfad}/${sub}`),
     };
   }
@@ -125,24 +159,36 @@ function erstelleFakeAdmin() {
     return [...store.keys()].filter((k) => k.startsWith(`${pfad}/`) && k.split('/').length === tiefe);
   }
 
-  function abfrage(pfad, filter, grenze) {
+  // Zeitstempel und Zahlen vergleichbar machen.
+  const vergleichswert = (v) => (istZeit(v) ? v.toMillis() : v instanceof Date ? v.getTime() : v);
+
+  function abfrage(pfad, filter, grenze, ordnung = null) {
     return {
       __abfrage: true,
-      where: (feld, op, wert) => abfrage(pfad, [...filter, { feld, op, wert }], grenze),
-      limit: (n) => abfrage(pfad, filter, n),
-      select: () => abfrage(pfad, filter, grenze),
-      orderBy: () => abfrage(pfad, filter, grenze),
+      __pfad: pfad,
+      where: (feld, op, wert) => abfrage(pfad, [...filter, { feld, op, wert }], grenze, ordnung),
+      limit: (n) => abfrage(pfad, filter, n, ordnung),
+      select: () => abfrage(pfad, filter, grenze, ordnung),
+      orderBy: (feld, richtung = 'asc') => abfrage(pfad, filter, grenze, { feld, richtung }),
       get: async () => {
         lesbar(pfad);
         let docs = kinder(pfad)
           .map(snap)
           .filter((s) => filter.every(({ feld, op, wert }) => {
-            const v = feldLesen(s.data(), feld);
-            if (op === '==') return v === wert;
-            if (op === '>') return v > wert;
-            if (op === 'array-contains') return Array.isArray(v) && v.includes(wert);
+            const v = vergleichswert(feldLesen(s.data(), feld));
+            const w = vergleichswert(wert);
+            if (op === '==') return v === w;
+            if (op === '>') return v > w;
+            if (op === '>=') return v >= w;
+            if (op === '<') return v < w;
+            if (op === '<=') return v <= w;
+            if (op === 'array-contains') return Array.isArray(v) && v.includes(w);
             throw new Error(`Operator ${op} nicht nachgebildet`);
           }));
+        if (ordnung) {
+          const f = (s) => vergleichswert(feldLesen(s.data(), ordnung.feld));
+          docs.sort((a, b) => (f(a) < f(b) ? -1 : f(a) > f(b) ? 1 : 0) * (ordnung.richtung === 'desc' ? -1 : 1));
+        }
         if (Number.isFinite(grenze)) docs = docs.slice(0, grenze);
         return { empty: docs.length === 0, size: docs.length, docs };
       },
@@ -165,23 +211,49 @@ function erstelleFakeAdmin() {
       return {
         set: (r, d, o) => ops.push(() => schreiben(r.path, d, o)),
         update: (r, d) => ops.push(() => aendern(r.path, d)),
-        delete: (r) => ops.push(() => store.delete(r.path)),
+        delete: (r) => ops.push(() => loeschen(r.path)),
         commit: async () => ops.forEach((f) => f()),
       };
     },
     // Lesen sofort, Schreiben gepuffert bis zum Erfolg des Callbacks — wirft
-    // der Callback, bleibt der Bestand unverändert (wie bei Firestore).
+    // der Callback, bleibt der Bestand unverändert (wie bei Firestore). Hat
+    // sich etwas Gelesenes inzwischen geändert, läuft der Callback erneut.
     runTransaction: async (fn) => {
-      const ops = [];
-      const tx = {
-        get: async (r) => (r.__abfrage ? r.get() : r.get()),
-        set: (r, d, o) => { ops.push(() => schreiben(r.path, d, o)); return tx; },
-        update: (r, d) => { ops.push(() => aendern(r.path, d)); return tx; },
-        delete: (r) => { ops.push(() => store.delete(r.path)); return tx; },
-      };
-      const ergebnis = await fn(tx);
-      ops.forEach((f) => f());
-      return ergebnis;
+      for (let versuch = 1; versuch <= 5; versuch++) {
+        const ops = [];
+        const gelesen = new Map();
+        const tx = {
+          get: async (r) => {
+            if (r.__abfrage) gelesen.set(`S:${r.__pfad}`, sammlungsVersionen.get(r.__pfad) || 0);
+            else gelesen.set(`D:${r.path}`, versionen.get(r.path) || 0);
+            return r.get();
+          },
+          // Wie Firestore: mehrere Dokumente auf einmal, Leseoptionen (fieldMask) ignoriert.
+          getAll: async (...args) => {
+            const refs = args.filter((a) => a && typeof a.path === 'string' && !a.__abfrage);
+            const out = [];
+            for (const r of refs) out.push(await tx.get(r));
+            return out;
+          },
+          set: (r, d, o) => { ops.push(() => schreiben(r.path, d, o)); return tx; },
+          update: (r, d) => { ops.push(() => aendern(r.path, d)); return tx; },
+          delete: (r) => { ops.push(() => loeschen(r.path)); return tx; },
+        };
+        const ergebnis = await fn(tx);
+        // Prüfen und Anwenden ohne await dazwischen — atomar.
+        const konflikt = [...gelesen].some(([k, v]) => (k.startsWith('S:')
+          ? (sammlungsVersionen.get(k.slice(2)) || 0)
+          : (versionen.get(k.slice(2)) || 0)) !== v);
+        if (konflikt) {
+          statistik.wiederholungen++;
+          continue;
+        }
+        ops.forEach((f) => f());
+        return ergebnis;
+      }
+      const e = new Error('ABORTED: Transaktion nach 5 Konflikten abgebrochen');
+      e.code = 10;
+      throw e;
     },
   };
 
@@ -228,9 +300,13 @@ function erstelleFakeAdmin() {
     // dem Zwischenspeicher am Dokument kommt.
     storage: () => ({
       bucket: () => ({
-        file: () => ({
-          download: async () => [Buffer.from('bon')],
-          getMetadata: async () => [{ size: 3, contentType: 'image/jpeg' }],
+        name: 'fake-bucket',
+        file: (pfad) => ({
+          download: async () => {
+            lesbar(`storage:${pfad}`);
+            return [dateien.has(pfad) ? dateien.get(pfad) : Buffer.from('bon')];
+          },
+          getMetadata: async () => [{ size: dateien.has(pfad) ? dateien.get(pfad).length : 3, contentType: 'image/jpeg' }],
         }),
       }),
     }),
@@ -239,6 +315,8 @@ function erstelleFakeAdmin() {
       fehler,
       benutzer,
       tokens,
+      dateien,
+      statistik,
       setzeJetzt: (ms) => { jetzt = ms; },
       zeit,
       zuruecksetzen: () => {
@@ -246,6 +324,10 @@ function erstelleFakeAdmin() {
         fehler.clear();
         benutzer.clear();
         tokens.clear();
+        dateien.clear();
+        versionen.clear();
+        sammlungsVersionen.clear();
+        statistik.wiederholungen = 0;
       },
     },
   };

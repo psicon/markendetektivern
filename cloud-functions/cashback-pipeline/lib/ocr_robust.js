@@ -62,7 +62,10 @@
 const { extractReceipt: extractReceiptDefault, reconcile, countEligibleItems, DEFAULT_MODEL } = require('./ocr');
 const { enhanceForOcr: enhanceForOcrDefault } = require('./imageEnhance');
 const { eskalationsOptionen } = require('./geminiModelle');
-const { VERSION: PROMPT_VERSION } = require('./prompt');
+// Prompt-Version (Schalter cashback_config/v1.ocrPrompt, 05.10.2026): ohne
+// Angabe v1.4 — der Live-Stand. Alle Lesungen einer Leiter (Basis, Bild-
+// verbesserung, Eskalation) nutzen DIESELBE Version.
+const { promptOptionen, STANDARD_VERSION: PROMPT_STANDARD } = require('./prompt');
 
 // ═══ Eskalationsstufe (01.10.2026): gemini-3.5-flash HIGH statt gemini-2.5-pro ═══
 // gemini-2.5-pro wird auf Vertex am 20.10.2026 abgeschaltet; eine GA-Pro-
@@ -246,15 +249,17 @@ const ganzzahlIn = (v, min, max) => Number.isInteger(v) && v >= min && v <= max;
  * DIESER Leiter passt (gleiches Modell, gleiche Eskalation, gleicher Prompt,
  * gleiche Zahl an Basis-Lesungen) und frisch ist. Sonst: frisch lesen — ein
  * verworfener Zwischenstand kostet Lesungen, nie eine falsche Entscheidung.
+ * Gleicher Prompt heißt seit dem Schalter (05.10.2026): die Version, mit der
+ * DIESER Lauf liest — Lesungen von v1.4 und v1.5 werden nie gemischt.
  *
  * @returns {{stand: object|null, grund: string|null}}
  */
-function zwischenstandLaden(roh, { model, eskModel, maxFlash, jetzt }) {
+function zwischenstandLaden(roh, { model, eskModel, maxFlash, jetzt, promptVersion = PROMPT_STANDARD }) {
   if (!roh || typeof roh !== 'object') return { stand: null, grund: null };
   const nein = (grund) => ({ stand: null, grund });
   if (roh.v !== ZWISCHENSTAND_VERSION) return nein('version');
   if (roh.model !== model || roh.eskModel !== eskModel) return nein('modell');
-  if (roh.promptVersion !== PROMPT_VERSION) return nein('prompt');
+  if (roh.promptVersion !== promptVersion) return nein('prompt');
   if (roh.maxFlash !== maxFlash) return nein('max_flash');
   if (!Number.isFinite(roh.gespeichertMs) || jetzt - roh.gespeichertMs > ZWISCHENSTAND_MAX_ALTER_MS) return nein('alter');
   if (!ganzzahlIn(roh.flash, 0, maxFlash) || !ganzzahlIn(roh.enh, 0, 2) || !ganzzahlIn(roh.esk, 0, 2)
@@ -316,6 +321,8 @@ function neuerStand() {
  *   zwischenstand: am Bon abgelegter Stand eines früheren Laufs (roh, wie aus
  *     Firestore) — wird geprüft; unpassend → frisch lesen.
  *   zeit / clock: Testnähte; Standard zeitOptionen() / Date.now.
+ *   promptVersion: 'v1.4' | 'v1.5' (lib/prompt.js promptVersionAus); fehlt
+ *     sie oder ist sie ungültig, liest die Leiter mit v1.4.
  *   escalationGate: optionale async Funktion (reads) => string|null.
  *   Eskalations-Deckel (Kosten, 86cb-Nachtrag 19.08.2026): Liefert sie einen
  *   Grund (z.B. 'bon_too_old'), wird die TEURE Leiter (Enhance-Lesungen +
@@ -336,6 +343,8 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
   const extractReceipt = opts.extract || extractReceiptDefault;
   const enhanceForOcr = opts.enhance || enhanceForOcrDefault;
   const maxFlash = opts.maxFlash || MAX_FLASH;
+  // Prompt, Schema und Versions-Etikett — für JEDE Lesung dieser Leiter gleich.
+  const prompt = promptOptionen(opts.promptVersion);
   const zeit = opts.zeit || ZEIT;
   const clock = opts.clock || Date.now;
   const frist = Number.isFinite(opts.laufStart) ? opts.laufStart + zeit.budgetMs : null;
@@ -345,7 +354,7 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
   // Fenster im Budget.
   const eskLimit = Math.min(esk.timeoutMs > 0 ? esk.timeoutMs : leseLimit, zeit.budgetMs - zeit.reserveMs);
 
-  const geladen = zwischenstandLaden(opts.zwischenstand, { model, eskModel: esk.model, maxFlash, jetzt: clock() });
+  const geladen = zwischenstandLaden(opts.zwischenstand, { model, eskModel: esk.model, maxFlash, jetzt: clock(), promptVersion: prompt.promptVersion });
   if (geladen.grund) console.warn('ocr-zwischenstand-verworfen', { grund: geladen.grund });
   const st = geladen.stand || neuerStand();
   // Auch ein verworfener Stand zählt als Lauf — sonst begänne die Zählung bei
@@ -406,7 +415,7 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
       v: ZWISCHENSTAND_VERSION,
       model,
       eskModel: esk.model,
-      promptVersion: PROMPT_VERSION,
+      promptVersion: prompt.promptVersion,
       maxFlash,
       gespeichertMs: clock(),
       laeufe: st.laeufe,
@@ -439,7 +448,7 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
     if (!fensterFrei(leseLimit)) anhalten();
     const n = Math.max(1, Math.min(2 - st.reads.length, maxFlash - st.flash));
     const ergebnisse = await Promise.all(
-      Array.from({ length: n }, (_, k) => versuch(`flash-${st.flash + k + 1}`, imageBytes, mimeType, { model, timeoutMs: leseLimit })),
+      Array.from({ length: n }, (_, k) => versuch(`flash-${st.flash + k + 1}`, imageBytes, mimeType, { model, timeoutMs: leseLimit, ...prompt })),
     );
     for (const e of ergebnisse) {
       if (verbraucht(e)) st.flash++;
@@ -491,7 +500,7 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
   if (enhanced) {
     while (st.enh < 2) {
       if (!fensterFrei(leseLimit)) anhalten();
-      const e = await versuch(`enhanced-${st.enh + 1}`, escImg, 'image/jpeg', { model, timeoutMs: leseLimit });
+      const e = await versuch(`enhanced-${st.enh + 1}`, escImg, 'image/jpeg', { model, timeoutMs: leseLimit, ...prompt });
       if (verbraucht(e)) st.enh++;
       if (!e.r) continue;
       e.r.__enh = true;
@@ -520,6 +529,7 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
     const denken = ausweichen ? esk.ausweichThinkingConfig : esk.thinkingConfig;
     const e = await versuch(`pro-${st.esk + 1}`, escImg, enhanced ? 'image/jpeg' : mimeType, {
       model: esk.model,
+      ...prompt,
       // Ausdrücklich gesetzt → hat Vorrang vor CASHBACK_OCR_THINKING_BUDGET
       // (ein `thinkingBudget` würde Gemini 3 mit 400 ablehnen).
       ...(denken ? { thinkingConfig: denken } : {}),

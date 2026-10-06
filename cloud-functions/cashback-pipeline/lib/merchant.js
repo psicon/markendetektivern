@@ -97,7 +97,51 @@ function chainFromItems(items) {
   return [...hits.values()][0];
 }
 
+// ─── Gedruckte Umsatzsteuer-ID der Kette (Stufe 1b) ──────────────
+//
+// Prüfrunde 3 (04.10.2026): Auf REWE-eBons (PDF, App-Screenshot) steht oft
+// kein Händlername, nur „UID Nr.: DE812706034" — die Umsatzsteuer-ID der
+// REWE Markt GmbH. Ohne Namen fand der Resolver dort nichts (bzw. früher
+// über den Tippfehler-Abgleich „dm"). Eine gedruckte Kennung der Kette ist
+// kein Schluss aus Artikeln (Picnic führt keine REWE-ID), deshalb hier.
+// Nur IDs, die in 95 Tagen auf ≥ 50 Bons standen und dort zu ≥ 98 % genau
+// einem Markt gehörten (scratchpad/verif_r3_ust.js, 14.369 Bons):
+//   DE812706034 REWE   133 von 136 (die 3 übrigen: ohne gelesenen Namen,
+//                      2× als „dm", 1× ohne Markt — genau dieser Fehler)
+//   DE132748925 Norma  100 von 100
+//   DE202748117 Penny   54 von 55 (1 ohne Markt)
+// Kaufland druckt je Filiale eine eigene ID und immer den Namen — nicht nötig.
+const UST_KETTE = new Map([
+  ['DE812706034', 'rewe'],
+  ['DE132748925', 'norma'],
+  ['DE202748117', 'penny'],
+]);
+
+/**
+ * Kette aus einer gedruckten Umsatzsteuer-ID im Bonkopf (merchantSubtitle).
+ * Zwei verschiedene Ketten → keine (lieber nichts als falsch).
+ * @param {string|string[]|null|undefined} kopf
+ * @returns {string|null} Alias-ID ('rewe', 'norma', 'penny')
+ */
+function ketteAusUstId(kopf) {
+  const texte = (Array.isArray(kopf) ? kopf : [kopf]).filter((t) => typeof t === 'string' && t);
+  const ketten = new Set();
+  for (const t of texte) {
+    const kompakt = t.toUpperCase().replace(/[\s.:/-]/g, '');
+    for (const m of kompakt.matchAll(/DE\d{9}/g)) {
+      const k = UST_KETTE.get(m[0]);
+      if (k) ketten.add(k);
+    }
+  }
+  return ketten.size === 1 ? [...ketten][0] : null;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────
+
+/** Ist genug vom Händlernamen gelesen, um ihn abzugleichen (≥ 3 Zeichen)? */
+function nameVerwertbar(raw) {
+  return normalize(raw).length >= 3;
+}
 
 function normalize(s) {
   return String(s || '')
@@ -243,22 +287,52 @@ function substringMatch(norm, all) {
  *
  * @param {string|null|undefined} rawMerchant
  * @param {string|null|undefined} bonCountry  'DE' | 'AT' | 'CH' | null
+ * @param {Array<{name?:string}>} [items]     Artikel für Stufe 4 (Eigenmarke)
+ * @param {object} [opts]
+ * @param {boolean} [opts.eigenmarke=true]    false = Stufe 4 aus. Für Online-
+ *   Bestellungen (Entscheidung 04.10.2026): ein Lieferdienst, der Eigenmarken
+ *   einer Kette verkauft (Picnic führt G&G), ist nicht diese Kette — sonst
+ *   wurde eine Picnic-Rechnung als EDEKA-Bon bezahlt. Ein selbstständiger
+ *   EDEKA-Kaufmann hat dagegen einen LADEN; dort bleibt die Stufe an.
+ * @param {boolean} [opts.fuzzy=true]  false = Stufe 2 (Tippfehler-Abgleich) aus.
+ *   Für Online-Bestellungen (Prüfrunde 2, 04.10.2026): ein gedruckter Shopname
+ *   braucht keine Tippfehler-Toleranz, und die Stufe ordnet fremde Händler über
+ *   kurze Wörter unseren Märkten zu („Denns" → Penny, „Das Futterhaus" → dm).
+ *   Bei Ladenbons bleibt sie (Fehllesungen auf Thermopapier) — dort ist die
+ *   Schärfung eine eigene Aufgabe, gemessen am Bestand.
+ * @param {boolean} [opts.nachsichtig=false]  Verhalten VOR der Prüfrunde 2
+ *   (Namensstufen auch ohne verwertbaren Namen, Tippfehler-Abgleich immer).
+ *   Für den Bestandsschutz schon bezahlter Bons und — bis zur Entscheidung
+ *   über `cashback_config/v1.marktNurMitName` (Prüfrunde 3) — für Ladenbons
+ *   (index.js). Ein Gate, das von approved wegführt, hängt an alreadyCredited.
+ * @param {string|string[]|null} [opts.kopf]  Zusatzzeilen des Bonkopfs
+ *   (merchantSubtitle) für Stufe 1b (gedruckte Umsatzsteuer-ID der Kette).
  * @returns {Promise<{
  *   id, name, displayName, logoUrl, land, eligible, matchVia
  * } | null>}
  */
-async function resolveMerchant(rawMerchant, bonCountry, items) {
+async function resolveMerchant(rawMerchant, bonCountry, items, { eigenmarke = true, fuzzy = true, nachsichtig = false, kopf = null } = {}) {
   const norm = normalize(rawMerchant);
   const all = await loadDiscounters();
   if (!all.length) return null;
-  if (!norm && !Array.isArray(items)) return null;
+  if (!norm && !Array.isArray(items) && !kopf) return null;
 
   let doc = null;
   let matchVia = null;
   let aliasId = null;
 
+  // Ohne verwertbaren Namen keine Namensstufen (Prüfrunde 2, 04.10.2026): der
+  // Tippfehler-Abgleich verglich einen LEEREN Namen mit „dm" (Abstand 2,
+  // erlaubt 2) — jeder Beleg ohne gelesenen Händler, aber mit Artikeln, wurde
+  // dm. Unter Prompt v1.5 traf das ehrliche Lidl-Plus-Screenshots ohne Logo.
+  // Ein Name aus ein bis zwei Zeichen liegt von „dm" nie weiter als 2 weg —
+  // der Tippfehler-Abgleich braucht deshalb mindestens drei. „DM" selbst
+  // erkennt der Alias.
+  const nameDa = nachsichtig || norm.length >= 2;
+  const fuzzyDa = nachsichtig || (fuzzy !== false && norm.length >= 3);
+
   // 1) Alias
-  const alias = aliasMatch(norm);
+  const alias = nameDa ? aliasMatch(norm) : null;
   if (alias) {
     aliasId = alias.id;
     const candidates = discountersForAliasId(alias.id, all);
@@ -266,17 +340,33 @@ async function resolveMerchant(rawMerchant, bonCountry, items) {
     if (doc) matchVia = 'alias';
   }
 
+  // 1b) Gedruckte Umsatzsteuer-ID der Kette — nur ohne verwertbaren Namen
+  //     (ein gelesener Name geht vor) und VOR dem Tippfehler-Abgleich, der
+  //     einen leeren Namen sonst zu „dm" macht (Prüfrunde 3, 04.10.2026).
+  if (!doc && !nameVerwertbar(rawMerchant) && kopf) {
+    const kette = ketteAusUstId(kopf);
+    if (kette) {
+      // Eine DE-Umsatzsteuer-ID gehört zum deutschen Markt der Kette.
+      const picked = pickByCountry(discountersForAliasId(kette, all), 'DE');
+      if (picked) {
+        doc = picked;
+        aliasId = kette;
+        matchVia = 'ust_id';
+      }
+    }
+  }
+
   // 2) Fuzzy
-  if (!doc) {
-    const fuzzy = fuzzyMatch(norm, all);
-    if (fuzzy) {
-      doc = fuzzy;
+  if (!doc && fuzzyDa) {
+    const fuzzyDoc = fuzzyMatch(norm, all);
+    if (fuzzyDoc) {
+      doc = fuzzyDoc;
       matchVia = 'fuzzy';
     }
   }
 
   // 3) Substring
-  if (!doc) {
+  if (!doc && nameDa) {
     const sub = substringMatch(norm, all);
     if (sub) {
       doc = sub;
@@ -285,8 +375,8 @@ async function resolveMerchant(rawMerchant, bonCountry, items) {
   }
 
   // 4) Eigenmarke auf dem Bon → Kette (selbstständige Kaufleute, deren
-  //    Bonkopf die Kette nicht nennt).
-  if (!doc) {
+  //    Bonkopf die Kette nicht nennt). Nicht bei Online-Bestellungen (opts).
+  if (!doc && eigenmarke !== false) {
     const chain = chainFromItems(items);
     if (chain) {
       const candidates = discountersForAliasId(chain.id, all);
@@ -308,7 +398,8 @@ async function resolveMerchant(rawMerchant, bonCountry, items) {
   // there are sibling docs with different countries, re-pick by
   // bonCountry across the same canonical-name family. Cheap re-pick
   // by looking up siblings sharing the same nameNorm.
-  if (matchVia !== 'alias' && bonCountry) {
+  // Nicht bei Stufe 1b: eine DE-Umsatzsteuer-ID legt das Land schon fest.
+  if (matchVia !== 'alias' && matchVia !== 'ust_id' && bonCountry) {
     const siblings = all.filter((d) => d.nameNorm === doc.nameNorm);
     if (siblings.length > 1) {
       const better = pickByCountry(siblings, bonCountry);
@@ -337,4 +428,4 @@ async function resolveMerchant(rawMerchant, bonCountry, items) {
   };
 }
 
-module.exports = { resolveMerchant, normalize, levenshtein, chainFromItems, aliasMatch };
+module.exports = { resolveMerchant, normalize, nameVerwertbar, levenshtein, chainFromItems, aliasMatch, ketteAusUstId };
