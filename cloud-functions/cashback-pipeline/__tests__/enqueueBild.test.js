@@ -226,6 +226,22 @@ describe('Verhalten wie bisher', () => {
     expect(fake.store.get('receipts/neu1').capture.bildAehnlich.kandidaten.sort()).toEqual(['alt', 'alt2']);
   });
 
+  test('Nachprüfung 06.10. (zweite Runde): der Vermerk nennt ALLE lebenden groben Treffer, neueste zuerst — nicht nur die 3 verglichenen', async () => {
+    // Drei ältere ähnliche Bons (etwa App-Bons derselben Kette) verdrängten
+    // sonst das Original aus der Liste, und Regel bild sah es nie.
+    for (const [id, stunden] of [['a1', 30], ['a2', 20], ['a3', 10], ['orig', 1]]) {
+      frueher(id, 'approved', ANDERES_BILD);
+      fake.store.set(`receipts/${id}`, { ...fake.store.get(`receipts/${id}`), createdAt: fake.zeit(Date.now() - stunden * 3600 * 1000) });
+    }
+    frueher('weg', 'rejected', ANDERES_BILD); // abgelehnt: kein Kandidat
+    const res = await hochladen();
+    expect(res.body).toMatchObject({ cashbackId: 'neu1' });
+    const b = fake.store.get('receipts/neu1').capture.bildAehnlich;
+    expect(b.kandidaten).toEqual(['orig', 'a3', 'a2', 'a1']);
+    expect(b.verglichen).toHaveLength(3);
+    expect(b.bestaetigt).toBe(false);
+  });
+
   test('Schalter aus → kein Feinvergleich, Sperre wie bisher', async () => {
     config({});
     frueher('alt', 'rejected', ANDERES_BILD);

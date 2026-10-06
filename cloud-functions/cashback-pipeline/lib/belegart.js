@@ -48,7 +48,14 @@
  * (echte Fälle Lidl 16.07. und 21.09.: zwei Scrollbilder, beide ohne Summe).
  * Die Regel deckt deshalb auch App-Bons (nur selber Tag) und ist per Code-
  * Default AN: diese Ergänzung wirkt ohne Schalter, also muss es ihr Schutz
- * auch — sonst zahlte schon der Deploy jeden Abschnitt einzeln.
+ * auch.
+ * Korrektur 06.10.2026: Ergänzung UND Schutz hängen an den v1.5-Feldern
+ * (`belegart`, daraus `summeAusArtikeln`). Unter dem Standard-Prompt v1.4
+ * (`cashback_config/v1.ocrPrompt` nicht 'v1.5') bleibt eine Lesung ohne diese
+ * Felder (siehe belegBereinigen) — v1.4 setzt die Artikelsumme selbst als
+ * Endbetrag ein, ungekennzeichnet, und die Regel `seite` sieht keinen
+ * Abschnitt. Scrollbilder und Rechnungsseiten werden dann wie vor diesem
+ * Zweig einzeln bezahlt; geschützt sind sie erst mit ocrPrompt 'v1.5'.
  */
 
 const BELEGARTEN = new Set(['kassenbon', 'app_kassenbon', 'online_bestellung', 'sonstiges']);

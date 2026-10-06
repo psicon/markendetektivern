@@ -181,6 +181,14 @@ const BON_URTEIL = {
   // Nachprüfung 05.10.2026 (cashback-pipeline Regel bild): Bild ähnelt einem
   // bezahlten Bon derselben Person — ein Mensch vergleicht die beiden.
   bild_aehnlich_bezahlt: 'hold',
+  // … gegen einen Bon, der noch nicht entschieden war (Nachprüfung 06.10.2026,
+  // zweite Runde; die Pipeline wartet vorher bis zu vier Läufe darauf).
+  bild_aehnlich_offen: 'hold',
+  // Nachprüfung 06.10.2026 (cashback-pipeline Regel seiteAbweichend, nur mit
+  // doppelSeiteAbweichend: true): sieht aus wie ein weiterer Abschnitt bzw.
+  // eine weitere Seite eines bezahlten Belegs, nur Uhrzeit, Bestellnummer
+  // oder (App) der Tag weichen ab — ein Mensch vergleicht die beiden.
+  seite_abweichend: 'hold',
 };
 const bonUrteil = (row) => BON_URTEIL[row.reviewReason] || (row.reconOk === false ? 'hold' : 'ok');
 

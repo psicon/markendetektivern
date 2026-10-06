@@ -287,11 +287,16 @@ describe('A — Regeln rein', () => {
     expect(D.identitaetAusBon({ merchant: { id: 'lidl' }, bonDate: GESTERN, belegart: 'app_kassenbon', ocr: { parsed: { items: T1 } } }).app).toBe(true);
   });
 
-  test('App-Paar an einem ANDEREN Tag trifft nie, ein Online-Paar schon', () => {
+  test('App-Paar an einem ANDEREN Tag trifft seite nie (1 Tag daneben: nur seiteAbweichend, beobachtet), ein Online-Paar schon', () => {
     const modi = D.doppelModi({});
     const neuApp = { ...id({ belegart: 'app_kassenbon', summeAusArtikeln: true }), tag: GESTERN };
     const altApp = D.eintragAus(D.identitaet({ merchantId: 'lidl', bonDate: VORGESTERN, items: T2, belegart: 'app_kassenbon' }));
-    expect(D.doppelUrteil({ bonId: 'n', uid: A, neu: neuApp, andere: [{ id: 'a', eintrag: altApp, tag: VORGESTERN }], modi }).treffer).toEqual([]);
+    const u = D.doppelUrteil({ bonId: 'n', uid: A, neu: neuApp, andere: [{ id: 'a', eintrag: altApp, tag: VORGESTERN }], modi });
+    expect(u.wirksam).toBeNull();
+    expect(u.treffer).toEqual([expect.objectContaining({ regel: 'seiteAbweichend', abweichend: ['tag'], modus: 'beobachtung' })]);
+    // Zwei Tage daneben: gar nichts.
+    const altApp2 = D.eintragAus(D.identitaet({ merchantId: 'lidl', bonDate: '2000-01-01', items: T2, belegart: 'app_kassenbon' }));
+    expect(D.doppelUrteil({ bonId: 'n', uid: A, neu: neuApp, andere: [{ id: 'a', eintrag: altApp2, tag: D.tageImFenster(VORGESTERN, 1)[0] }], modi }).treffer).toEqual([]);
     const neuOn = { ...id({ online: true, summeAusArtikeln: true }) };
     const altOn = D.eintragAus(D.identitaet({ merchantId: 'lidl', bonDate: VORGESTERN, items: T2, online: true }));
     expect(D.doppelUrteil({ bonId: 'n', uid: A, neu: neuOn, andere: [{ id: 'a', eintrag: altOn, tag: VORGESTERN }], modi }).wirksam)
@@ -449,11 +454,13 @@ describe('B — Regel bild (Feinvergleich hat einen Bildtreffer nicht bestätigt
     expect(bon('kopie').status).toBe('approved');
   });
 
-  test('anderer Markt → bezahlt (die Regel vergleicht nur denselben Markt)', async () => {
+  test('anderer Markt → trotzdem Prüfung (seit 06.10.2026, zweite Runde: umgeschriebener Kopf umging die Regel)', async () => {
     await original();
     bonAnlegen('kopie', { markt: 'netto', zeit: '12:31', datum: VORGESTERN, items: KOPIE, capture: aehnlich() });
     await verarbeiten('kopie');
-    expect(bon('kopie').status).toBe('approved');
+    expect(bon('kopie')).toMatchObject({ status: 'review', reviewReason: D.BILD_GRUND });
+    expect(bon('kopie').doppelPruefung.treffer).toEqual([expect.objectContaining({ regel: 'bild', gegen: 'orig', andererMarkt: true })]);
+    expect(earns()).toHaveLength(1);
   });
 
   test('Bon-Tag mehr als 8 Tage vom Original entfernt → bezahlt (bekannte Lücke, siehe CLAUDE.md)', async () => {
@@ -483,16 +490,24 @@ describe('B — Regel bild (Feinvergleich hat einen Bildtreffer nicht bestätigt
     });
     await verarbeiten('kopie');
     expect(bon('kopie')).toMatchObject({ status: 'review', reviewReason: D.BILD_GRUND });
-    expect(bon('kopie').doppelPruefung.treffer).toEqual([expect.objectContaining({ regel: 'bild', gegen: 'orig' })]);
+    // Der bezahlte bestimmt den Grund; der offene steht daneben (06.10.2026).
+    expect(bon('kopie').doppelPruefung.treffer).toEqual([
+      expect.objectContaining({ regel: 'bild', gegen: 'orig' }),
+      expect.objectContaining({ regel: 'bild', gegen: 'offen', offen: true }),
+    ]);
   });
 
-  test('Regel rein: Markt, Tag ±8, Reihenfolge nach allen ablehnenden Regeln', () => {
+  test('Regel rein: Tag ±8 (Markt seit 06.10.2026 egal), Reihenfolge nach allen ablehnenden Regeln', () => {
     const neu = D.identitaet({ merchantId: 'kaufland', bonDate: GESTERN, items: ZEHN });
     expect(D.bildTrifft(neu, { markt: 'Kaufland', tag: vorTagen(9) })).toEqual({ abstand: 8 });
     expect(D.bildTrifft(neu, { markt: 'kaufland', tag: vorTagen(10) })).toBeNull();
-    expect(D.bildTrifft(neu, { markt: 'netto', tag: GESTERN })).toBeNull();
-    expect(D.bildTrifft(neu, { markt: null, tag: GESTERN })).toBeNull();
-    expect(D.bildTrifft({ ...neu, markt: null }, { markt: 'kaufland', tag: GESTERN })).toBeNull();
+    expect(D.bildTrifft(neu, { markt: 'netto', tag: GESTERN })).toEqual({ abstand: 0 });
+    expect(D.bildTrifft(neu, { markt: null, tag: GESTERN })).toEqual({ abstand: 0 });
+    expect(D.bildTrifft({ ...neu, markt: null }, { markt: 'kaufland', tag: GESTERN })).toEqual({ abstand: 0 });
+    // Ohne Datum nur ein offener Kandidat (noch nicht gelesen).
+    expect(D.bildTrifft(neu, { tag: null })).toBeNull();
+    expect(D.bildTrifft(neu, { tag: null, offen: true })).toEqual({ abstand: null });
+    expect(D.bildTrifft({ ...neu, tag: null }, { tag: GESTERN, offen: true })).toBeNull();
     const modi = D.doppelModi({ doppelSumme: true });
     const u = D.doppelUrteil({
       bonId: 'n', uid: A, neu: { ...neu, summe: 1000 },

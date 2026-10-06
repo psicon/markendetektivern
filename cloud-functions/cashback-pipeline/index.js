@@ -106,7 +106,13 @@ const {
   grundFuer: doppelGrund,
   schalterModus,
   bildTrifft,
-  BILD_GRUND,
+  bildKandidatenIds,
+  marktIstSicher,
+  modiFuerEntscheidung,
+  nurPruefung,
+  BILD_OFFEN_STATUS,
+  BILD_MAX_KANDIDATEN,
+  DATUM_FENSTER_TAGE,
 } = require('./lib/doppelBon');
 const { pruefeKandidaten: bildKandidatenPruefen } = require('./lib/bildVergleich');
 const { istOnlineBestellung, belegBereinigen, onlineMerkmal } = require('./lib/belegart');
@@ -213,6 +219,12 @@ const DHASH_DEDUP_LOOKBACK_DAYS = 120;
 // gegen Bons, die noch laufen oder Geld bekommen haben. Gegen abgelehnte und
 // unvergütete Bons ist ein Neuversuch erlaubt (wie bei der Inhaltsprüfung).
 const BILD_SPERR_STATUS = new Set(['approved', 'paid', 'matched', 'review', 'ocr_pending']);
+// Kehrlauf: höchstens so viele Neuzustellungen je Bon (sweepStuckReceipts).
+const SWEEP_MAX_ANZAHL = 5;
+// Regel bild gegen ein noch offenes Original (Nachprüfung 06.10.2026, zweite
+// Runde): so viele Läufe wartet die Kopie, bevor sie in die Prüfung geht. Der
+// erste Lauf plus drei Kehrläufe ≈ eine Stunde bis gut zwei Stunden.
+const BILD_WARTEN_MAX = 4;
 // Zusammen für alle Kandidaten (Download + Vergleich); danach wird gelesen.
 const BILD_FEINVERGLEICH_BUDGET_MS = 15_000;
 // Dieselbe DATEI noch einmal nach einer Ablehnung wegen eines Lesefehlers:
@@ -238,7 +250,7 @@ const BILD_FEIN_BESTAND = 'doppelBestandIndexiert';
 // schon bei 1 % Beschnitt nichts mehr (Seitenverhältnis). Eine beschnittene
 // Kopie mit einigen geänderten Preisziffern (Endsumme mit) trifft keine
 // Textregel — der grobe dHash sperrte sie bisher. Regel bild hält sie in der
-// Prüfung (gleicher Markt, ±8 Tage). Code-Default AN; wer sie ausdrücklich
+// Prüfung (±8 Tage, jeder Markt). Code-Default AN; wer sie ausdrücklich
 // abschaltet, schaltet damit auch den Feinvergleich zurück auf 'shadow'.
 const BILD_FEIN_SCHUTZ = 'doppelBildAehnlich';
 
@@ -891,6 +903,75 @@ async function nettoGutgeschrieben(uid, cashbackId) {
   return sum(earnsSnap) - sum(reversesSnap);
 }
 
+/** Stammt der erkannte Markt aus einem lesbaren Namen? (lib/doppelBon marktIstSicher) */
+function marktSicherFuer(merchantInfo, rawMerchant) {
+  if (!merchantInfo) return true;
+  return marktIstSicher(merchantInfo.matchVia, nameVerwertbar(rawMerchant));
+}
+
+/**
+ * Prüfregeln (lib/doppelBon nurPruefung: bild, seiteAbweichend) für einen Bon,
+ * der ohne Buchung in die Prüfung geht (processCashback 6y1, Lese-Sicherheit).
+ * Nachprüfung 06.10.2026, zweite Runde: seiteAbweichend wurde bisher nur in
+ * der Buchung ausgewertet — ein Abschnitt mit niedriger Lese-Sicherheit lag als
+ * `ocr_confidence_low` in der Prüfung, und die Bon-Runde gab ihn frei.
+ *
+ * Außerhalb einer Transaktion, also nicht race-frei (ein paralleler Abschnitt
+ * kann gerade gebucht werden): den Rückhalt liefert der Resolver, der dieselben
+ * Regeln in der Buchungs-Transaktion prüft (modiFuerEntscheidung). Hier steht
+ * der Grund nur früher am Bon, und die Bon-Runde spart die Zweitlesung.
+ * Gelesen werden nur die Tageseinträge bezahlter Bons (`cashback_days`, Tag
+ * und Fenster wie in der Buchung) und die Bild-Kandidaten samt Ledger.
+ * @returns {Promise<{treffer:object[], wirksam:object|null}>}
+ */
+async function pruefRegelnOhneBuchung({ uid, cashbackId, neu, modi, bildIds = [] }) {
+  const nurPruef = {
+    ...modi,
+    summe: false, konten: false, artikel: false, bestellung: false,
+    datum: false, kontenArtikel: false, seite: false, kontenDatum: false,
+  };
+  const bild = [];
+  if (nurPruef.bild && neu && neu.tag) {
+    for (const id of bildIds.slice(0, BILD_MAX_KANDIDATEN)) {
+      const s = await db.doc(`receipts/${id}`).get();
+      // Nur ein Bon DIESER Person (der grobe Vergleich sucht nur dort).
+      if (!s.exists || s.get('userId') !== uid) continue;
+      const tag = typeof s.get('bonDate') === 'string' ? s.get('bonDate') : null;
+      const offenStatus = BILD_OFFEN_STATUS.has(s.get('status'));
+      if (!bildTrifft(neu, { tag, offen: offenStatus })) continue;
+      const l = await db.collection(`users/${uid}/cashback_ledger`).where('receiptId', '==', id).get();
+      const netto = l.docs.reduce((sum, d) => {
+        const x = d.data();
+        return sum + (x.type === 'earn' ? x.cents || 0 : x.type === 'reverse' ? -(x.cents || 0) : 0);
+      }, 0);
+      const m = s.get('merchant');
+      bild.push({
+        id,
+        markt: m && m.id && m.id !== 'unknown' ? m.id : null,
+        tag,
+        lebendig: netto > 0,
+        offen: netto <= 0 && offenStatus,
+      });
+    }
+  }
+  const andere = [];
+  if (nurPruef.seiteAbweichend && neu && neu.tag && neu.markt && (neu.online || neu.app)) {
+    const tage = [neu.tag, ...tageImFenster(neu.tag, neu.online ? DATUM_FENSTER_TAGE : 1)];
+    for (const tag of tage) {
+      const s = await db.doc(`users/${uid}/cashback_days/${tag}`).get();
+      if (!s.exists) continue;
+      const d = s.data() || {};
+      const eintr = d.eintraege && typeof d.eintraege === 'object' ? d.eintraege : {};
+      const ids = Array.isArray(d.receiptIds) ? d.receiptIds : [];
+      for (const id of ids) {
+        if (id === cashbackId || !eintr[id]) continue;
+        andere.push({ id, eintrag: eintr[id], ...(tag === neu.tag ? {} : { tag }) });
+      }
+    }
+  }
+  return doppelUrteil({ bonId: cashbackId, uid, neu, andere, bild, modi: nurPruef });
+}
+
 /**
  * Idempotent ledger sync: enforce that a receiptId has AT MOST one
  * active 'earn' entry, and that the earn matches the current status.
@@ -961,11 +1042,17 @@ async function nettoGutgeschrieben(uid, cashbackId) {
  * und Endsumme im Schlüssel — bei jeder Gutschrift ergänzt (auch ohne
  * Schalter), beim Storno entfernt, Ledger entscheidet.
  * opts.bon = lib/doppelBon identitaet() des Bons (fehlt → keine Prüfung).
- * opts.bild = Kandidaten des Bild-Feinvergleichs [{id, markt, tag}] (Regel
- * bild, nur processCashback): trifft sie wirksam und keine ablehnende Regel,
- * bucht die Transaktion nicht (capReason `bild_aehnlich_bezahlt`) und der
- * Aufrufer setzt den Bon auf 'review'. Resolver und Bon-Runde geben sie nicht
- * mit — dort hat ein Mensch bzw. die Zweitlesung entschieden.
+ * opts.bild = Bon-IDs aus `capture.bildAehnlich` (Regel bild, lib/doppelBon
+ * bildKandidatenIds). Die Transaktion liest jeden Kandidaten selbst — Status,
+ * Datum und Ledger —, damit „bezahlt" und „noch offen" race-frei feststehen
+ * (Nachprüfung 06.10.2026, zweite Runde: zählte nur ein schon bezahlter
+ * Kandidat, bekamen Kopie und Original Geld, wenn die Kopie zuerst gebucht
+ * wurde). Trifft sie wirksam und keine ablehnende Regel, bucht die
+ * Transaktion nicht (capReason `bild_aehnlich_bezahlt` bzw. `_offen`); der
+ * Aufrufer hält den Bon fest bzw. lässt ihn auf das Original warten.
+ * processCashback und Resolver geben sie mit; im Resolver gilt sie nur, wenn
+ * der Bon nicht schon mit einem Prüfgrund in der Prüfung steht
+ * (lib/doppelBon modiFuerEntscheidung).
  */
 async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, bonDateIso, campaignId, campaignMode, caps = null, opts = {}) {
   const ledgerCol = userRef.collection('cashback_ledger');
@@ -1183,16 +1270,20 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
           if (await lebtLautLedger(userRef.id, id)) andere.push({ id, eintrag: e, ...tagFeld });
         }
       };
-      if (modi.summe || modi.artikel || modi.seite) await ausTag(daySnap, null);
+      if (modi.summe || modi.artikel || modi.seite || modi.seiteAbweichend) await ausTag(daySnap, null);
       // Nur mit gelesenem Bon-Datum: ohne es wäre bonDay „heute" und jeder Tag
       // im Fenster ein Zufall. Ohne Uhrzeit nur, wenn Summe und genug Artikel
       // da sind — sonst kann die Regel nicht treffen (lib/doppelBon.js).
       const datumKannTreffen = Boolean(neu.uhrzeit) || (Boolean(neu.summe) && neu.artikel.length >= modi.minArtikel);
       // Regel seite auch an anderen Tagen im Fenster (Nachprüfung 05.10.2026:
-      // Datum auf einer Seite geändert → jede Seite bezahlt).
-      const seiteKannTreffen = Boolean(modi.seite) && neu.online;
-      if (((modi.datum && datumKannTreffen) || seiteKannTreffen) && neu.markt && neu.tag === bonDay) {
-        for (const tag of tageImFenster(bonDay)) {
+      // Datum auf einer Seite geändert → jede Seite bezahlt); seiteAbweichend
+      // ebenso, bei einem App-Bon nur 1 Tag daneben (Nachprüfung 06.10.2026).
+      const seiteKannTreffen = Boolean(modi.seite || modi.seiteAbweichend) && neu.online;
+      const fensterTage = (modi.datum && datumKannTreffen) || seiteKannTreffen
+        ? DATUM_FENSTER_TAGE
+        : modi.seiteAbweichend && neu.app ? 1 : 0;
+      if (fensterTage > 0 && neu.markt && neu.tag === bonDay) {
+        for (const tag of tageImFenster(bonDay, fensterTage)) {
           if (!daySnaps.has(tag)) daySnaps.set(tag, await tx.get(userRef.collection('cashback_days').doc(tag)));
           const snap = daySnaps.get(tag);
           if (snap.exists) await ausTag(snap, tag);
@@ -1228,14 +1319,28 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
         const kandidaten = personKandidaten({ bonId: cashbackId, neu, eintraege: personStand.eintraege, modi }).slice(0, 5);
         for (const k of kandidaten) personStandTreffer.push({ ...k, lebendig: await lebtLautLedger(userRef.id, k.id) });
       }
-      // Regel bild (Nachprüfung 05.10.2026): Kandidaten des Bild-
-      // Feinvergleichs (processCashback 6y1, nur dieselbe Person). Das Ledger
-      // nur für die lesen, die zu Markt und Tag passen (höchstens 3).
+      // Regel bild (Nachprüfung 05.10.2026, zweite Runde 06.10.2026): die
+      // Kandidaten aus `capture.bildAehnlich` HIER lesen — Status, Datum und
+      // Ledger in derselben Transaktion. Nur Bons dieser Person; das Ledger nur
+      // für die, deren Tag ins Fenster passt (bzw. offen ohne Datum).
       const bildStand = [];
       if (modi.bild && Array.isArray(opts.bild)) {
-        for (const k of opts.bild.slice(0, 3)) {
-          if (!k || typeof k.id !== 'string' || k.id === cashbackId || !bildTrifft(neu, k)) continue;
-          bildStand.push({ id: k.id, markt: k.markt ?? null, tag: k.tag ?? null, lebendig: await lebtLautLedger(userRef.id, k.id) });
+        for (const id of opts.bild.slice(0, BILD_MAX_KANDIDATEN)) {
+          if (typeof id !== 'string' || !id || id === cashbackId) continue;
+          const kSnap = await tx.get(db.doc(`receipts/${id}`));
+          if (!kSnap.exists || kSnap.get('userId') !== userRef.id) continue;
+          const m = kSnap.get('merchant');
+          const tag = typeof kSnap.get('bonDate') === 'string' ? kSnap.get('bonDate') : null;
+          const offenStatus = BILD_OFFEN_STATUS.has(kSnap.get('status'));
+          if (!bildTrifft(neu, { tag, offen: offenStatus })) continue;
+          const lebendig = await lebtLautLedger(userRef.id, id);
+          bildStand.push({
+            id,
+            markt: m && m.id && m.id !== 'unknown' ? m.id : null,
+            tag,
+            lebendig,
+            offen: !lebendig && offenStatus,
+          });
         }
       }
       doppelGeprueft = true;
@@ -1380,7 +1485,10 @@ async function syncLedgerForReceipt(userRef, cashbackId, status, cashbackCents, 
     const personEintragen = () => {
       if (!personStand || !neu) return;
       const wert = personEintragWert(personStand.eintraege[cashbackId], personLesungAus(neu));
-      const weg = personAufraeumen(personStand.eintraege, todayBerlin(), cashbackId);
+      // Größenbremse: der neue Wert des eigenen Eintrags zählt mit.
+      const weg = personAufraeumen(personStand.eintraege, todayBerlin(), cashbackId, {
+        neuWert: wert || personStand.eintraege[cashbackId] || null,
+      });
       if (!wert && !weg.length) return;
       tx.set(
         personStand.ref,
@@ -1950,8 +2058,9 @@ exports.enqueueCashback = onRequest(
       // auch mit geänderter/verdeckter Uhrzeit — über Summe UND Artikel (Regel
       // datum, Prüfrunde 2). Sind zusätzlich Preisziffern geändert, greift
       // keine Textregel mehr: dann hält Regel bild den Bon in der Prüfung
-      // (`capture.bildAehnlich` unten; bezahlter Kandidat, gleicher Markt,
-      // ±8 Tage — Nachprüfung 05.10.2026).
+      // (`capture.bildAehnlich` unten; bezahlter oder noch offener Kandidat
+      // derselben Person, ±8 Tage — Nachprüfung 05.10.2026, zweite Runde
+      // 06.10.2026).
       // 'shadow' = Verhalten wie bisher, der Feinvergleich wird nur
       // protokolliert ('forensics-feinvergleich').
       const exactDhashQuery = await db
@@ -2026,12 +2135,26 @@ exports.enqueueCashback = onRequest(
             // die Auswertung. Ein Fehler/Zeitlimit ist kein Urteil: gelesen wird
             // trotzdem.
             const erster = fein.ergebnisse[0] || null;
+            const msVon = (t) => {
+              const v = t.doc.get('createdAt');
+              return v && typeof v.toMillis === 'function' ? v.toMillis() : 0;
+            };
             bildAehnlich = {
               kandidat: erster ? erster.kandidat : naechster.doc.id,
-              // Alle verglichenen Kandidaten (höchstens 3, nächster zuerst) —
-              // Regel bild in processCashback prüft jeden, nicht nur den
-              // nächsten (der kann ein offener Bon sein, ein weiterer bezahlt).
-              kandidaten: fein.ergebnisse.map((e) => e.kandidat).filter((id) => typeof id === 'string').slice(0, 3),
+              // ALLE groben Treffer, die laufen oder Geld bekamen — neueste
+              // zuerst, höchstens BILD_MAX_KANDIDATEN —, nicht nur die bis zu
+              // 3 fein verglichenen (Nachprüfung 06.10.2026, zweite Runde: drei
+              // ältere ähnliche Bons, etwa App-Bons derselben Kette, verdrängten
+              // sonst das Original aus der Liste). Regel bild in processCashback
+              // prüft jeden (Status, Datum ±8, Ledger); ein Original liegt
+              // höchstens wenige Wochen zurück, darum die neuesten zuerst.
+              kandidaten: kandidaten
+                .slice()
+                .sort((x, y) => msVon(y.treffer) - msVon(x.treffer))
+                .map((k) => k.id)
+                .slice(0, BILD_MAX_KANDIDATEN),
+              // Welche davon fein verglichen wurden (höchstens 3, nächster zuerst).
+              verglichen: fein.ergebnisse.map((e) => e.kandidat).filter((id) => typeof id === 'string'),
               distanz: erster ? erster.distanz : naechster.distance,
               ssim: erster && Number.isFinite(erster.ssim) ? erster.ssim : null,
               abweichung: erster && Number.isFinite(erster.abweichung) ? erster.abweichung : null,
@@ -3520,7 +3643,7 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
       }
 
       // Identität des Bons für den Doppel-Schutz in der Buchung (04.10.2026)
-      // und die Regel bild (unten).
+      // und die Prüfregeln (6y1).
       const doppelModiCfg = doppelModi(config);
       const bonIdent = bonIdentitaet({
         merchantId: merchantInfo?.id,
@@ -3534,64 +3657,63 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
         summeAusArtikeln: ocr.parsed.summeAusArtikeln === true,
         // … und Abschnitte eines App-Kassenbons (Nachprüfung 05.10.2026).
         belegart: ocr.parsed.belegart ?? null,
+        // Markt aus einem lesbaren Namen? (Nachprüfung 06.10.2026, zweite
+        // Runde: ein Abschnitt ohne Kopf wurde „dm" und einzeln bezahlt.)
+        marktSicher: marktSicherFuer(merchantInfo, ocr.parsed.merchant),
       });
 
-      // 6y1) Regel bild (Nachprüfung 05.10.2026, lib/doppelBon.js): der scharfe
-      // Feinvergleich hat beim Hochladen einen groben Bildtreffer gegen einen
-      // früheren Bon DERSELBEN Person nicht als dasselbe Bild bestätigt
-      // (`capture.bildAehnlich` — schon 1 % Beschnitt reicht). Eine solche
-      // Kopie mit einigen geänderten Preisziffern trifft keine Textregel. Ist
-      // der Kandidat bezahlt, gleicher Markt, Bon-Tag ±8 → Prüfung, nie
-      // Ablehnung. Bei einer Gutschrift entscheidet die Buchung (Regel bild nach
-      // allen ablehnenden Regeln, Ledger in der Transaktion). Geht der Bon
-      // ohnehin wegen der Lese-Sicherheit in die Prüfung, ersetzt der Prüfgrund
-      // den der Texterkennung — die Bon-Runde entscheidet nur ocr_confidence_*
-      // und gäbe die Kopie sonst über den Resolver frei. Nie bei einem schon
+      // 6y1) Prüfregeln (lib/doppelBon.js nurPruefung: bild, seiteAbweichend).
+      // Regel bild: der scharfe Feinvergleich hat beim Hochladen einen groben
+      // Bildtreffer gegen einen früheren Bon DERSELBEN Person nicht als
+      // dasselbe Bild bestätigt (`capture.bildAehnlich` — schon 1 % Beschnitt
+      // reicht); eine solche Kopie mit einigen geänderten Preisziffern trifft
+      // keine Textregel. Bei einer Gutschrift entscheidet die Buchung (nach
+      // allen ablehnenden Regeln, Kandidaten, Status und Ledger in der
+      // Transaktion). Geht der Bon ohnehin wegen der Lese-Sicherheit in die
+      // Prüfung, wird hier geprüft und der Prüfgrund ersetzt den der
+      // Texterkennung — die Bon-Runde entscheidet nur ocr_confidence_* und gäbe
+      // die Kopie bzw. den Abschnitt sonst über den Resolver frei (der hält
+      // seit 06.10.2026 selbst fest; hier steht der Grund aber gleich am Bon,
+      // und der Abgleich kostet keine Zweitlesung). Nie bei einem schon
       // bezahlten Bon oder nach der Entscheidung eines Menschen.
-      const bildKandidaten = [];
-      let bildVerdacht = null;
-      const bildAehnlichAmBon = receipt.capture && receipt.capture.bildAehnlich;
-      const bildPfad = status === 'approved'
-        || (status === 'review' && /^ocr_confidence_/.test(String(reviewReason || '')));
-      if (bildAehnlichAmBon && doppelModiCfg.bild && bildPfad && !alreadyCredited && !menschLehnteAb
-        && receipt.reviewDecision !== 'approve') {
-        const ids = [...new Set([
-          ...(Array.isArray(bildAehnlichAmBon.kandidaten) ? bildAehnlichAmBon.kandidaten : []),
-          bildAehnlichAmBon.kandidat,
-        ])].filter((id) => typeof id === 'string' && id && id !== cashbackId).slice(0, 3);
-        for (const id of ids) {
-          const s = await db.doc(`receipts/${id}`).get();
-          // Nur ein Bon DIESER Person (der grobe Vergleich sucht nur dort).
-          if (!s.exists || s.get('userId') !== uid) continue;
-          const m = s.get('merchant');
-          bildKandidaten.push({
-            id,
-            markt: m && m.id && m.id !== 'unknown' ? m.id : null,
-            tag: typeof s.get('bonDate') === 'string' ? s.get('bonDate') : null,
-          });
-        }
-        if (status === 'review') {
-          // Es wird nichts gebucht — das Ledger der Kandidaten hier lesen, und
-          // nur für die, die zu Markt und Tag passen.
-          const lebendig = [];
-          for (const k of bildKandidaten) {
-            if (!bildTrifft(bonIdent, k)) continue;
-            const l = await db.collection(`users/${uid}/cashback_ledger`).where('receiptId', '==', k.id).get();
-            const netto = l.docs.reduce((s, d) => {
-              const x = d.data();
-              return s + (x.type === 'earn' ? x.cents || 0 : x.type === 'reverse' ? -(x.cents || 0) : 0);
-            }, 0);
-            if (netto > 0) lebendig.push({ ...k, lebendig: true });
-          }
-          const urteil = doppelUrteil({ bonId: cashbackId, uid, neu: bonIdent, bild: lebendig, modi: doppelModiCfg });
-          bildVerdacht = urteil.wirksam || urteil.treffer[0] || null;
-          if (bildVerdacht) {
+      const bildIds = doppelModiCfg.bild
+        ? bildKandidatenIds(receipt.capture && receipt.capture.bildAehnlich, cashbackId)
+        : [];
+      const pruefRegelnPfad = !alreadyCredited && !menschLehnteAb && receipt.reviewDecision !== 'approve';
+      // Regel bild gegen einen noch OFFENEN Kandidaten (Nachprüfung 06.10.2026,
+      // zweite Runde): auf das Original warten, statt einen Menschen zu
+      // beschäftigen. Meist ist es dieselbe Aufnahme ein zweites Mal (ein
+      // erneut fotografierter Bon, Minuten später) — ist das Original
+      // entschieden, lehnt eine Textregel die Kopie ab, hält Regel bild sie
+      // gegen das bezahlte Original fest, oder (Original abgelehnt) sie wird
+      // bezahlt. Der Bon bleibt `ocr_pending`, der Kehrlauf stellt ihn nach
+      // 20 min neu zu (die Lesung liegt im Cache). Erst nach BILD_WARTEN_MAX
+      // Läufen bzw. wenn kein Kehrlauf mehr kommt: Prüfung `bild_aehnlich_offen`.
+      const bildWarten = async (treffer, pfad) => {
+        const vorher = receipt.bildWartet && Number(receipt.bildWartet.versuche) > 0 ? Number(receipt.bildWartet.versuche) : 0;
+        const kehrlaufKommt = receipt.status === 'ocr_pending' && (Number(receipt.sweepCount) || 0) < SWEEP_MAX_ANZAHL;
+        if (!kehrlaufKommt || vorher >= BILD_WARTEN_MAX) return false;
+        logger.info('bild-wartet-auf-original', { cashbackId, gegen: treffer.gegen, versuch: vorher + 1, pfad });
+        await docRef.update({
+          bildWartet: { gegen: treffer.gegen, versuche: vorher + 1, letzterLaufMs: Date.now() },
+          updatedAt: now,
+        });
+        return true;
+      };
+      let pruefVerdacht = null;
+      if (status === 'review' && /^ocr_confidence_/.test(String(reviewReason || '')) && pruefRegelnPfad) {
+        const urteil = await pruefRegelnOhneBuchung({ uid, cashbackId, neu: bonIdent, modi: doppelModiCfg, bildIds });
+        if (urteil.treffer.length) {
+          pruefVerdacht = urteil;
+          for (const t of urteil.treffer) {
             logger.warn('doppel-treffer', {
-              cashbackId, regel: 'bild', modus: bildVerdacht.modus, sameUser: true,
-              gegen: bildVerdacht.gegen, abstand: bildVerdacht.abstand ?? null, pfad: 'pruefung',
+              cashbackId, regel: t.regel, modus: t.modus, sameUser: true, gegen: t.gegen,
+              abstand: t.abstand ?? null, offen: t.offen === true, andererMarkt: t.andererMarkt === true, pfad: 'pruefung',
             });
-            if (bildVerdacht.modus === 'wirksam') reviewReason = BILD_GRUND;
           }
+          const w = urteil.wirksam;
+          if (w && w.regel === 'bild' && w.offen && await bildWarten(w, 'pruefung')) return;
+          if (w) reviewReason = doppelGrund(w);
         }
       }
 
@@ -3643,9 +3765,10 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
             extraDays: [receipt.bonDate],
             bon: bonIdent,
             doppel: doppelModiCfg,
-            // Regel bild (6y1): Kandidaten des Feinvergleichs; ob sie noch
-            // bezahlt sind, liest die Transaktion.
-            ...(status === 'approved' && bildKandidaten.length ? { bild: bildKandidaten } : {}),
+            // Regel bild (6y1): Kandidaten aus `capture.bildAehnlich`; Status,
+            // Datum und Ledger liest die Transaktion. Nur auf dem Buchungspfad
+            // und solange keine Entscheidung eines Menschen am Bon steht.
+            ...(status === 'approved' && pruefRegelnPfad && bildIds.length ? { bild: bildIds } : {}),
             // Ein automatischer Lauf storniert nie eine Gutschrift — nur ein
             // Mensch (05.10.2026). Entscheidet die Transaktion gegen das frisch
             // gelesene Ledger, nicht gegen das vorab gelesene alreadyCredited.
@@ -3670,13 +3793,50 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
       // Betrifft Gates, die von Zustand AUSSERHALB des Bons abhängen (Kopie in
       // der Vorprüfung trotz Race, geänderte Aktion/Frist/Region, Freigabe eines
       // Menschen bei Zukunftsdatum) und abweichende Neulesungen.
-      if (settle.bestandGeschuetzt) {
+      //
+      // Die BEZAHLTE Lesung bleibt am Bon (Nachprüfung 06.10.2026): bisher schrieb
+      // Schritt 7 die Felder der verworfenen Lesung an den Bon — contentHash,
+      // transactionHash, itemsHash, Datum, Summe, Markt, Positionen. Die
+      // Vorprüfung 5b sucht Kopien NUR über diese Felder; danach wurde ein neues
+      // Foto desselben Bons ein zweites Mal bezahlt (nachgestellt: Datum als zu
+      // alt oder Markt unlesbar gelesen → Kennung weg → Kopie bezahlt). Darum
+      // schreiben Bon und Spiegel jetzt nur Status und Betrag; die verworfene
+      // Lesung steht als Vermerk `neulesungVerworfen` daneben (das Feld `ocr`
+      // kann sie tragen — die frühe Ablage bzw. die Nachverarbeitung hat es
+      // schon ersetzt; lib/doppelBon identitaetAusBon liest dann die Felder
+      // des Bons), keine Positionen, keine Region.
+      const bestandGeschuetzt = settle.bestandGeschuetzt === true;
+      let neulesungVerworfen = null;
+      if (bestandGeschuetzt) {
         logger.warn('bestandsschutz-gutschrift', {
           cashbackId,
           waereStatus: status,
           waereGrund: rejectReason || reviewReason || null,
           gutgeschriebenCents: settle.creditedCents,
         });
+        // Nur wenn die Lesung von der gespeicherten abweicht (sonst wurde
+        // nichts verworfen — nur ein äußerer Zustand hat sich geändert).
+        const gleich = receipt.contentHash === (contentHash ?? null)
+          && receipt.transactionHash === (transactionHash ?? null)
+          && receipt.itemsHash === (itemsHash ?? null)
+          && (receipt.bonDate ?? null) === (ocr.parsed.bonDate || null)
+          && ((receipt.merchant && receipt.merchant.id) ?? null) === (merchantInfo ? merchantInfo.id : ocr.parsed.merchant ? 'unknown' : null);
+        if (!gleich) {
+          neulesungVerworfen = {
+            at: now,
+            waereStatus: status,
+            grund: rejectReason || reviewReason || null,
+            bonDate: ocr.parsed.bonDate || null,
+            bonTime: ocr.parsed.bonTime || null,
+            totalCents: ocr.parsed.totalCents ?? null,
+            merchantId: merchantInfo?.id ?? null,
+            merchantRaw: ocr.parsed.merchant ?? null,
+            contentHash: contentHash ?? null,
+            transactionHash: transactionHash ?? null,
+            itemsHash: itemsHash ?? null,
+            promptVersion: ocr.promptVersion ?? null,
+          };
+        }
         status = 'approved';
         cashbackCents = settle.creditedCents;
         rejectReason = null;
@@ -3712,16 +3872,25 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
             // Prüfrunde 3: in der Beobachtung getrennt auswerten.
             andererMarkt: t.andererMarkt === true,
             abstand: t.abstand ?? null,
+            offen: t.offen === true,
           });
         }
       }
-      if (status === 'approved' && settle.doppel && settle.doppel.modus === 'wirksam' && settle.doppel.regel === 'bild') {
-        // Regel bild (6y1): kein Doppel-Beweis, nur ein Bild, das einem
-        // bezahlten Bon derselben Person ähnelt → Prüfung durch einen Menschen.
-        // Der Betrag bleibt am Bon stehen: eine Freigabe über den Resolver
-        // bucht ihn (mit allen Deckeln und den übrigen Doppel-Regeln).
+      // Regel bild gegen ein noch offenes Original: warten (bildWarten oben).
+      // Die Transaktion hat nichts gebucht und nichts geschrieben.
+      if (status === 'approved' && settle.doppel && settle.doppel.modus === 'wirksam'
+        && settle.doppel.regel === 'bild' && settle.doppel.offen && await bildWarten(settle.doppel, 'buchung')) {
+        return;
+      }
+      if (status === 'approved' && settle.doppel && settle.doppel.modus === 'wirksam' && nurPruefung(settle.doppel.regel)) {
+        // Regel bild (6y1) bzw. seiteAbweichend (06.10.2026): kein Doppel-
+        // Beweis, nur ein Bild bzw. ein Abschnitt, der einem Bon derselben
+        // Person ähnelt (bezahlt oder — nach dem Warten — noch offen) →
+        // Prüfung durch einen Menschen. Der Betrag bleibt am Bon stehen: eine
+        // Freigabe über den Resolver bucht ihn (mit allen Deckeln und den
+        // übrigen Doppel-Regeln).
         status = 'review';
-        reviewReason = BILD_GRUND;
+        reviewReason = doppelGrund(settle.doppel);
         rejectReason = null;
         rejectDetail = null;
       } else if (status === 'approved' && settle.doppel && settle.doppel.modus === 'wirksam') {
@@ -3763,6 +3932,41 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
           }))
         : [];
 
+      // Was die LESUNG beschreibt (Markt, Datum, Summe, Positionen …). Unter
+      // Bestandsschutz bleibt im Spiegel die bezahlte Lesung stehen (merge).
+      const spiegelLesung = bestandGeschuetzt ? {} : {
+        eligibleItemCount,
+        merchantRaw: ocr.parsed.merchant ?? null,
+        // Filiale laut Bon (05.09.2026) — schlank für die App: Ort + PLZ.
+        storeCity: store?.city ?? null,
+        storeZip: store?.zip ?? null,
+        // Nur was die App zeigen muss: wurde die Aktion regional gewechselt.
+        campaignRegionSwitched: targeting?.korrigiert === true ? true : null,
+        merchantId: merchantInfo?.id ?? null,
+        discounterId: merchantInfo?.discounterId ?? null, // 86ca0wbg7
+        merchantName: merchantInfo?.name ?? null,
+        merchantDisplayName: merchantInfo?.displayName ?? null,
+        merchantLogoUrl: merchantInfo?.logoUrl ?? null,
+        merchantLand: merchantInfo?.land ?? null,
+        merchantMatchVia: merchantInfo?.matchVia ?? null,
+        bonCountry: ocr.parsed.bonCountry ?? null,
+        bonDate: ocr.parsed.bonDate || null,
+        bonAgeDays: ageDays,
+        // 86ca0wbg7: angewandte Max-Alter-Grenze (Tage) → die App zeigt die
+        // ECHTE Grenze statt einer hardcodierten Zahl. Seit dem Go-Live ist
+        // der globale Default 7 (Entscheidung 05.09.2026: 7 Tage, endgültig)
+        // — der frühere Guard „nur wenn strenger als global" ließ die App
+        // bei jedem bon_too_old ohne Zahl dastehen. Immer die Grenze senden.
+        maxAgeDays: effectiveMaxAgeDays,
+        bonTotalCents: ocr.parsed.totalCents ?? null,
+        items: slimItems,
+        reconciliationDeltaCents: recon.deltaCents ?? null,
+        reconciliationDirection: recon.direction ?? null,
+        ocrEngine: ocr.engine ?? null,
+        escalation: escalation?.fired ? escalation : null,
+        // Prompt v1.5: kassenbon | app_kassenbon | online_bestellung | sonstiges.
+        belegart: ocr.parsed.belegart ?? null,
+      };
       await db
         .doc(`users/${uid}/cashback_status/${cashbackId}`)
         .set(
@@ -3771,37 +3975,9 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
             receiptId: cashbackId,
             cashbackCents,
             tierApplied: cashbackCents,
-            eligibleItemCount,
-            merchantRaw: ocr.parsed.merchant ?? null,
-            // Filiale laut Bon (05.09.2026) — schlank für die App: Ort + PLZ.
-            storeCity: store?.city ?? null,
-            storeZip: store?.zip ?? null,
-            // Nur was die App zeigen muss: wurde die Aktion regional gewechselt.
-            campaignRegionSwitched: targeting?.korrigiert === true ? true : null,
-            merchantId: merchantInfo?.id ?? null,
-            discounterId: merchantInfo?.discounterId ?? null, // 86ca0wbg7
-            merchantName: merchantInfo?.name ?? null,
-            merchantDisplayName: merchantInfo?.displayName ?? null,
-            merchantLogoUrl: merchantInfo?.logoUrl ?? null,
-            merchantLand: merchantInfo?.land ?? null,
-            merchantMatchVia: merchantInfo?.matchVia ?? null,
-            bonCountry: ocr.parsed.bonCountry ?? null,
-            bonDate: ocr.parsed.bonDate || null,
-            bonAgeDays: ageDays,
-            // 86ca0wbg7: angewandte Max-Alter-Grenze (Tage) → die App zeigt die
-            // ECHTE Grenze statt einer hardcodierten Zahl. Seit dem Go-Live ist
-            // der globale Default 7 (Entscheidung 05.09.2026: 7 Tage, endgültig)
-            // — der frühere Guard „nur wenn strenger als global" ließ die App
-            // bei jedem bon_too_old ohne Zahl dastehen. Immer die Grenze senden.
-            maxAgeDays: effectiveMaxAgeDays,
-            bonTotalCents: ocr.parsed.totalCents ?? null,
-            items: slimItems,
+            ...spiegelLesung,
             storageBucket: receipt.storage?.bucket ?? null,
             storagePath: receipt.storage?.path ?? null,
-            reconciliationDeltaCents: recon.deltaCents ?? null,
-            reconciliationDirection: recon.direction ?? null,
-            ocrEngine: ocr.engine ?? null,
-            escalation: escalation?.fired ? escalation : null,
             // Mirror only carries minimal duplicate info — never the
             // foreign user's id (privacy).
             duplicate: duplicateOf
@@ -3809,28 +3985,21 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
               : null,
             rejectReason,
             rejectDetail: rejectDetail ?? null,
-            // Prompt v1.5: kassenbon | app_kassenbon | online_bestellung | sonstiges.
-            belegart: ocr.parsed.belegart ?? null,
             updatedAt: now,
           },
           { merge: true },
         );
 
       // 7) Write authoritative doc to top-level /receipts/*
-      await docRef.update({
-        status,
-        rejectReason,
-        rejectDetail: rejectDetail ?? null,
-        reviewReason,
+      // Was die LESUNG beschreibt. Unter Bestandsschutz bleibt am Bon die
+      // bezahlte Lesung stehen (siehe oben) — 5b findet Kopien nur über diese
+      // Felder, und identitaetAusBon liest sie, sobald `neulesungVerworfen` steht.
+      const bonLesung = bestandGeschuetzt ? {} : {
         // Worauf die Freigabe-Entscheidung beruhte, wenn die Sequenz-Bewertung
         // allein nicht gereicht hätte (86cbet2w1). Null, solange das Gate nicht
         // greifen musste — dann entschied die Bewertung wie bisher.
         ocrFieldAgreement,
         ocr: buildOcrField(ocr, recon, escalation),
-        // Falls das frühe Speichern oben scheiterte, steht er noch da.
-        ...(receipt.ocrZwischenstand || receipt.ocrFortsetzungen != null
-          ? { ocrZwischenstand: admin.firestore.FieldValue.delete(), ocrFortsetzungen: admin.firestore.FieldValue.delete() }
-          : {}),
         merchant: merchantInfo
           ? {
               id: merchantInfo.id,
@@ -3841,6 +4010,11 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
               name: merchantInfo.name,
               raw: ocr.parsed.merchant ?? null,
               matchedScore: 1,
+              // Wie der Markt erkannt wurde und ob aus einem lesbaren Namen
+              // (lib/doppelBon marktIstSicher, Nachprüfung 06.10.2026) — die
+              // Regeln seite/seiteAbweichend lesen es über identitaetAusBon.
+              matchVia: merchantInfo.matchVia ?? null,
+              sicher: bonIdent.marktUnsicher !== true,
             }
           : ocr.parsed.merchant
           ? { id: 'unknown', raw: ocr.parsed.merchant, matchedScore: 0 }
@@ -3868,7 +4042,6 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
         contentHash: contentHash ?? null,
         transactionHash: transactionHash ?? null,
         itemsHash: itemsHash ?? null,
-        duplicateOf: duplicateOf ?? null,
         // Doppel-Schutz in der Buchung (04.10.2026): was geprüft wurde und was
         // getroffen hätte bzw. hat — auch im Beobachtungs-Modus. Nur wenn die
         // Buchung geprüft hat (erste Gutschrift); eine erneute Zustellung lässt
@@ -3881,14 +4054,15 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
                 at: admin.firestore.Timestamp.now(),
               },
             }
-          // Regel bild auf dem Prüf-Pfad (6y1): ohne Buchung keine Prüfung in
-          // der Transaktion — der Treffer steht trotzdem am Bon, damit die
-          // Prüfkonsole den ähnlichen bezahlten Bon verlinkt.
-          : bildVerdacht
+          // Prüfregeln auf dem Prüf-Pfad (6y1): ohne Buchung keine Prüfung in
+          // der Transaktion — die Treffer stehen trotzdem am Bon (auch im
+          // Beobachtungs-Modus), damit die Prüfkonsole den ähnlichen Bon
+          // verlinkt.
+          : pruefVerdacht
           ? {
               doppelPruefung: {
                 modi: modiVermerk(doppelModiCfg),
-                treffer: [bildVerdacht],
+                treffer: pruefVerdacht.treffer,
                 at: admin.firestore.Timestamp.now(),
               },
             }
@@ -3906,6 +4080,25 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
             }))
           : [],
         eligibleItemCount,
+      };
+      await docRef.update({
+        status,
+        rejectReason,
+        rejectDetail: rejectDetail ?? null,
+        reviewReason,
+        // Falls das frühe Speichern oben scheiterte, steht er noch da.
+        ...(receipt.ocrZwischenstand || receipt.ocrFortsetzungen != null
+          ? { ocrZwischenstand: admin.firestore.FieldValue.delete(), ocrFortsetzungen: admin.firestore.FieldValue.delete() }
+          : {}),
+        ...bonLesung,
+        duplicateOf: duplicateOf ?? null,
+        // Vermerk zur verworfenen Neulesung (Bestandsschutz). Eine normale
+        // Ablage schreibt alle Felder der Lesung neu — dann gilt er nicht mehr.
+        ...(neulesungVerworfen
+          ? { neulesungVerworfen }
+          : bestandGeschuetzt
+            ? {}
+            : { neulesungVerworfen: admin.firestore.FieldValue.delete() }),
         tierApplied: cashbackCents,
         cashbackCents,
         'storage.sizeBytes': sizeBytes,
@@ -3925,7 +4118,8 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
       // kein einziges eine PLZ. Aus ihr steuern sich später auch Produktfoto-
       // und Umfrage-Aktionen, die selbst keine PLZ liefern. Fire-and-forget:
       // ein Fehler hier darf einen Bon nie aufhalten.
-      if (store?.zip && uid) {
+      // Unter Bestandsschutz stammt `store` aus der verworfenen Lesung.
+      if (store?.zip && uid && !bestandGeschuetzt) {
         void db.doc(`users/${uid}`).set({
           region: {
             zip: store.zip,
@@ -3939,8 +4133,11 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
       }
 
       const rewardEligible = status === 'approved' || status === 'no_reward';
-      const captureProducts =
-        rewardEligible || (status === 'rejected' && RELIABLE_REJECT_REASONS.has(rejectReason));
+      // Unter Bestandsschutz keine Positionen: sie kämen aus der verworfenen
+      // Lesung (und ohne `backfilled` — sie könnten einen heutigen Zettel
+      // abhaken); die der bezahlten Lesung stehen schon.
+      const captureProducts = !bestandGeschuetzt
+        && (rewardEligible || (status === 'rejected' && RELIABLE_REJECT_REASONS.has(rejectReason)));
       if (captureProducts) {
         await writePurchasedProducts(uid, cashbackId, ocr.parsed, merchantInfo, {
           status,
@@ -4826,6 +5023,7 @@ exports.resolveCashbackReview = onRequest(
         res.status(409).json({ code: 'no_cashback_computed', reviewReason: r.reviewReason || null });
         return;
       }
+      const entscheidungsModi = modiFuerEntscheidung(doppelModi(config), r.reviewReason);
       const settle = await syncLedgerForReceipt(
         userRef,
         receiptId,
@@ -4842,8 +5040,13 @@ exports.resolveCashbackReview = onRequest(
           legacyFallback: config.dailyCapLegacyFallback !== false,
         },
         // Doppel-Schutz (04.10.2026): auch eine Freigabe durch einen Menschen
-        // oder die Bon-Runde bucht keinen Bon, der schon bezahlt ist.
-        { bon: identitaetAusBon(r), doppel: doppelModi(config) },
+        // oder die Bon-Runde bucht keinen Bon, der schon bezahlt ist. Die
+        // Prüfregeln (bild, seiteAbweichend) gelten hier auch (Nachprüfung
+        // 06.10.2026, zweite Runde: die Bon-Runde gab einen Abschnitt bzw. eine
+        // Kopie frei, die wegen der Lese-Sicherheit in der Prüfung lag) — ein
+        // Treffer hält fest (unten), außer der Bon steht schon mit einem ihrer
+        // Prüfgründe in der Prüfung: dann hat der Mensch sie vor sich.
+        { bon: identitaetAusBon(r), doppel: entscheidungsModi, bild: bildKandidatenIds(r.capture && r.capture.bildAehnlich, receiptId) },
       );
       if (settle?.doppelTreffer?.length) {
         for (const t of settle.doppelTreffer) {
@@ -4852,11 +5055,30 @@ exports.resolveCashbackReview = onRequest(
       }
       const doppelPruefung = settle?.doppelGeprueft
         ? {
-            modi: modiVermerk(doppelModi(config)),
+            modi: modiVermerk(entscheidungsModi),
             treffer: settle.doppelTreffer,
             at: admin.firestore.Timestamp.now(),
           }
         : null;
+      if (settle?.doppel && settle.doppel.modus === 'wirksam' && nurPruefung(settle.doppel.regel)) {
+        // Prüfregel getroffen (bild, seiteAbweichend): kein Doppel-Beweis —
+        // nicht buchen, nicht ablehnen, sondern festhalten. Der Bon bleibt in
+        // der Prüfung, jetzt mit dem Prüfgrund der Regel und der Zeile
+        // „Doppel-Prüfung" (verlinkt den anderen Bon). Die Bon-Runde fasst
+        // diesen Grund nie an; ein Mensch, der danach erneut freigibt, bucht
+        // (modiFuerEntscheidung). Gebucht wurde nichts (Transaktion), der
+        // Spiegel bleibt 'review'.
+        const grund = doppelGrund(settle.doppel);
+        await ref.update({
+          reviewReason: grund,
+          ...(doppelPruefung ? { doppelPruefung } : {}),
+          entscheidungLaeuft: admin.firestore.FieldValue.delete(),
+          updatedAt: ts,
+        });
+        logger.info('cashback-review-gehalten', { receiptId, uid, regel: settle.doppel.regel, grund, gegen: settle.doppel.gegen });
+        res.status(409).json({ code: 'halten', reviewReason: grund, regel: settle.doppel.regel, gegen: settle.doppel.gegen });
+        return;
+      }
       if (settle?.doppel && settle.doppel.modus === 'wirksam') {
         // Derselbe Bon ist schon bezahlt: Ablehnung wie in der Pipeline. Die
         // Entscheidung des Menschen (approve) bleibt als reviewDecision stehen
@@ -4977,7 +5199,7 @@ exports.sweepStuckReceipts = onSchedule(
       // Laufs hält niemand einen Anspruch. Ging die Zustellung verloren, holt
       // ein späterer Kehrlauf den Bon (der Zwischenstand bleibt verwertbar).
       const fortsetzungFrisch = Number(x.ocrZwischenstand?.gespeichertMs) > jetzt - LAUF_MAX_MS;
-      return created && created < cutoff && lastSweep < cutoff && (x.sweepCount || 0) < 5
+      return created && created < cutoff && lastSweep < cutoff && (x.sweepCount || 0) < SWEEP_MAX_ANZAHL
         && aktiveLaeufe(x.verarbeitung, jetzt).length === 0
         && !fortsetzungFrisch;
     }).slice(0, SWEEP_MAX_PER_RUN);

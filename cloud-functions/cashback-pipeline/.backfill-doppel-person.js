@@ -82,7 +82,9 @@ async function nachtragen({ db, FV, SCHREIBEN = false, VERIFY = false, SCHALTER 
       // Nur die Felder, die identitaetAusBon liest — Bon-Dokumente tragen die
       // ganze Texterkennung.
       const snaps = await tx.getAll(...aktiv.map((id) => db.collection('receipts').doc(id)), {
-        fieldMask: ['userId', 'bonDate', 'bonTime', 'bonTotalCents', 'merchant', 'items', 'ocr.parsed'],
+        // `neulesungVerworfen`/`belegart`: Bestandsschutz (06.10.2026) — dann
+        // gilt die bezahlte Lesung aus den Feldern des Bons, nicht `ocr`.
+        fieldMask: ['userId', 'bonDate', 'bonTime', 'bonTotalCents', 'merchant', 'items', 'belegart', 'neulesungVerworfen', 'ocr.parsed'],
       });
       const neu = {};
       for (const sn of snaps) {

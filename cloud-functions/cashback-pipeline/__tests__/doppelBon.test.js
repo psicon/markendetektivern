@@ -85,7 +85,7 @@ describe('identitaet', () => {
 
   test('eintragAus: nur, was die Prüfung braucht', () => {
     const e = D.eintragAus(D.identitaet({ merchantId: 'lidl', bonDate: '2026-10-01', totalCents: 500, bonTime: '10:00', items: art(['Milch', 119]) }));
-    expect(e).toEqual({ markt: 'lidl', summe: 500, uhrzeit: '10:00', artikel: ['milch#119'], artikelSumme: 119, bestellHash: null, v: 1 });
+    expect(e).toEqual({ markt: 'lidl', summe: 500, uhrzeit: '10:00', artikel: ['milch#119'], artikelSumme: 119, positivSumme: 119, bestellHash: null, v: 1 });
   });
 
   test('artikelSumme: Summe der gelesenen Preise wie im Abgleich, Pfand und Rabatt eingeschlossen', () => {
@@ -101,12 +101,15 @@ describe('Schalter', () => {
     expect(D.schalterModus(v)).toBe(e);
   });
 
-  test('Code-Default: alles aus außer seite und bild, Schwelle 0,6, mindestens 5 Artikel', () => {
+  test('Code-Default: alles aus außer seite und bild (an) und seiteAbweichend (Beobachtung), Schwelle 0,6, mindestens 5 Artikel', () => {
     // seite/bild an (Nachprüfung 05.10.2026): sie sichern nur Zahlwege ab, die
     // ohne Schalter (Artikelsumme) bzw. erst mit scharfem Feinvergleich entstehen.
-    expect(D.doppelModi({})).toEqual({ summe: false, konten: false, artikel: false, bestellung: false, datum: false, kontenArtikel: false, seite: true, kontenDatum: false, bild: true, schwelle: 0.6, minArtikel: 5 });
-    expect(D.modiVermerk(D.doppelModi({ doppelDatum: 'shadow', doppelKontenArtikel: true, doppelOnlineSeite: 'shadow', doppelKontenDatum: true, doppelBildAehnlich: false })))
-      .toEqual({ summe: false, konten: false, artikel: false, bestellung: false, datum: 'shadow', kontenArtikel: true, seite: 'shadow', kontenDatum: true, bild: false });
+    // seiteAbweichend (06.10.2026) wird ab dem Deploy nur beobachtet.
+    expect(D.doppelModi({})).toEqual({ summe: false, konten: false, artikel: false, bestellung: false, datum: false, kontenArtikel: false, seite: true, kontenDatum: false, bild: true, seiteAbweichend: 'shadow', schwelle: 0.6, minArtikel: 5 });
+    expect(D.modiVermerk(D.doppelModi({ doppelDatum: 'shadow', doppelKontenArtikel: true, doppelOnlineSeite: 'shadow', doppelKontenDatum: true, doppelBildAehnlich: false, doppelSeiteAbweichend: true })))
+      .toEqual({ summe: false, konten: false, artikel: false, bestellung: false, datum: 'shadow', kontenArtikel: true, seite: 'shadow', kontenDatum: true, bild: false, seiteAbweichend: true });
+    expect(D.doppelModi({ doppelSeiteAbweichend: false }).seiteAbweichend).toBe(false);
+    expect(D.doppelModi({ doppelSeiteAbweichend: 'ja' }).seiteAbweichend).toBe(false);
     // Nur ein FEHLENDER Wert gilt als an; alles Unbekannte bleibt aus.
     expect(D.doppelModi({ doppelOnlineSeite: null, doppelBildAehnlich: undefined })).toMatchObject({ seite: true, bild: true });
     expect(D.doppelModi({ doppelOnlineSeite: 'true', doppelBildAehnlich: 0 })).toMatchObject({ seite: false, bild: false });
@@ -213,9 +216,11 @@ describe('Regel datum (Kopie mit geändertem Datum, gleiche Person)', () => {
     const alt = [{ id: 'alt', eintrag: D.eintragAus(am('2026-10-03')), tag: '2026-10-03' }];
     const u = D.doppelUrteil({ bonId: 'n', uid: 'u', neu: am('2026-10-02', { bonTime: null, totalCents: 1880 }), andere: alt, modi: AN_D });
     expect(u.wirksam).toMatchObject({ regel: 'datum', ohneUhrzeit: true, nurArtikelSumme: true, anteil: 1 });
-    // Eintrag aus der Zeit vor Prüfrunde 3 (ohne artikelSumme) → kein Treffer über sie.
-    const { artikelSumme, ...ohne } = alt[0].eintrag;
+    // Eintrag aus der Zeit vor Prüfrunde 3 (ohne artikelSumme, ohne
+    // positivSumme) → kein Treffer über sie.
+    const { artikelSumme, positivSumme, ...ohne } = alt[0].eintrag;
     expect(artikelSumme).toBe(1870);
+    expect(positivSumme).toBe(1870);
     expect(D.doppelUrteil({ bonId: 'n', uid: 'u', neu: am('2026-10-02', { bonTime: null, totalCents: 1880 }), andere: [{ ...alt[0], eintrag: ohne }], modi: AN_D }).treffer).toEqual([]);
   });
 

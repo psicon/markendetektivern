@@ -237,7 +237,8 @@ describe('Beobachtungs-Modus', () => {
     expect(earns()).toHaveLength(2);
     const vermerk = fake.store.get('receipts/s2').doppelPruefung;
     // seite und bild sind per Code-Default an (Nachprüfung 05.10.2026).
-    expect(vermerk.modi).toEqual({ summe: 'shadow', konten: 'shadow', artikel: 'shadow', bestellung: false, datum: false, kontenArtikel: false, seite: true, kontenDatum: false, bild: true });
+    // seiteAbweichend wird per Code-Default beobachtet (Nachprüfung 06.10.2026).
+    expect(vermerk.modi).toEqual({ summe: 'shadow', konten: 'shadow', artikel: 'shadow', bestellung: false, datum: false, kontenArtikel: false, seite: true, kontenDatum: false, bild: true, seiteAbweichend: 'shadow' });
     expect(vermerk.treffer.map((t) => [t.regel, t.modus])).toEqual(expect.arrayContaining([['summe', 'beobachtung'], ['konten', 'beobachtung'], ['artikel', 'beobachtung']]));
     // Der Schlüssel bleibt beim ersten Bon („der erste gewinnt").
     expect(fake.store.get(`cashback_bon_schluessel/${kontenId('netto', summe(ZEHN), '10:15')}`).receiptId).toBe('s1');

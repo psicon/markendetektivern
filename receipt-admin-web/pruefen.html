@@ -298,6 +298,8 @@
         duplicate_content_self: { titel: 'Derselbe Bon wurde schon eingereicht', tun: 'Beide Einreichungen vergleichen; die frühere zählt' },
         duplicate_content_cross_user: { titel: 'Derselbe Bon kam von einem anderen Konto', tun: 'Beide vergleichen — gleicher Markt, gleicher Tag, gleiche Summe' },
         bild_aehnlich_bezahlt: { titel: 'Bild ähnelt einem schon bezahlten Bon dieser Person', tun: 'Mit dem verlinkten Bon vergleichen (Doppel-Prüfung): beschnitten, Datum, Uhrzeit oder Preise geändert? Derselbe Einkauf → ablehnen als „bereits eingereicht"; ein anderer Einkauf → freigeben' },
+        bild_aehnlich_offen: { titel: 'Bild ähnelt einem anderen Bon dieser Person, der noch nicht entschieden war', tun: 'Mit dem verlinkten Bon vergleichen (Doppel-Prüfung): derselbe Einkauf (beschnitten, Datum, Uhrzeit oder Preise geändert)? Dann nur einen von beiden freigeben, den anderen ablehnen als „bereits eingereicht"; zwei verschiedene Einkäufe → beide freigeben' },
+        seite_abweichend: { titel: 'Sieht aus wie ein weiterer Teil eines schon bezahlten Belegs dieser Person', tun: 'Mit dem verlinkten Bon vergleichen (Doppel-Prüfung): dieselbe Online-Rechnung bzw. derselbe App-Bon, nur Uhrzeit, Bestellnummer oder Datum anders? Derselbe Einkauf → ablehnen als „bereits eingereicht"; ein anderer Einkauf → freigeben' },
         mensch_hat_entschieden: { titel: 'Wurde bereits von Hand entschieden', tun: 'Der frühere Beschluss steht; erneut zustellen ändert daran nichts' },
         support_kulanz_unknown_merchant: { titel: 'Kulanzfall aus dem Support', tun: 'Wie mit dem Support besprochen entscheiden' },
       };
@@ -312,15 +314,19 @@
         datum: 'gleicher Bon mit anderem Datum',
         kontenArtikel: 'gleiche Artikel in einem anderen Konto',
         kontenDatum: 'gleicher Bon in einem anderen Konto, anderes Datum',
-        bild: 'Bild ähnelt einem bezahlten Bon (gleicher Markt, ±8 Tage) — zur Prüfung',
+        bild: 'Bild ähnelt einem Bon dieser Person (±8 Tage) — zur Prüfung',
+        seiteAbweichend: 'wie ein weiterer Teil desselben Belegs, nur Uhrzeit, Bestellnummer oder Tag anders — zur Prüfung',
       };
+      const ABWEICHEND_DE = { uhrzeit: 'Uhrzeit', bestellnummer: 'Bestellnummer', tag: 'Datum' };
       function doppelZeile(dp) {
         const t = (dp && dp.treffer) || [];
         if (!t.length) return '';
         return `<div class="k">Doppel-Prüfung</div><div class="v">${t.map((x) => `${esc(DOPPEL_REGEL_DE[x.regel] || x.regel)}${
           x.anteil != null ? ` · ${Math.round(x.anteil * 100)} % gleiche Artikel` : ''}${
           x.sameUser === false ? ' · anderes Konto' : ''}${x.andererMarkt ? ' · anderer Markt' : ''}${
+          x.offen ? ' · noch nicht entschieden' : ''}${
           x.abstand ? ` · ${esc(String(x.abstand))} Tage daneben` : ''}${
+          Array.isArray(x.abweichend) && x.abweichend.length ? ` · anders: ${esc(x.abweichend.map((a) => ABWEICHEND_DE[a] || a).join(', '))}` : ''}${
           x.gegen ? ` · <a href="pruefen.html?tab=receipts&id=${encodeURIComponent(x.gegen)}">${esc(x.gegen)}</a>` : ''}${
           x.modus === 'beobachtung' ? ' <span style="color:var(--fg3)">· Beobachtungs-Modus, ohne Wirkung</span>' : ''}`).join('<br>')}</div>`;
       }
@@ -335,6 +341,10 @@
         receipt_missing: 'der Bon wurde nicht gefunden',
         decision_in_progress: 'über diesen Bon entscheidet gerade jemand anderes — gleich neu laden',
         processing_in_progress: 'dieser Bon wird gerade automatisch verarbeitet — in einer Minute erneut versuchen',
+        // Nachprüfung 06.10.2026: Prüfregel in der Buchung getroffen. Der Fall
+        // wird neu geladen und zeigt die Zeile „Doppel-Prüfung"; eine erneute
+        // Freigabe bucht dann.
+        halten: 'Doppel-Verdacht — der Bon ähnelt einem anderen Bon dieser Person. Zeile „Doppel-Prüfung" ansehen, dann erneut entscheiden',
         forbidden: 'der Zugang zum Resolver wurde abgelehnt',
         // Keine Antwort: der Resolver kann trotzdem gebucht haben — nicht blind
         // noch einmal klicken (ein zweiter Klick ergibt dann „nicht mehr in der Prüfung").
@@ -903,6 +913,11 @@
           } else {
             const code = r.data.code || r.data.http;
             toast(`Nicht ausgeführt: ${esc(RESOLVER_DE[code] || code)}`, 'bad');
+            if (code === 'halten') {
+              // Den Fall frisch laden: die Zeile „Doppel-Prüfung" ist neu.
+              S.cache.delete(fallId);
+              if (S.zeigt === fallId) await showCurrent();
+            }
           }
         } catch (e) {
           // Abbruch ohne Antwort: der Resolver kann trotzdem gebucht haben.

@@ -3358,7 +3358,18 @@ siehe unten — beide sichern nur Zahlwege ab, die ohne sie neu entstünden).
   gleiche Uhrzeit → Summe ODER Artikel ≥ 0,6; ohne → (Summe ODER Artikelsumme)
   UND Artikel ≥ 0,6, jeder Markt. 29.519 Paare gleiche Person, 1–95 Tage: nur
   der echte Netto-Fall. Verworfen „Artikel ≥ 0,6 + Endsumme ±2 €": traf einen
-  echten REWE-Zweitkauf. Treffer mit `quelle: 'person'`. `doppelOnlineSeite`
+  echten REWE-Zweitkauf. Treffer mit `quelle: 'person'`. **Nachprüfung
+  06.10.2026:** als „Summe" zählt ohne Uhrzeit auch die gleiche Summe der
+  POSITIVEN Artikel (`positivSumme`, ohne Pfand/Leergut/Rabatt/Coupon) — eine
+  Kopie mit eingefügter oder geänderter Coupon-/Leergut-Zeile und angepasster
+  Endsumme ändert keinen Artikel (unter v1.5 ist die Couponzeile die
+  vorgesehene Lesart); Gegenprobe 5 Paare gleiche Positivsumme, alle Anteil 0.
+  Der Personen-Index trägt dafür `ps` und wie Tages-/Summen-Index Namens-
+  Hashes `n` + Rabatt-Vermerk `k`: über den Prompt-Wechsel v1.4 ↔ v1.5
+  (Coupon in den Preisen ↔ eigene Zeile) tragen dieselben Artikel andere
+  Preise, ohne Namen war ein Coupon-Bon ab Tag 9 wieder zahlbar. Darum
+  `.backfill-doppel-person.js` (schreibt die Namen mit) VOR dem Umschalten auf
+  `ocrPrompt: 'v1.5'`. `doppelOnlineSeite`
   greift auch an einem anderen Tag im Fenster ±8 (Datum auf einer Seite
   geändert; 0 Paare zweier Online-Belege desselben Markts in 1–8 Tagen).
   **Nachprüfung 05.10.2026 (zweite Runde):** `doppelOnlineSeite` deckt auch
@@ -3372,7 +3383,26 @@ siehe unten — beide sichern nur Zahlwege ab, die ohne sie neu entstünden).
   **Code-Default von `doppelOnlineSeite` ist `true`**: die Artikelsumme bei
   Belegen ohne Summe setzt `lib/belegart.js` OHNE Schalter ein — mit Schutz
   `false` zahlte schon der Deploy jede Seite/jeden Abschnitt einzeln (D1/N3
-  im Nachprüf-Angriff). Rückweg: ausdrücklich `false`.
+  im Nachprüf-Angriff). Rückweg: ausdrücklich `false`. **Korrektur 06.10.2026:
+  `app` und `ohneSumme` liefert nur Prompt v1.5.** Unter dem Standard-Prompt
+  v1.4 (`ocrPrompt` nicht `'v1.5'`) sieht die Regel keinen Abschnitt — v1.4
+  setzt die Artikelsumme selbst ein, ungekennzeichnet, und Scrollbilder bzw.
+  Rechnungsseiten werden wie vor dem Zweig einzeln bezahlt (Test
+  `nachpruefung0610`, Teil 6). Der Schutz kommt erst mit `ocrPrompt: 'v1.5'`.
+  **`doppelSeiteAbweichend` (06.10.2026, Code-Default `'shadow'`):** seite
+  träfe, nur Uhrzeit, Bestellnummer oder (App) der Bon-Tag ±1 weichen ab — mit
+  EINEM geänderten Feld je Abschnitt war sonst jeder einzeln bezahlt. Nicht
+  gemessen (zwei echte Einkäufe können so aussehen), darum ab dem Deploy nur
+  beobachtet (`doppelPruefung.treffer`, Log `doppel-treffer` mit
+  `regel: seiteAbweichend`, `abweichend`); `true` hält wie Regel bild nur in
+  der Prüfung fest (`reviewReason: seite_abweichend`, nie Ablehnung). Seit
+  der zweiten Nachprüfung 06.10. auch auf dem Prüfpfad (Bon geht wegen der
+  Lese-Sicherheit in die Prüfung → Grund `seite_abweichend` statt
+  `ocr_confidence_*`) und im Resolver (siehe Regel bild: „halten"). Ein nur
+  unsicher erkannter Markt (Tippfehler-Abgleich ohne lesbaren Namen,
+  Eigenmarken-Stufe; `receipts.merchant.sicher`) gilt für seite und
+  seiteAbweichend als gleicher Markt — ein App-Abschnitt ohne Kopf wurde sonst
+  „dm" und einzeln bezahlt. Wie seite nur mit Prompt v1.5.
   Nur vor der ERSTEN Gutschrift
   geprüft — die Regel storniert nie. Grund-Codes sind die
   vorhandenen `duplicate_content_self/_cross_user`, `duplicateOf.kind` sagt die
@@ -3384,8 +3414,10 @@ siehe unten — beide sichern nur Zahlwege ab, die ohne sie neu entstünden).
   `cashback_bon_schluessel/{tx_…|bo_…}`,
   `cashback_bon_tage/{markt}_{tag}.eintraege.{receiptId} = {u, a}` und
   `cashback_bon_summen/{markt}_{summe}.eintraege.{receiptId} = {u, t, z, a}`,
-  `cashback_bon_person/{uid}.eintraege.{receiptId} = {l: [{t, m, z, s, as, a}]}`
-  (höchstens 2 Lesungen je Bon, 80 Hashes je Lesung, 300 Bons je Person,
+  `cashback_bon_person/{uid}.eintraege.{receiptId} = {l: [{t, m, z, s, as, ps, a, n, k?}]}`
+  (höchstens 2 Lesungen je Bon, 80 Artikel- und 40 Namens-Hashes je Lesung,
+  300 Bons je Person und geschätzt höchstens 700 KB — `personAufraeumen`
+  wirft sonst die ältesten heraus,
   bei JEDER Gutschrift geschrieben — auch ohne Schalter —, beim Storno
   entfernt, Einträge älter als 95 Tage räumt die nächste Gutschrift)
   (nur Artikel-Hashes, keine Namen; alle server-only, deny-all reicht; „der
@@ -3441,9 +3473,30 @@ siehe unten — beide sichern nur Zahlwege ab, die ohne sie neu entstünden).
   Regel (erneut fotografierter, bezahlter Bon) gewinnt. Geht der Bon ohnehin
   wegen der Lese-Sicherheit in die Prüfung, ersetzt der Grund den der
   Texterkennung (sonst gäbe die Bon-Runde, die nur `ocr_confidence_*`
-  entscheidet, die Kopie über den Resolver frei). Resolver/Konsole wenden sie
-  nicht an — dort entscheidet der Mensch, die Konsole verlinkt den Kandidaten
-  (Zeile „Doppel-Prüfung"). Voraussetzung für `bildFeinvergleich: true`;
+  entscheidet, die Kopie über den Resolver frei). Die Konsole verlinkt den
+  Kandidaten (Zeile „Doppel-Prüfung"). **Zweite Nachprüfung 06.10.2026:**
+  (1) zählt auch ein Kandidat, der noch NICHT entschieden ist (`ocr_pending`,
+  `review`) — vorher bekamen Kopie und Original Geld, wenn die Kopie zuerst
+  gebucht wurde oder das Original in der Prüfung lag (das Original trägt
+  keinen Vermerk, es ist älter). Die Kopie wartet dann auf das Original
+  (`receipts.bildWartet`, bleibt `ocr_pending`, der Kehrlauf stellt sie neu
+  zu; höchstens 4 Läufe ≈ 2 h), danach greift die normale Prüfung (Textregel
+  lehnt ab, bild gegen das bezahlte Original hält fest, Original abgelehnt →
+  bezahlt) bzw. Prüfung `bild_aehnlich_offen`. Warten statt sofort Prüfung,
+  weil der häufigste Fall ein Minuten später erneut fotografierter Bon ist
+  (35 dHash-Sperren mit < 3 min Abstand in 30 Tagen) — den lehnt nach dem
+  Original eine Textregel ohne Menschen ab. (2) Markt egal (umgeschriebener
+  oder unlesbarer Kopf umging die Regel; +~5 % Fälle: 21 von 459 Bild-Nahpaaren
+  derselben Person ±8 Tage lagen an verschiedenen Märkten). (3) `kandidaten`
+  = ALLE groben Treffer, die laufen oder Geld bekamen (neueste zuerst, bis 20;
+  `verglichen` = die bis zu 3 fein verglichenen) — drei ältere ähnliche
+  App-Bons verdrängten sonst das Original. (4) **Resolver hält fest:** trifft
+  bei einer Freigabe (Bon-Runde, Mensch) eine Prüfregel (bild,
+  seiteAbweichend) wirksam, antwortet er 409 `halten`, setzt den Prüfgrund und
+  `doppelPruefung` und bucht nichts — außer der Bon steht schon mit einem
+  Prüfgrund (`bild_aehnlich_*`, `seite_abweichend`) in der Prüfung: dann hat
+  der Mensch die Zeile vor sich, eine erneute Freigabe bucht
+  (`lib/doppelBon modiFuerEntscheidung`). Voraussetzung für `bildFeinvergleich: true`;
   ausdrücklich `false`/`'shadow'` → Feinvergleich wie `'shadow'`. Erwartete
   Prüffälle: Obergrenze ~26 Gruppen in 30 Tagen (Sperren September mit
   bezahltem Kandidaten ≤ 8 Tage), 11 davon < 1 h nach dem Original (meist
@@ -3503,7 +3556,9 @@ siehe unten — beide sichern nur Zahlwege ab, die ohne sie neu entstünden).
   (je Treffer Regel, Modus, `andererMarkt`, `abstand`) und
   `jsonPayload.message="markt-ohne-namen"` für `marktNurMitName`; am Bon steht
   derselbe Befund in `receipts.doppelPruefung.treffer`, in der Konsole als Zeile
-  „Doppel-Prüfung"; (6) auf `true`; `bildFeinvergleich` zuletzt. **Die Regeln
+  „Doppel-Prüfung"; (6) auf `true`; `bildFeinvergleich` zuletzt.
+  `doppelSeiteAbweichend` beobachtet ab dem Deploy von selbst — erst nach
+  Durchsicht dieser Treffer (und mit `ocrPrompt: 'v1.5'`) auf `true`. **Die Regeln
   über Konten kennen nur Gutschriften NACH dem Deploy** (Schlüssel und Indizes
   entstehen erst dann; nur die Regeln derselben Person lesen den Bestand aus
   `receipts` — die Erweiterung von `doppelDatum` über den Summen-Index nicht,
@@ -3563,7 +3618,8 @@ siehe unten — beide sichern nur Zahlwege ab, die ohne sie neu entstünden).
   bezahlten Paaren, höchster ehrlicher Wert 0,75 (knapp), fängt nur Kopien
   mit höchstens 2 von 10 geänderten Preisen;
   Seiten einer Online-Rechnung mit geändertem Datum UND geänderter
-  Bestellnummer; ANDERES Konto + geänderter Händlername (kein Index ohne Markt); anderes Konto
+  Bestellnummer (seit 06.10. hält `doppelSeiteAbweichend: true` sie bis ±8 Tage
+  in der Prüfung); ANDERES Konto + geänderter Händlername (kein Index ohne Markt); anderes Konto
   + geändertes Datum + geänderte Endsumme (bräuchte Artikelvergleich über die
   Tages-Indizes der ±8 Tage außerhalb der Transaktion; gemessen 0 Fehlalarme
   erst ab Anteil 0,7, niedrigster echter Doppelbon 0,71 — zu knapp für ohne
@@ -3571,6 +3627,22 @@ siehe unten — beide sichern nur Zahlwege ab, die ohne sie neu entstünden).
   gleichen Artikeln. Betrug über mehrere Konten (Verbünde) stoppt die
   Kontosperre, nicht diese Regeln. Die Doppelzahlung vom 02.10.
   (8 ct) ist bezahlt; eine Rückforderung ist nicht Teil dieses Baus.
+- **Eine Schutzregel, die nur gegen BEZAHLTE Gegenstücke prüft, hängt an der
+  Verarbeitungsreihenfolge** (zweite Nachprüfung 06.10.2026, Regel bild): wird
+  die Kopie vor dem Original gebucht, ist das Gegenstück noch offen, und
+  ältere Belege tragen den Verweis nie — beide werden bezahlt. Bei jeder
+  einseitigen Verweis-Regel (neu → alt) fragen: was passiert, wenn das ALTE
+  noch nicht entschieden ist? Und: **eine Regel, die nur in der Buchung
+  prüft, ist für jeden Bon unsichtbar, der ohne Buchung in die Prüfung geht**
+  — dort entscheidet später ein automatischer Weg (Bon-Runde → Resolver).
+  Darum prüft der Resolver dieselben Regeln in der Buchungs-Transaktion.
+- **Kein Kommentar, keine Konstante beschreibt einen Schutz, den kein Test
+  auslöst** (Nachprüfung 06.10.2026): am 05.10. standen Positivsumme,
+  Größenbremse und Namens-Hashes im Personen-Index nur in Kommentaren, der
+  Code hatte sie nicht, und der Testlauf war rot — eine Bauzusammenfassung
+  meldete trotzdem „getestet". Halbfertiges entweder verdrahten (mit Test,
+  der am alten Stand scheitert) oder samt Kommentar entfernen; vor „fertig"
+  `jest … --selectProjects cf` mit Exit 0.
 - **Behoben 05.10.2026 (Altfehler):** die Vorprüfung in Schritt 5b hing nicht
   an `alreadyCredited`. Lag eine zweite Kopie desselben Bons in einem lebenden
   Status (bezahlt, in Prüfung, wartend), stornierte eine erneute Zustellung des
@@ -3760,6 +3832,20 @@ Review-Runden (29 Funde) haben Fallen gezeigt, die für JEDE Nacharbeit gelten:
   (Aktion geändert) ein Teil-Storno ohne Menschen. Mit `bestandsschutz` bleibt
   der Betrag (`betragGeschuetzt`, Log `bestandsschutz-betrag`); Korrekturen
   nur über Resolver oder Mensch (`__tests__/nachpruefung0510.test.js`).
+  **Die bezahlte LESUNG bleibt am Bon (Nachprüfung 06.10.2026):** bis dahin
+  schrieb Schritt 7 unter Bestandsschutz die Felder der verworfenen Lesung an
+  den Bon (contentHash, transactionHash, itemsHash, Datum, Summe, Markt,
+  Positionen) — 5b sucht Kopien nur über diese Felder, und ein neues Foto
+  desselben Bons wurde ein zweites Mal bezahlt (nachgestellt: Datum als zu alt
+  oder Markt unlesbar gelesen). Jetzt schreiben Bon und Spiegel nur Status und
+  Betrag, keine Positionen, keine Region; die verworfene Lesung steht als
+  `neulesungVerworfen` am Bon (`ocr` kann sie tragen — frühe Ablage bzw.
+  Nachverarbeitung hat es ersetzt), und `identitaetAusBon` liest dann die
+  Felder des Bons statt `ocr`. Regel: **wer eine Entscheidung verwirft,
+  verwirft auch die Lesung, die zu ihr führte** — sonst verliert der bezahlte
+  Bon seine Kennung. Noch offen (wie vor dem Zweig): eine ANGENOMMENE
+  Neulesung mit anderem Inhalt ersetzt die 5b-Felder ebenfalls; dagegen
+  helfen nur die Doppel-Schalter (Tageseinträge sperren unter beiden Lesungen).
   Einen bezahlten Bon storniert nur ein Mensch: Resolver reject/no_reward oder
   `reviewDecision` am Bon setzen und neu zustellen. Neue Gates brauchen damit
   keinen eigenen `alreadyCredited`-Guard fürs Geld — wohl aber für die
