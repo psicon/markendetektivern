@@ -138,3 +138,43 @@ describe('Barcode-Nummer und Halte-Gründe (Prüfrunde 2, 02.10.2026)', () => {
     expect(codes(warnungen(basis({ runde: runde({ eanFotoNichtGespeichert: 2 }) })))).toEqual(['gelb:barcode_befund_nicht_gespeichert']);
   });
 });
+
+describe('Barcode-Korrektur (06.10.2026)', () => {
+  it('Notbremse der Korrektur → rot, mit Zahlen', () => {
+    const w = warnungen(basis({ runde: { geprueft: 50, offen: 9, auditFehler: 0, auditVersucht: 49, nichtGeschafft: 0, korrekturGebremst: { anzahl: 9, geprueft: 49 } } }));
+    const b = w.find((x) => x.code === 'barcode_korrektur_gebremst');
+    expect(b).toMatchObject({ stufe: 'rot' });
+    expect(b.text).toMatch(/9 von 49/);
+  });
+  it('Korrektur nicht gespeichert → gelb', () => {
+    const w = warnungen(basis({ runde: { geprueft: 50, offen: 1, auditFehler: 0, auditVersucht: 49, nichtGeschafft: 0, korrekturNichtGespeichert: 2 } }));
+    expect(w.find((x) => x.code === 'barcode_korrektur_nicht_gespeichert')).toMatchObject({ stufe: 'gelb' });
+  });
+  it('frühere Notbremse, Fälle liegen noch → gelb (Erinnerung)', () => {
+    const w = warnungen(basis({ runde: { geprueft: 50, offen: 8, auditFehler: 0, auditVersucht: 49, nichtGeschafft: 0, korrekturGebremstWartet: 8 } }));
+    expect(w.find((x) => x.code === 'barcode_korrektur_gebremst_wartet')).toMatchObject({ stufe: 'gelb' });
+    expect(w.find((x) => x.code === 'barcode_korrektur_gebremst_wartet').text).toMatch(/^8 Fälle/);
+  });
+  it('ohne Bremse und ohne Fehler → nichts', () => {
+    const w = warnungen(basis({ runde: { geprueft: 50, offen: 1, auditFehler: 0, auditVersucht: 49, nichtGeschafft: 0, korrekturGebremst: null, korrekturNichtGespeichert: 0 } }));
+    expect(w.map((x) => x.code)).not.toEqual(expect.arrayContaining(['barcode_korrektur_gebremst']));
+  });
+  it('Prüfrunde 06.10.: Bremse ohne Speichern (Trockenlauf/Schalter aus) → rot, sagt, dass nichts vermerkt wurde; mit Speichern „auch später nicht"', () => {
+    const r = (vermerkt) => warnungen(basis({ runde: { geprueft: 50, offen: 9, auditFehler: 0, auditVersucht: 49, nichtGeschafft: 0, korrekturGebremst: { anzahl: 8, geprueft: 10, alle: 13, vermerkt } } })).find((x) => x.code === 'barcode_korrektur_gebremst');
+    expect(r(false)).toMatchObject({ stufe: 'rot' });
+    expect(r(false).text).toMatch(/8 von 10 neu geprüften/);
+    expect(r(false).text).toMatch(/Trockenlauf bzw\. Schalter aus: nichts dauerhaft vermerkt/);
+    expect(r(true).text).toMatch(/auch später nicht automatisch/);
+  });
+  it('Tagesgrenze für Korrekturen aus alten Befunden überschritten → gelb', () => {
+    const w = warnungen(basis({ runde: { geprueft: 50, offen: 1, auditFehler: 0, auditVersucht: 49, nichtGeschafft: 0, korrekturAufgeschoben: 3 } }));
+    expect(w.find((x) => x.code === 'barcode_korrektur_aufgeschoben')).toMatchObject({ stufe: 'gelb' });
+  });
+  it('Schalter barcodeKorrektur unbekannt oder nicht lesbar → gelb; fehlt (null) → nichts', () => {
+    const w = (v) => warnungen(basis({ runde: { geprueft: 50, offen: 1, auditFehler: 0, auditVersucht: 49, nichtGeschafft: 0, korrekturSchalterUnbekannt: v } })).find((x) => x.code === 'barcode_korrektur_schalter_unbekannt');
+    expect(w('"ja"')).toMatchObject({ stufe: 'gelb' });
+    expect(w('"ja"').text).toMatch(/gilt als aus/);
+    expect(w('nicht lesbar').text).toMatch(/nicht lesbar/);
+    expect(w(null)).toBeUndefined();
+  });
+});

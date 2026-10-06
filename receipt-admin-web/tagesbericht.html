@@ -123,6 +123,9 @@
         konto_gesperrt_im_lauf: 'Konto während der Runde gesperrt',
         ean_abweichend: 'Barcode-Foto zeigt andere Nummer',
         ean_unsicher: 'Barcode-Foto: zwei Lesungen uneinig',
+        // Barcode-Korrektur (Entscheidung Patrick 06.10.2026)
+        ean_alt_doppelt: 'Eigene Einreichung dieser Woche unter einer zugehörigen Barcode-Nummer (vor einer Korrektur)',
+        ean_korrektur_fehlt: 'Barcode-Korrektur nicht gespeichert (Technik)',
         beleg_nicht_geschrieben: 'Doppel-Beleg heute nicht gespeichert',
         foto_fremdes_konto: 'Gleiches Foto bei anderem Konto',
         foto_aeltere_offen: 'Gleiches Foto in älterer offener Einreichung',
@@ -310,6 +313,16 @@
             <section class="box"><h3>Automatisch abgelehnt (${b.abgelehnt ?? 0}${(b.abgelehntListe || []).length < (b.abgelehnt || 0) ? `, erste ${(b.abgelehntListe || []).length} gezeigt` : ''})</h3>${faelle(b.abgelehntListe, 'Keine Ablehnungen.')}</section>
             <section class="box"><h3>Ablehngründe</h3>${zeilen(b.ablehnGruende, 'keine')}
               ${Object.keys(b.nichtGebucht || {}).length ? `<h3 style="margin-top:14px">Freigegeben, aber nicht gebucht</h3>${zeilen(b.nichtGebucht)}` : ''}</section>
+            ${(b.eanKorrektur?.vorgeschlagenFaelle || []).length ? `<section class="box"><h3>Barcode-Korrektur vorgeschlagen — Schalter barcodeKorrektur ist aus (${b.eanKorrektur.vorgeschlagen})</h3><div class="liste">${b.eanKorrektur.vorgeschlagenFaelle.map((f) => `
+              <div class="fall">
+                <a href="pruefen.html?id=${encodeURIComponent(f.id)}">${esc(f.vorher || '?')} → ${esc(f.neu || '?')}</a>
+                <span class="g">liegt wie bisher${f.aus === 'vorbefund' ? ' · Befund aus früherem Lauf' : ''}</span>
+              </div>`).join('')}</div></section>` : ''}
+            ${(b.eanKorrektur?.faelle || []).length ? `<section class="box"><h3>Barcode automatisch korrigiert (${b.eanKorrektur.korrigiert}${b.eanKorrektur.gespeichert === false ? ', nur geplant — Trockenlauf' : ''})</h3><div class="liste">${b.eanKorrektur.faelle.map((f) => `
+              <div class="fall">
+                <a href="pruefen.html?id=${encodeURIComponent(f.id)}">${esc(f.vorher || '?')} → ${esc(f.neu || '?')}</a>
+                <span class="g">${esc(f.entscheidung === 'freigeben' ? 'freigegeben' : f.entscheidung === 'ablehnen' ? `abgelehnt: ${g(f.grund)}` : `liegt: ${g(f.grund)}`)}${f.aus === 'vorbefund' ? ' · Befund aus früherem Lauf' : ''}</span>
+              </div>`).join('')}</div></section>` : ''}
             <section class="box"><h3>Nachgelesen &amp; Bildprüfung</h3>
               <div class="zeile"><span>Name</span><span>${b.nachgelesen?.name ?? 0}</span></div>
               <div class="zeile"><span>Barcode</span><span>${b.nachgelesen?.ean ?? 0}</span></div>
@@ -319,6 +332,11 @@
               <div class="zeile"><span>davon gescheitert (Technik)</span><span>${b.bildpruefung?.gescheitert ?? 0}</span></div>
               <div class="zeile"><span>davon unpassend</span><span>${b.bildpruefung?.unpassend ?? 0}</span></div>
               ${b.kontoSperren?.offenEinreichungen ? `<div class="zeile"><span>gesperrte Konten — liegen still (nicht in „Wartet auf dich")</span><span>${b.kontoSperren.offenEinreichungen}</span></div>` : ''}
+              ${b.eanKorrektur ? `<div class="zeile"><span>Barcode automatisch korrigiert${b.eanKorrektur.ausVorbefund ? ` (davon ${b.eanKorrektur.ausVorbefund} aus früheren Läufen)` : ''}</span><span>${b.eanKorrektur.korrigiert ?? 0}</span></div>` : ''}
+              ${b.eanKorrektur?.gebremst ? `<div class="zeile"><span style="color:var(--nein)">Barcode-Korrektur gebremst — ${b.eanKorrektur.gebremstAnzahl} wären es gewesen (${b.eanKorrektur.quote?.korrigiert ?? '?'} von ${b.eanKorrektur.quote?.geprueft ?? '?'} neu geprüften)${b.eanKorrektur.gebremstVermerkt === false ? ', nichts vermerkt' : ''}</span><span>0</span></div>` : ''}
+              ${b.eanKorrektur?.aufgeschoben ? `<div class="zeile"><span>Barcode-Korrekturen aus früheren Läufen aufgeschoben (Tagesgrenze)</span><span>${b.eanKorrektur.aufgeschoben}</span></div>` : ''}
+              ${b.eanKorrektur?.gebremstHaelt ? `<div class="zeile"><span>Barcode von einer Notbremse angehalten — nie automatisch korrigiert</span><span>${b.eanKorrektur.gebremstHaelt}</span></div>` : ''}
+              ${b.eanKorrektur?.uneinigUeberTage ? `<div class="zeile"><span>Barcode über Tage uneinig gelesen — nie automatisch korrigiert</span><span>${b.eanKorrektur.uneinigUeberTage}</span></div>` : ''}
               ${b.eanFotoVorbefund?.haelt ? `<div class="zeile"><span>Barcode-Befund früherer Läufe hält weiter</span><span>${b.eanFotoVorbefund.haelt}</span></div>` : ''}
               ${b.fotoVorbefund?.haelt ? `<div class="zeile"><span>Foto-Befund früherer Läufe hält weiter</span><span>${b.fotoVorbefund.haelt}</span></div>` : ''}
             </section>

@@ -35,7 +35,13 @@ function gerettetEan(x) {
   return typeof e === 'string' && pruefzifferOk(e) ? e : null;
 }
 
-const eanOf = (x) => x.ean || gerettetEan(x) || null;
+/**
+ * Effektive EAN: korrigiert (Morgenrunde, `eanKorrektur`) → gespeichert (`ean`,
+ * gescannt/getippt) → nachgelesen (`eanRescueOcr`). Wer die EAN einer
+ * Einreichung braucht, nimmt DIESE Funktion — `ean` allein ist bei einer
+ * korrigierten Einreichung die falsche Nummer (Entscheidung Patrick 06.10.2026).
+ */
+const eanOf = (x) => eanKorrekturOf(x) || x.ean || gerettetEan(x) || null;
 const nameOf = (x) => x.productName || x.productNameOcr || x.productNameRescueOcr || null;
 /** Liefert das Preis-OBJEKT ({priceCents, …}); ob es gültig ist, prüft die Doppel-Regel (priceOf). */
 const preisOf = (x) => (gueltigerPreis(x.priceOcr) ? x.priceOcr : x.priceRescueOcr || null);
@@ -56,9 +62,14 @@ const herstellerAnzeige = (x) =>
  * „andere Daten" gewertet gäbe das eine echte Dublette frei (CLAUDE.md,
  * Produktfoto-Runde 20.09.2026). Ein nachgelesener PREIS darf dagegen lösen:
  * der Preis vom Schild ist eindeutig.
+ *
+ * `eanVorher` (06.10.2026): nach einer Barcode-Korrektur die ursprünglich
+ * gespeicherte Nummer, sonst null. evaluateDuplicate liest das Feld nicht; die
+ * Aufrufer bilden damit die Gruppe der VERWANDTEN Einreichungen (eanNummern,
+ * teilenNummer) für die zusätzliche Prüfung `ean_alt_doppelt`.
  */
 const policyOf = (id, x, serverZeit = null) => ({
-  id, userId: x.userId ?? null, ean: eanOf(x), marketId: x.marketId ?? null,
+  id, userId: x.userId ?? null, ean: eanOf(x), eanVorher: eanVorherOf(x), marketId: x.marketId ?? null,
   status: x.status, createdAt: einreichZeit(x, serverZeit), priceOcr: preisOf(x), manufacturerOcr: x.manufacturerOcr ?? null,
 });
 
@@ -91,6 +102,7 @@ function herkunftOf(x) {
   return {
     nameQuelle,
     eanNachgelesen: !x.ean && !!gerettetEan(x),
+    eanKorrigiert: !!eanKorrekturOf(x),
     preisNachgelesen: !gueltigerPreis(x.priceOcr) && gueltigerPreis(x.priceRescueOcr),
     herstellerNachgelesen: !text(x.manufacturerOcr && x.manufacturerOcr.name) && !!text(x.manufacturerRescueOcr && x.manufacturerRescueOcr.name),
   };
@@ -264,7 +276,9 @@ function eanFotoBestaetigen(befund, zweitRoh) {
   const gueltig = !!zweit && pruefzifferOk(zweit);
   const istGespeichert = gueltig && !!befund.gespeichert && gtin14(zweit) === gtin14(befund.gespeichert);
   if (befund.art === 'abweichend') {
-    if (gueltig && gtin14(zweit) === gtin14(befund.gelesen)) return { ...befund, bestaetigt: true };
+    // `zweit`: die zweite Lesung selbst — eine Korrektur (eanKorrekturAus) legt
+    // beide Lesungen am Dokument ab, nicht nur die erste.
+    if (gueltig && gtin14(zweit) === gtin14(befund.gelesen)) return { ...befund, bestaetigt: true, zweit };
     // Erste Lesung eine ANDERE gültige Nummer, zweite die gespeicherte → weiter
     // wie „gleich": die erste gilt als Fehllesung. Entscheidung Patrick
     // 04.10.2026 („ja", Frage 6). Wirkung laut Trockenlauf ~1 Fall/Tag. Gilt
@@ -311,26 +325,95 @@ const EAN_HALTEN = new Set(['abweichend', 'unsicher']);
  * Bis dahin galt der jüngere Lauf: ein neueres „gleich" konnte einen älteren
  * Halt verdrängen. Das ging nur über das automatische Aufheben, das es nicht
  * mehr gibt.
- * @returns {{befund:'abweichend'|'unsicher', gelesen:string|null, gespeichert:string|null, bestaetigt:boolean, zweit:string|null, lauf:string|null, quelle:'eanFotoOcr'|'rundeOffen'}|null}
+ * Seit 06.10.2026 zählt ein Befund nicht mehr, den eine gespeicherte Korrektur
+ * aufgelöst hat (`abweichend` mit genau der korrigierten Nummer, siehe
+ * eanKorrekturOf) — `gespeichert` ist dann die korrigierte Nummer, gegen die
+ * das Foto seitdem geprüft wird (eanAbgleichOf).
+ * `korrekturfaehig`: trägt der Befund allein eine Korrektur (alle Quellen
+ * vertrauenswürdig und einig, siehe eanFotoHalteQuellen)? Ein übernommener
+ * Befund gibt das beim Neuschreiben weiter (eanFotoMitVorbefund).
+ * @returns {{befund:'abweichend'|'unsicher', gelesen:string|null, gespeichert:string|null, bestaetigt:boolean, zweit:string|null, lauf:string|null, quelle:'eanFotoOcr'|'rundeOffen', vertraut:boolean, korrekturfaehig:boolean}|null}
  */
 function eanFotoVorbefund(x) {
-  if (!x || typeof x !== 'object') return null;
+  const quellen = eanFotoHalteQuellen(x);
+  if (!quellen.length) return null;
+  const [erste] = quellen;
+  const gleich = (q) => q.befund === erste.befund && q.bestaetigt === erste.bestaetigt
+    && (q.gelesen ? !!erste.gelesen && gtin14(q.gelesen) === gtin14(erste.gelesen) : !erste.gelesen);
+  return { ...erste, korrekturfaehig: quellen.every((q) => q.vertraut && gleich(q)) };
+}
+
+/**
+ * Lauf, dessen Barcode-Befunde ohne Vermerk (`korrekturfaehig`) noch allein
+ * eine Korrektur tragen dürfen: der letzte Lauf des Codes VOR der
+ * Barcode-Korrektur (Stand fe89647e). Geprüft 06.10.2026 an den Daten: alle 18
+ * haltenden Befunde offener Einreichungen (und ihre Rückfälle in
+ * `review.rundeOffen`) stammen aus genau diesem Lauf, keine der Einreichungen
+ * existierte beim Lauf davor — jeder Fall wurde also genau einmal angesehen.
+ *
+ * Warum überhaupt ein Vermerk (Prüfrunde 06.10.2026, Übergangslücke): der
+ * alte Code ersetzt JEDEN alten Halt durch eine heute bestätigte Abweichung,
+ * egal mit welcher Nummer, und behält einen alten Halt gegen einen heutigen
+ * Widerspruch stillschweigend bei — auch im Trockenlauf. Läuft er nach dem
+ * 06.10. noch einmal (Zeitplan 08:00 bis zum Ausrollen), steht ein früherer
+ * `unsicher` oder ein Widerspruch nirgends mehr; ein Befund „abweichend,
+ * bestätigt M" sähe dann aus wie zwei saubere Lesungen. Nachgestellt am
+ * echten Fall otzruv…_4 (Delverde Eliche, Foto unscharf, eine Lesung erfand
+ * 8002270014512): am Folgetag wäre bei unlesbarem Foto auf die erfundene
+ * Nummer korrigiert und bezahlt worden. Deshalb trägt nur ein Befund mit
+ * Vermerk (geschrieben vom neuen Code, der Widersprüche festhält) oder einer
+ * aus diesem Lauf eine Korrektur allein; jeder andere braucht heute eine
+ * eigene zweifache Lesung derselben Nummer (eanKorrekturAus).
+ */
+const LETZTER_LAUF_OHNE_VERMERK = '2026-10-06_080038';
+
+/**
+ * ALLE Halte-Befunde früherer Läufe (`eanFotoOcr` zuerst, dann
+ * `review.rundeOffen.eanFoto`) in der Form von eanFotoVorbefund. Eine Korrektur
+ * aus einem alten Befund verlangt, dass JEDE Quelle dasselbe sagt
+ * (eanKorrekturAus) — eanFotoVorbefund nimmt nur die erste.
+ *
+ * `vertraut` (Prüfrunde 06.10.2026, Übergangslücke): darf diese Quelle allein
+ * eine Korrektur tragen? Nur eine Abweichung, und nur
+ *  - mit Vermerk `korrekturfaehig: true` (vom Code seit der Korrektur
+ *    geschrieben) und — bei einer bestätigten — der zweiten Lesung `zweit`
+ *    gleich der ersten, oder
+ *  - ohne Vermerk aus genau LETZTER_LAUF_OHNE_VERMERK (beim Rückfall in
+ *    `review.rundeOffen` zählt dessen Lauf: der alte Code schrieb ihn jeden
+ *    Morgen neu, auch über einen Widerspruch hinweg).
+ * Ein ausdrückliches `korrekturfaehig: false` (Befund aus einer gebremsten
+ * Runde ohne Speichern, übernommener nicht vertrauter Befund) ist nie vertraut.
+ */
+function eanFotoHalteQuellen(x) {
+  if (!x || typeof x !== 'object') return [];
   const lauf = (v) => (typeof v === 'string' ? v.slice(0, 40) : null);
   const o = x.eanFotoOcr && typeof x.eanFotoOcr === 'object' ? x.eanFotoOcr : null;
   const ro = x.review && typeof x.review === 'object' && x.review.rundeOffen && typeof x.review.rundeOffen === 'object' ? x.review.rundeOffen : null;
   const r = ro && ro.eanFoto && typeof ro.eanFoto === 'object' ? { ...ro.eanFoto, lauf: ro.lauf } : null;
-  const haelt = (b) => !!b && EAN_HALTEN.has(b.befund);
-  const quelle = haelt(o) ? o : haelt(r) ? r : null;
-  if (!quelle) return null;
-  return {
-    befund: quelle.befund,
-    gelesen: ziffern(quelle.ean) || null,
-    gespeichert: ziffern(x.ean) || null,
-    bestaetigt: quelle.bestaetigt === true,
-    zweit: ziffern(quelle.zweit) || null,
-    lauf: lauf(quelle.lauf),
-    quelle: quelle === o ? 'eanFotoOcr' : 'rundeOffen',
+  const haelt = (b) => !!b && EAN_HALTEN.has(b.befund) && !durchKorrekturErledigt(x, b);
+  const gespeichert = ziffern(eanAbgleichOf(x)) || null;
+  const vertraut = (q) => {
+    if (q.befund !== 'abweichend') return false;
+    if (q.korrekturfaehig === true) {
+      if (q.bestaetigt !== true) return true; // trägt ohnehin keine Korrektur
+      const g = ziffern(q.ean); const z = ziffern(q.zweit);
+      return !!g && !!z && gtin14(g) === gtin14(z);
+    }
+    return q.korrekturfaehig == null && lauf(q.lauf) === LETZTER_LAUF_OHNE_VERMERK;
   };
+  return [o, r].filter(haelt).map((q) => ({
+    befund: q.befund,
+    gelesen: ziffern(q.ean) || null,
+    gespeichert,
+    bestaetigt: q.bestaetigt === true,
+    zweit: ziffern(q.zweit) || null,
+    lauf: lauf(q.lauf),
+    quelle: q === o ? 'eanFotoOcr' : 'rundeOffen',
+    vertraut: vertraut(q),
+    // Notbremse der Korrektur hat diesen Befund angehalten (06.10.2026): er
+    // wird nie mehr automatisch korrigiert (eanKorrekturAus). Jeder Wert zählt.
+    ...(q.korrekturGebremst ? { gebremst: lauf(q.korrekturGebremst) || 'ja' } : {}),
+  }));
 }
 
 /**
@@ -347,8 +430,30 @@ function eanFotoVorbefund(x) {
  * eine eigene Abschwächung, die Patrick nie vorgelegt war; ein einmal
  * angehaltener Fall kam damit ohne Menschen zur Freigabe.
  *
- * Einzige Änderung am alten Befund: eine heute BESTÄTIGTE Abweichung ersetzt
- * ihn (stärkerer Beleg, er hält weiter an); alles andere lässt ihn stehen.
+ * Änderungen am alten Befund (Stand 06.10.2026, Prüfrunde zur Barcode-Korrektur):
+ *  - alter `unsicher`: bleibt `unsicher`, was heute auch gelesen wird — auch
+ *    zwei gleiche heutige Lesungen ersetzen ihn nicht. Bis dahin ersetzte eine
+ *    heute bestätigte Abweichung JEDEN alten Befund; am Folgetag wäre der Fall
+ *    dann als korrigierbar erschienen (`ean_unsicher` bleibt beim Menschen).
+ *  - alter `abweichend` mit Nummer N:
+ *    - heute zweimal N (bestätigt) → der heutige Befund ersetzt ihn (stärkerer
+ *      Beleg, hält weiter an); ein Bremsvermerk (`korrekturGebremst`) bleibt.
+ *    - heute widerspricht (heuteWiderspricht: die gespeicherte Nummer, eine
+ *      andere — auch zweimal gelesen —, falsche Prüfziffer, uneinige Lesungen)
+ *      → `unsicher` mit `grund: 'lesungen_uneinig_tage'` und `frueher`, NEU
+ *      zu speichern. Damit ist der Widerspruch am Dokument festgehalten: ein
+ *      späterer Lauf, der wieder N liest oder nichts lesen kann, darf den Fall
+ *      nicht automatisch korrigieren (eanKorrekturAus korrigiert nie aus
+ *      `unsicher`). Bis dahin blieb der alte Befund stehen und der Widerspruch
+ *      war am nächsten Morgen vergessen.
+ *    - sonst (heute keine Bildprüfung, nichts lesbar, N nur einmal gelesen)
+ *      → der alte Befund bleibt unverändert.
+ *  In jedem Fall hält er weiter an — aufgehoben wird ein alter Halt nur in der
+ *  Konsole oder durch die Barcode-Korrektur (eanKorrekturAus).
+ *  Ein unverändert übernommener `abweichend` trägt seinen Vermerk
+ *  `korrekturfaehig` (eanFotoVorbefund) und seine zweite Lesung weiter, damit
+ *  ein Neuschreiben (Rückfall, Bremsvermerk) aus einem nicht vertrauten Befund
+ *  keinen vertrauten macht (Prüfrunde 06.10.2026, Übergangslücke).
  *
  * @param {object|null} heute   Befund dieses Laufs (nach zweiter Lesung) oder null (heute keine Bildprüfung)
  * @param {object|null} vorher  eanFotoVorbefund
@@ -357,12 +462,33 @@ function eanFotoVorbefund(x) {
  */
 function eanFotoMitVorbefund(heute, vorher) {
   if (!vorher) return heute;
-  if (heute && heute.art === 'abweichend' && heute.bestaetigt === true) return heute;
+  const heuteKurz = heute ? { art: heute.art, gelesen: heute.gelesen || heute.roh || null } : null;
+  if (vorher.befund === 'abweichend') {
+    const gleicheNr = heute && !!ziffern(heute.gelesen) && !!vorher.gelesen && gtin14(heute.gelesen) === gtin14(vorher.gelesen);
+    if (heute && heute.art === 'abweichend' && heute.bestaetigt === true && gleicheNr) {
+      return vorher.gebremst ? { ...heute, korrekturGebremst: vorher.gebremst } : heute;
+    }
+    if (heuteWiderspricht(heute, vorher.gelesen)) {
+      return {
+        art: 'unsicher', gelesen: vorher.gelesen, gespeichert: vorher.gespeichert || heute.gespeichert || null,
+        zweit: ziffern(heute.gelesen || heute.roh).slice(0, 14) || null, grund: 'lesungen_uneinig_tage',
+        frueher: { lauf: vorher.lauf, ean: vorher.gelesen, bestaetigt: vorher.bestaetigt === true }, heute: heuteKurz,
+      };
+    }
+  }
   return {
     art: vorher.befund, gelesen: vorher.gelesen, gespeichert: vorher.gespeichert || (heute && heute.gespeichert) || null,
-    ...(vorher.befund === 'abweichend' ? { bestaetigt: vorher.bestaetigt } : { zweit: vorher.zweit }),
+    // Abweichung: Vermerk und zweite Lesung gehen beim Neuschreiben mit
+    // (eanFotoEintrag, rundeOffenEintrag) — ein nicht vertrauter Befund bleibt
+    // ausdrücklich `korrekturfaehig: false`, sonst würde er durch das
+    // Neuschreiben zum vertrauten. Ein bestätigter Befund des alten Codes trägt
+    // kein `zweit`; „bestätigt" hieß dort schon „zweite Lesung = erste".
+    ...(vorher.befund === 'abweichend'
+      ? { bestaetigt: vorher.bestaetigt, korrekturfaehig: vorher.korrekturfaehig === true, zweit: vorher.zweit || (vorher.bestaetigt ? vorher.gelesen : null) }
+      : { zweit: vorher.zweit }),
+    ...(vorher.gebremst ? { korrekturGebremst: vorher.gebremst } : {}),
     vorbefund: { lauf: vorher.lauf, quelle: vorher.quelle },
-    heute: heute ? { art: heute.art, gelesen: heute.gelesen || heute.roh || null } : null,
+    heute: heuteKurz,
   };
 }
 
@@ -374,13 +500,224 @@ function eanFotoMitVorbefund(heute, vorher) {
  * `gleich` oder `unsicher`); falls doch, als `unsicher`.
  */
 function eanFotoEintrag(b) {
+  // Korrigiert (06.10.2026): die Foto-Nummer gilt, `vorher` ist die gespeicherte.
+  // Hält nicht an (nicht in EAN_HALTEN); die Korrektur selbst steht in `eanKorrektur`.
+  if (b.art === 'korrigiert') return { ean: b.gelesen, befund: 'korrigiert', vorher: b.gespeichert || null, korrekturAus: (b.korrektur && b.korrektur.aus) || null };
   const befund = b.art === 'zweifelhaft' ? 'unsicher' : b.art;
   return {
     ean: b.gelesen || b.roh || null, befund,
     ...(b.grund ? { grund: b.grund } : {}),
-    ...(befund === 'abweichend' ? { bestaetigt: b.bestaetigt === true } : {}),
+    // Abweichung (Prüfrunde 06.10.2026, Übergangslücke): beide Lesungen und der
+    // Vermerk, ob der Befund allein eine Korrektur tragen darf
+    // (eanFotoHalteQuellen). Ein heutiger Befund ist es; ein übernommener nur,
+    // wenn er es vorher war (eanFotoMitVorbefund), ein in einer gebremsten Runde
+    // ohne Speichern gelesener nicht (taeglicheRunde 4c).
+    ...(befund === 'abweichend' ? { bestaetigt: b.bestaetigt === true, zweit: ziffern(b.zweit).slice(0, 14) || null, korrekturfaehig: b.korrekturfaehig !== false } : {}),
     ...(befund === 'unsicher' ? { zweit: b.zweit || null } : {}),
+    // Notbremse der Korrektur (06.10.2026): dieser Befund wird nie mehr automatisch korrigiert.
+    ...(befund === 'abweichend' && b.korrekturGebremst ? { korrekturGebremst: String(b.korrekturGebremst).slice(0, 40) } : {}),
     ...(b.fehler ? { fehler: String(b.fehler).slice(0, 80) } : {}),
+  };
+}
+
+/* ── Korrigierte Barcode-Nummer (Entscheidung Patrick 06.10.2026: „ja") ──
+ *
+ * Eindeutige Fälle korrigiert die Morgenrunde selbst, statt sie liegen zu
+ * lassen: das Barcode-Foto wurde von ZWEI unabhängigen Lesungen gleich gelesen
+ * (Bildprüfung + zweite Lesung nur des Barcode-Fotos), die Nummer ist eine
+ * gültige GTIN (Prüfziffer, 8/12/13/14 Stellen) und kein Waagen-/Händlercode
+ * (istHandelsCode: GTIN-13 mit 02/04/20–29, UPC-A mit 2/4 — strenger als
+ * „02/20–29 bei 13 Stellen", EAN-8 bleibt korrigierbar). Dann gilt die
+ * Foto-Nummer als EAN der Einreichung, und alle weiteren Regeln rechnen mit
+ * ihr.
+ *
+ * Anlass (06.10.2026): 18 von 20 liegenden Fällen hingen an der Barcode-Prüfung,
+ * alle von Android (6.0.20/1248, 6.0.17/1240), 12 von einer Person; jede
+ * gespeicherte Nummer hatte eine gültige Prüfziffer, oft stimmten nur die
+ * letzten 5–6 Ziffern (rechte Hälfte des EAN-13). 8 davon waren zweimal gleich
+ * gelesen — genau diese Klasse wird korrigiert. Liest die zweite Lesung nichts
+ * oder etwas anderes (`unsicher`), bleibt der Fall beim Menschen.
+ *
+ * Gespeichert in `eanKorrektur` (nur Server, firestore.rules), NIE in `ean`:
+ * die ursprüngliche Nummer bleibt dort für Audit und für die Messung, wie oft
+ * der Scanner falsch liest (dieselbe Regel wie bei den *RescueOcr-Feldern).
+ */
+
+/**
+ * Darf eine Nummer vom Barcode-Foto die gespeicherte ersetzen? Gültige GTIN,
+ * kein Waagen-/Händlercode — und keine GTIN-14 mit Packungsindikator 1–9
+ * (Prüfrunde 06.10.2026): das ist die Nummer eines Umkartons bzw. einer
+ * Handelseinheit (ITF-14 auf dem Versandkarton, in Discountern oft direkt im
+ * Regal), nie die des Artikels. Sonst ersetzte die Runde eine richtige EAN-13
+ * durch die Kartonnummer derselben Ware. Ein solcher Fall bleibt wie vor dem
+ * 06.10. beim Menschen. GTIN-14 mit führender 0 ist dieselbe GTIN-13 und bleibt
+ * korrigierbar.
+ */
+function eanKorrigierbar(code) {
+  const c = ziffern(code);
+  return pruefzifferOk(c) && !istHandelsCode(c) && !(c.length === 14 && c[0] !== '0');
+}
+
+/**
+ * Hat ein Mensch die Korrektur verworfen (`eanKorrekturVerworfen`, nur Server,
+ * Prüfkonsole „Korrektur verwerfen", Prüfrunde 06.10.2026)? Dann gilt wieder
+ * die gespeicherte Nummer — in Runde, Konsole und jeder künftigen
+ * Doppel-Prüfung —, und die Runde korrigiert diese Einreichung nie wieder
+ * (eanKorrekturAus). Jedes Objekt zählt (fail-closed: lieber keine Korrektur
+ * als eine, die ein Mensch zurückgenommen hat).
+ */
+function eanKorrekturVerworfen(x) {
+  return !!(x && x.eanKorrekturVerworfen && typeof x.eanKorrekturVerworfen === 'object');
+}
+
+/**
+ * Die korrigierte EAN einer Einreichung — nur, wenn der Eintrag in sich stimmt:
+ * korrigierbare Nummer, und `vorher` ist genau die gespeicherte `ean` (eine
+ * Korrektur gilt nur für die Nummer, die sie korrigiert hat) — und kein Mensch
+ * sie verworfen hat (eanKorrekturVerworfen).
+ * @returns {string|null}
+ */
+function eanKorrekturOf(x) {
+  const k = x && x.eanKorrektur && typeof x.eanKorrektur === 'object' ? x.eanKorrektur : null;
+  if (!k || eanKorrekturVerworfen(x)) return null;
+  const neu = ziffern(k.ean);
+  const vorher = ziffern(k.vorher);
+  const gespeichert = ziffern(x.ean);
+  if (!eanKorrigierbar(neu) || !vorher || !gespeichert) return null;
+  if (gtin14(vorher) !== gtin14(gespeichert) || gtin14(neu) === gtin14(gespeichert)) return null;
+  return neu;
+}
+
+/**
+ * Nummer, gegen die das Barcode-Foto geprüft wird: nach einer Korrektur die
+ * korrigierte (die nächste Bildprüfung soll sie bestätigen, nicht wieder die
+ * alte „falsch" finden), sonst die gespeicherte (Rohwert wie bisher).
+ */
+const eanAbgleichOf = (x) => eanKorrekturOf(x) || (x ? x.ean ?? null : null);
+
+/** Die ursprünglich gespeicherte Nummer einer KORRIGIERTEN Einreichung, sonst null (policyOf.eanVorher). */
+const eanVorherOf = (x) => (eanKorrekturOf(x) ? ziffern(x.ean) : null);
+
+/**
+ * Alle Nummern einer Einreichung als Gruppenschlüssel (eanSchluessel): die
+ * effektive (`ean` der Policy) und — nach einer Korrektur — die ursprünglich
+ * gespeicherte (`eanVorher`).
+ * @param {{ean?:string|null, eanVorher?:string|null}} p  policyOf
+ */
+function eanNummern(p) {
+  return [...new Set([eanSchluessel(p && p.ean), eanSchluessel(p && p.eanVorher)].filter(Boolean))];
+}
+
+/**
+ * Verwandt = die beiden teilen eine Nummer (effektiv oder ursprünglich, je
+ * Seite). Die Doppel-Regel über ALLE verwandten Einreichungen (`ean_alt_doppelt`,
+ * Prüfrunde 06.10.2026) deckt drei Wege ab, die die Gruppe nach effektiver EAN
+ * nicht sieht: die eigene alte Nummer = die Nummer einer früheren
+ * (korrigiert: ihre neue), eine frühere wurde VON dieser Nummer weg korrigiert,
+ * beide wurden von derselben alten Nummer weg korrigiert.
+ */
+function teilenNummer(a, b) {
+  const s = new Set(eanNummern(a));
+  return eanNummern(b).some((k) => s.has(k));
+}
+
+/**
+ * Hat eine gespeicherte Korrektur diesen Halte-Befund aufgelöst? Ja, wenn er
+ * `abweichend` mit genau der korrigierten Nummer ist — das ist der Befund, aus
+ * dem die Korrektur entstand (z. B. ein Rückfall in `review.rundeOffen`, dessen
+ * Aktualisieren scheiterte). Ein späterer Befund GEGEN die korrigierte Nummer
+ * trägt eine andere Nummer und hält weiter.
+ */
+function durchKorrekturErledigt(x, b) {
+  const korr = eanKorrekturOf(x);
+  return !!korr && !!b && b.befund === 'abweichend' && !!ziffern(b.ean) && gtin14(b.ean) === gtin14(korr);
+}
+
+/**
+ * Widerspricht die heutige Lesung einem alten Halte-Befund mit Nummer `nr`?
+ * Nein, wenn heute keine Bildprüfung lief (null), nichts lesbar war, oder
+ * heute dieselbe Nummer gelesen wurde — auch nur einmal (zweite Lesung leer
+ * oder technisch gescheitert). Alles andere widerspricht: die gespeicherte
+ * Nummer (auch über die zweite Lesung), eine andere — auch zweimal gelesen —,
+ * eine Lesung mit falscher Prüfziffer, uneinige Lesungen (fail-closed).
+ */
+function heuteWiderspricht(heute, nr) {
+  if (!heute) return false;
+  if (heute.art === 'kein_urteil' && heute.grund === 'nicht_lesbar') return false;
+  const gleicheNr = !!nr && !!ziffern(heute.gelesen) && gtin14(heute.gelesen) === gtin14(nr);
+  if (heute.art === 'abweichend') return !gleicheNr;
+  if (heute.art === 'unsicher') return !(gleicheNr && !heute.zweit);
+  return true;
+}
+
+/**
+ * Korrektur aus dem heutigen Befund (nach zweiter Lesung) bzw. aus einem
+ * gespeicherten Halte-Befund.
+ *
+ *  - Ohne alten Befund: heute `abweichend` UND `bestaetigt` (zweite Lesung =
+ *    erste) UND korrigierbar.
+ *  - Mit altem Befund (Patricks „ja" hebt für GENAU diese Klasse die Regel
+ *    „ein angehaltener Fall wird nie automatisch aufgehoben" auf): JEDE
+ *    haltende Quelle (eanFotoOcr, review.rundeOffen.eanFoto) sagt `abweichend`,
+ *    `bestaetigt`, dieselbe korrigierbare Nummer, keine trägt einen Bremsvermerk
+ *    (`korrekturGebremst`) — UND heute lief eine Bildprüfung, und zwar:
+ *    - sind alle Quellen vertraut (eanFotoHalteQuellen `vertraut`: Vermerk
+ *      `korrekturfaehig` oder Lauf LETZTER_LAUF_OHNE_VERMERK): eine, die nicht
+ *      widerspricht (heuteWiderspricht; nichts lesbar zählt nicht als
+ *      Widerspruch);
+ *    - sonst (Prüfrunde 06.10.2026, Übergangslücke): heute selbst `abweichend`
+ *      UND `bestaetigt` mit derselben Nummer — „nichts lesbar" reicht dort
+ *      nicht, der alte Befund könnte einen Widerspruch oder ein `unsicher`
+ *      verdecken. Ergebnis mit `heuteBestaetigt: true`.
+ *    Ohne Bildprüfung heute keine Korrektur aus einem alten Befund (Prüfrunde
+ *    06.10.2026: sonst hätte ein Ausfall der Bildprüfung als Bestätigung
+ *    gegolten). Ein alter `unsicher`-Befund — auch einer aus Lesungen, die
+ *    sich über Tage widersprachen (`lesungen_uneinig_tage`,
+ *    eanFotoMitVorbefund) — wird nie korrigiert.
+ *  - Höchstens EINE Korrektur je Einreichung: steht schon eine, korrigiert die
+ *    Runde nie wieder (eine weitere Abweichung gegen die korrigierte Nummer
+ *    hält an — zwei Korrekturen wären kein eindeutiger Fall mehr). Hat ein
+ *    Mensch eine Korrektur verworfen (eanKorrekturVerworfen), ebenfalls nie.
+ *
+ * @param {object} x  Einreichung
+ * @param {object|null} heute  heutiger Befund nach zweiter Lesung, OHNE alten Befund (eanFotoBestaetigen/eanFotoOhneZweitlesung), null = heute keine Bildprüfung
+ * @returns {{ean:string, vorher:string, lesungen:string[], aus:'heute'|'vorbefund', befundVom:string|null, heuteBestaetigt?:boolean}|null}
+ */
+function eanKorrekturAus(x, heute) {
+  if (!x || typeof x !== 'object' || eanKorrekturOf(x) || eanKorrekturVerworfen(x)) return null;
+  const vorher = ziffern(x.ean);
+  if (!vorher) return null;
+  const quellen = eanFotoHalteQuellen(x);
+  if (quellen.length) {
+    const neu = quellen[0].gelesen;
+    const einig = quellen.every((q) => q.befund === 'abweichend' && q.bestaetigt === true && !q.gebremst && !!q.gelesen && gtin14(q.gelesen) === gtin14(neu));
+    if (!einig || !heute || !eanKorrigierbar(neu) || gtin14(neu) === gtin14(vorher)) return null;
+    const vertraut = quellen.every((q) => q.vertraut);
+    const heuteBestaetigt = heute.art === 'abweichend' && heute.bestaetigt === true && !heute.korrekturGebremst
+      && !!ziffern(heute.gelesen) && gtin14(heute.gelesen) === gtin14(neu);
+    if (vertraut ? heuteWiderspricht(heute, neu) : !heuteBestaetigt) return null;
+    return { ean: neu, vorher, lesungen: [neu, neu], aus: 'vorbefund', befundVom: quellen[0].lauf || null, ...(vertraut ? {} : { heuteBestaetigt: true }) };
+  }
+  if (!heute || heute.art !== 'abweichend' || heute.bestaetigt !== true || heute.korrekturGebremst || !eanKorrigierbar(heute.gelesen)) return null;
+  const neu = ziffern(heute.gelesen);
+  if (gtin14(neu) === gtin14(vorher)) return null;
+  return { ean: neu, vorher, lesungen: [neu, ziffern(heute.zweit) || neu], aus: 'heute', befundVom: null };
+}
+
+/** Befund „korrigiert" für entscheideFall: hält nicht an; die Regeln rechnen mit `gelesen`. */
+function eanFotoKorrigiert(k) {
+  return { art: 'korrigiert', gelesen: k.ean, gespeichert: k.vorher, bestaetigt: true, korrektur: k };
+}
+
+/** Was in `eanKorrektur` am Dokument landet (ohne `at`/`lauf`/`quelle`, die setzt die Runde). */
+function eanKorrekturEintrag(k) {
+  return {
+    ean: k.ean, vorher: k.vorher, lesungen: (k.lesungen || []).slice(0, 2), aus: k.aus,
+    ...(k.befundVom ? { befundVom: k.befundVom } : {}),
+    // Alter Befund ohne Vermerk, heute selbst zweimal gelesen (eanKorrekturAus).
+    ...(k.heuteBestaetigt ? { heuteBestaetigt: true } : {}),
+    // Ohne Namen: das Dokument darf der Einreicher selbst lesen (firestore.rules).
+    regel: 'Barcode-Korrektur 06.10.2026: Foto-Nummer zweimal gleich gelesen, gültige GTIN, kein Waagen-Code',
   };
 }
 
@@ -406,4 +743,6 @@ module.exports = {
   pruefzifferOk, eanOf, nameOf, preisOf, policyOf, einreichZeit, herstellerAnzeige, vollstaendigkeitOf, herkunftOf, preisHinweisOf, PREIS_ARTEN,
   gtin14, eanSchluessel, eanVarianten, istHandelsCode, eanFotoOf, eanFotoBefund, eanFotoBestaetigen,
   eanFotoOhneZweitlesung, eanFotoVorbefund, eanFotoMitVorbefund, eanFotoEintrag, stellenAbstand, MAX_LESEFEHLER_STELLEN, EAN_HALTEN,
+  eanKorrigierbar, eanKorrekturOf, eanAbgleichOf, durchKorrekturErledigt, eanKorrekturAus, eanFotoKorrigiert, eanKorrekturEintrag, eanFotoHalteQuellen,
+  heuteWiderspricht, eanVorherOf, eanNummern, teilenNummer, eanKorrekturVerworfen, LETZTER_LAUF_OHNE_VERMERK,
 };

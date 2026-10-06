@@ -69,7 +69,12 @@ const AUSSER_GESAMTQUOTE = new Set([...EIGENE_BREMSEN.flatMap((b) => b.gruende),
  * @param {string[]} f.unlesbar     Slots, deren Metadaten Storage nicht lieferte (unsere Technik)
  * @param {{art:'wiederverwendet'|'aeltere_offen'|'fremdes_konto', mit:string[], seit?:string|null, vorbefund?:object, heute?:string|null}|null} [f.bild]  bildBefund / bildMitVorbefund
  * @param {boolean} [f.fotoAbgleichFehlt]  Abgleich gegen frühere Einreichungen nicht möglich (Storage-Liste gescheitert)
- * @param {{art:string, gelesen:string|null, gespeichert:string|null, zweit?:string|null}|null} [f.eanFoto]  werte.eanFotoBefund / eanFotoBestaetigen
+ * @param {{art:string, gelesen:string|null, gespeichert:string|null, zweit?:string|null}|null} [f.eanFoto]  werte.eanFotoBefund / eanFotoBestaetigen;
+ *   `korrigiert` (werte.eanFotoKorrigiert, 06.10.2026): hält nicht an, `f.dup` ist dann mit der korrigierten EAN gerechnet
+ * @param {{verdict:string}|null} [f.dupAlt]  Doppel-Regel über alle VERWANDTEN Einreichungen (werte.teilenNummer:
+ *   effektive oder ursprünglich gespeicherte Nummer, je Seite) — null = nicht gerechnet
+ * @param {boolean} [f.eanKorrigiert]  die Einreichung trägt eine Barcode-Korrektur (heute oder früher)
+ * @param {string|null} [f.dupAltHinweis]  Text für den Menschen zu `dupAlt`
  * @param {string|null} [f.eanFotoHinweis]  Text für den Menschen (z. B. eigene Freigabe unter der Foto-Nummer)
  * @param {{echt:boolean, loseWare:boolean, traegtAngaben?:boolean, gleicheAnsicht:boolean, grund:string}|null} f.audit
  * @param {string|null} f.auditFehler   Fehlermeldung, wenn die Bildprüfung scheiterte
@@ -113,6 +118,12 @@ function entscheideFall(f) {
   // 02.10.2026): die rechnet mit der gespeicherten EAN — ist die falsch und
   // gehört zufällig zu einem eigenen Produkt dieser Woche, lehnte die
   // Wochen-Sperre ein womöglich anderes Produkt ab.
+  // Seit 06.10.2026 kommt eine zweimal gleich gelesene, gültige Foto-Nummer
+  // hier als `korrigiert` an (werte.eanKorrekturAus) und läuft weiter; als
+  // `abweichend` bleiben nur Fälle, die das Kriterium nicht erfüllen
+  // (zweite Lesung gescheitert, Waagen-Code, schon einmal korrigiert,
+  // Notbremse der Korrektur, heute keine Bildprüfung); widersprechen sich die
+  // Lesungen über Tage, wird der Befund `unsicher` (werte.eanFotoMitVorbefund).
   if (f.eanFoto && f.eanFoto.art === 'abweichend') {
     return offen('ean_abweichend', { hinweis: f.eanFotoHinweis || `Barcode-Foto zeigt ${f.eanFoto.gelesen}, gespeichert ist ${f.eanFoto.gespeichert}` });
   }
@@ -126,8 +137,29 @@ function entscheideFall(f) {
   // Wochen-Regel (02.10.2026) hängt die Sperre an nichts als Person, EAN und
   // Zeit — kein Preis, kein Hersteller, kein Markt. Ein gescheitertes
   // Nachlesen des Preises ändert an ihr deshalb nichts mehr.
+  // Bei korrigierter Nummer (Entscheidung Patrick 06.10.2026) rechnet der
+  // Aufrufer `dup` mit der KORRIGIERTEN EAN — zwei gleiche Lesungen des Fotos
+  // sind der stärkere Beleg, eine Sperre dort darf ablehnen.
   if (dup.verdict === 'locked') return ablehnen(dup.reason || REASON.SAME_USER_WEEK, { lockUntil: dup.lockUntil });
   if (dup.verdict === 'hold') return offen(PENDING_OLDER);
+
+  // Doppel-Regel zusätzlich über alle VERWANDTEN Einreichungen (`dupAlt`):
+  // solche, die mit dieser eine Nummer teilen — effektive oder ursprünglich
+  // gespeicherte, auf jeder Seite (werte.teilenNummer). Sperrt oder hält sie
+  // dort, bleibt der Fall beim Menschen — nie ablehnen: eine alte Nummer kann
+  // ein Lesefehler des Scanners sein, der zufällig einem anderen eigenen
+  // Produkt gehört. Ohne diese Prüfung könnte jemand ein diese Woche schon
+  // bezahltes Produkt erneut einreichen und auf dem Barcode-Schritt den
+  // Strichcode eines anderen fotografieren: die Korrektur schöbe die
+  // Einreichung aus der Wochen-Sperre. Gilt an JEDEM Tag, nicht nur am Tag der
+  // Korrektur, und auch für eine Einreichung ohne Korrektur, deren Nummer die
+  // ursprüngliche einer früheren, korrigierten ist (Prüfrunde 06.10.2026).
+  // Trägt die Einreichung eine Korrektur und fehlt `dupAlt`, wurde nicht
+  // geprüft → ebenfalls liegen lassen (fail-closed).
+  const korrigiert = !!f.eanKorrigiert || !!(f.eanFoto && f.eanFoto.art === 'korrigiert');
+  if ((f.dupAlt && f.dupAlt.verdict !== 'ok') || (korrigiert && !f.dupAlt)) {
+    return offen('ean_alt_doppelt', { hinweis: f.dupAltHinweis || f.eanFotoHinweis || 'Doppel-Regel über die ursprünglich gespeicherte Barcode-Nummer: eigene Einreichung dieser Woche' });
+  }
 
   // Identisches Identitätsfoto in einer FRÜHEREN Einreichung (Abgleich gegen
   // alle, Entscheidung Patrick 02.10.2026). Die älteste Einreichung einer
@@ -423,7 +455,7 @@ function belegeVon(fall) {
  * eines Fotos eines ANDEREN Kontos liegen ließ, in der Konsole als „ok" mit
  * Freigabe-Taste da.
  */
-const RUNDE_SPERREND = Object.freeze(['foto_fremdes_konto', 'foto_aeltere_offen', 'bilder_wiederverwendet', 'ean_abweichend', 'ean_unsicher']);
+const RUNDE_SPERREND = Object.freeze(['foto_fremdes_konto', 'foto_aeltere_offen', 'bilder_wiederverwendet', 'ean_abweichend', 'ean_unsicher', 'ean_alt_doppelt']);
 const BILD_CODE = { fremdes_konto: 'foto_fremdes_konto', aeltere_offen: 'foto_aeltere_offen', wiederverwendet: 'bilder_wiederverwendet' };
 
 /**
@@ -441,8 +473,59 @@ function rundeBefunde(eingabe) {
   const ef = e.eanFoto;
   if (ef && ef.art === 'abweichend') out.push('ean_abweichend');
   else if (ef && (ef.art === 'unsicher' || ef.art === 'zweifelhaft')) out.push('ean_unsicher');
+  // Doppel über eine verwandte Nummer (oder bei einer Korrektur nicht
+  // geprüft) — die Konsole rechnet das auch selbst (einreichung.precheckOf,
+  // verwandteRows), hier steht es für den Fall, dass sie nicht nachschlägt.
+  // Nur, wenn die Gruppe der effektiven EAN selbst nichts fand: sonst ist es
+  // dieselbe Feststellung, und ein gespeicherter Befund hielte die Konsole
+  // noch an, wenn die ältere Einreichung längst entschieden ist.
+  const dupOk = !e.dup || e.dup.verdict === 'ok';
+  const korrigiert = !!e.eanKorrigiert || !!(ef && ef.art === 'korrigiert');
+  if (dupOk && ((e.dupAlt && e.dupAlt.verdict !== 'ok') || (korrigiert && !e.dupAlt))) out.push('ean_alt_doppelt');
   return out;
 }
+
+/**
+ * Notbremse der Barcode-Korrektur (06.10.2026). Korrigiert die Runde an einem
+ * Tag auffällig viele Nummern, liegt es eher am Modell (es liest zweimal
+ * dieselbe falsche Nummer) als an den Einreichungen — dann korrigiert sie an
+ * diesem Tag GAR NICHTS, die Fälle bleiben wie vor dem 06.10. liegen
+ * (`ean_abweichend`), und der Bericht warnt rot. Vorher gemessen: 8 von 178
+ * geprüften Fällen (4,5 %, davon 6 von einer Person), am 02.10. 9 von 273
+ * Abweichungen insgesamt (3,3 %).
+ *
+ * Gerechnet NUR über die frischen Fälle (Prüfrunde 06.10.2026): Zähler = heute
+ * geplante Korrekturen aus heutigen Lesungen (`aus: 'heute'`), Nenner = heute
+ * angesehene Fälle OHNE haltenden Befund eines früheren Laufs. Der liegende
+ * Bestand ist vorsortiert — normale Fälle werden täglich entschieden und
+ * verschwinden, Barcode-Abweichungen bleiben liegen. Mit ihm im Nenner schlug
+ * die Bremse beim Ausrollen fast sicher an (gemessen 06.10.: 85 offen, davon
+ * 8 bestätigte Altfälle; frisch 8 von 175 = 4,6 %; über 10 % bei weniger als
+ * ~44 Eingängen über Nacht, ohne Eingänge 12,9 %) und hätte genau die Fälle
+ * für immer gesperrt, die Patrick aufgelöst haben wollte. Ein Lesefehler des Modells von heute zeigt sich in den
+ * frischen Fällen; schlägt die Bremse dort an, gilt sie für ALLE, auch für die
+ * Korrekturen aus alten Befunden (die hängen an der heutigen Lesung mit).
+ * Ausgelöst im scharfen Lauf, vermerkt die Runde sie am Befund
+ * (`korrekturGebremst`): ein so angehaltener Fall wird nie mehr automatisch
+ * korrigiert, ein Mensch entscheidet. Ohne Speichern (Trockenlauf, Schalter
+ * `barcodeKorrektur` aus) wird nichts vermerkt — die heute gelesenen Befunde
+ * gelten dann nur als nicht vertraut (`korrekturfaehig: false`): eine spätere
+ * Korrektur braucht eine neue, zweifache Lesung (taeglicheRunde 4c).
+ */
+const KORREKTUR_BREMSE = Object.freeze({ min: 8, anteil: 0.1 });
+function korrekturBremse(anzahl, geprueft, { min = KORREKTUR_BREMSE.min, anteil = KORREKTUR_BREMSE.anteil } = {}) {
+  return anzahl >= min && geprueft > 0 && anzahl / geprueft > anteil;
+}
+
+/**
+ * Höchstens so viele Korrekturen aus Befunden FRÜHERER Läufe je Lauf
+ * (Prüfrunde 06.10.2026). Sie stehen außerhalb der Bremsen-Quote
+ * (korrekturBremse); ein ungewöhnlich großer Rückstand — etwa nach Tagen mit
+ * ausgeschaltetem Schalter — soll nicht in einem Zug durchlaufen. Der Rest
+ * (die jüngsten) wartet ohne Vermerk bis morgen; gelbe Warnung. Gemessen
+ * 06.10.: 8 solche Fälle.
+ */
+const KORREKTUR_ALT_MAX = 25;
 
 /**
  * Was die Runde an einer Einreichung hinterlässt, die NACH dem Lauf offen ist
@@ -496,7 +579,16 @@ function rundeOffenEintrag(p, { lauf, trocken = false } = {}) {
     ...(bild && BILD_CODE[bild.art] ? { fotoSeit: bild.seit || lauf || null } : {}),
     eanFoto: eanHalt ? {
       befund: ef.art === 'abweichend' ? 'abweichend' : 'unsicher', ean: ef.gelesen || ef.roh || null,
-      ...(ef.art === 'abweichend' ? { bestaetigt: ef.bestaetigt === true } : { zweit: ef.zweit || null }),
+      // Abweichung: beide Lesungen und der Vermerk, ob der Befund allein eine
+      // Barcode-Korrektur tragen darf (werte.eanFotoHalteQuellen, Prüfrunde
+      // 06.10.2026) — hier wie in `eanFotoOcr`, denn eine Korrektur aus einem
+      // alten Befund verlangt, dass JEDE Quelle vertraut ist.
+      ...(ef.art === 'abweichend'
+        ? { bestaetigt: ef.bestaetigt === true, zweit: String(ef.zweit || '').replace(/\D/g, '').slice(0, 14) || null, korrekturfaehig: ef.korrekturfaehig !== false }
+        : { zweit: ef.zweit || null }),
+      // Bremsvermerk der Barcode-Korrektur (06.10.2026) — auch hier, damit er
+      // gilt, wenn `eanFotoOcr` nicht gespeichert werden konnte.
+      ...(ef.art === 'abweichend' && ef.korrekturGebremst ? { korrekturGebremst: String(ef.korrekturGebremst).slice(0, 40) } : {}),
     } : null,
     lauf: lauf || null,
     trocken: !!trocken,
@@ -564,6 +656,6 @@ function notbremse(plan, { schnittQuote = null, bildMaxAnteil = 0.1, bildMin = 5
 
 module.exports = {
   entscheideFall, bildBefund, fotoVorbefund, bildMitVorbefund, belegeVon, notbremse, nameAusLesungen, eanAusLesungen, rettungNichtGeschafft,
-  rundeBefunde, rundeOffenEintrag,
-  BILD_GRUENDE, EIGENE_BREMSEN, AUSSER_GESAMTQUOTE, KONTO_GESPERRT, DOPPEL_GRUENDE, RUNDE_SPERREND,
+  rundeBefunde, rundeOffenEintrag, korrekturBremse,
+  BILD_GRUENDE, EIGENE_BREMSEN, AUSSER_GESAMTQUOTE, KONTO_GESPERRT, DOPPEL_GRUENDE, RUNDE_SPERREND, KORREKTUR_BREMSE, KORREKTUR_ALT_MAX,
 };

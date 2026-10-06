@@ -230,7 +230,7 @@ App: Foto → Storage-Upload → enqueueCashback (HTTPS, Pre-OCR-Dedup: Byte-Has
 | `cashback_payouts/{id}` | read-own, CF-write | Auszahlungen via Tremendous: `{userId, amountCents, method, status, tremendousOrderId}` |
 | `cashback_review_queue`, `cashback_consumption/{month}`, `cashback_webhook_events` | **komplett server-only** | Review-Queue, Monats-Budget-Verbrauch, Webhook-Log |
 | `receiptMatches`, `receiptAliases` | **CF-intern** (deny-all) | Matcher-Ergebnisse + selbstlernendes Bon-Zeilen-Alias-Lexikon (`aliasId = f(marktSlug, normKey)`) |
-| `crowd_uploads/{id}` | Client create + read-own | Produktfoto-Einreichungen: `{userId, sessionId, marketId/Name, productName, ean, campaignId, images{step→pfad}, status:'pending'}` — Bild-Dateinamen tragen einen eindeutigen Batch-Token |
+| `crowd_uploads/{id}` | Client create + read-own | Produktfoto-Einreichungen: `{userId, sessionId, marketId/Name, productName, ean, campaignId, images{step→pfad}, status:'pending'}` — Bild-Dateinamen tragen einen eindeutigen Batch-Token. **Effektive EAN = `eanKorrektur.ean` → `ean` → `eanRescueOcr`** (`review-console/src/werte.js` `eanOf`); `eanKorrektur` setzt nur die Morgenrunde (Foto-Nummer zweimal gleich gelesen, 06.10.2026, Schalter `cashback_config/v1.barcodeKorrektur`), `ean` bleibt die gescannte/getippte; `eanKorrekturVerworfen` (Prüfkonsole) nimmt eine Korrektur zurück — dann gilt wieder `ean` |
 
 ---
 

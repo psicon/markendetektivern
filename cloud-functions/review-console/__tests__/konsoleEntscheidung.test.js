@@ -322,3 +322,126 @@ describe('Schlussprüfung 03.10.2026: Zurückholen und Referenz-ID', () => {
     expect(JSON.stringify(doc('u1_k').review)).not.toContain('u9');
   });
 });
+
+describe('Barcode-Korrektur der Morgenrunde in der Konsole (Entscheidung Patrick 06.10.2026)', () => {
+  // gespeichert EAN (Scanner), korrigiert ANDERE (Foto, zweimal gleich)
+  const korrektur = { eanKorrektur: { ean: ANDERE, vorher: EAN, lesungen: [ANDERE, ANDERE], aus: 'heute', lauf: 'L1' }, eanFotoOcr: { ean: ANDERE, befund: 'korrigiert', vorher: EAN } };
+
+  it('korrigierte Einreichung ohne Doppel → Freigabe ohne force', async () => {
+    lege('k', korrektur);
+    const r = await entscheide({ ids: ['k'], decision: 'approve' });
+    expect(r.results[0]).toMatchObject({ outcome: 'approved', precheck: { verdict: 'ok', reasons: [] } });
+  });
+
+  it('eigene Freigabe unter der GESPEICHERTEN (alten) Nummer binnen 7 Tagen → blockiert (ean_alt_doppelt), mit force + Notiz frei', async () => {
+    lege('alt', { status: 'approved', createdAt: ts(T0 - 2 * TAG_MS) });
+    lege('k', korrektur);
+    const ohne = await entscheide({ ids: ['k'], decision: 'approve' });
+    expect(ohne.results[0]).toMatchObject({ outcome: 'blocked', reason: 'ean_alt_doppelt' });
+    expect(doc('k').status).toBe('pending');
+    const mit = await entscheide({ ids: ['k'], decision: 'approve', force: true, note: 'anderes Produkt, Scanner hat falsch gelesen' });
+    expect(mit.results[0].outcome).toBe('approved');
+  });
+
+  it('eigene Freigabe, deren EAN NUR über eine Korrektur stimmt (eanKorrektur.ean), sperrt die Freigabe unter der korrigierten Nummer', async () => {
+    lege('frueher', { ean: '4001382088125', eanKorrektur: { ean: ANDERE, vorher: '4001382088125' }, status: 'approved', createdAt: ts(T0 - 2 * TAG_MS) });
+    lege('k', { ean: ANDERE });
+    const r = await entscheide({ ids: ['k'], decision: 'approve' });
+    expect(r.results[0]).toMatchObject({ outcome: 'blocked', reason: 'sperre_woche_gleicher_nutzer' });
+  });
+
+  it('… eine eigene, von DIESER Nummer weg korrigierte Freigabe dieser Woche sperrt nicht unter der effektiven EAN, hält aber an (ean_alt_doppelt, Prüfrunde 06.10.)', async () => {
+    // frueher: gespeichert EAN, korrigiert auf eine andere — k: wieder EAN, Foto ohne Befund.
+    // Ohne die Korrektur von `frueher` wäre k gesperrt; durch sie darf k nicht durchrutschen.
+    lege('frueher', { ean: EAN, eanKorrektur: { ean: '4001382088125', vorher: EAN }, status: 'approved', createdAt: ts(T0 - 2 * TAG_MS) });
+    lege('k');
+    const r = await entscheide({ ids: ['k'], decision: 'approve' });
+    expect(r.results[0]).toMatchObject({ outcome: 'blocked', reason: 'ean_alt_doppelt', precheck: { dup: { verdict: 'ok' }, dupAlt: { verdict: 'locked', priorId: 'frueher' } } });
+    expect(doc('k').status).toBe('pending');
+  });
+
+  it('… dieselbe Lage bei einem FREMDEN Konto → frei (fremde Einreichungen sperren nicht, 20.09.)', async () => {
+    lege('frueher', { userId: 'u2', ean: EAN, eanKorrektur: { ean: '4001382088125', vorher: EAN }, status: 'approved', createdAt: ts(T0 - 2 * TAG_MS) });
+    lege('k');
+    expect((await entscheide({ ids: ['k'], decision: 'approve' })).results[0].outcome).toBe('approved');
+  });
+
+  it('… beide von derselben alten Nummer weg korrigiert (auf VERSCHIEDENE Nummern) → hält an (ean_alt_doppelt)', async () => {
+    lege('frueher', { ean: EAN, eanKorrektur: { ean: '4001382088125', vorher: EAN }, status: 'approved', createdAt: ts(T0 - 2 * TAG_MS) });
+    lege('k', korrektur);
+    const r = await entscheide({ ids: ['k'], decision: 'approve' });
+    expect(r.results[0]).toMatchObject({ outcome: 'blocked', reason: 'ean_alt_doppelt' });
+  });
+
+  it('Warteschlange und Fallansicht zeigen die korrigierte Nummer und halten bei Doppel unter der alten', async () => {
+    lege('alt', { status: 'approved', createdAt: ts(T0 - 2 * TAG_MS) });
+    lege('k', korrektur);
+    // Am EAN-Zwischenspeicher der Warteschlange (2 min) vorbei — sonst gälte der Index eines früheren Tests.
+    const spaeter = Date.now() + 10 * 60 * 1000;
+    const spy = jest.spyOn(Date, 'now').mockReturnValue(spaeter);
+    try {
+      const q = await konsole.reviewQueue({ ...admin, data: { type: 'photos' } });
+      expect(q.rows.find((x) => x.id === 'k')).toMatchObject({ ean: ANDERE, eanKorrigiert: true, verdict: 'hold', reasons: ['ean_alt_doppelt'] });
+    } finally { spy.mockRestore(); }
+    const f = await konsole.reviewGetUpload({ ...admin, data: { id: 'k' } });
+    expect(f.row).toMatchObject({ ean: EAN, anzeigeEan: ANDERE, eanKorrektur: { ean: ANDERE, vorher: EAN } });
+    expect(f.precheck).toMatchObject({ verdict: 'hold', reasons: ['ean_alt_doppelt'], dupAlt: { verdict: 'locked', priorId: 'alt' } });
+    const c = await konsole.reviewCases({ ...admin, data: { type: 'photos', ids: ['k'] } });
+    expect(c.cases[0].precheck).toMatchObject({ verdict: 'hold', reasons: ['ean_alt_doppelt'] });
+  });
+});
+
+describe('Rückweg: Barcode-Korrektur verwerfen (Prüfrunde 06.10.2026)', () => {
+  const korrektur = { eanKorrektur: { ean: ANDERE, vorher: EAN, lesungen: [ANDERE, ANDERE], aus: 'heute', lauf: 'L1' }, eanFotoOcr: { ean: ANDERE, befund: 'korrigiert', vorher: EAN } };
+  const verwerfen = (id, note = 'Scanner-Nummer stimmt, Foto zeigt Umverpackung') => entscheide({ ids: [id], decision: 'ean_korrektur_verwerfen', note });
+
+  it('offene Einreichung: setzt nur den Vermerk (Audit bleibt), entscheidet nichts; danach hält die Konsole an der Foto-Abweichung (force + Notiz)', async () => {
+    lege('k', korrektur);
+    const r = await verwerfen('k');
+    expect(r.results[0]).toMatchObject({ outcome: 'korrektur_verworfen', ean: ANDERE });
+    expect(doc('k')).toMatchObject({ status: 'pending', ean: EAN, eanKorrektur: { ean: ANDERE, vorher: EAN } });
+    expect(doc('k').eanKorrekturVerworfen).toMatchObject({ by: 'patrick', notiz: 'Scanner-Nummer stimmt, Foto zeigt Umverpackung', ean: ANDERE, vorher: EAN, status: 'pending', at: mockSentinel });
+    const f = await konsole.reviewGetUpload({ ...admin, data: { id: 'k' } });
+    expect(f.row).toMatchObject({ anzeigeEan: EAN, eanKorrektur: null, eanKorrekturVerworfen: { ean: ANDERE, vorher: EAN } });
+    const ohne = await entscheide({ ids: ['k'], decision: 'approve' });
+    expect(ohne.results[0]).toMatchObject({ outcome: 'blocked', reason: 'ean_abweichend' });
+    const mit = await entscheide({ ids: ['k'], decision: 'approve', force: true, note: 'gespeicherte Nummer geprüft' });
+    expect(mit.results[0].outcome).toBe('approved');
+  });
+
+  it('nur mit Notiz und nur für EINE Einreichung; ohne gültige Korrektur bzw. zweimal → nichts geändert', async () => {
+    lege('k', korrektur);
+    lege('k2', korrektur);
+    await expect(entscheide({ ids: ['k'], decision: 'ean_korrektur_verwerfen' })).rejects.toMatchObject({ code: 'invalid-argument' });
+    await expect(entscheide({ ids: ['k'], decision: 'ean_korrektur_verwerfen', note: ' x ' })).rejects.toMatchObject({ code: 'invalid-argument' });
+    await expect(entscheide({ ids: ['k', 'k2'], decision: 'ean_korrektur_verwerfen', note: 'stimmt so' })).rejects.toMatchObject({ code: 'invalid-argument' });
+    expect(doc('k').eanKorrekturVerworfen).toBeUndefined();
+    lege('ohne');
+    expect((await verwerfen('ohne')).results[0]).toMatchObject({ outcome: 'skipped', reason: 'keine_korrektur' });
+    await verwerfen('k');
+    const vorher = doc('k').eanKorrekturVerworfen;
+    expect((await verwerfen('k', 'nochmal')).results[0]).toMatchObject({ outcome: 'skipped', reason: 'schon_verworfen' });
+    expect(doc('k').eanKorrekturVerworfen).toEqual(vorher);
+  });
+
+  it('auch nach einer FREIGABE: danach zählt die gespeicherte Nummer für die Wochen-Sperre künftiger Einreichungen', async () => {
+    lege('frei', { ...korrektur, status: 'approved', createdAt: ts(T0 - 2 * TAG_MS) });
+    lege('neu', { createdAt: ts(T0) });
+    // vorher: nur über die alte Nummer verwandt → angehalten (ean_alt_doppelt), nicht gesperrt
+    expect((await entscheide({ ids: ['neu'], decision: 'approve' })).results[0]).toMatchObject({ outcome: 'blocked', reason: 'ean_alt_doppelt' });
+    expect((await verwerfen('frei')).results[0].outcome).toBe('korrektur_verworfen');
+    expect(doc('frei').status).toBe('approved');
+    expect((await entscheide({ ids: ['neu'], decision: 'approve' })).results[0]).toMatchObject({ outcome: 'blocked', reason: 'sperre_woche_gleicher_nutzer' });
+  });
+
+  it('Warteschlange: eine verworfene Korrektur zählt im EAN-Index nicht mehr (Feld im select)', async () => {
+    lege('frei', { ...korrektur, status: 'approved', createdAt: ts(T0 - 2 * TAG_MS), eanKorrekturVerworfen: { by: 'patrick', notiz: 'stimmt' } });
+    lege('neu', { ean: ANDERE, createdAt: ts(T0) });
+    const spy = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 20 * 60 * 1000);
+    try {
+      const q = await konsole.reviewQueue({ ...admin, data: { type: 'photos' } });
+      // unter ANDERE gibt es keine eigene Freigabe mehr — die Korrektur von `frei` ist verworfen
+      expect(q.rows.find((x) => x.id === 'neu')).toMatchObject({ ean: ANDERE, verdict: 'ok' });
+    } finally { spy.mockRestore(); }
+  });
+});

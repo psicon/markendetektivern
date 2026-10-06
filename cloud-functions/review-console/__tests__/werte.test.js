@@ -304,7 +304,7 @@ describe('Halte-Befund früherer Läufe (Prüfrunde 2, 02.10.2026)', () => {
 
   it('eanFotoVorbefund: nur abweichend/unsicher halten; Quelle eanFotoOcr', () => {
     expect(eanFotoVorbefund({ ...KFS, eanFotoOcr: { ean: '4013602136424', befund: 'abweichend', bestaetigt: true, lauf: '2026-10-02_080000' } }))
-      .toEqual({ befund: 'abweichend', gelesen: '4013602136424', gespeichert: '4250231136474', bestaetigt: true, zweit: null, lauf: '2026-10-02_080000', quelle: 'eanFotoOcr' });
+      .toEqual({ befund: 'abweichend', gelesen: '4013602136424', gespeichert: '4250231136474', bestaetigt: true, zweit: null, lauf: '2026-10-02_080000', quelle: 'eanFotoOcr', vertraut: false, korrekturfaehig: false });
     expect(eanFotoVorbefund({ ...KFS, eanFotoOcr: { ean: ANDERE, befund: 'unsicher', zweit: '4001382088125' } })).toMatchObject({ befund: 'unsicher', zweit: '4001382088125' });
     for (const befund of ['gleich', 'kein_urteil', 'zweifelhaft', undefined]) expect(eanFotoVorbefund({ ...KFS, eanFotoOcr: { ean: ANDERE, befund } })).toBeNull();
     expect(eanFotoVorbefund(KFS)).toBeNull();
@@ -329,48 +329,320 @@ describe('Halte-Befund früherer Läufe (Prüfrunde 2, 02.10.2026)', () => {
     const h = eanFotoBefund(KFS.ean, KFS.ean);
     expect(eanFotoMitVorbefund(h, null)).toBe(h);
   });
-  it('Kfs5jFA6qqOF8gD9iTEk: heute falsche Prüfziffer (kein Urteil) oder keine Bildprüfung → der alte Befund hält weiter', () => {
-    const heute = eanFotoBefund(KFS.ean, '4250231136470'); // eine Ziffer daneben → kein Urteil
-    expect(heute.art).toBe('kein_urteil');
-    expect(eanFotoMitVorbefund(heute, vorher())).toMatchObject({
-      art: 'abweichend', gelesen: '4013602136424', gespeichert: '4250231136474', bestaetigt: false,
-      vorbefund: { lauf: '2026-10-02_080000', quelle: 'eanFotoOcr' }, heute: { art: 'kein_urteil', gelesen: null },
-    });
+  it('Kfs5jFA6qqOF8gD9iTEk: keine Bildprüfung oder Foto nicht lesbar → der alte Befund hält unverändert', () => {
+    for (const heute of [null, eanFotoBefund(KFS.ean, '')]) {
+      expect(eanFotoMitVorbefund(heute, vorher())).toMatchObject({
+        art: 'abweichend', gelesen: '4013602136424', gespeichert: '4250231136474', bestaetigt: false,
+        vorbefund: { lauf: '2026-10-02_080000', quelle: 'eanFotoOcr' }, heute: heute ? { art: 'kein_urteil', gelesen: null } : null,
+      });
+    }
     expect(eanFotoMitVorbefund(null, vorher({ befund: 'unsicher', zweit: '4001382088125' }))).toMatchObject({ art: 'unsicher', zweit: '4001382088125', heute: null });
   });
-  it('heute die gespeicherte Nummer gelesen — auch zweimal — hebt den alten Befund NICHT auf: nur ein Mensch in der Konsole (Schlussprüfung 03.10.)', () => {
-    // auch ein (künstlich) bestätigtes „gleich" — so entstand bis 03.10. das Aufheben
-    const zweimal = { ...eanFotoBefund(KFS.ean, KFS.ean), bestaetigt: true };
-    for (const v of [vorher(), vorher({ befund: 'unsicher', zweit: null }), vorher({ bestaetigt: true })]) {
-      const r = eanFotoMitVorbefund(zweimal, v);
-      expect(r).toMatchObject({ art: v.befund, gelesen: '4013602136424', vorbefund: { lauf: '2026-10-02_080000', quelle: 'eanFotoOcr' }, heute: { art: 'gleich', gelesen: KFS.ean } });
-      expect(r.grund).toBeUndefined();
+  it('… heute dieselbe Nummer nur EINMAL (zweite Lesung leer oder gescheitert) → unverändert, kein Widerspruch', () => {
+    const N = '4013602136424';
+    for (const heute of [eanFotoBestaetigen(eanFotoBefund(KFS.ean, N), ''), { ...eanFotoBefund(KFS.ean, N), bestaetigt: false, fehler: 'zeit' }]) {
+      expect(eanFotoMitVorbefund(heute, vorher({ bestaetigt: true }))).toMatchObject({ art: 'abweichend', gelesen: N, bestaetigt: true, vorbefund: expect.any(Object) });
     }
   });
-  it('… und nicht mit nur EINER Lesung der gespeicherten Nummer', () => {
-    const nurEine = eanFotoBestaetigen(eanFotoBefund(KFS.ean, KFS.ean), '');
-    expect(eanFotoMitVorbefund(nurEine, vorher()).art).toBe('abweichend');
-    const einfach = eanFotoBefund(KFS.ean, KFS.ean); // ohne zweite Lesung
-    expect(eanFotoMitVorbefund(einfach, vorher()).art).toBe('abweichend');
-    // erste Lesung abweichend, zweite gespeichert (am ersten Tag reicht das) — gegen einen alten Befund nicht
-    const zweiteGleich = eanFotoBestaetigen(eanFotoBefund(KFS.ean, ANDERE), KFS.ean);
-    expect(zweiteGleich.art).toBe('gleich');
-    expect(eanFotoMitVorbefund(zweiteGleich, vorher()).art).toBe('abweichend');
+  it('Prüfrunde 06.10.: heute ein WIDERSPRUCH zum alten Abweichungs-Befund → `unsicher` über Tage, neu zu speichern (nie mehr korrigierbar)', () => {
+    const N = '4013602136424';
+    const widersprueche = [
+      eanFotoBefund(KFS.ean, KFS.ean), // die gespeicherte
+      { ...eanFotoBefund(KFS.ean, KFS.ean), bestaetigt: true }, // auch „zweimal"
+      eanFotoBestaetigen(eanFotoBefund(KFS.ean, ANDERE), KFS.ean), // erste andere, zweite gespeichert (am ersten Tag „gleich")
+      eanFotoBefund(KFS.ean, '4250231136470'), // falsche Prüfziffer nah an der gespeicherten
+      eanFotoBestaetigen(eanFotoBefund(KFS.ean, ANDERE), ANDERE), // eine ANDERE, zweimal gelesen
+      eanFotoBestaetigen(eanFotoBefund(KFS.ean, ANDERE), ''), // eine andere, einmal
+      eanFotoBestaetigen(eanFotoBefund(KFS.ean, N), '4001382088125'), // N und eine dritte
+    ];
+    for (const heute of widersprueche) {
+      for (const v of [vorher(), vorher({ bestaetigt: true })]) {
+        const r = eanFotoMitVorbefund(heute, v);
+        expect(r).toMatchObject({ art: 'unsicher', gelesen: N, gespeichert: KFS.ean, grund: 'lesungen_uneinig_tage', frueher: { lauf: '2026-10-02_080000', ean: N, bestaetigt: v.bestaetigt } });
+        expect(r.vorbefund).toBeUndefined(); // wird neu gespeichert
+        expect(eanFotoEintrag(r)).toMatchObject({ ean: N, befund: 'unsicher', grund: 'lesungen_uneinig_tage' });
+      }
+    }
+    // die heutige Nummer steht als zweite Lesung da
+    expect(eanFotoMitVorbefund(eanFotoBestaetigen(eanFotoBefund(KFS.ean, ANDERE), ANDERE), vorher()).zweit).toBe(ANDERE);
   });
-  it('heute eine BESTÄTIGTE Abweichung → ersetzt den alten Befund (stärkerer Beleg)', () => {
+  it('alter `unsicher` bleibt `unsicher` — auch gegen zwei gleiche heutige Lesungen (Prüfrunde 06.10.: ean_unsicher bleibt beim Menschen)', () => {
     const ab = eanFotoBestaetigen(eanFotoBefund(KFS.ean, ANDERE), ANDERE);
-    expect(eanFotoMitVorbefund(ab, vorher({ befund: 'unsicher' }))).toBe(ab);
-    // eine unbestätigte heutige ersetzt ihn nicht
-    const unb = eanFotoBestaetigen(eanFotoBefund(KFS.ean, ANDERE), '');
-    expect(eanFotoMitVorbefund(unb, vorher())).toMatchObject({ art: 'abweichend', gelesen: '4013602136424', vorbefund: expect.any(Object) });
+    for (const heute of [ab, eanFotoBefund(KFS.ean, KFS.ean), null]) {
+      expect(eanFotoMitVorbefund(heute, vorher({ befund: 'unsicher', zweit: null }))).toMatchObject({ art: 'unsicher', gelesen: '4013602136424', vorbefund: expect.any(Object) });
+    }
+  });
+  it('heute dieselbe Nummer BESTÄTIGT → ersetzt den alten Abweichungs-Befund; ein Bremsvermerk bleibt', () => {
+    const N = '4013602136424';
+    const ab = eanFotoBestaetigen(eanFotoBefund(KFS.ean, N), N);
+    expect(eanFotoMitVorbefund(ab, vorher())).toBe(ab);
+    const r = eanFotoMitVorbefund(ab, vorher({ bestaetigt: true, gebremst: 'L0' }));
+    expect(r).toMatchObject({ art: 'abweichend', gelesen: N, bestaetigt: true, korrekturGebremst: 'L0' });
+    expect(eanFotoEintrag(r)).toEqual({ ean: N, befund: 'abweichend', bestaetigt: true, zweit: N, korrekturfaehig: true, korrekturGebremst: 'L0' });
+    // übernommen (ohne heutige Bestätigung): der Vermerk bleibt ebenfalls
+    expect(eanFotoMitVorbefund(null, vorher({ bestaetigt: true, gebremst: 'L0' }))).toMatchObject({ korrekturGebremst: 'L0', vorbefund: expect.any(Object) });
   });
   it('eanFotoEintrag: was am Dokument landet — ganze Form, ohne Reste', () => {
     expect(eanFotoEintrag(eanFotoBefund(KFS.ean, KFS.ean))).toEqual({ ean: KFS.ean, befund: 'gleich' });
-    expect(eanFotoEintrag(eanFotoBestaetigen(eanFotoBefund(KFS.ean, ANDERE), ANDERE))).toEqual({ ean: ANDERE, befund: 'abweichend', bestaetigt: true });
+    expect(eanFotoEintrag(eanFotoBestaetigen(eanFotoBefund(KFS.ean, ANDERE), ANDERE))).toEqual({ ean: ANDERE, befund: 'abweichend', bestaetigt: true, zweit: ANDERE, korrekturfaehig: true });
+    // unbestätigt (zweite Lesung gescheitert): ohne zweite Lesung, Vermerk trotzdem (trägt ohnehin keine Korrektur)
+    expect(eanFotoEintrag({ ...eanFotoBefund(KFS.ean, ANDERE), bestaetigt: false, fehler: 'zeit' })).toEqual({ ean: ANDERE, befund: 'abweichend', bestaetigt: false, zweit: null, korrekturfaehig: true, fehler: 'zeit' });
     expect(eanFotoEintrag(eanFotoBestaetigen(eanFotoBefund(KFS.ean, '4013602313647'), ''))).toEqual({ ean: '4013602313647', befund: 'unsicher', grund: 'zweite_lesung_leer', zweit: null });
     expect(eanFotoEintrag({ art: 'zweifelhaft', roh: '123', gespeichert: KFS.ean })).toMatchObject({ befund: 'unsicher', ean: '123' });
     // erste Lesung abweichend, zweite gespeichert (erster Tag) → gleich, ohne Reste
     expect(eanFotoEintrag(eanFotoBestaetigen(eanFotoBefund(KFS.ean, ANDERE), KFS.ean))).toEqual({ ean: KFS.ean, befund: 'gleich', grund: 'zweite_lesung' });
     expect(eanFotoEintrag(eanFotoBefund(KFS.ean, ''))).toEqual({ ean: null, befund: 'kein_urteil', grund: 'nicht_lesbar' });
+  });
+});
+
+describe('Barcode-Korrektur (Entscheidung Patrick 06.10.2026)', () => {
+  const {
+    eanKorrekturOf, eanAbgleichOf, eanKorrekturAus, durchKorrekturErledigt, eanKorrigierbar, eanFotoKorrigiert, eanKorrekturEintrag,
+    eanFotoBefund, eanFotoBestaetigen, eanFotoOhneZweitlesung, eanFotoVorbefund, eanFotoEintrag, herkunftOf: herkunft, EAN_HALTEN,
+  } = require('../src/werte');
+  const S = '4061464833821'; // gespeichert (vom Scanner)
+  const X = '4000417025005'; // vom Foto, zweimal gleich
+  const korr = (extra = {}) => ({ ean: S, eanKorrektur: { ean: X, vorher: S, lesungen: [X, X], aus: 'heute', ...extra } });
+
+  it('eanKorrigierbar: gültige GTIN, kein Waagen-/Händlercode; EAN-8 mit 2 vorne bleibt korrigierbar', () => {
+    expect(eanKorrigierbar(X)).toBe(true);
+    expect(eanKorrigierbar('20917937')).toBe(true);
+    expect(eanKorrigierbar('4000417025006')).toBe(false); // Prüfziffer
+    expect(eanKorrigierbar('2112345001500')).toBe(false); // Waage (GTIN-13, 2x)
+    expect(eanKorrigierbar('0212345001509')).toBe(false); // 02
+    expect(eanKorrigierbar('')).toBe(false);
+    // GTIN-14 mit Packungsindikator (Umkarton/ITF-14) nie; mit führender 0 = GTIN-13, korrigierbar
+    expect(eanKorrigierbar('14061464833828')).toBe(false);
+    expect(eanKorrigierbar('0' + X)).toBe(true);
+  });
+
+  it('eanKorrekturOf: nur in sich stimmig — korrigierbar, `vorher` = gespeicherte EAN, nicht dieselbe Nummer', () => {
+    expect(eanKorrekturOf(korr())).toBe(X);
+    expect(eanKorrekturOf(korr({ vorher: '0' + S }))).toBe(X); // Schreibweise egal
+    expect(eanKorrekturOf({ ...korr(), ean: '4001382088125' })).toBeNull(); // korrigiert eine andere Nummer
+    expect(eanKorrekturOf(korr({ ean: '4000417025006' }))).toBeNull();
+    expect(eanKorrekturOf(korr({ ean: '2112345001500' }))).toBeNull();
+    expect(eanKorrekturOf(korr({ ean: S }))).toBeNull();
+    expect(eanKorrekturOf({ ean: S })).toBeNull();
+    expect(eanKorrekturOf({ eanKorrektur: { ean: X, vorher: S } })).toBeNull(); // ohne gespeicherte EAN
+  });
+
+  it('eanOf: korrigiert vor gespeichert vor nachgelesen; ungültige Korrektur zählt nicht', () => {
+    expect(eanOf(korr())).toBe(X);
+    expect(eanOf({ ...korr({ ean: '4000417025006' }) })).toBe(S);
+    expect(eanOf({ ...korr(), eanRescueOcr: '4001382088125' })).toBe(X);
+    expect(eanAbgleichOf(korr())).toBe(X);
+    expect(eanAbgleichOf({ ean: S })).toBe(S);
+    expect(herkunft(korr())).toMatchObject({ eanKorrigiert: true, eanNachgelesen: false });
+    expect(policyOf('k', korr()).ean).toBe(X);
+    expect(vollstaendigkeitOf(korr()).ean).toBe(X);
+  });
+
+  it('eanKorrekturAus ohne alten Befund: nur abweichend UND bestätigt UND korrigierbar', () => {
+    const ab = eanFotoBestaetigen(eanFotoBefund(S, X), X);
+    expect(eanKorrekturAus({ ean: S }, ab)).toEqual({ ean: X, vorher: S, lesungen: [X, X], aus: 'heute', befundVom: null });
+    // zweite Lesung in anderer Schreibweise (UPC/0-Präfix) — dieselbe GTIN, beide Lesungen gemerkt
+    expect(eanKorrekturAus({ ean: S }, eanFotoBestaetigen(eanFotoBefund(S, X), '0' + X))).toMatchObject({ ean: X, lesungen: [X, '0' + X] });
+    expect(eanKorrekturAus({ ean: S }, eanFotoBestaetigen(eanFotoBefund(S, X), ''))).toBeNull(); // unsicher
+    expect(eanKorrekturAus({ ean: S }, eanFotoBestaetigen(eanFotoBefund(S, X), '4001382088125'))).toBeNull();
+    expect(eanKorrekturAus({ ean: S }, eanFotoOhneZweitlesung(eanFotoBefund(S, X), 'zeit'))).toBeNull(); // nur eine Lesung
+    expect(eanKorrekturAus({ ean: S }, eanFotoBefund(S, S))).toBeNull();
+    expect(eanKorrekturAus({ ean: S }, eanFotoBefund(S, ''))).toBeNull();
+    expect(eanKorrekturAus({ ean: S }, null)).toBeNull();
+    // Waagen-Code auf dem Foto gegen Hersteller-Barcode: abweichend + bestätigt, aber nicht korrigierbar
+    const waage = eanFotoBestaetigen(eanFotoBefund(S, '2112345001500'), '2112345001500');
+    expect(waage).toMatchObject({ art: 'abweichend', bestaetigt: true });
+    expect(eanKorrekturAus({ ean: S }, waage)).toBeNull();
+    // ohne gespeicherte EAN gibt es nichts zu korrigieren
+    expect(eanKorrekturAus({ eanRescueOcr: S }, ab)).toBeNull();
+  });
+
+  it('… höchstens EINE Korrektur je Einreichung', () => {
+    const y = '4001382088125';
+    const gegenX = eanFotoBestaetigen(eanFotoBefund(X, y), y);
+    expect(eanKorrekturAus(korr(), gegenX)).toBeNull();
+  });
+
+  it('eanKorrekturAus mit altem Halte-Befund: alle Quellen abweichend + bestätigt + dieselbe Nummer, heute kein Widerspruch', () => {
+    // Vom Code seit der Korrektur geschrieben: Vermerk + beide Lesungen (vertraut).
+    const gestern = { ean: S, eanFotoOcr: { ean: X, befund: 'abweichend', bestaetigt: true, zweit: X, korrekturfaehig: true, lauf: 'L1' } };
+    const nichtLesbar = eanFotoBefund(S, '');
+    expect(eanKorrekturAus(gestern, nichtLesbar)).toEqual({ ean: X, vorher: S, lesungen: [X, X], aus: 'vorbefund', befundVom: 'L1' });
+    expect(eanKorrekturAus(gestern, eanFotoBestaetigen(eanFotoBefund(S, X), X))).toMatchObject({ ean: X, aus: 'vorbefund' });
+    expect(eanKorrekturAus(gestern, eanFotoOhneZweitlesung(eanFotoBefund(S, X), 'zeit'))).toMatchObject({ ean: X });
+    // dieselbe Nummer, zweite Lesung leer: kein Widerspruch
+    expect(eanKorrekturAus(gestern, eanFotoBestaetigen(eanFotoBefund(S, X), ''))).toMatchObject({ ean: X });
+    // Prüfrunde 06.10.: heute KEINE Bildprüfung → keine Korrektur aus dem alten Befund
+    expect(eanKorrekturAus(gestern, null)).toBeNull();
+    // Widerspruch heute: gespeicherte gelesen, eine dritte, falsche Prüfziffer nah an S, uneinig
+    for (const heute of [
+      eanFotoBefund(S, S),
+      eanFotoBestaetigen(eanFotoBefund(S, '4001382088125'), '4001382088125'),
+      eanFotoBefund(S, '4061464833820'),
+      eanFotoBestaetigen(eanFotoBefund(S, X), '4001382088125'),
+      eanFotoBestaetigen(eanFotoBefund(S, '4001382088125'), ''),
+    ]) expect(eanKorrekturAus(gestern, heute)).toBeNull();
+    // alter Befund unbestätigt oder unsicher → nie
+    expect(eanKorrekturAus({ ean: S, eanFotoOcr: { ean: X, befund: 'abweichend', bestaetigt: false } }, nichtLesbar)).toBeNull();
+    expect(eanKorrekturAus({ ean: S, eanFotoOcr: { ean: X, befund: 'unsicher', zweit: X } }, nichtLesbar)).toBeNull();
+    expect(eanKorrekturAus({ ean: S, eanFotoOcr: { ean: X, befund: 'unsicher', grund: 'lesungen_uneinig_tage', zweit: S } }, eanFotoBestaetigen(eanFotoBefund(S, X), X))).toBeNull();
+    // Bremsvermerk an einer Quelle → nie (Prüfrunde 06.10.)
+    expect(eanKorrekturAus({ ean: S, eanFotoOcr: { ean: X, befund: 'abweichend', bestaetigt: true, korrekturGebremst: 'L0' } }, eanFotoBestaetigen(eanFotoBefund(S, X), X))).toBeNull();
+    expect(eanKorrekturAus({ ...gestern, review: { rundeOffen: { lauf: 'L2', eanFoto: { befund: 'abweichend', ean: X, bestaetigt: true, korrekturGebremst: 'L2' } } } }, nichtLesbar)).toBeNull();
+    // … auch ohne alten Befund, wenn der heutige ihn trägt
+    expect(eanKorrekturAus({ ean: S }, { ...eanFotoBestaetigen(eanFotoBefund(S, X), X), korrekturGebremst: 'L0' })).toBeNull();
+    // Rückfall in review.rundeOffen genügt, wenn er allein steht …
+    const nurRo = { ean: S, review: { rundeOffen: { lauf: 'L2', eanFoto: { befund: 'abweichend', ean: X, bestaetigt: true, zweit: X, korrekturfaehig: true } } } };
+    expect(eanKorrekturAus(nurRo, nichtLesbar)).toMatchObject({ ean: X, befundVom: 'L2' });
+    // … und zwei uneinige Quellen verhindern sie
+    expect(eanKorrekturAus({ ...gestern, review: { rundeOffen: { lauf: 'L2', eanFoto: { befund: 'abweichend', ean: '4001382088125', bestaetigt: true } } } }, nichtLesbar)).toBeNull();
+    expect(eanKorrekturAus({ ...gestern, review: { rundeOffen: { lauf: 'L2', eanFoto: { befund: 'unsicher', ean: X } } } }, nichtLesbar)).toBeNull();
+  });
+
+  it('nach der Korrektur hält der Befund, aus dem sie entstand, nicht mehr — ein späterer gegen die korrigierte Nummer schon', () => {
+    const x = { ...korr(), eanFotoOcr: { ean: X, befund: 'korrigiert', vorher: S }, review: { rundeOffen: { lauf: 'L1', eanFoto: { befund: 'abweichend', ean: X, bestaetigt: true } } } };
+    expect(durchKorrekturErledigt(x, { befund: 'abweichend', ean: X })).toBe(true);
+    expect(eanFotoVorbefund(x)).toBeNull();
+    const spaeter = { ...korr(), eanFotoOcr: { ean: '4001382088125', befund: 'abweichend', bestaetigt: true, lauf: 'L3' } };
+    expect(eanFotoVorbefund(spaeter)).toMatchObject({ befund: 'abweichend', gelesen: '4001382088125', gespeichert: X });
+    expect(EAN_HALTEN.has('korrigiert')).toBe(false);
+  });
+
+  it('eanFotoKorrigiert / eanFotoEintrag / eanKorrekturEintrag: was am Dokument landet', () => {
+    const k = { ean: X, vorher: S, lesungen: [X, X], aus: 'vorbefund', befundVom: 'L1' };
+    const b = eanFotoKorrigiert(k);
+    expect(b).toMatchObject({ art: 'korrigiert', gelesen: X, gespeichert: S, bestaetigt: true });
+    expect(eanFotoEintrag(b)).toEqual({ ean: X, befund: 'korrigiert', vorher: S, korrekturAus: 'vorbefund' });
+    expect(eanKorrekturEintrag(k)).toEqual({ ean: X, vorher: S, lesungen: [X, X], aus: 'vorbefund', befundVom: 'L1', regel: expect.stringMatching(/06\.10\.2026/) });
+    expect(eanKorrekturEintrag({ ...k, befundVom: null, aus: 'heute' })).not.toHaveProperty('befundVom');
+  });
+
+  it('eanVorher / eanNummern / teilenNummer: die ursprüngliche Nummer bleibt für die verwandten Einreichungen erhalten', () => {
+    const { eanNummern, teilenNummer, eanVorherOf, eanSchluessel } = require('../src/werte');
+    expect(eanVorherOf(korr())).toBe(S);
+    expect(eanVorherOf({ ean: S })).toBeNull();
+    expect(eanVorherOf(korr({ ean: '4000417025006' }))).toBeNull(); // ungültige Korrektur
+    const pk = policyOf('k', korr());
+    expect(pk).toMatchObject({ ean: X, eanVorher: S });
+    expect(eanNummern(pk)).toEqual([eanSchluessel(X), eanSchluessel(S)]);
+    expect(eanNummern(policyOf('a', { ean: S }))).toEqual([eanSchluessel(S)]);
+    expect(eanNummern(policyOf('a', {}))).toEqual([]);
+    expect(teilenNummer(pk, policyOf('a', { ean: S }))).toBe(true); // meine alte = deine
+    expect(teilenNummer(pk, policyOf('a', { ean: '0' + X }))).toBe(true); // meine neue = deine (andere Schreibweise)
+    expect(teilenNummer(pk, policyOf('a', { ean: S, eanKorrektur: { ean: '4001382088125', vorher: S } }))).toBe(true); // dieselbe alte
+    expect(teilenNummer(pk, policyOf('a', { ean: '4001382088125' }))).toBe(false);
+    expect(teilenNummer(policyOf('a', {}), policyOf('b', {}))).toBe(false);
+  });
+
+  it('Doppel-Regel gruppiert nach der korrigierten Nummer (dieselbe Funktion wie Runde und Konsole)', () => {
+    const frei = { ...policyOf('ref', { userId: 'u1', ean: X, status: 'approved', createdAt: T0 - 2 * 24 * STUNDE }) };
+    const kand = policyOf('k', { ...korr(), userId: 'u1', status: 'pending', createdAt: T0 });
+    expect(evaluateDuplicate(kand, [frei])).toMatchObject({ verdict: 'locked', priorId: 'ref' });
+  });
+});
+
+describe('Prüfrunde 06.10.2026 (Rückweg, Übergangslücke): wem ein alter Barcode-Befund trauen darf', () => {
+  const {
+    eanKorrekturAus, eanKorrekturOf, eanFotoBefund, eanFotoBestaetigen, eanFotoVorbefund, eanFotoMitVorbefund, eanFotoEintrag,
+    eanFotoHalteQuellen, eanKorrekturVerworfen, durchKorrekturErledigt, eanVorherOf, LETZTER_LAUF_OHNE_VERMERK, eanKorrekturEintrag,
+  } = require('../src/werte');
+  const S = '4061464833821'; // gespeichert
+  const X = '4000417025005'; // vom Foto
+  const Y = '4001382088125'; // eine dritte
+  const ALT = LETZTER_LAUF_OHNE_VERMERK;
+  const SPAETER = '2026-10-07_080001'; // ein Lauf des alten Codes NACH dem 06.10.
+  const nichtLesbar = eanFotoBefund(S, '');
+  const zweimal = (n) => eanFotoBestaetigen(eanFotoBefund(S, n), n);
+  /** Was der alte Code (fe89647e) schreibt: eanFotoOcr ohne Vermerk/zweit, Rückfall ohne Vermerk. */
+  const altCode = (ean, lauf, { befund = 'abweichend', bestaetigt = true, ro = true } = {}) => ({
+    ean: S,
+    eanFotoOcr: { ean, befund, ...(befund === 'abweichend' ? { bestaetigt } : { zweit: null }), lauf },
+    ...(ro ? { review: { rundeOffen: { lauf, eanFoto: { befund, ean, ...(befund === 'abweichend' ? { bestaetigt } : { zweit: null }) } } } } : {}),
+  });
+
+  it('der Lauf vom 06.10. (einziger Blick, an den Daten geprüft) ist ohne Vermerk vertraut: nicht lesbar heute → korrigiert', () => {
+    expect(ALT).toBe('2026-10-06_080038');
+    const x = altCode(X, ALT);
+    expect(eanFotoHalteQuellen(x).map((q) => q.vertraut)).toEqual([true, true]);
+    expect(eanFotoVorbefund(x)).toMatchObject({ vertraut: true, korrekturfaehig: true });
+    expect(eanKorrekturAus(x, nichtLesbar)).toEqual({ ean: X, vorher: S, lesungen: [X, X], aus: 'vorbefund', befundVom: ALT });
+  });
+
+  it('Befund des alten Codes aus einem SPÄTEREN Lauf (Übergang): nicht lesbar reicht NICHT, nur heute selbst zweimal dieselbe Nummer', () => {
+    const x = altCode(X, SPAETER);
+    expect(eanFotoVorbefund(x)).toMatchObject({ vertraut: false, korrekturfaehig: false });
+    expect(eanKorrekturAus(x, nichtLesbar)).toBeNull();
+    expect(eanKorrekturAus(x, eanFotoBestaetigen(eanFotoBefund(S, X), ''))).toBeNull(); // nur einmal
+    expect(eanKorrekturAus(x, zweimal(Y))).toBeNull();
+    expect(eanKorrekturAus(x, zweimal(X))).toEqual({ ean: X, vorher: S, lesungen: [X, X], aus: 'vorbefund', befundVom: SPAETER, heuteBestaetigt: true });
+    expect(eanKorrekturEintrag(eanKorrekturAus(x, zweimal(X)))).toMatchObject({ heuteBestaetigt: true });
+  });
+
+  it('… dasselbe, wenn nur der Rückfall vom späteren Lauf stammt (der alte Code schrieb ihn jeden Morgen neu — auch über einen Widerspruch hinweg)', () => {
+    const x = { ...altCode(X, ALT), review: { rundeOffen: { lauf: SPAETER, eanFoto: { befund: 'abweichend', ean: X, bestaetigt: true } } } };
+    expect(eanFotoHalteQuellen(x).map((q) => q.vertraut)).toEqual([true, false]);
+    expect(eanKorrekturAus(x, nichtLesbar)).toBeNull();
+    expect(eanKorrekturAus(x, zweimal(X))).toMatchObject({ ean: X, heuteBestaetigt: true });
+  });
+
+  it('Delverde Eliche (otzruv…_4): 06.10. `unsicher`, der alte Code ersetzt das am 07.10. durch „abweichend, bestätigt M" → am 08.10. bei unlesbarem Foto KEINE Korrektur', () => {
+    const M = '8002270014512'; // gültige Prüfziffer, vom unscharfen Foto erfunden
+    const gespeichert = '8000270013122';
+    const nach07 = { ...altCode(M, SPAETER), ean: gespeichert };
+    expect(eanKorrekturAus(nach07, eanFotoBefund(gespeichert, ''))).toBeNull();
+    // Gegenprobe: mit dem neuen Code durchgehend bleibt der alte `unsicher` `unsicher` — nie korrigierbar
+    const unsicher = { ...altCode(M, ALT, { befund: 'unsicher' }), ean: gespeichert };
+    const heute = eanFotoBestaetigen(eanFotoBefund(gespeichert, M), M);
+    const r = eanFotoMitVorbefund(heute, eanFotoVorbefund(unsicher));
+    expect(r).toMatchObject({ art: 'unsicher', vorbefund: expect.any(Object) });
+    expect(eanKorrekturAus(unsicher, heute)).toBeNull();
+  });
+
+  it('mit Vermerk vertraut nur, wenn eine bestätigte Abweichung beide gleichen Lesungen trägt; `korrekturfaehig: false` nie — auch nicht aus dem Lauf vom 06.10.', () => {
+    const mit = (o) => ({ ean: S, eanFotoOcr: { ean: X, befund: 'abweichend', bestaetigt: true, lauf: SPAETER, ...o } });
+    expect(eanFotoVorbefund(mit({ korrekturfaehig: true, zweit: X }))).toMatchObject({ vertraut: true });
+    expect(eanFotoVorbefund(mit({ korrekturfaehig: true, zweit: '0' + X }))).toMatchObject({ vertraut: true }); // Schreibweise egal
+    expect(eanFotoVorbefund(mit({ korrekturfaehig: true }))).toMatchObject({ vertraut: false }); // zweite Lesung fehlt
+    expect(eanFotoVorbefund(mit({ korrekturfaehig: true, zweit: Y }))).toMatchObject({ vertraut: false });
+    expect(eanFotoVorbefund(mit({ korrekturfaehig: false, zweit: X, lauf: ALT }))).toMatchObject({ vertraut: false });
+    expect(eanKorrekturAus(mit({ korrekturfaehig: false, zweit: X, lauf: ALT }), nichtLesbar)).toBeNull();
+    // unsicher ist nie vertraut
+    expect(eanFotoHalteQuellen({ ean: S, eanFotoOcr: { ean: X, befund: 'unsicher', zweit: null, lauf: ALT } })[0].vertraut).toBe(false);
+  });
+
+  it('eanFotoVorbefund: korrekturfaehig nur, wenn ALLE Quellen vertraut UND einig sind', () => {
+    const fo = { ean: X, befund: 'abweichend', bestaetigt: true, zweit: X, korrekturfaehig: true, lauf: 'L1' };
+    expect(eanFotoVorbefund({ ean: S, eanFotoOcr: fo, review: { rundeOffen: { lauf: 'L1', eanFoto: { befund: 'abweichend', ean: X, bestaetigt: true, zweit: X, korrekturfaehig: true } } } }).korrekturfaehig).toBe(true);
+    expect(eanFotoVorbefund({ ean: S, eanFotoOcr: fo, review: { rundeOffen: { lauf: 'L1', eanFoto: { befund: 'abweichend', ean: Y, bestaetigt: true, zweit: Y, korrekturfaehig: true } } } }).korrekturfaehig).toBe(false);
+    expect(eanFotoVorbefund({ ean: S, eanFotoOcr: fo, review: { rundeOffen: { lauf: SPAETER, eanFoto: { befund: 'abweichend', ean: X, bestaetigt: true } } } }).korrekturfaehig).toBe(false);
+  });
+
+  it('übernommener Befund: der Vermerk geht mit; ein nicht vertrauter bleibt beim Neuschreiben ausdrücklich nicht vertraut (kein Waschen)', () => {
+    const vertraut = eanFotoMitVorbefund(nichtLesbar, eanFotoVorbefund(altCode(X, ALT)));
+    expect(vertraut).toMatchObject({ art: 'abweichend', korrekturfaehig: true, zweit: X, vorbefund: expect.any(Object) });
+    expect(eanFotoEintrag(vertraut)).toMatchObject({ befund: 'abweichend', bestaetigt: true, zweit: X, korrekturfaehig: true });
+    const fremd = eanFotoMitVorbefund(nichtLesbar, eanFotoVorbefund(altCode(X, SPAETER)));
+    expect(fremd).toMatchObject({ korrekturfaehig: false });
+    expect(eanFotoEintrag(fremd)).toMatchObject({ korrekturfaehig: false });
+    // … und so neu geschrieben ist er auch am nächsten Morgen nicht vertraut
+    const neu = { ean: S, eanFotoOcr: { ...eanFotoEintrag(fremd), lauf: '2026-10-08_080000' } };
+    expect(eanKorrekturAus(neu, nichtLesbar)).toBeNull();
+  });
+
+  it('verworfene Korrektur: gilt nicht mehr, nie wieder korrigiert, der Befund, aus dem sie entstand, hält wieder', () => {
+    const k = { ean: X, vorher: S, lesungen: [X, X], aus: 'heute' };
+    const x = { ean: S, eanKorrektur: k, eanKorrekturVerworfen: { by: 'patrick', notiz: 'Scanner-Nummer stimmt' }, review: { rundeOffen: { lauf: 'L1', eanFoto: { befund: 'abweichend', ean: X, bestaetigt: true, zweit: X, korrekturfaehig: true } } } };
+    expect(eanKorrekturVerworfen(x)).toBe(true);
+    expect(eanKorrekturOf(x)).toBeNull();
+    expect(eanOf(x)).toBe(S);
+    expect(policyOf('k', x)).toMatchObject({ ean: S, eanVorher: null });
+    expect(eanVorherOf(x)).toBeNull();
+    expect(durchKorrekturErledigt(x, { befund: 'abweichend', ean: X })).toBe(false);
+    expect(eanFotoVorbefund(x)).toMatchObject({ befund: 'abweichend', gelesen: X });
+    // nie wieder — weder aus dem alten Befund noch aus zwei heutigen Lesungen
+    expect(eanKorrekturAus(x, zweimal(X))).toBeNull();
+    expect(eanKorrekturAus({ ean: S, eanKorrekturVerworfen: { by: 'p' } }, zweimal(X))).toBeNull();
+    // ohne Verwerfen derselbe Fall: korrigiert
+    expect(eanKorrekturOf({ ean: S, eanKorrektur: k })).toBe(X);
   });
 });

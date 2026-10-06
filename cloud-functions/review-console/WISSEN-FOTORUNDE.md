@@ -13,6 +13,7 @@ hat, steht hier als Regel. Wer die Runde ändert, ändert zuerst diese Datei.
 | Doppel-Regel | `src/duplicatePolicy.js` — DIESELBE Datei wie die Prüfkonsole |
 | Gesperrte Konten | `src/kontoSperre.js` — liest `cashback_sperren/{uid}` (server-only), Runde UND Konsole |
 | Nummer vom Barcode-Foto | `src/werte.js` (`eanFotoBefund`, `eanFotoMitVorbefund`), gelesen in der Bildprüfung, abgelegt in `eanFotoOcr` |
+| Barcode-Korrektur (06.10.2026) | `src/werte.js` (`eanKorrekturAus`, `eanKorrekturOf`, `eanOf`), abgelegt in `eanKorrektur`; Notbremse `fotoRundeRegeln.korrekturBremse` |
 | Halte-Grund für die Prüfkonsole | `review.rundeOffen` (`fotoRundeRegeln.rundeOffenEintrag`), gelesen in `einreichung.precheckOf`; Foto-Befunde früherer Läufe: `fotoRundeRegeln.bildMitVorbefund` |
 | Warnungen | `src/warnungen.js` (+ Tests) |
 | Buchung + Push | `crowd-upload-reward` (Trigger bei `approved` bucht; der Sammler `crowd_push_sammler` verschickt EINE Nachricht pro Person) |
@@ -48,8 +49,15 @@ Notbremse zurückhält — das steht im Bericht unter `wartetAufDich`.
    Aufruf die Nummer unter dem Strichcode des Barcode-Fotos mit (`eanFoto`);
    wo nötig folgt eine zweite Lesung nur dieses Fotos (innerhalb der
    Arbeitszeit). Ein Halte-Befund eines früheren Laufs gilt weiter, bis ein
-   Mensch in der Konsole entscheidet. Die Runde
+   Mensch in der Konsole entscheidet — außer der Halt erfüllt das Kriterium
+   der Barcode-Korrektur (siehe dort). Die Runde
    legt das Ergebnis in `eanFotoOcr` ab (als Ganzes ersetzt), auch im Trockenlauf.
+   **Barcode korrigieren** (seit 06.10.2026): eine zweimal gleich gelesene,
+   gültige Foto-Nummer (kein Waagen-Code) wird zur EAN der Einreichung
+   (`eanKorrektur`, zusammen mit `eanFotoOcr` in EINEM Schreibvorgang — NUR im
+   scharfen Lauf, nie im Trockenlauf, und nur mit eingeschaltetem Schalter
+   `cashback_config/v1.barcodeKorrektur === true`); alle weiteren Schritte
+   rechnen mit ihr.
 5. **Chronologisch entscheiden** (`entscheideFall`) — eine im selben Lauf
    entschiedene Einreichung ist für die nächste derselben EAN Referenz bzw.
    kein offener Vorgänger mehr. „Dieselbe EAN" heißt dieselbe GTIN in jeder
@@ -184,6 +192,217 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   Prüfziffer allein schützt also nicht. Kosten: ~15 Ausgabe-Token je Fall im
   ohnehin laufenden Aufruf (Eingabe ~8.200 Token für 7 Fotos), dazu eine
   Lesung eines einzelnen Fotos je Abweichung (~3 % der Fälle).
+- **Barcode-Korrektur (Entscheidung Patrick 06.10.2026: „ja").** Eindeutige
+  Fälle korrigiert die Runde selbst, statt sie liegen zu lassen. Eindeutig
+  heißt: das Barcode-Foto wurde von ZWEI unabhängigen Lesungen gleich gelesen
+  (Bildprüfung + zweite Lesung nur des Barcode-Fotos, `abweichend` +
+  `bestaetigt`), die Nummer ist eine gültige GTIN (Prüfziffer, 8/12/13/14
+  Stellen) und kein Waagen-/Händlercode (`istHandelsCode`: GTIN-13 mit 02/04/
+  20–29, UPC-A mit 2/4 — strenger als „02/20–29 bei 13 Stellen"; EAN-8 bleibt
+  korrigierbar). Dann gilt die Foto-Nummer als EAN der Einreichung
+  (`werte.eanOf`: korrigiert → `ean` → nachgelesen), und ALLE weiteren Regeln
+  rechnen mit ihr — Wochen-Sperre (eine Sperre unter der korrigierten Nummer
+  lehnt ab), md5-Abgleich, Preis-Pflicht, Kontosperre, Notbremsen.
+  `ean_unsicher` (zweite Lesung leer, gescheitert oder eine dritte Nummer)
+  bleibt beim Menschen; ebenso eine unbestätigte Abweichung und ein
+  Waagen-Code auf dem Foto.
+  Anlass (06.10.): 18 von 20 liegenden Fällen hingen an der Barcode-Prüfung,
+  alle Android (6.0.20/1248, 2× 6.0.17/1240), 12 von einer Person; jede
+  gespeicherte Nummer hatte eine gültige Prüfziffer, oft stimmten nur die
+  letzten 5–6 Ziffern. 8 davon zweimal gleich gelesen → korrigierbar, 10
+  `ean_unsicher` → bleiben.
+  - **Gespeichert** in `eanKorrektur` = `{ean, vorher, lesungen[2], aus:
+    'heute'|'vorbefund', befundVom?, regel, lauf, at, quelle}` — nur Server
+    (firestore.rules-Sperrliste, Rules-Test). `ean` bleibt UNVERÄNDERT: die
+    ursprüngliche Nummer für Audit und Scanner-Messung (dieselbe Regel wie bei
+    den *RescueOcr-Feldern). `eanFotoOcr.befund` wird `korrigiert` (hält nicht
+    an). Korrektur und Befund in EINEM Schreibvorgang; scheitert er, gilt die
+    Korrektur NICHT (der Fall liegt wie vorher, `ean_abweichend`, gelbe
+    Warnung) — sonst sähe die Konsole die alte Nummer ohne Barcode-Befund.
+    Die Entscheidungs-Transaktion prüft, dass die Korrektur am Dokument steht
+    (`ean_korrektur_fehlt` → liegen lassen).
+  - **Eigener Schalter `cashback_config/v1.barcodeKorrektur`** (Prüfrunde
+    06.10.2026, Rückweg). NUR `true` wendet Korrekturen an. Fehlt er, steht er
+    auf `false` oder einem anderen Wert, rechnet die Runde sie nur (Bericht:
+    `eanKorrektur.vorgeschlagen`, Liste im Dashboard „vorgeschlagen — Schalter
+    ist aus"); die Fälle liegen wie vor dem 06.10. (`ean_abweichend`). Ein
+    unbekannter oder unlesbarer Wert steht gelb im Bericht
+    (`barcode_korrektur_schalter_unbekannt`). Der Schalter steckt in der
+    Regelversion. Abschalten stoppt NEUE Korrekturen; gespeicherte gelten
+    weiter (einzeln zurücknehmen: siehe Rückweg). `fotoWorker` bleibt der
+    Schalter für alle Entscheidungen. index.js reicht den Wert aus seinem
+    eigenen Lesen der Konfiguration durch.
+  - **Rückweg: Korrektur verwerfen** (Prüfkonsole, Knopf an der Barcode-Zeile,
+    `reviewDecideUploads` mit `decision: 'ean_korrektur_verwerfen'`, Pflicht-
+    Notiz, genau eine Einreichung, jeder Status). Setzt nur
+    `eanKorrekturVerworfen = {by, at, notiz, ean, vorher, status}` (nur Server,
+    firestore.rules-Sperrliste, Rules-Test). Danach gilt wieder `ean` — in
+    Runde, Konsole (auch im EAN-Index der Warteschlange, Feld im `select`) und
+    in jeder künftigen Doppel-Prüfung (`werte.eanKorrekturOf` ignoriert eine
+    verworfene Korrektur), und die Runde korrigiert diese Einreichung NIE
+    wieder (`eanKorrekturAus`). `eanKorrektur` bleibt fürs Audit stehen, die
+    Konsole zeigt „Korrektur auf … verworfen". Entscheidet nichts: eine offene
+    Einreichung bleibt offen; weil das Foto weiter die andere Nummer zeigt,
+    hält sie mit `ean_abweichend` (Freigabe mit force + Notiz). Gerade nach
+    einer FREIGABE wichtig: ohne Rückweg blieb eine falsch korrigierte Nummer
+    für immer die EAN dieser Einreichung in der Wochen-Sperre — auch das
+    Löschen von `eanKorrektur` von Hand half nicht (der Befund `korrigiert`
+    hält nicht, am nächsten Morgen wäre bei erneut zweimal gelesener Nummer
+    wieder korrigiert worden). Einweg; zurücknehmen ließe sich das Verwerfen
+    nur von Hand.
+  - **Trockenlauf (`fotoWorker` aus) speichert KEINE Korrektur** (Prüfrunde
+    06.10.2026). Eine Korrektur wirkt dauerhaft (höchstens eine je
+    Einreichung) und hebt in der Konsole einen Halt auf — das ist eine
+    Entscheidung, keine Tatsache über die Fotos. Der Trockenlauf rechnet sie
+    nur (Bericht: `eanKorrektur.gespeichert: false`, „nur geplant"), legt in
+    `eanFotoOcr` den Befund DAVOR ab (`abweichend` + `bestaetigt`) und lässt
+    den Halt in `review.rundeOffen` stehen (`sperrend: ['ean_abweichend']`,
+    `geplant`). Der nächste scharfe Lauf korrigiert dann aus diesem Befund.
+  - **Leser der EAN:** ausschließlich `review-console` (Runde + Konsole) —
+    crowd-upload-reward, -namer, -location und die App lesen sie nicht
+    (geprüft 06.10.2026). Wer künftig die EAN einer Einreichung braucht
+    (Katalog-Übernahme, Auswertung, Export), nimmt `werte.eanOf`, NIE `ean`
+    allein. Die Konsole fragt Nachbarn über alle drei Felder ab (`ean`,
+    `eanRescueOcr`, `eanKorrektur.ean`) und zählt nach effektiver EAN.
+  - **Abgleich danach** gegen die korrigierte Nummer (`werte.eanAbgleichOf`):
+    eine spätere Bildprüfung soll sie bestätigen. Höchstens EINE Korrektur je
+    Einreichung — eine bestätigte Abweichung gegen die korrigierte Nummer hält
+    an (`ean_abweichend`). Der Befund, aus dem die Korrektur entstand, hält
+    nicht mehr (`durchKorrekturErledigt`, z. B. ein alter Rückfall in
+    `review.rundeOffen`).
+  - **Schon angehaltene Fälle:** Patricks „ja" hebt für GENAU diese Klasse
+    die Regel „ein angehaltener Fall wird nie automatisch aufgehoben" auf. Ein
+    alter Halt wird korrigiert, wenn JEDE haltende Quelle (`eanFotoOcr`,
+    `review.rundeOffen.eanFoto`) `abweichend` + `bestaetigt` mit derselben
+    korrigierbaren Nummer sagt, keine einen Bremsvermerk trägt, UND heute eine
+    Bildprüfung lief, die nicht widerspricht (nichts lesbar, oder dieselbe
+    Nummer — auch nur einmal). Ohne Bildprüfung heute keine Korrektur aus
+    einem alten Befund: ein Ausfall ist keine Bestätigung.
+    „Nicht widersprechen" genügt aber NUR, wenn jede Quelle VERTRAUT ist
+    (`werte.eanFotoHalteQuellen` `vertraut`, Prüfrunde 06.10.2026,
+    Übergangslücke): eine Abweichung mit Vermerk `korrekturfaehig: true` und —
+    bestätigt — beiden gleichen Lesungen (`zweit`), oder ohne Vermerk aus
+    genau dem Lauf `2026-10-06_080038` (`LETZTER_LAUF_OHNE_VERMERK`; beim
+    Rückfall zählt dessen Lauf). Sonst muss heute die Bildprüfung SELBST
+    zweimal dieselbe Nummer lesen (`abweichend` + `bestaetigt`); die Korrektur
+    trägt dann `heuteBestaetigt: true`. Grund: der alte Code (fe89647e, bis
+    zum Ausrollen um 08:00 aktiv, auch im Trockenlauf) ersetzt JEDEN alten
+    Halt durch eine heute bestätigte Abweichung und behält einen alten Halt
+    gegen einen Widerspruch stillschweigend — ein früheres `unsicher` oder ein
+    Widerspruch steht danach nirgends mehr. Nachgestellt am echten Fall
+    otzruv…_4 (Delverde Eliche, Foto unscharf, eine Lesung erfand
+    8002270014512): ohne Vermerk wäre am Folgetag bei unlesbarem Foto auf die
+    erfundene Nummer korrigiert und bezahlt worden. An den Daten geprüft
+    (06.10.): alle 18 haltenden Befunde offener Einreichungen und ihre
+    Rückfälle stammen aus dem Lauf `2026-10-06_080038`, keine Einreichung
+    existierte beim Lauf davor — jeder Fall wurde genau einmal angesehen.
+    Der Vermerk wandert mit: ein unverändert übernommener Befund wird mit
+    seinem Vertrauen neu geschrieben (Rückfall, Bremsvermerk), ein nicht
+    vertrauter ausdrücklich mit `korrekturfaehig: false` — Neuschreiben macht
+    nie aus einem nicht vertrauten einen vertrauten. Ein Befund des alten
+    Codes ohne `zweit` gilt beim Übernehmen als zweimal dieselbe Nummer
+    („bestätigt" hieß dort genau das).
+  - **Tagesgrenze:** höchstens 25 Korrekturen aus alten Befunden je Lauf
+    (`KORREKTUR_ALT_MAX`, die ältesten zuerst); der Rest wartet ohne Vermerk
+    auf den nächsten Lauf, gelbe Warnung `barcode_korrektur_aufgeschoben`.
+    Sie stehen außerhalb der Bremsen-Quote; ein ungewöhnlich großer Rückstand
+    (Tage mit ausgeschaltetem Schalter) soll nicht in einem Zug durchlaufen.
+  - **Ein Widerspruch über Tage bleibt am Dokument** (`werte.eanFotoMitVorbefund`,
+    Prüfrunde 06.10.2026). Liest die Bildprüfung gegen einen alten
+    `abweichend`-Halt mit Nummer N heute die gespeicherte Nummer, eine andere
+    (auch zweimal), eine mit falscher Prüfziffer, oder sind die Lesungen
+    uneinig, wird der Befund `unsicher` (`grund: 'lesungen_uneinig_tage'`,
+    `zweit` = heutige Nummer) und NEU gespeichert. `unsicher` wird nie
+    korrigiert. Bis dahin blieb der alte Befund stehen und der Widerspruch war
+    am nächsten Morgen vergessen: am Folgetag mit unlesbarem Foto wäre auf N
+    korrigiert und bezahlt worden — auch nach zwei verschiedenen, je zweimal
+    gelesenen Nummern (das Muster „unscharfes Foto erfindet Nummern"). Ein
+    alter `unsicher`-Halt bleibt `unsicher`, auch gegen zwei gleiche heutige
+    Lesungen (`ean_unsicher` bleibt beim Menschen); bis dahin ersetzte eine
+    heute bestätigte Abweichung JEDEN alten Befund und machte ihn am Folgetag
+    korrigierbar. Bericht: `eanKorrektur.uneinigUeberTage`.
+  - **Doppel-Regel über ALLE zugehörigen Nummern, an JEDEM Tag.** Unter der
+    korrigierten (effektiven) wie immer (sperrt → ablehnen). Zusätzlich
+    (`dupAlt`) über alle VERWANDTEN Einreichungen: solche, die mit dieser eine
+    Nummer teilen — effektive oder ursprünglich gespeicherte (`policyOf.eanVorher`),
+    auf jeder Seite (`werte.eanNummern`, `teilenNummer`). Eigene Freigabe dort
+    binnen 7 Tagen oder eine ältere eigene, noch offene, während die Gruppe der
+    effektiven EAN nichts fand → liegen lassen (`ean_alt_doppelt`, sperrend für
+    die Konsole), NIE ablehnen — eine alte Nummer kann ein Scanner-Fehler sein,
+    der zufällig einem anderen eigenen Produkt gehört. Fremde Einreichungen
+    halten nichts an. Drei Wege, die die Gruppe nach effektiver EAN allein
+    nicht sieht (alle in der Prüfrunde 06.10.2026 mit dem Test-Harness als
+    Doppelzahlung nachgestellt):
+    1. die gespeicherte Nummer DIESER Einreichung = Nummer einer eigenen
+       Freigabe der Woche (fremden Strichcode fotografiert);
+    2. eine frühere eigene Freigabe wurde VON dieser Nummer weg korrigiert, die
+       neue trägt wieder die falsche Nummer und das Foto ist unlesbar
+       (dieselbe Person, systematische Fehllesung des Scanners);
+    3. beide wurden von derselben alten Nummer weg auf VERSCHIEDENE Nummern
+       korrigiert.
+    Die Prüfung hängt an der GESPEICHERTEN Korrektur, nicht am heutigen
+    Befund: bis zur Prüfrunde rechnete die Runde sie nur am Tag der Korrektur
+    — am nächsten Morgen (Foto bestätigt die korrigierte Nummer, „gleich")
+    gab sie einen am Vortag angehaltenen Fall frei. Eine absichtlich falsche
+    Nummer bringt nichts: sie wird durch die Foto-Nummer ersetzt und kann nur
+    zusätzlich anhalten. (Dass jemand gleich Nummer UND Strichcode eines
+    anderen Produkts nimmt, ging schon vorher — das fängt nur die
+    Bildprüfung.) Die Konsole rechnet dasselbe (`precheckOf(…, {verwandteRows})`
+    aus `verwandteVon`/`verwandteAus`; Abfragen über alle Nummern der Zeile;
+    korrigiert ohne Nachschlagen → `ean_alt_ungeprueft`, hold).
+  - **Notbremse der Korrektur** (`korrekturBremse`): mindestens 8 und mehr
+    als 10 % — gerechnet NUR über die frischen Fälle (Prüfrunde 06.10.2026):
+    Zähler = heute geplante Korrekturen aus heutigen Lesungen (`aus:
+    'heute'`), Nenner = heute angesehene Fälle OHNE haltenden alten Befund.
+    Der liegende Bestand ist vorsortiert — normale Fälle werden täglich
+    entschieden und verschwinden, Barcode-Abweichungen bleiben liegen. Mit
+    allen geplanten über alle geprüften (Stand bis zur Prüfrunde) schlug die
+    Bremse beim Ausrollen fast sicher an (gemessen 06.10.: 85 offen, davon 8
+    bestätigte Altfälle; frisch 8 von 175 = 4,6 %; über 10 % bei weniger als
+    ~44 Eingängen über Nacht, ohne Eingänge 12,9 %) und hätte genau die Fälle
+    für immer gesperrt, die Patrick aufgelöst haben wollte. Die frühere
+    Annahme „der Anteil bleibt auch bei einem Rückstand aussagekräftig" war
+    falsch. Schlägt die Bremse an, gilt sie für ALLE Korrekturen des Laufs,
+    auch die aus alten Befunden (sie hängen an der heutigen Lesung mit):
+    heute KEINE Korrektur, alle liegen wie vorher (`ean_abweichend`), rote
+    Warnung `barcode_korrektur_gebremst` (Zahlen der frischen Fälle).
+    - Scharfer Lauf mit Schalter an: die Runde vermerkt die Bremse am Befund
+      (`eanFotoOcr.korrekturGebremst` und `review.rundeOffen.eanFoto.
+      korrekturGebremst` = Lauf) — diese Fälle korrigiert sie auch später NIE,
+      ein Mensch entscheidet. Bericht: `eanKorrektur.gebremstHaelt`.
+    - Ohne Speichern (Trockenlauf, Schalter aus): KEIN Vermerk — er wirkt
+      dauerhaft wie eine Entscheidung (Prüfrunde 06.10.2026: sonst hätte der
+      übliche Trockenlauf nach dem Ausrollen die Altfälle schon vor dem ersten
+      scharfen Lauf für immer gesperrt). Die heute gelesenen Befunde werden
+      stattdessen mit `korrekturfaehig: false` abgelegt: eine spätere
+      Korrektur braucht eine neue, zweifache Lesung; „nichts lesbar" reicht
+      dann nicht. Die Warnung sagt „nichts dauerhaft vermerkt".
+    Bericht: `eanKorrektur.quote = {korrigiert, geprueft}`, `gebremstVermerkt`.
+  - **Notbremsen-Quote:** kein neuer Ablehngrund. Korrigierte Fälle enden mit
+    den gewohnten Gründen (Wochen-Sperre bleibt außerhalb der Gesamtquote);
+    `ean_alt_doppelt` und `ean_korrektur_fehlt` sind Liegegründe.
+  - **Bericht:** `eanKorrektur` = `{korrigiert, ausHeute, ausVorbefund,
+    nichtGespeichert, gebremst, gebremstAnzahl, quote, gebremstVermerkt,
+    aufgeschoben, schalter, schalterUnbekannt?, vorgeschlagen,
+    vorgeschlagenFaelle[], gespeichert, uneinigUeberTage, gebremstHaelt,
+    faelle[{id, vorher, neu, aus, entscheidung, grund}]}`,
+    `notbremse.korrektur`, `eanFoto.korrigiert`; im Dashboard „Barcode
+    automatisch korrigiert" mit Liste alt → neu (im Trockenlauf „nur geplant").
+  - **Übertragbare Lehre (Prüfrunde 06.10.2026, vier Funde derselben Art):**
+    Ein Schutz, der an einem ZUSTAND hängt (korrigiert, gebremst, widersprochen),
+    muss aus dem GESPEICHERTEN Zustand gerechnet werden, nicht aus dem
+    heutigen Ereignis — sonst gilt er genau einen Lauf, und der nächste Morgen
+    entscheidet ohne ihn. Prüffrage bei jeder neuen Halte-Regel der Runde:
+    Was sieht der Lauf von MORGEN, wenn die Bildprüfung dann „gleich",
+    „nichts lesbar" oder gar nichts liefert?
+    Zweite Runde derselben Prüfung (Übergang, Bremse, Rückweg): (1) eine Regel,
+    die gespeicherten Zuständen vertraut, muss auch die Zustände kennen, die
+    der ALTE Code bis zum Ausrollen noch schreibt — sonst öffnet das Ausrollen
+    selbst die Lücke; (2) eine Quote über einen vorsortierten Rückstand misst
+    den Rückstand, nicht das Modell; (3) was dauerhaft wirkt (Korrektur,
+    Bremsvermerk), schreibt nur der scharfe Lauf; (4) jede automatische
+    Entscheidungsregel braucht einen eigenen Schalter und einen Rückweg für
+    den Einzelfall.
 - **Foto-Abgleich gegen ALLE früheren Einreichungen (Entscheidung Patrick
   02.10.2026).** Gruppen gleicher Identitätsfotos (Pfad oder md5, leere
   Dateien ausgenommen). Die älteste Einreichung einer Gruppe trägt nie einen
@@ -322,7 +541,8 @@ gesperrten Konten), dort als „Vorprüfung ok" mit Freigabe-Taste.
   (`foto_fremdes_konto`), in einer älteren offenen (`foto_aeltere_offen`)
   oder bezahlten eigenen Einreichung (`bilder_wiederverwendet`, z. B. von der
   Notbremse zurückgehalten), abweichende/unsichere Barcode-Nummer
-  (`ean_abweichend`/`ean_unsicher`). Die Konsole macht daraus `hold` —
+  (`ean_abweichend`/`ean_unsicher`), eigene Einreichung dieser Woche unter
+  einer zugehörigen Nummer (`ean_alt_doppelt`, 06.10.2026). Die Konsole macht daraus `hold` —
   Freigabe nur mit force + Notiz. Alle anderen Gründe (Bildprüfung
   gescheitert, Ort auffällig, Preis unsicher …) stehen nur zur Information da.
 - **Nicht in `holdReasons`**: die zeigt die App bei offenen Fällen als
@@ -423,7 +643,8 @@ Freigaben laufen IMMER — sie sind die harmlose Richtung. Zurückgehalten
   gespeicherte, gilt die erste als Fehllesung → `gleich`, die Runde
   entscheidet normal weiter (meist Freigabe). Wirkung laut Trockenlauf ~1
   Fall/Tag. Gilt nur am ersten Tag: ein einmal angehaltener Fall wird nie
-  automatisch aufgehoben. (`werte.eanFotoBestaetigen`)
+  automatisch aufgehoben — mit EINER Ausnahme seit 06.10.2026, der
+  Barcode-Korrektur (siehe dort). (`werte.eanFotoBestaetigen`)
   Ebenso: die alten Handrunden-Skripte (`.crowd-review-0909/1309.js`, nicht
   versioniert) schreiben `dup.reason` unverändert — nicht mehr benutzen.
 
@@ -444,7 +665,11 @@ Zweifel mehr liegen), mehr als 10 % (mind. 8) der geprüften Fälle heute NEU
 wegen der Barcode-Nummer angehalten (gelb, über 25 % rot; normal ~3 % — ein
 Sprung deutet auf das Modell, Prüfrunde 2), Halte-Grund für die Konsole nicht
 gespeichert (rot) bzw. nur der Barcode-Befund nicht (gelb, steht ersatzweise
-am Halte-Grund). Dass die Runde gar nicht lief, erkennen
+am Halte-Grund), Barcode-Korrektur gebremst (rot, siehe Barcode-Korrektur;
+Zahlen der frischen Fälle, im Trockenlauf „nichts dauerhaft vermerkt"),
+Korrekturen aus alten Befunden über der Tagesgrenze (gelb), Schalter
+`barcodeKorrektur` unbekannt oder nicht lesbar (gelb)
+bzw. eine Korrektur nicht gespeichert (gelb). Dass die Runde gar nicht lief, erkennen
 Dashboard und Morgen-Chat selbst (Bericht älter als 26 h bzw. nicht von heute).
 
 ## Nachricht an die Nutzer

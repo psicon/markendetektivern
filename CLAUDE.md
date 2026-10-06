@@ -3243,6 +3243,37 @@ Patrick, 02.10.: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche",
   ein einmal angehaltener Fall wird nie automatisch aufgehoben. Ausnahme nur
   am ersten Tag (Patrick 04.10.: „ja"): liest die zweite Lesung die
   gespeicherte Nummer, war die erste eine Fehllesung → weiter.
+- **Eindeutige Barcode-Fälle korrigiert die Morgenrunde selbst** (Patrick
+  06.10.2026: „ja"). Eindeutig = das Barcode-Foto zweimal unabhängig gleich
+  gelesen UND gültige GTIN UND kein Waagen-/Händlercode. Dann gilt die
+  Foto-Nummer als EAN (`eanKorrektur`, nur Server; `ean` bleibt die
+  gespeicherte für Audit), alle weiteren Regeln rechnen mit ihr. Das gilt auch
+  für schon angehaltene `ean_abweichend`-Fälle, deren gespeicherte Lesungen das
+  erfüllen — Patricks „ja" hebt für GENAU diese Klasse „nie automatisch
+  aufheben" auf, solange die heutige Lesung nicht widerspricht.
+  `ean_unsicher` bleibt beim Menschen — auch ein alter `ean_unsicher` gegen
+  zwei gleiche spätere Lesungen; widersprechen sich die Lesungen über Tage,
+  wird der Halt `unsicher` und nie korrigiert. Ohne Bildprüfung am selben
+  Morgen keine Korrektur aus einem alten Halt. Die Wochen-Sperre läuft
+  zusätzlich über alle zugehörigen Nummern (gespeichert/korrigiert, eigene
+  und frühere Einreichungen), an JEDEM Tag; trifft sie dort, bleibt der Fall
+  liegen (`ean_alt_doppelt`), sonst käme ein schon bezahltes Produkt mit
+  einem fremden Strichcode-Foto durch. Eigene Notbremse (≥ 8 und > 10 % der
+  heute NEU geprüften Fälle → keine Korrektur; nur im scharfen Lauf Vermerk am
+  Befund: diese Fälle nie automatisch). Eigener Schalter
+  `cashback_config/v1.barcodeKorrektur` — NUR `true` wendet an, sonst nur
+  Vorschlag im Bericht (nach dem Ausrollen von Patrick einzuschalten). Eine
+  falsche Korrektur nimmt die Prüfkonsole einzeln zurück („Korrektur
+  verwerfen", `eanKorrekturVerworfen`, danach nie wieder korrigiert). Der
+  Trockenlauf speichert weder Korrektur noch Bremsvermerk. Befunde des
+  ALTEN Codes nach dessen letztem Lauf `2026-10-06_080038` tragen allein
+  keine Korrektur (er verschluckt Widersprüche) — dort muss die Runde die
+  Nummer heute selbst zweimal lesen. Die EAN einer
+  Einreichung IMMER über `werte.eanOf` lesen, nie `ean` allein. Lehre der
+  Prüfrunde: ein Schutz, der an einem Zustand hängt, wird aus dem
+  GESPEICHERTEN Zustand gerechnet, nie aus dem heutigen Ereignis — sonst
+  gilt er nur einen Lauf; und eine Vertrauensregel muss kennen, was der alte
+  Code bis zum Ausrollen noch schreibt. Details: `cloud-functions/review-console/WISSEN-FOTORUNDE.md`.
 - **Anderer Markt innerhalb der Woche zählt NICHT als neue Erfassung**
   (Patrick 04.10.: „nein").
 - **Foto-Abgleich (md5) gegen ALLE früheren Einreichungen**, Preisfoto

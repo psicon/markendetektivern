@@ -5,7 +5,7 @@
  * denselben Fall dasselbe sagen (Befund 26.09.2026).
  */
 const {
-  rowOf, stripPolicy, precheckOf, precheckFuerFall, nachbarnAus, nachbarnVon, gruppiereNachEan, eanIndex, baueFotoListe, bildDefektOf, safeStatus, rundeOffenOf, wiedereroeffnetOf,
+  rowOf, stripPolicy, precheckOf, precheckFuerFall, nachbarnAus, nachbarnVon, verwandteAus, verwandteVon, gruppiereNachEan, eanIndex, baueFotoListe, bildDefektOf, safeStatus, rundeOffenOf, wiedereroeffnetOf,
 } = require('../src/einreichung');
 const { eanSchluessel } = require('../src/werte');
 
@@ -52,7 +52,8 @@ describe('rowOf: angezeigt wird der effektive Wert, mit Herkunft', () => {
   it('Namer-Werte gehen vor, Preisbild dann vom Namer', () => {
     const n = rowOf(doc('c2', basis({ productNameOcr: 'Namer', ean: ANDERE, priceOcr: { priceCents: 199 }, priceImageKind: 'kassenbon', manufacturerOcr: { name: 'Bauer' }, priceRescueOcr: { priceCents: 229, priceImageKind: 'preisschild' } })));
     expect(n).toMatchObject({ anzeigeName: 'Namer', anzeigeEan: ANDERE, priceCents: 199, priceImageKindAnzeige: 'kassenbon', manufacturer: 'Bauer' });
-    expect(n.herkunft).toEqual({ nameQuelle: 'ocr', eanNachgelesen: false, preisNachgelesen: false, herstellerNachgelesen: false });
+    expect(n.herkunft).toEqual({ nameQuelle: 'ocr', eanNachgelesen: false, eanKorrigiert: false, preisNachgelesen: false, herstellerNachgelesen: false });
+    expect(n.eanKorrektur).toBeNull();
   });
 
   it('fremder Status wird „unknown" (landet in HTML-Attributen)', () => {
@@ -368,5 +369,121 @@ describe('Zurückgeholte Ablehnung (review.wiedereroeffnet, Schlussprüfung 03.1
   it('Warteschlange zeigt den Fall als „zurückhalten"', () => {
     const l = baueFotoListe([doc('k', basis({ ean: GUELTIG, productNameOcr: 'Skyr', ...zurueck('bilder_wiederverwendet') }))], new Map(), {}, '');
     expect(l.rows[0]).toMatchObject({ verdict: 'hold', reasons: ['zurueckgeholt_doppel'] });
+  });
+});
+
+describe('Barcode-Korrektur der Morgenrunde (06.10.2026)', () => {
+  const { eanFotoZeile, eanKorrekturZeile } = require('../src/einreichung');
+  const S = GUELTIG;
+  const X = ANDERE;
+  const korrigiert = (extra = {}) => basis({
+    ean: S, productNameOcr: 'Skyr', priceOcr: { priceCents: 129 },
+    eanKorrektur: { ean: X, vorher: S, lesungen: [X, X], aus: 'heute', lauf: 'L1', at: T0 },
+    eanFotoOcr: { ean: X, befund: 'korrigiert', vorher: S },
+    ...extra,
+  });
+
+  it('rowOf: angezeigt und geprüft wird die korrigierte Nummer, die gespeicherte bleibt sichtbar', () => {
+    const r = rowOf(doc('k', korrigiert()));
+    expect(r).toMatchObject({ ean: S, anzeigeEan: X, eanKorrektur: { ean: X, vorher: S, aus: 'heute', lauf: 'L1', at: T0 }, herkunft: { eanKorrigiert: true } });
+    expect(r._policy.ean).toBe(X);
+    expect(r.eanFoto).toMatchObject({ art: 'gleich', gelesen: X });
+  });
+  it('eanKorrekturZeile: ungültige Korrektur → null (die Konsole sieht dann die gespeicherte Nummer und den Barcode-Befund)', () => {
+    expect(eanKorrekturZeile(korrigiert({ eanKorrektur: { ean: '4000417025006', vorher: S } }))).toBeNull();
+    const r = rowOf(doc('k', korrigiert({ eanKorrektur: { ean: '4000417025006', vorher: S } })));
+    expect(r.anzeigeEan).toBe(S);
+    // `befund: korrigiert` ohne gültige Korrektur: gegen die gespeicherte gerechnet → abweichend (fail-closed)
+    expect(r.eanFoto).toMatchObject({ art: 'abweichend' });
+    expect(precheckOf(r, [])).toMatchObject({ verdict: 'hold', reasons: expect.arrayContaining(['ean_abweichend']) });
+  });
+  it('eanFotoZeile: der Befund, aus dem die Korrektur entstand, hält nicht mehr; ein späterer gegen die korrigierte Nummer schon', () => {
+    expect(eanFotoZeile(korrigiert({ eanFotoOcr: { ean: X, befund: 'abweichend', bestaetigt: true } }))).toMatchObject({ art: 'gleich' });
+    expect(eanFotoZeile(korrigiert({ eanFotoOcr: { ean: '4001382088125', befund: 'abweichend', bestaetigt: true } }))).toMatchObject({ art: 'abweichend', gespeichert: X });
+  });
+  it('precheckOf: Doppel-Regel unter der korrigierten UND über alle verwandten Nummern', () => {
+    const r = rowOf(doc('k', korrigiert()));
+    const eigenUnterS = rowOf(doc('alt', basis({ ean: S, status: 'approved', createdAt: T0 - 48 * STUNDE })));
+    const eigenUnterX = rowOf(doc('altX', basis({ ean: X, status: 'approved', createdAt: T0 - 48 * STUNDE })));
+    // sauber
+    expect(precheckOf(r, [], { verwandteRows: [] })).toMatchObject({ verdict: 'ok', reasons: [] });
+    // unter der korrigierten gesperrt → locked (wie die Runde: ablehnen); verwandt ist sie auch, aber ohne zweiten Grund
+    expect(precheckOf(r, [eigenUnterX], { verwandteRows: [eigenUnterX] })).toMatchObject({ verdict: 'locked', reasons: ['sperre_woche_gleicher_nutzer'] });
+    // unter der gespeicherten gesperrt → hold
+    const pre = precheckOf(r, [], { verwandteRows: [eigenUnterS] });
+    expect(pre).toMatchObject({ verdict: 'hold', reasons: ['ean_alt_doppelt'], dupAlt: { verdict: 'locked', priorId: 'alt' } });
+    // nicht nachgeschlagen → hold (fail-closed)
+    expect(precheckOf(r, [])).toMatchObject({ verdict: 'hold', reasons: ['ean_alt_ungeprueft'] });
+    // eine FREMDE Freigabe unter der gespeicherten Nummer hält nichts an
+    const fremd = rowOf(doc('fremd', basis({ userId: 'u2', ean: S, status: 'approved', createdAt: T0 - 48 * STUNDE })));
+    expect(precheckOf(r, [], { verwandteRows: [fremd] })).toMatchObject({ verdict: 'ok', reasons: [] });
+  });
+
+  it('Prüfrunde 06.10.: auch OHNE eigene Korrektur — eine frühere eigene Freigabe, die VON dieser Nummer weg korrigiert wurde, hält an', () => {
+    // frueher: gespeichert S → korrigiert X, freigegeben. k: gespeichert S, Foto ohne Befund.
+    const frueher = doc('frueher', korrigiert({ status: 'approved', createdAt: T0 - 48 * STUNDE }));
+    const k = doc('k', basis({ ean: S, productNameOcr: 'Skyr', priceOcr: { priceCents: 129 } }));
+    const idx = gruppiereNachEan([frueher, k]);
+    const rk = rowOf(k);
+    // nach effektiver EAN gehört `frueher` nicht mehr zu S …
+    expect(nachbarnVon(idx, S).map((x) => x.id)).toEqual(['k']);
+    // … verwandt ist sie aber (ihre ursprüngliche Nummer ist S)
+    expect(verwandteVon(idx, rk).map((x) => x.id)).toEqual(['frueher']);
+    expect(verwandteAus([frueher, k, frueher], rk, 'k').map((x) => x.id)).toEqual(['frueher']);
+    expect(precheckOf(rk, nachbarnVon(idx, S), { verwandteRows: verwandteVon(idx, rk) })).toMatchObject({ verdict: 'hold', reasons: ['ean_alt_doppelt'], dup: { verdict: 'ok' }, dupAlt: { verdict: 'locked', priorId: 'frueher' } });
+    // dieselbe Lage über die Warteschlange (Index über den ganzen Bestand)
+    expect(baueFotoListe([k], eanIndex([frueher, k]), {}, '').rows[0]).toMatchObject({ id: 'k', verdict: 'hold', reasons: ['ean_alt_doppelt'] });
+  });
+
+  it('… beide von derselben alten Nummer weg korrigiert, auf verschiedene Nummern → hält an', () => {
+    const Y = '4001382088125';
+    const frueher = doc('frueher', korrigiert({ status: 'approved', createdAt: T0 - 48 * STUNDE, eanKorrektur: { ean: Y, vorher: S }, eanFotoOcr: { ean: Y, befund: 'korrigiert', vorher: S } }));
+    const k = doc('k', korrigiert());
+    const rk = rowOf(k);
+    expect(verwandteAus([frueher], rk, 'k').map((x) => x.id)).toEqual(['frueher']);
+    expect(precheckOf(rk, [], { verwandteRows: verwandteAus([frueher], rk, 'k') })).toMatchObject({ verdict: 'hold', reasons: ['ean_alt_doppelt'] });
+  });
+
+  it('… ältere Freigabe außerhalb der Woche → nichts', () => {
+    const frueher = doc('frueher', korrigiert({ status: 'approved', createdAt: T0 - 8 * 24 * STUNDE }));
+    const rk = rowOf(doc('k', basis({ ean: S, productNameOcr: 'Skyr', priceOcr: { priceCents: 129 } })));
+    expect(precheckOf(rk, [], { verwandteRows: verwandteAus([frueher], rk, 'k') })).toMatchObject({ verdict: 'ok', reasons: [] });
+  });
+  it('Warteschlange: Nachbarn über die korrigierte Nummer, die gespeicherte wird ebenfalls geprüft', () => {
+    const offen = doc('k', korrigiert());
+    const alt = doc('alt', basis({ ean: S, status: 'approved', createdAt: T0 - 48 * STUNDE }));
+    const index = eanIndex([offen, alt]);
+    expect(nachbarnVon(index, X).map((r) => r.id)).toEqual(['k']);
+    expect(nachbarnVon(index, S).map((r) => r.id)).toEqual(['alt']);
+    const liste = baueFotoListe([offen], index, {}, '');
+    expect(liste.rows[0]).toMatchObject({ id: 'k', ean: X, eanKorrigiert: true, verdict: 'hold', reasons: ['ean_alt_doppelt'] });
+    // ohne eigene Freigabe unter der gespeicherten → ok
+    expect(baueFotoListe([offen], eanIndex([offen]), {}, '').rows[0]).toMatchObject({ verdict: 'ok' });
+    // Suche findet beide Nummern
+    expect(baueFotoListe([offen], eanIndex([offen]), {}, S.slice(-6)).rows).toHaveLength(1);
+  });
+});
+
+describe('Rückweg: verworfene Barcode-Korrektur in der Konsole (Prüfrunde 06.10.2026)', () => {
+  const { INDEX_FELDER, eanKorrekturVerworfenZeile } = require('../src/einreichung');
+  const S = GUELTIG; // gespeichert
+  const verworfen = (extra = {}) => basis({
+    ean: S, productNameOcr: 'Skyr', priceOcr: { priceCents: 129 }, eanKorrektur: { ean: ANDERE, vorher: S, aus: 'heute' }, eanFotoOcr: { ean: ANDERE, befund: 'korrigiert', vorher: S },
+    eanKorrekturVerworfen: { by: 'patrick', at: { toMillis: () => T0 }, notiz: 'Scanner-Nummer stimmt', ean: ANDERE, vorher: S }, ...extra,
+  });
+
+  it('Zeile: es gilt die gespeicherte Nummer, keine Korrektur, der Vermerk fürs Audit; die Foto-Nummer hält wieder (ean_abweichend)', () => {
+    const r = rowOf(doc('k', verworfen()));
+    expect(r).toMatchObject({ anzeigeEan: S, eanKorrektur: null, eanKorrekturVerworfen: { ean: ANDERE, vorher: S, at: T0, notiz: 'Scanner-Nummer stimmt' } });
+    expect(r.eanFoto).toMatchObject({ art: 'abweichend', gelesen: ANDERE });
+    expect(precheckOf(r, [], { verwandteRows: [] })).toMatchObject({ verdict: 'hold', reasons: ['ean_abweichend'] });
+    expect(eanKorrekturVerworfenZeile({ ean: S })).toBeNull();
+  });
+
+  it('der EAN-Index der Warteschlange liest das Feld mit — sonst hielte er eine verworfene Korrektur für gültig', () => {
+    expect(INDEX_FELDER).toEqual(expect.arrayContaining(['eanKorrektur', 'eanKorrekturVerworfen']));
+    const idx = eanIndex([{ id: 'k', data: () => verworfen({ status: 'approved' }) }]);
+    expect(nachbarnVon(idx, S).map((x) => x.id)).toEqual(['k']);
+    expect(nachbarnVon(idx, ANDERE)).toEqual([]);
   });
 });

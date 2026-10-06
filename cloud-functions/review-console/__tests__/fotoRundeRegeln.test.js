@@ -500,7 +500,7 @@ describe('Halte-Grund für die Prüfkonsole (review.rundeOffen, Prüfrunde 2, 02
     expect(rundeOffenEintrag(null, {})).toBeNull();
   });
   it('RUNDE_SPERREND: genau die Befunde, die die Konsole nicht selbst prüfen kann', () => {
-    expect([...RUNDE_SPERREND].sort()).toEqual(['bilder_wiederverwendet', 'ean_abweichend', 'ean_unsicher', 'foto_aeltere_offen', 'foto_fremdes_konto']);
+    expect([...RUNDE_SPERREND].sort()).toEqual(['bilder_wiederverwendet', 'ean_abweichend', 'ean_alt_doppelt', 'ean_unsicher', 'foto_aeltere_offen', 'foto_fremdes_konto']);
   });
   it('entscheideFall: zweifelhaft (sollte nach der zweiten Lesung nie ankommen) hält wie unsicher', () => {
     expect(entscheideFall(fall({ eanFoto: { art: 'zweifelhaft', roh: '4013602313647', gelesen: null, gespeichert: '4250231136474' } })))
@@ -573,5 +573,82 @@ describe('Foto-Befund eines früheren Laufs (Schlussprüfung 03.10.2026)', () =>
     expect(rundeBefunde(eingabe)).toEqual(['foto_fremdes_konto', 'bilder_wiederverwendet']);
     // fotoSeit nur mit Foto-Befund
     expect(rundeOffenEintrag({ ...entscheideFall(fall({ audit: null, auditFehler: '429' })), eingabe: fall({ audit: null }) }, { lauf: 'L2' }).fotoSeit).toBeUndefined();
+  });
+});
+
+describe('Barcode-Korrektur (Entscheidung Patrick 06.10.2026)', () => {
+  const { korrekturBremse, KORREKTUR_BREMSE, KORREKTUR_ALT_MAX } = require('../src/fotoRundeRegeln');
+  const korrigiert = { art: 'korrigiert', gelesen: '4000417025005', gespeichert: '4061464833821', bestaetigt: true, korrektur: { aus: 'heute' } };
+  const dupOk = { verdict: 'ok', reason: null, lockUntil: null };
+
+  it('korrigiert + keine Sperre unter beiden Nummern → normal weiter (Freigabe)', () => {
+    expect(entscheideFall(fall({ eanFoto: korrigiert, dupAlt: dupOk }))).toMatchObject({ entscheidung: 'freigeben' });
+  });
+  it('korrigiert + Wochen-Sperre unter der KORRIGIERTEN Nummer → ablehnen (die Foto-Nummer ist der stärkere Beleg)', () => {
+    const dup = { verdict: 'locked', reason: WOCHE, lockUntil: 123 };
+    expect(entscheideFall(fall({ eanFoto: korrigiert, dup, dupAlt: dupOk }))).toMatchObject({ entscheidung: 'ablehnen', grund: WOCHE });
+  });
+  it('korrigiert + Sperre oder ältere offene unter der ALTEN Nummer → liegen lassen (ean_alt_doppelt), nie ablehnen', () => {
+    for (const verdict of ['locked', 'hold']) {
+      const e = entscheideFall(fall({ eanFoto: korrigiert, dupAlt: { verdict, reason: 'x' }, eanFotoHinweis: 'Hinweis' }));
+      expect(e).toMatchObject({ entscheidung: 'offen', grund: 'ean_alt_doppelt', ctx: { hinweis: 'Hinweis' } });
+    }
+  });
+  it('korrigiert ohne dupAlt (nicht geprüft) → liegen lassen (fail-closed)', () => {
+    expect(entscheideFall(fall({ eanFoto: korrigiert }))).toMatchObject({ entscheidung: 'offen', grund: 'ean_alt_doppelt' });
+  });
+  it('korrigiert hält NICHT wie abweichend; die übrigen Regeln greifen weiter (Preis-Pflicht)', () => {
+    const ohnePreis = { ...echt, preisSichtbar: false };
+    expect(entscheideFall(fall({ eanFoto: korrigiert, dupAlt: dupOk, preisVorhanden: false, audit: ohnePreis }))).toMatchObject({ entscheidung: 'ablehnen', grund: 'preis_fehlt' });
+  });
+  it('rundeBefunde / rundeOffenEintrag: ean_alt_doppelt sperrt in der Konsole; eine saubere Korrektur hinterlässt nichts', () => {
+    expect(rundeBefunde({ eanFoto: korrigiert, dupAlt: { verdict: 'locked' } })).toEqual(['ean_alt_doppelt']);
+    expect(rundeBefunde({ eanFoto: korrigiert })).toEqual(['ean_alt_doppelt']);
+    expect(rundeBefunde({ eanFoto: korrigiert, dupAlt: dupOk })).toEqual([]);
+    const p = { entscheidung: 'offen', grund: 'ean_alt_doppelt', ctx: { hinweis: 'h' }, eingabe: { eanFoto: korrigiert, dupAlt: { verdict: 'locked' } } };
+    expect(rundeOffenEintrag(p, { lauf: 'L' })).toMatchObject({ grund: 'ean_alt_doppelt', sperrend: ['ean_alt_doppelt'], eanFoto: null });
+    expect(rundeOffenEintrag({ entscheidung: 'freigeben', grund: null, eingabe: { eanFoto: korrigiert, dupAlt: dupOk } }, { lauf: 'L' })).toBeNull();
+  });
+  it('Prüfrunde 06.10.: ean_alt_doppelt hängt an `dupAlt`/`eanKorrigiert`, nicht am heutigen Barcode-Befund (Folgetage, Einreichungen ohne Korrektur)', () => {
+    // Folgetag: Foto bestätigt die korrigierte Nummer („gleich"), Korrektur steht am Dokument
+    const gleich = { art: 'gleich', gelesen: '4000417025005', gespeichert: '4000417025005' };
+    expect(entscheideFall(fall({ eanFoto: gleich, eanKorrigiert: true, dupAlt: { verdict: 'locked' }, dupAltHinweis: 'H' }))).toMatchObject({ entscheidung: 'offen', grund: 'ean_alt_doppelt', ctx: { hinweis: 'H' } });
+    expect(entscheideFall(fall({ eanFoto: null, eanKorrigiert: true }))).toMatchObject({ entscheidung: 'offen', grund: 'ean_alt_doppelt' }); // nicht geprüft
+    expect(entscheideFall(fall({ eanFoto: gleich, eanKorrigiert: true, dupAlt: dupOk }))).toMatchObject({ entscheidung: 'freigeben' });
+    // ohne eigene Korrektur: verwandte eigene Freigabe (eine frühere wurde von dieser Nummer weg korrigiert)
+    expect(entscheideFall(fall({ eanFoto: null, dupAlt: { verdict: 'locked' } }))).toMatchObject({ entscheidung: 'offen', grund: 'ean_alt_doppelt' });
+    expect(entscheideFall(fall({ eanFoto: null, dupAlt: dupOk }))).toMatchObject({ entscheidung: 'freigeben' });
+    // die Sperre unter der effektiven EAN geht vor (ablehnen bzw. ältere offene)
+    expect(entscheideFall(fall({ dup: { verdict: 'locked', reason: WOCHE, lockUntil: 1 }, dupAlt: { verdict: 'locked' } }))).toMatchObject({ entscheidung: 'ablehnen' });
+    // rundeBefunde: dieselbe Feststellung wie die Gruppe der effektiven EAN → KEIN zusätzlicher Konsolen-Halt
+    expect(rundeBefunde({ dup: { verdict: 'hold' }, dupAlt: { verdict: 'hold' } })).toEqual([]);
+    expect(rundeBefunde({ dup: dupOk, dupAlt: { verdict: 'locked' } })).toEqual(['ean_alt_doppelt']);
+    expect(rundeBefunde({ dup: dupOk, eanKorrigiert: true })).toEqual(['ean_alt_doppelt']);
+    // neben einem Barcode-Halt gegen die korrigierte Nummer steht er zusätzlich
+    expect(rundeBefunde({ dup: dupOk, eanFoto: { art: 'abweichend', gelesen: 'x' }, eanKorrigiert: true, dupAlt: { verdict: 'locked' } })).toEqual(['ean_abweichend', 'ean_alt_doppelt']);
+  });
+  it('Notbremse: der Vermerk `korrekturGebremst` landet auch im Rückfall review.rundeOffen.eanFoto', () => {
+    const ef = { art: 'abweichend', gelesen: '4000417025005', gespeichert: '4061464833821', bestaetigt: true, korrekturGebremst: 'L1' };
+    expect(rundeOffenEintrag({ entscheidung: 'offen', grund: 'ean_abweichend', ctx: {}, eingabe: { eanFoto: ef } }, { lauf: 'L1' }).eanFoto)
+      .toEqual({ befund: 'abweichend', ean: '4000417025005', bestaetigt: true, zweit: null, korrekturfaehig: true, korrekturGebremst: 'L1' });
+  });
+  it('Prüfrunde 06.10. (Übergangslücke): der Rückfall trägt beide Lesungen und den Vermerk — ein nicht vertrauter Befund bleibt nicht vertraut', () => {
+    const p = (ef) => rundeOffenEintrag({ entscheidung: 'offen', grund: 'ean_abweichend', ctx: {}, eingabe: { eanFoto: ef } }, { lauf: 'L1' }).eanFoto;
+    const ab = { art: 'abweichend', gelesen: '4000417025005', gespeichert: '4061464833821', bestaetigt: true, zweit: '04000417025005' };
+    expect(p(ab)).toEqual({ befund: 'abweichend', ean: '4000417025005', bestaetigt: true, zweit: '04000417025005', korrekturfaehig: true });
+    expect(p({ ...ab, korrekturfaehig: false })).toMatchObject({ korrekturfaehig: false });
+    // unsicher: wie bisher, ohne Vermerk
+    expect(p({ art: 'unsicher', gelesen: '4000417025005', zweit: null })).toEqual({ befund: 'unsicher', ean: '4000417025005', zweit: null });
+  });
+  it('KORREKTUR_ALT_MAX: Tagesgrenze für Korrekturen aus alten Befunden', () => {
+    expect(KORREKTUR_ALT_MAX).toBe(25);
+  });
+  it('korrekturBremse: ab 8 UND über 10 % der geprüften', () => {
+    expect(KORREKTUR_BREMSE).toEqual({ min: 8, anteil: 0.1 });
+    expect(korrekturBremse(8, 79)).toBe(true);
+    expect(korrekturBremse(8, 80)).toBe(false);
+    expect(korrekturBremse(7, 10)).toBe(false);
+    expect(korrekturBremse(8, 178)).toBe(false); // Stau 06.10.2026: 8 von 178
+    expect(korrekturBremse(8, 0)).toBe(false);
   });
 });

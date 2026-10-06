@@ -20,7 +20,9 @@
  * WAS ER LIEGEN LÄSST (`wartetAufDich` im Bericht)
  *   Alles, was an unserer Technik hängt: Storage nicht lesbar, Bildprüfung
  *   oder Nachlesen am Google-Limit gescheitert, beschädigte Datei — alles,
- *   was die Notbremse zurückhält, und jede Abweichung der Barcode-Nummer.
+ *   was die Notbremse zurückhält, und jede Abweichung der Barcode-Nummer, die
+ *   er nicht eindeutig korrigieren kann (seit 06.10.2026 korrigiert er eine
+ *   zweimal gleich gelesene, gültige Foto-Nummer selbst — werte.eanKorrekturAus).
  *   Einreichungen gesperrter Konten liegen STUMM (eigener Zähler im Bericht,
  *   nicht in `wartetAufDich`).
  * WAS ER NIE TUT
@@ -32,6 +34,10 @@
  * Angaben in die eigenen *RescueOcr-Felder — die zählen danach in Runde UND
  * Prüfkonsole mit, siehe src/werte.js — und die Befunde für die Prüfkonsole:
  * `eanFotoOcr` und `review.rundeOffen`).
+ * Eigener Schalter der Barcode-Korrektur (Prüfrunde 06.10.2026):
+ * `cashback_config/v1.barcodeKorrektur === true` → Korrekturen werden
+ * angewandt (gespeichert nur im scharfen Lauf); jeder andere Wert → nur
+ * gerechnet und im Bericht vorgeschlagen, die Fälle liegen wie vor dem 06.10.
  *
  * WAS DIE KONSOLE VON DER RUNDE ERFÄHRT (Prüfrunde 2, 02.10.2026): jeder Fall,
  * der nach dem Lauf offen ist, trägt `review.rundeOffen` (Grund, Hinweis,
@@ -50,12 +56,13 @@ const { GoogleGenAI } = require('@google/genai');
 const { evaluateDuplicate, completenessCheck, dupZumSpeichern, appGrund, REASON } = require('./duplicatePolicy');
 const {
   entscheideFall, bildBefund, fotoVorbefund, bildMitVorbefund, belegeVon, notbremse, nameAusLesungen, eanAusLesungen, rettungNichtGeschafft, rundeOffenEintrag,
-  BILD_GRUENDE, AUSSER_GESAMTQUOTE, KONTO_GESPERRT,
+  korrekturBremse, KORREKTUR_ALT_MAX, BILD_GRUENDE, AUSSER_GESAMTQUOTE, KONTO_GESPERRT,
 } = require('./fotoRundeRegeln');
 // Werte-Helfer gemeinsam mit der Prüfkonsole (index.js/einreichung.js) — eine Quelle.
 const {
   eanOf, nameOf, preisOf, policyOf, einreichZeit, pruefzifferOk, vollstaendigkeitOf, preisHinweisOf, eanSchluessel, PREIS_ARTEN,
   eanFotoBefund, eanFotoBestaetigen, eanFotoOhneZweitlesung, eanFotoVorbefund, eanFotoMitVorbefund, eanFotoEintrag, EAN_HALTEN,
+  eanAbgleichOf, eanKorrekturOf, eanKorrekturAus, eanFotoKorrigiert, eanKorrekturEintrag, gtin14, eanNummern,
 } = require('./werte');
 const { SPERREN, ladeSperren, kontoSperreVon, sperreAusDaten } = require('./kontoSperre');
 const { auffaelligkeiten } = require('./ort');
@@ -83,6 +90,8 @@ const NAMER_HAENGT_MS = 2 * 60 * 60 * 1000;
 const BUCHUNG_WARTEN_MS = 5 * 60 * 1000;
 /** Konto beim Schreiben gesperrt vorgefunden (Schritt 7) — liegt wie KONTO_GESPERRT stumm. */
 const KONTO_GESPERRT_IM_LAUF = 'konto_gesperrt_im_lauf';
+/** Entscheidung mit korrigierter EAN, aber die Korrektur steht beim Schreiben nicht am Dokument (Schritt 7). */
+const EAN_KORREKTUR_FEHLT = 'ean_korrektur_fehlt';
 
 const ms = (v) => (v && typeof v.toMillis === 'function' ? v.toMillis() : typeof v === 'number' ? v : null);
 const fmtDate = (m) => (m ? new Date(m).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Berlin' }) : null);
@@ -280,7 +289,7 @@ async function bildAudit(ai, bucket, x) {
 
 /* ─────────────────────────── Hilfen ─────────────────────────── */
 
-function regelVersion() {
+function regelVersion(barcodeKorrekturAn = false) {
   const h = crypto.createHash('sha1');
   // werte.js gehört dazu: es bestimmt, welche EAN, welcher Preis und welcher
   // Hersteller in die Regeln eingehen; ort.js, wann der Aufnahmeort auffällt.
@@ -288,6 +297,8 @@ function regelVersion() {
   for (const f of ['duplicatePolicy.js', 'fotoRundeRegeln.js', 'werte.js', 'ort.js', 'kontoSperre.js']) h.update(fs.readFileSync(path.join(__dirname, f)));
   // Ebenso die Anweisungen an das Modell: sie entscheiden mit (Gegenprüfung 26.09.).
   h.update([PROMPT_NAME, PROMPT_EAN, PROMPT_PREIS, AUDIT_ANWEISUNG].join('\n'));
+  // Und der Schalter der Barcode-Korrektur: an/aus ändert, was entschieden wird.
+  h.update(`barcodeKorrektur=${barcodeKorrekturAn === true}`);
   return h.digest('hex').slice(0, 10);
 }
 
@@ -398,8 +409,11 @@ async function dateiListe(storage) {
  *   02.10.2026, Wochen-Sperre). Der normale Trockenlauf (`dryRun`) schreibt
  *   dagegen Nachlesungen und Bericht.
  * @param {number} [opts.arbeitszeitMs]  Nach dieser Zeit beginnt die Runde nichts Neues mehr.
+ * @param {*} [opts.barcodeKorrektur]  Rohwert des Schalters der Barcode-Korrektur
+ *   (`cashback_config/v1.barcodeKorrektur`; fehlt = null). Nicht übergeben
+ *   (undefined) → die Runde liest ihn selbst. NUR `true` wendet Korrekturen an.
  */
-async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser = 'zeitplan', vergleich = null, nurLesen = false, arbeitszeitMs = ARBEITSZEIT_MS } = {}) {
+async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser = 'zeitplan', vergleich = null, nurLesen = false, arbeitszeitMs = ARBEITSZEIT_MS, barcodeKorrektur } = {}) {
   if (vergleich || nurLesen) dryRun = true;
   // Nachgelesene Angaben und die Foto-Nummer sind Tatsachen über die Fotos und
   // werden auch im normalen Trockenlauf gespeichert — nur nicht beim reinen Rechnen.
@@ -411,6 +425,25 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   const frist = start + arbeitszeitMs;
   const tag = berlinTag(start);
   const lauf = `${tag}_${berlinZeit(start)}${dryRun ? '_trocken' : ''}`;
+
+  // Schalter der Barcode-Korrektur (Prüfrunde 06.10.2026): NUR `true` wendet
+  // an. Fehlt er, ist er unbekannt oder nicht lesbar → rechnen, nicht anwenden
+  // (die Fälle liegen wie vor dem 06.10.); ein unbekannter oder unlesbarer
+  // Wert steht gelb im Bericht. Schon gespeicherte Korrekturen bleiben gültig —
+  // zurücknehmen lässt sich eine einzelne in der Prüfkonsole
+  // (`eanKorrekturVerworfen`, werte.eanKorrekturVerworfen).
+  let korrekturRoh = barcodeKorrektur;
+  let korrekturSchalterUnbekannt = null;
+  if (korrekturRoh === undefined) {
+    try { korrekturRoh = ((await db.doc('cashback_config/v1').get()).data() || {}).barcodeKorrektur ?? null; }
+    catch (e) {
+      korrekturRoh = null;
+      korrekturSchalterUnbekannt = 'nicht lesbar';
+      logger.warn('Schalter barcodeKorrektur nicht lesbar — heute keine Barcode-Korrektur', { fehler: String(e && e.message).slice(0, 160) });
+    }
+  }
+  const korrekturAn = korrekturRoh === true;
+  if (!korrekturSchalterUnbekannt && korrekturRoh != null && typeof korrekturRoh !== 'boolean') korrekturSchalterUnbekannt = String(JSON.stringify(korrekturRoh)).slice(0, 40);
 
   const [alleSnap, sperren] = await Promise.all([db.collection(COL).get(), ladeSperren(db)]);
   // `zeit`: Server-Zeitpunkt des Dokuments (createTime) — die Regeln rechnen
@@ -546,7 +579,9 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   }
   for (const d of zuPruefen) {
     const a = audit.get(d.id);
-    if (a) eanFoto.set(d.id, eanFotoBefund(d.x.ean, a.eanFoto));
+    // Gegen die korrigierte Nummer, wo schon eine steht (werte.eanAbgleichOf),
+    // sonst gegen die gespeicherte.
+    if (a) eanFoto.set(d.id, eanFotoBefund(eanAbgleichOf(d.x), a.eanFoto));
   }
   // Ein heutiges „gleich" braucht keine zweite Lesung: ohne alten Befund geht
   // es ohnehin weiter, mit altem Befund hebt es nichts auf.
@@ -563,43 +598,188 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     }
   }, PARALLEL_KI, frist);
   ohneZweitlesung.forEach((d) => eanFoto.set(d.id, eanFotoOhneZweitlesung(eanFoto.get(d.id), 'zeit_abgelaufen')));
+  // Heutiger Befund OHNE alten — die Korrektur prüft, ob er einem alten widerspricht.
+  const heuteVon = new Map(eanFoto);
   for (const [id, v] of vorbefundVon) eanFoto.set(id, eanFotoMitVorbefund(eanFoto.get(id) || null, v));
+
+  // 4c) Barcode korrigieren (Entscheidung Patrick 06.10.2026: „ja"). Zweimal
+  //     gleich gelesene, gültige Foto-Nummer (kein Waagen-Code) → sie gilt als
+  //     EAN der Einreichung, alle weiteren Regeln rechnen mit ihr. Auch für
+  //     schon angehaltene `abweichend`-Fälle, deren gespeicherte Lesungen das
+  //     erfüllen, wenn heute eine Bildprüfung lief und nicht widerspricht —
+  //     bei einem Befund ohne Vermerk aus der Übergangszeit nur, wenn heute
+  //     selbst zweimal dieselbe Nummer gelesen wurde (werte.eanKorrekturAus).
+  //     Schalter `cashback_config/v1.barcodeKorrektur` (Prüfrunde 06.10.2026):
+  //     NUR `true` wendet Korrekturen an; jeder andere Wert rechnet sie nur
+  //     für den Bericht (`vorgeschlagen`), die Fälle liegen wie vor dem 06.10.
+  //     Notbremse (fotoRundeRegeln.korrekturBremse, nur über die FRISCHEN
+  //     Fälle gerechnet): korrigiert die Runde heute auffällig viel, korrigiert
+  //     sie gar nichts. Im scharfen Lauf vermerkt sie das am Befund
+  //     (`korrekturGebremst`): diese Fälle korrigiert sie auch später nie, ein
+  //     Mensch entscheidet. Ohne Speichern (Trockenlauf, Schalter aus) wird
+  //     NICHTS vermerkt — ein Vermerk wirkt dauerhaft wie eine Entscheidung —,
+  //     die heute gelesenen Befunde gelten nur als nicht vertraut
+  //     (`korrekturfaehig: false`): eine spätere Korrektur braucht dann eine
+  //     neue, zweifache Lesung.
+  //     Aus alten Befunden höchstens KORREKTUR_ALT_MAX je Lauf (die ältesten);
+  //     sie stehen außerhalb der Bremsen-Quote.
+  //     Eine Korrektur gilt nur, wenn sie gespeichert ist — sonst sähe die
+  //     Prüfkonsole die alte Nummer ohne Barcode-Befund; dann bleibt der Fall
+  //     wie bisher liegen. Im Trockenlauf wird sie NIE gespeichert (Prüfrunde
+  //     06.10.2026): sie wirkt dauerhaft und hebt in der Konsole einen Halt
+  //     auf — das ist eine Entscheidung, keine Tatsache über die Fotos. Dort
+  //     wird nur gerechnet und der Befund davor abgelegt.
+  const speichertKorrektur = korrekturAn && schreibtAngaben && !dryRun;
+  const korrekturVon = new Map();
+  for (const d of zuBearbeiten) {
+    const k = eanKorrekturAus(d.x, heuteVon.get(d.id) || null);
+    if (k) korrekturVon.set(d.id, k);
+  }
+  const korrekturStand = {
+    geplant: korrekturVon.size,
+    ausHeuteGeplant: [...korrekturVon.values()].filter((k) => k.aus === 'heute').length,
+    ausAltGeplant: [...korrekturVon.values()].filter((k) => k.aus === 'vorbefund').length,
+    // Nenner der Bremse: heute angesehene Fälle ohne haltenden alten Befund.
+    frischGeprueft: [...audit.keys()].filter((id) => !vorbefundVon.has(id)).length,
+    gebremst: false, gebremstVermerkt: false, aufgeschoben: 0, vorgeschlagen: [], nichtGespeichert: 0, entschiedenInzwischen: 0,
+  };
+  korrekturStand.gebremst = korrekturBremse(korrekturStand.ausHeuteGeplant, korrekturStand.frischGeprueft);
+  if (korrekturStand.gebremst) {
+    for (const id of korrekturVon.keys()) {
+      const b = eanFoto.get(id);
+      if (!b) continue;
+      // `neuSpeichern`: auch ein übernommener alter Befund bekommt den Vermerk am Dokument.
+      if (speichertKorrektur) eanFoto.set(id, { ...b, korrekturGebremst: lauf, neuSpeichern: true });
+      // Ohne Speichern: nur der HEUTE gelesene Befund verliert das Vertrauen.
+      else if (!b.vorbefund) eanFoto.set(id, { ...b, korrekturfaehig: false });
+    }
+    korrekturStand.gebremstVermerkt = speichertKorrektur;
+    korrekturVon.clear();
+  }
+  if (!korrekturAn) {
+    korrekturStand.vorgeschlagen = [...korrekturVon.entries()].map(([id, k]) => ({ id, vorher: k.vorher, neu: k.ean, aus: k.aus }));
+    korrekturVon.clear();
+  } else {
+    const ausAlt = [...korrekturVon.entries()].filter(([, k]) => k.aus === 'vorbefund');
+    if (ausAlt.length > KORREKTUR_ALT_MAX) {
+      // Map-Reihenfolge = zuBearbeiten = chronologisch: die jüngsten warten.
+      for (const [id] of ausAlt.slice(KORREKTUR_ALT_MAX)) korrekturVon.delete(id);
+      korrekturStand.aufgeschoben = ausAlt.length - KORREKTUR_ALT_MAX;
+    }
+  }
+  const vorKorrektur = new Map(); // Befund vor der Korrektur — für Rückfall und Trockenlauf
+  for (const [id, k] of korrekturVon) {
+    vorKorrektur.set(id, eanFoto.get(id) || null);
+    eanFoto.set(id, eanFotoKorrigiert(k));
+  }
+  const xVon = new Map(zuBearbeiten.map((d) => [d.id, d.x]));
+  const korrekturZurueck = (id) => {
+    korrekturVon.delete(id);
+    const alt = vorKorrektur.get(id) || null;
+    if (alt) eanFoto.set(id, alt); else eanFoto.delete(id);
+    return alt;
+  };
+
   const refVon = new Map(pending.map((d) => [d.id, d.ref]));
   const eanFotoStand = { nichtGespeichert: 0, nichtGespeichertHalten: 0 };
+  // Ein übernommener alter Befund wird nicht neu geschrieben — außer er stand
+  // nur im Rückfall (`review.rundeOffen.eanFoto`), weil `eanFotoOcr` damals
+  // nicht gespeichert werden konnte, oder er bekommt einen Bremsvermerk.
+  const altUnveraendert = (b) => !!b && !!b.vorbefund && b.vorbefund.quelle === 'eanFotoOcr' && !b.neuSpeichern;
   if (schreibtAngaben) {
-    // Ein übernommener alter Befund wird nicht neu geschrieben — außer er stand
-    // nur im Rückfall (`review.rundeOffen.eanFoto`), weil `eanFotoOcr` damals
-    // nicht gespeichert werden konnte.
-    const zuSpeichern = [...eanFoto.entries()].filter(([, b]) => !(b.vorbefund && b.vorbefund.quelle === 'eanFotoOcr'));
+    const zuSpeichern = [...eanFoto.entries()]
+      // Trockenlauf: statt der (nicht gespeicherten) Korrektur der Befund davor.
+      .map(([id, b]) => [id, b.art === 'korrigiert' && !speichertKorrektur ? vorKorrektur.get(id) : b])
+      .filter(([, b]) => !!b && !altUnveraendert(b));
     await arbeite(zuSpeichern, async ([id, b]) => {
+      const korrektur = b.art === 'korrigiert' ? eanKorrekturEintrag(b.korrektur) : null;
+      const befundFeld = (x) => ({ ...eanFotoEintrag(x), at: FieldValue.serverTimestamp(), quelle: `${MODELL}/vertex, Bildprüfung der Morgenrunde`, lauf });
       try {
-        await refVon.get(id).update({ eanFotoOcr: { ...eanFotoEintrag(b), at: FieldValue.serverTimestamp(), quelle: `${MODELL}/vertex, Bildprüfung der Morgenrunde`, lauf } });
+        if (!korrektur) {
+          await refVon.get(id).update({ eanFotoOcr: befundFeld(b) });
+          return;
+        }
+        // Korrektur und Befund in EINEM Schreibvorgang: entweder beides oder
+        // nichts — und nur an einer noch OFFENEN Einreichung (Prüfrunde
+        // 06.10.2026): hat inzwischen ein Mensch entschieden (etwa „die
+        // Scanner-Nummer stimmt", force), darf die Runde die EAN dieser
+        // Entscheidung nicht nachträglich umschreiben. Dann nur der Befund
+        // davor (Tatsache über die Fotos), die Korrektur entfällt.
+        const ausgang = await db.runTransaction(async (tx) => {
+          const snap = await tx.get(refVon.get(id));
+          if (!snap.exists) return 'weg';
+          if (snap.data().status !== 'pending') {
+            const vorher = vorKorrektur.get(id);
+            if (vorher && !altUnveraendert(vorher)) tx.update(refVon.get(id), { eanFotoOcr: befundFeld(vorher) });
+            return 'entschieden';
+          }
+          tx.update(refVon.get(id), {
+            eanFotoOcr: befundFeld(b),
+            eanKorrektur: { ...korrektur, at: FieldValue.serverTimestamp(), quelle: `${MODELL}/vertex, Morgenrunde`, lauf },
+          });
+          return 'korrigiert';
+        });
+        if (ausgang === 'korrigiert') xVon.get(id).eanKorrektur = { ...korrektur, lauf };
+        else { korrekturZurueck(id); korrekturStand.entschiedenInzwischen++; }
       } catch (e) {
         // Die Konsole und der nächste Lauf sehen den Halte-Befund trotzdem:
         // er steht auch in review.rundeOffen (Schritt 7b). Gezählt, gemeldet.
         eanFotoStand.nichtGespeichert++;
-        if (EAN_HALTEN.has(b.art)) eanFotoStand.nichtGespeichertHalten++;
-        logger.warn('eanFotoOcr nicht gespeichert', { id, fehler: String(e.message).slice(0, 160) });
+        if (korrektur) {
+          korrekturStand.nichtGespeichert++;
+          const alt = korrekturZurueck(id);
+          // Der alte Befund steht noch am Dokument, wenn er aus eanFotoOcr kam.
+          if (alt && EAN_HALTEN.has(alt.art) && !altUnveraendert(alt)) eanFotoStand.nichtGespeichertHalten++;
+        } else if (EAN_HALTEN.has(b.art)) eanFotoStand.nichtGespeichertHalten++;
+        logger.warn('eanFotoOcr nicht gespeichert', { id, korrektur: !!korrektur, fehler: String(e.message).slice(0, 160) });
       }
     }, 20, null);
   }
+  // Rechnen ohne Speichern (Trockenlauf, nurLesen, vergleich): die Korrektur
+  // nur im Speicher — die Entscheidungen zeigen, was die Runde täte.
+  if (!speichertKorrektur) for (const [id, k] of korrekturVon) xVon.get(id).eanKorrektur = eanKorrekturEintrag(k);
 
   // 5) Chronologisch entscheiden — eine im selben Lauf entschiedene Einreichung
   //    ist für die nächste derselben EAN Referenz bzw. kein offener Vorgänger mehr.
   //    Gruppiert nach GTIN in jeder Schreibweise (eanSchluessel): „0" + EAN-13
   //    darf die Wochen-Sperre nicht umgehen (Prüfrunde 02.10.2026).
+  //    Zusätzlich je Nummer (effektiv UND ursprünglich gespeichert, werte.eanNummern)
+  //    die VERWANDTEN Einreichungen — für `ean_alt_doppelt` (Prüfrunde 06.10.2026).
   const byEan = new Map();
-  const merkeEan = (key, v) => { if (!byEan.has(key)) byEan.set(key, []); byEan.get(key).push(v); };
+  const byNummer = new Map();
+  const policyVon = new Map();
+  const merkeIn = (map, key, v) => { if (!map.has(key)) map.set(key, []); map.get(key).push(v); };
   alle.forEach((d) => {
-    const e = eanOf(d.x);
-    if (e) merkeEan(eanSchluessel(e), policyOf(d.id, d.x, d.zeit));
+    const pol = policyOf(d.id, d.x, d.zeit);
+    policyVon.set(d.id, pol);
+    if (pol.ean) merkeIn(byEan, eanSchluessel(pol.ean), pol);
+    for (const k of eanNummern(pol)) merkeIn(byNummer, k, pol);
   });
   const statusJetzt = new Map(alle.map((d) => [d.id, d.x.status]));
   const nachbarn = (ean, ohneId) => (byEan.get(eanSchluessel(ean)) || []).filter((o) => o.id !== ohneId).map((o) => ({ ...o, status: statusJetzt.get(o.id) || o.status }));
+  /** Alle Einreichungen, die mit `pol` eine Nummer teilen (werte.teilenNummer), mit Status jetzt. */
+  const verwandte = (pol) => {
+    const gesehen = new Set([pol.id]);
+    const out = [];
+    for (const k of eanNummern(pol)) {
+      for (const o of byNummer.get(k) || []) {
+        if (gesehen.has(o.id)) continue;
+        gesehen.add(o.id);
+        out.push({ ...o, status: statusJetzt.get(o.id) || o.status });
+      }
+    }
+    return out;
+  };
+  /** Kurzbeschreibung der Nummern einer eigenen Einreichung für den Hinweis (das Dokument liest der Einreicher selbst). */
+  const nummernText = (id) => {
+    const o = policyVon.get(id);
+    if (!o) return '?';
+    return o.eanVorher ? `gespeichert ${o.eanVorher}, korrigiert auf ${o.ean}` : `Nummer ${o.ean}`;
+  };
   // Ablehngrund je Einreichung (intern, sonst der Code am Dokument) — für
   // bildBefund: Fotos einer als Doppel abgelehnten Einreichung zählen als wiederverwendet.
   const grundJetzt = new Map(alle.map((d) => [d.id, (d.x.review && d.x.review.reason) || d.x.rejectReason || null]));
-  const infoVon = new Map(alle.map((d) => [d.id, { userId: d.x.userId ?? null, createdAt: d.zeit, ean: eanSchluessel(eanOf(d.x)) }]));
+  const infoVon = new Map(alle.map((d) => [d.id, { userId: d.x.userId ?? null, createdAt: d.zeit, ean: eanSchluessel(policyVon.get(d.id).ean) }]));
   const info = (id) => (infoVon.has(id) ? { ...infoVon.get(id), status: statusJetzt.get(id), grund: grundJetzt.get(id) } : null);
   // Ist das Produkt für diese Person bezahlt? (bildBefund: eine als Doppel
   // abgelehnte ältere Einreichung zählt nur dann als Beleg, Prüfrunde 2.)
@@ -615,19 +795,45 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       continue;
     }
     const v = vor.get(d.id);
-    const andere = nachbarn(eanOf(d.x), d.id);
-    const dup = eanOf(d.x) ? evaluateDuplicate(policyOf(d.id, d.x, d.zeit), andere) : { verdict: 'ok', reason: null, lockUntil: null };
+    const pol = policyVon.get(d.id);
+    const dup = pol.ean ? evaluateDuplicate(pol, nachbarn(pol.ean, d.id)) : { verdict: 'ok', reason: null, lockUntil: null };
     // Die Doppel-Prüfung zusätzlich unter der Nummer vom Barcode-Foto — eine
     // falsch getippte EAN soll die Wochen-Sperre nicht umgehen. Weicht die
     // Nummer ab, bleibt der Fall ohnehin liegen; der Befund steht im Hinweis.
     const ef = eanFoto.get(d.id) || null;
     let eanFotoHinweis = null;
+    // Korrigierte Nummer (06.10.2026): `dup` rechnet oben schon mit ihr (eanOf).
+    // Zusätzlich die Doppel-Regel über alle VERWANDTEN Einreichungen (`dupAlt`,
+    // werte.teilenNummer) — an JEDEM Tag, nicht nur am Tag der Korrektur, und
+    // auch ohne eigene Korrektur (Prüfrunde 06.10.2026). Wer diese Woche schon
+    // unter einer verwandten Nummer bezahlt wurde, soll nicht über einen
+    // fremden Strichcode auf dem Barcode-Foto aus der Wochen-Sperre herauskommen
+    // (fotoRundeRegeln.entscheideFall, `ean_alt_doppelt`).
+    const dupAlt = pol.ean ? evaluateDuplicate(pol, verwandte(pol)) : null;
+    if (ef && ef.art === 'korrigiert') {
+      eanFotoHinweis = `Barcode korrigiert: gespeichert war ${ef.gespeichert}, das Foto zeigt zweimal ${ef.gelesen}`
+        + (ef.korrektur && ef.korrektur.aus === 'vorbefund' ? ` (Befund vom ${ef.korrektur.befundVom || 'früheren Lauf'})` : '');
+    }
+    let dupAltHinweis = null;
+    if (dupAlt && dupAlt.verdict !== 'ok' && dup.verdict === 'ok') {
+      const wer = nummernText(dupAlt.priorId);
+      const basis = ef && ef.art === 'korrigiert' ? eanFotoHinweis
+        : pol.eanVorher ? `Barcode früher korrigiert: gespeichert ist ${pol.eanVorher}, es gilt ${pol.ean}` : `Barcode ${pol.ean}`;
+      dupAltHinweis = basis + (dupAlt.verdict === 'locked'
+        ? ` — eigene Freigabe vom ${datumVon(dupAlt.priorId)} unter einer zugehörigen Nummer (${wer}), Wochen-Sperre, womöglich dasselbe Produkt`
+        : ` — ältere eigene, noch offene Einreichung unter einer zugehörigen Nummer (${wer})`);
+    }
     if (ef && ef.art === 'abweichend') {
       const dupFoto = evaluateDuplicate({ ...policyOf(d.id, d.x, d.zeit), ean: ef.gelesen }, nachbarn(ef.gelesen, d.id));
       eanFotoHinweis = `Barcode-Foto zeigt ${ef.gelesen}, gespeichert ist ${ef.gespeichert}`
         + (ef.bestaetigt === false ? ' (zweite Lesung gescheitert)' : '')
         + (dupFoto.verdict === 'locked' ? ` — unter der Foto-Nummer gibt es eine eigene Freigabe vom ${datumVon(dupFoto.priorId)} (Wochen-Sperre)`
           : dupFoto.verdict === 'hold' ? ' — unter der Foto-Nummer liegt eine ältere eigene, noch offene Einreichung' : '');
+    }
+    if (ef && ef.frueher) {
+      // Lesungen widersprechen sich über Tage (werte.eanFotoMitVorbefund) — bleibt beim Menschen.
+      const h = ef.heute;
+      eanFotoHinweis = `Barcode-Foto: am ${ef.frueher.lauf || 'früheren Lauf'} ${ef.frueher.bestaetigt ? 'zweimal ' : ''}${ef.gelesen || '?'} gelesen, heute ${h ? `${h.art}${h.gelesen ? ` (${h.gelesen})` : ''}` : '—'}, gespeichert ist ${ef.gespeichert} — Lesungen uneinig über mehrere Tage, keine automatische Korrektur`;
     }
     if (ef && ef.vorbefund) {
       // Halte-Befund eines früheren Laufs: sagen, dass er weiter gilt und was heute gelesen wurde.
@@ -637,6 +843,10 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
         : h.art === 'kein_urteil' ? `heute kein Urteil${h.gelesen ? ` (${h.gelesen})` : ''}`
           : `heute ${h.art}${h.gelesen ? ` (${h.gelesen})` : ''}`;
       eanFotoHinweis = `${basis} — Befund vom ${ef.vorbefund.lauf || 'früheren Lauf'}, gilt bis zur Entscheidung in der Konsole; ${heute}`;
+    }
+    if (ef && ef.korrekturGebremst) {
+      // Notbremse der Korrektur (06.10.2026): nie mehr automatisch korrigiert.
+      eanFotoHinweis = `${eanFotoHinweis || `Barcode-Foto zeigt ${ef.gelesen}, gespeichert ist ${ef.gespeichert}`} — Barcode-Korrektur am ${ef.korrekturGebremst} von der Notbremse angehalten, keine automatische Korrektur`;
     }
     const rf = { ...(rettungFehler.get(d.id) || {}) };
     const gps = d.x.capture && d.x.capture.gps;
@@ -655,7 +865,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       kontoSperre, comp: v.comp, dup, leer: v.leer, unlesbar: v.unlesbar,
       bild: bildMitVorbefund(bildBefund(d.id, partnerVon.get(d.id) || [], info, freigabeVon), fotoVorbefund(d.x), { vollstaendig: fotoVollstaendig(d.id) }),
       fotoAbgleichFehlt: liste == null,
-      eanFoto: ef, eanFotoHinweis,
+      eanFoto: ef, eanFotoHinweis, dupAlt, dupAltHinweis, eanKorrigiert: !!pol.eanVorher,
       audit: audit.get(d.id) || null, auditFehler: auditFehler.get(d.id) || null, rettungFehler: rf,
       preisVorhanden: !!preisOf(d.x), preisHinweis: preisHinweisOf(d.x), ortAuffaellig: ort ? ort.text : null,
       namerLaeuft: namerAb != null && namerAb > start - NAMER_HAENGT_MS, preisBildDefekt,
@@ -669,9 +879,48 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   // 6) Notbremse
   const bremse = notbremse(plan, { schnittQuote: schnittQuote(alle, start) });
 
+  // Barcode-Korrekturen dieses Laufs (06.10.2026) — für Bericht und Trockenlauf.
+  // `faelle` wird nach dem Schreiben neu gelesen (Entscheidung kann sich ändern).
+  const korrekturBericht = () => {
+    const faelle = plan.filter((p) => p.eingabe && p.eingabe.eanFoto && p.eingabe.eanFoto.art === 'korrigiert');
+    return {
+      korrigiert: faelle.length,
+      ausHeute: faelle.filter((p) => p.eingabe.eanFoto.korrektur.aus === 'heute').length,
+      ausVorbefund: faelle.filter((p) => p.eingabe.eanFoto.korrektur.aus === 'vorbefund').length,
+      nichtGespeichert: korrekturStand.nichtGespeichert,
+      // Während der Runde von einem Menschen entschieden — Korrektur entfiel.
+      entschiedenInzwischen: korrekturStand.entschiedenInzwischen,
+      gebremst: korrekturStand.gebremst,
+      // Wie viele es ohne Bremse gewesen wären (alle geplanten, auch aus alten Befunden).
+      gebremstAnzahl: korrekturStand.gebremst ? korrekturStand.geplant : 0,
+      // Grundlage der Bremse: frische Korrekturen von frisch geprüften Fällen (korrekturBremse).
+      quote: { korrigiert: korrekturStand.ausHeuteGeplant, geprueft: korrekturStand.frischGeprueft },
+      // Bremse am Befund vermerkt (nur im scharfen Lauf mit Schalter an).
+      gebremstVermerkt: korrekturStand.gebremstVermerkt,
+      // Aus alten Befunden über KORREKTUR_ALT_MAX hinaus — warten bis morgen.
+      aufgeschoben: korrekturStand.aufgeschoben,
+      // Schalter `barcodeKorrektur` (nur true wendet an) und was ohne ihn vorgeschlagen wäre.
+      schalter: korrekturAn,
+      ...(korrekturSchalterUnbekannt ? { schalterUnbekannt: korrekturSchalterUnbekannt } : {}),
+      vorgeschlagen: korrekturStand.vorgeschlagen.length,
+      vorgeschlagenFaelle: korrekturStand.vorgeschlagen.slice(0, 100),
+      // Trockenlauf / nurLesen / Schalter aus: nicht gespeichert.
+      gespeichert: speichertKorrektur,
+      // Heute über Tage widersprüchlich gelesen → `unsicher`, nie mehr automatisch (werte.eanFotoMitVorbefund).
+      uneinigUeberTage: [...eanFoto.values()].filter((b) => b.frueher).length,
+      // Von einer Notbremse (heute oder früher) angehalten — liegen beim Menschen.
+      gebremstHaelt: [...eanFoto.values()].filter((b) => b.korrekturGebremst).length,
+      faelle: faelle.slice(0, 100).map((p) => ({
+        id: p.id, vorher: p.eingabe.eanFoto.gespeichert, neu: p.eingabe.eanFoto.gelesen, aus: p.eingabe.eanFoto.korrektur.aus,
+        entscheidung: p.entscheidung, grund: p.grund || null,
+      })),
+    };
+  };
+
   if (vergleich || nurLesen) {
     return {
       notbremse: bremse,
+      eanKorrektur: korrekturBericht(),
       fotoAbgleich: { dateien: liste ? liste.size : null },
       kontoSperren: sperren ? [...sperren.values()].filter((x) => sperreAusDaten(x) === 'gesperrt').length : null,
       plan: plan.map((p) => ({
@@ -729,6 +978,13 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
           const uid = s.data().userId;
           const sperre = uid ? sperreAusDaten((await tx.get(db.collection(SPERREN).doc(uid))).data()) : null;
           if (sperre === 'gesperrt') return KONTO_GESPERRT_IM_LAUF;
+          // Entschieden mit korrigierter Nummer → sie muss am Dokument stehen
+          // (Schritt 4c speichert sie vorher; scheitert das, gilt sie gar nicht).
+          // Steht sie nicht da, entschiede die Runde über eine EAN, die sonst
+          // niemand sieht — dann liegen lassen wie vor der Korrektur.
+          const korr = p.eingabe && p.eingabe.eanFoto && p.eingabe.eanFoto.art === 'korrigiert' ? p.eingabe.eanFoto.gelesen : null;
+          const amDok = korr ? eanKorrekturOf(s.data()) : null;
+          if (korr && !(amDok && gtin14(amDok) === gtin14(korr))) return EAN_KORREKTUR_FEHLT;
           if (p.entscheidung === 'freigeben') {
             tx.update(p.ref, {
               status: 'approved', reviewedAt: FieldValue.serverTimestamp(), reviewedBy: ENTSCHEIDER, updatedAt: FieldValue.serverTimestamp(),
@@ -759,6 +1015,8 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
           p.zurueckgehaltenGrund = p.grund;
           p.entscheidung = 'offen';
           p.grund = ausgang;
+          // Korrektur nicht am Dokument: der Befund von vorher gilt (Halt in review.rundeOffen, Schritt 7b).
+          if (ausgang === EAN_KORREKTUR_FEHLT) p.eingabe = { ...p.eingabe, eanFoto: korrekturZurueck(p.id), dupAlt: null, dupAltHinweis: null, eanKorrigiert: false };
         }
       } catch (e) {
         // Ein einzelner Schreibfehler darf die Runde nicht abbrechen (kein
@@ -788,7 +1046,12 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     const kandidaten = plan.filter((p) => p.grund !== KONTO_GESPERRT && p.grund !== KONTO_GESPERRT_IM_LAUF && !geschrieben.has(p.id));
     await arbeite(kandidaten, async (p) => {
       // Übersprungen (Status geändert, Preis inzwischen gefunden): heute kein Urteil.
-      const eintrag = p.uebersprungen ? null : rundeOffenEintrag(p, { lauf, trocken: dryRun });
+      // Trockenlauf mit geplanter Korrektur: die Korrektur ist NICHT gespeichert —
+      // die Konsole soll den Fall sehen wie ohne sie (ein Halt bleibt stehen).
+      const fuerKonsole = !speichertKorrektur && korrekturVon.has(p.id)
+        ? { ...p, eingabe: { ...p.eingabe, eanFoto: vorKorrektur.get(p.id) || null, dupAlt: null, dupAltHinweis: null, eanKorrigiert: false } }
+        : p;
+      const eintrag = p.uebersprungen ? null : rundeOffenEintrag(fuerKonsole, { lauf, trocken: dryRun });
       const alt = !!(p.x.review && typeof p.x.review === 'object' && p.x.review.rundeOffen);
       if (!eintrag && !alt) return;
       try {
@@ -855,14 +1118,15 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     });
   }
   if (bonNachgereicht) bonRundeHeute = bonRundeRoh(bonNachgereicht);
-  const version = regelVersion();
+  const version = regelVersion(korrekturAn);
   const zaehle = (liste, feld) => liste.reduce((a, p) => { const k = p[feld] || '?'; a[k] = (a[k] || 0) + 1; return a; }, {});
   const abgelehnt = plan.filter((p) => p.entscheidung === 'ablehnen' && !p.uebersprungen);
   // Gesperrte Konten liegen stumm und dauerhaft — sie warten NICHT auf eine
   // Entscheidung und zählen deshalb getrennt (sonst füllten sie „wartet auf
   // dich" und die Warnung „wartet seit X Tagen" jeden Morgen).
   const gesperrtOffen = plan.filter((p) => p.entscheidung === 'offen' && p.grund === KONTO_GESPERRT);
-  const eanHaltenNeu = [...eanFoto.values()].filter((b) => EAN_HALTEN.has(b.art) && !b.vorbefund).length;
+  // Über Tage uneinig (`frueher`) hielt schon vorher — kein NEUER Halt.
+  const eanHaltenNeu = [...eanFoto.values()].filter((b) => EAN_HALTEN.has(b.art) && !b.vorbefund && !b.frueher).length;
   const offen = plan.filter((p) => p.entscheidung === 'offen' && p.grund !== KONTO_GESPERRT);
   const runde = {
     geprueft: pending.length, offen: offen.length,
@@ -880,6 +1144,15 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     // … und Halte-Befunde, die die Prüfkonsole nicht sieht.
     haltBefundNichtGespeichert: rundeOffenStand.fehlerSperrend,
     eanFotoNichtGespeichert: eanFotoStand.nichtGespeichertHalten,
+    // Barcode-Korrektur (06.10.2026): Notbremse ausgelöst / nicht gespeichert.
+    korrekturGebremst: korrekturStand.gebremst
+      ? { anzahl: korrekturStand.ausHeuteGeplant, geprueft: korrekturStand.frischGeprueft, alle: korrekturStand.geplant, vermerkt: korrekturStand.gebremstVermerkt }
+      : null,
+    korrekturAufgeschoben: korrekturStand.aufgeschoben,
+    korrekturSchalterUnbekannt,
+    korrekturNichtGespeichert: korrekturStand.nichtGespeichert,
+    // Fälle, die eine FRÜHERE Notbremse angehalten hat und die noch liegen.
+    korrekturGebremstWartet: korrekturStand.gebremstVermerkt ? 0 : [...eanFoto.values()].filter((b) => b.korrekturGebremst).length,
   };
   const warn = warnungen({
     jetzt: start, aktionen, zweitpruefung: lage.zweitpruefung, bons: lage.bons, runde, notbremse: bremse,
@@ -910,14 +1183,17 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     bildpruefung: { versucht: runde.auditVersucht, gescheitert: runde.auditFehler, unpassend: plan.filter((p) => BILD_GRUENDE.has(p.grund) || BILD_GRUENDE.has(p.zurueckgehaltenGrund)).length },
     nichtGeschafft: runde.nichtGeschafft,
     schreibFehler: runde.schreibFehler,
-    notbremse: { bild: bremse.bild, gesamt: bremse.gesamt, preis: bremse.preis, woche: bremse.woche },
+    notbremse: { bild: bremse.bild, gesamt: bremse.gesamt, preis: bremse.preis, woche: bremse.woche, korrektur: korrekturStand.gebremst },
+    // Automatisch korrigierte Barcodes (Entscheidung Patrick 06.10.2026):
+    // Zahl, Herkunft (heutige Lesungen / alter Befund) und je Fall alt → neu.
+    eanKorrektur: korrekturBericht(),
     // Neu 02.10.2026 (Entscheidungen Patrick): Nummer vom Barcode-Foto, Abgleich
     // gegen alle früheren Fotos, gesperrte Konten — nur Zahlen, die Fälle stehen
     // in wartetAufDich bzw. abgelehntListe.
     eanFoto: zaehle([...eanFoto.values()], 'art'),
     // Prüfrunde 2: alte Barcode-Halte-Befunde, die weiter gelten (aufgehoben
     // wird keiner mehr automatisch, Schlussprüfung 03.10.2026).
-    eanFotoVorbefund: { haelt: [...eanFoto.values()].filter((b) => b.vorbefund).length },
+    eanFotoVorbefund: { haelt: [...eanFoto.values()].filter((b) => b.vorbefund || b.frueher).length },
     // Foto-Befunde früherer Läufe, die heute übernommen wurden (nicht
     // nachprüfbar, oder fremdes Konto bis zur Entscheidung in der Konsole).
     fotoVorbefund: { haelt: plan.filter((p) => p.eingabe && p.eingabe.bild && p.eingabe.bild.vorbefund).length },

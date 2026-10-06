@@ -23,7 +23,7 @@ const TAG_MS = 24 * 60 * 60 * 1000;
  * @param {Array<{id:string, kind:string, active:boolean, startAt:number, endAt:number, budgetRemainingCents?:number, budgetTotalCents?:number}>} k.aktionen
  * @param {{eingeschaltet:boolean, laeufeLetzte48h:number}} k.zweitpruefung
  * @param {{inPruefung:number, aeltesteTage:number|null, letzte24h:{gesamt:number, ohneAktion:number}}} k.bons
- * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number, aeltesteOffenTage?:number|null, fotoAbgleichGescheitert?:boolean, kontoSperrenUnlesbar?:boolean, eanHaltenNeu?:number, haltBefundNichtGespeichert?:number, eanFotoNichtGespeichert?:number}} k.runde
+ * @param {{geprueft:number, offen:number, auditFehler:number, auditVersucht:number, nichtGeschafft:number, schreibFehler?:number, aeltesteOffenTage?:number|null, fotoAbgleichGescheitert?:boolean, kontoSperrenUnlesbar?:boolean, eanHaltenNeu?:number, haltBefundNichtGespeichert?:number, eanFotoNichtGespeichert?:number, korrekturGebremst?:{anzahl:number, geprueft:number, alle?:number, vermerkt?:boolean}|null, korrekturNichtGespeichert?:number, korrekturGebremstWartet?:number, korrekturAufgeschoben?:number, korrekturSchalterUnbekannt?:string|null}} k.runde
  * @param {{bild:boolean, gesamt:boolean, text:string[]}} k.notbremse
  * @param {{alt:string|null, neu:string}} k.regelVersion
  * @param {{scharf:boolean, bericht:object|null, abgebrochen?:boolean, laeuftNoch?:boolean, unbekannt?:boolean}} [k.bonRunde]
@@ -109,6 +109,36 @@ function warnungen(k) {
     }
     if (r.eanFotoNichtGespeichert > 0) {
       gelb('barcode_befund_nicht_gespeichert', `Bei ${r.eanFotoNichtGespeichert} Fällen konnte der Barcode-Befund (eanFotoOcr) nicht gespeichert werden; er steht ersatzweise am Halte-Grund der Runde.`);
+    }
+    // Barcode-Korrektur (Entscheidung Patrick 06.10.2026). Korrigiert die Runde
+    // auffällig viel, liegt es eher am Modell — dann korrigiert sie heute gar
+    // nichts (fotoRundeRegeln.korrekturBremse), die Fälle liegen wie früher.
+    // Gerechnet nur über die heute NEU geprüften Fälle (Prüfrunde 06.10.2026):
+    // der liegende Bestand besteht fast nur aus Abweichungen und verzerrte den Anteil.
+    if (r.korrekturGebremst) {
+      const { anzahl, geprueft, vermerkt } = r.korrekturGebremst;
+      const anteil = `${anzahl} von ${geprueft} neu geprüften Barcode-Nummern korrigiert (${geprueft ? Math.round((100 * anzahl) / geprueft) : 0} %, normal unter 5 %)`;
+      rot('barcode_korrektur_gebremst', vermerkt === false
+        ? `Die Runde hätte heute ${anteil} — eher ein Lesefehler des Modells. Keine davon korrigiert. Trockenlauf bzw. Schalter aus: nichts dauerhaft vermerkt, eine spätere Korrektur dieser Fälle braucht eine neue doppelte Lesung.`
+        : `Die Runde hätte heute ${anteil} — eher ein Lesefehler des Modells. Keine davon wurde korrigiert, auch später nicht automatisch: die Fälle warten auf dich.`);
+    }
+    // Von einer FRÜHEREN Notbremse angehaltene Fälle liegen noch (sie werden
+    // nie automatisch korrigiert, Prüfrunde 06.10.2026) — erinnern, bis entschieden.
+    if (r.korrekturGebremstWartet > 0) {
+      gelb('barcode_korrektur_gebremst_wartet', `${r.korrekturGebremstWartet} Fälle hat eine frühere Notbremse der Barcode-Korrektur angehalten — die Runde korrigiert sie nicht mehr selbst, sie warten auf dich.`);
+    }
+    if (r.korrekturNichtGespeichert > 0) {
+      gelb('barcode_korrektur_nicht_gespeichert', `${r.korrekturNichtGespeichert} Barcode-Korrekturen konnten nicht gespeichert werden — diese Fälle bleiben wie vor der Korrektur liegen und sind morgen wieder dran.`);
+    }
+    // Mehr Korrekturen aus früheren Läufen als die Tagesgrenze (fotoRundeRegeln.KORREKTUR_ALT_MAX).
+    if (r.korrekturAufgeschoben > 0) {
+      gelb('barcode_korrektur_aufgeschoben', `${r.korrekturAufgeschoben} Barcode-Korrekturen aus früheren Läufen liegen über der Tagesgrenze — sie folgen in den nächsten Läufen. Ungewöhnlich viele: lief die Korrektur einige Tage nicht?`);
+    }
+    // Schalter `barcodeKorrektur`: nur true wendet an (Prüfrunde 06.10.2026).
+    if (r.korrekturSchalterUnbekannt) {
+      gelb('barcode_korrektur_schalter_unbekannt', r.korrekturSchalterUnbekannt === 'nicht lesbar'
+        ? 'Der Schalter barcodeKorrektur war nicht lesbar — heute keine Barcode-Korrektur, die Fälle liegen wie vorher.'
+        : `Schalter barcodeKorrektur hat den Wert ${r.korrekturSchalterUnbekannt} — gilt als aus. An nur mit true (Typ boolean), aus mit false.`);
     }
   }
   for (const t of (k.notbremse?.text || [])) rot('notbremse', `Notbremse: ${t}`);
