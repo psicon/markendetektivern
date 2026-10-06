@@ -3245,6 +3245,13 @@ Patrick, 02.10.: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche",
   gespeicherte Nummer, war die erste eine Fehllesung → weiter.
 - **Anderer Markt innerhalb der Woche zählt NICHT als neue Erfassung**
   (Patrick 04.10.: „nein").
+- **Eindeutig falsche Barcode-Nummer korrigiert die Morgenrunde selbst**
+  (Patrick 06.10.: „ja"): Foto zweimal gleich gelesen + gültige GTIN + kein
+  Ladencode → Foto-Nummer gilt, alle Regeln laufen mit ihr weiter; das gilt
+  auch für schon angehaltene `ean_abweichend`-Fälle dieser Klasse.
+  `ean_unsicher` (zweite Lesung fehlt/weicht ab) bleibt beim Menschen.
+  Zweig `claude/barcode-korrektur`. Ursache der falschen Nummern (bisher nur
+  Android, rechte EAN-Hälfte oft richtig) wird untersucht.
 - **Foto-Abgleich (md5) gegen ALLE früheren Einreichungen**, Preisfoto
   ausgenommen; eine Kopie bleibt immer freigabefähig. Die Gründe, mit denen die
   Runde einen Fall liegen lässt, stehen in `review.rundeOffen` (nur Server).
