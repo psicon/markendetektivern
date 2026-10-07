@@ -344,6 +344,29 @@ describe('bereinigeName', () => {
     expect(bereinigeName(roh, { host })).toBeNull();
   });
 
+  // Stichprobe der Produktsuche 07.10.2026 (26 Funde, 3–4 schlechte Namen).
+  test.each([
+    ['Premium Passata Klassik - 36 kcal - Kalorien & Nährwerte', 'www.wikifit.de', 'Premium Passata Klassik'],
+    ['Ajvar scharf ist vegan', 'iiveg.app', 'Ajvar scharf'],
+    ['Ajvar scharf ist vegan | Is it Vegan?', 'iiveg.app', 'Ajvar scharf'],
+    ['Haferdrink is not vegan?', 'x.de', 'Haferdrink'],
+    ['Pez Bonbons', 'x.de', 'Pez Bonbons'],
+    ['Pez', 'x.de', 'Pez'],
+    ['Milbona, haltbare VOLLMILCH', 'fddb.info', 'Milbona, haltbare VOLLMILCH'],
+    ['Kalorienarme Gummibärchen 200 g', 'x.de', 'Kalorienarme Gummibärchen 200 g'],
+  ])('Stichprobe %p', (roh, host, erwartet) => {
+    expect(bereinigeName(roh, { host })).toBe(erwartet);
+  });
+  test.each(['Soft baked cookies triple choc', 'Cookies and Cream', 'Rio Black & White Cookies'])('Produkt mit „Cookies“ bleibt %p', (roh) => {
+    expect(bereinigeName(roh, { host: 'x.de' })).toBe(roh);
+  });
+  test.each(['Wir verwenden Cookies', 'Cookie-Einstellungen', 'Cookies akzeptieren', 'Cookie Policy'])('Cookie-Hinweis %p → null', (roh) => {
+    expect(bereinigeName(roh, { host: 'x.de' })).toBeNull();
+  });
+  test.each(['as – 1pcs', 'x 500 g', 'ab - 2 Stk'])('ohne Wortinhalt %p → null', (roh) => {
+    expect(bereinigeName(roh, { host: 'x.de' })).toBeNull();
+  });
+
   test('Nummer mitten im Namen bleibt (OpenFoodFacts-Schreibweise)', () => {
     expect(bereinigeName('Dreamies mit Thunfisch Geschmack 4008429158223 Ergänzungsfuttermittel für Katzen', { host: 'x.de' }))
       .toBe('Dreamies mit Thunfisch Geschmack 4008429158223 Ergänzungsfuttermittel für Katzen');

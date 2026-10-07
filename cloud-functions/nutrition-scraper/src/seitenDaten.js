@@ -517,7 +517,10 @@ const PLATZHALTER_NAME =
 // Barcode-Datenbanken (06.10.2026, erster Lauf nach dem Ausrollen): opengtindb
 // lieferte als Namen seinen Seitentitel „4068706509612 Open EAN Database -
 // Datenbank und Produktbewertung“.
-const VERDAECHTIGER_NAME = /(suchergebnis|search result|not found|nicht gefunden|client challenge|captcha|cookie|open ean database|ean[- ]?datenbank|barcode[- ]?datenbank|produktbewertung)/i;
+// Cookie-HINWEISE, nicht das Wort „Cookie“: bis 07.10.2026 stand hier ein
+// nacktes `cookie`, das echte Namen wie „Soft baked cookies triple choc“ oder
+// „Cookies and Cream“ verwarf (gemessen 10 von 21.134 in external_products).
+const VERDAECHTIGER_NAME = /(suchergebnis|search result|not found|nicht gefunden|client challenge|captcha|cookie[- ]?(einstellungen|settings|policy|richtlinie|hinweis|consent|banner)|cookies? (akzeptieren|zulassen|accept)|(wir verwenden|we use|diese (website|seite) verwendet) cookies|open ean database|ean[- ]?datenbank|barcode[- ]?datenbank|produktbewertung)/i;
 // Ein Name, der mit einer Strichcode-Nummer (8–14 Ziffern) BEGINNT, ist der
 // Seitentitel einer Barcode-Seite oder nur die Nummer selbst, nie ein
 // Produktname. Gemessen 06.10.2026: 3 von 21.109 Namen in external_products,
@@ -525,6 +528,13 @@ const VERDAECHTIGER_NAME = /(suchergebnis|search result|not found|nicht gefunden
 // (echterName) — bei Änderungen beide nachziehen.
 const NAME_BEGINNT_MIT_NUMMER = /^\d{8,14}\b/;
 const SHOP_WOERTER = /\b(shop|online[- ]?shop|kaufen|bestellen|gro(ß|ss)handel|versand|apotheke)\b|\.(de|at|com|eu|net|shop)\b/i;
+// Angehängte Nährwert-/Kalorienangaben aus Titeln von Kalorien-Datenbanken
+// („Premium Passata Klassik - 36 kcal - Kalorien & Nährwerte“, wikifit; Stichprobe
+// 07.10.2026), und der Seitenname „Is it Vegan?“ (iiveg). Nur als ABGETRENNTER
+// Titelteil am Ende, nie mitten im Namen.
+const INFO_TEIL = /(\b\d+(?:[.,]\d+)?\s*kcal\b|\bkalorien\b|\bn(ä|ae|a)hrwerte\b|\bkalorientabelle\b|\bnutrition facts\b|\bis it vegan\b)/i;
+// Mengen-/Stück-Angaben ohne Wortinhalt („1pcs“, „500 g“) — zählen nicht als Name.
+const NUR_MENGE = /^(\d+(?:[.,]\d+)?\s*(pcs|stk|st|stück|x|g|kg|mg|ml|cl|l)?|pcs|stk|st|stück|x)$/i;
 
 function hostWoerter(host) {
   if (!host) return [];
@@ -545,7 +555,7 @@ function bereinigeName(roh, { host = null } = {}) {
   if (!s) return null;
   const shopTeil = (teil) => {
     const t = teil.toLowerCase();
-    return SHOP_WOERTER.test(t) || hostWoerter(host).some((w) => t.includes(w));
+    return SHOP_WOERTER.test(t) || INFO_TEIL.test(t) || hostWoerter(host).some((w) => t.includes(w));
   };
   const TRENNER = /\s+(?:\||–|—|-|•|·|⮞|»|::)\s+/;
   let teile = s.split(TRENNER);
@@ -564,10 +574,17 @@ function bereinigeName(roh, { host = null } = {}) {
   s = s.replace(/\s*[⮞»|]\s*$/, '').trim();
   // „… online kaufen“ / „… jetzt bestellen“ am Ende
   s = s.replace(/\s+(jetzt\s+)?(online\s+)?(günstig\s+)?(kaufen|bestellen)$/i, '').trim();
+  // „… ist vegan“ / „… is not vegan?“ (Vegan-Prüf-Apps, iiveg; Stichprobe 07.10.2026)
+  s = s.replace(/\s+(ist|is)\s+(nicht\s+|not\s+)?vegan\??$/i, '').trim();
   if (s.length > 200) s = s.slice(0, 200).trim();
   if (s.length < 3) return null;
   if (/^[\d\s.-]+$/.test(s)) return null;
   if (PLATZHALTER_NAME.test(s) || VERDAECHTIGER_NAME.test(s) || NAME_BEGINNT_MIT_NUMMER.test(s)) return null;
+  // Ohne Mengenangaben weniger als drei Buchstaben → kein Name („as – 1pcs“,
+  // openproductsfacts; Stichprobe 07.10.2026). „Pez“ bleibt ein Name.
+  const buchstaben = s.split(/[\s–—|,;:/()-]+/).filter((t) => t && !NUR_MENGE.test(t))
+    .reduce((n, t) => n + (t.match(/\p{L}/gu) || []).length, 0);
+  if (buchstaben < 3) return null;
   return s;
 }
 
