@@ -96,7 +96,10 @@ const REQUIRED = ['front', 'rueckseite', 'hersteller', 'ean', 'naehrwerte', 'zut
 const IDENTITY_SLOTS = new Set(['front', 'rueckseite', 'hersteller', 'ean', 'naehrwerte', 'zutaten']);
 const MODELL = 'gemini-3.5-flash';
 // 4 parallel: mit 8 liefen am 24.09. zwei Durchgänge zu je ~8 % ins Google-Limit.
-const PARALLEL_KI = 4;
+// 6 seit 08.10.2026 (Patrick: „ja“): die Preisfoto-Prüfung (Zusatzfrage +
+// Bildkopf) machte die Runde 19 statt 14 Minuten lang, 32 von 145 Fällen
+// blieben liegen. 429 fängt mitWiederholung ab.
+const PARALLEL_KI = 6;
 // Strichcode-Leser (Barcode-Korrektur, Prüfrunde 06.10.2026): nur für die
 // Korrektur-Kandidaten (gemessen 06.10.: 9 von 84 offenen Fällen). Zwei
 // Downloads gleichzeitig; das Lesen selbst läuft ohnehin nacheinander (WASM
@@ -106,8 +109,10 @@ const PARALLEL_STRICHE = 2;
 const STRICHE_DOWNLOAD_MS = 30 * 1000;
 const ENTSCHEIDER = 'worker-fotorunde';
 // Nach dieser Zeit beginnt die Runde nichts Neues mehr; der Rest ist morgen dran.
-// Die Function darf 30 Minuten laufen — Luft für Schreiben und Buchungs-Abwarten.
-const ARBEITSZEIT_MS = 18 * 60 * 1000;
+// Die Function darf 30 Minuten laufen — Luft für Schreiben und Buchungs-Abwarten
+// (BUCHUNG_WARTEN_MS = 5 min, Schreiben gemessen ~1 min). 22 statt 18 Minuten
+// seit 08.10.2026 (siehe PARALLEL_KI); mehr ginge nur mit längerem Timeout.
+const ARBEITSZEIT_MS = 22 * 60 * 1000;
 /** Präfix aller Produktfoto-Dateien — für den Abgleich gegen ALLE früheren Einreichungen. */
 const UPLOAD_PRAEFIX = 'crowduploads/';
 /** Ab hier gilt ein geplanter Nachlauf des Lesedienstes als hängend (Takt: 15 min). */

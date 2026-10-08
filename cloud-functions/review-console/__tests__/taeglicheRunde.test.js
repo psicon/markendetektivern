@@ -664,7 +664,7 @@ describe('Prüfrunde 2 (02.10.2026): Barcode-Befund hält über Tage, Konsole er
   it('zweite Lesung bekommt keine Zeit mehr (Arbeitszeit vorbei) → Abweichung bleibt unbestätigt stehen, nie freigegeben', async () => {
     einreichung('k');
     mockAudit.set(doc('k').images.ean, ANDERE);
-    mockLage.nachAudit = () => dateSpy.mockImplementation(() => T0 + 19 * 60 * 1000);
+    mockLage.nachAudit = () => dateSpy.mockImplementation(() => T0 + 23 * 60 * 1000); // hinter ARBEITSZEIT_MS (22 min)
     await scharf();
     expect(mockLage.zweitLesungen).toEqual([]);
     expect(doc('k').status).toBe('pending');
