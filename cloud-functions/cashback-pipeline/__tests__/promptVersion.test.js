@@ -68,7 +68,7 @@ describe('v1.4 ist byte-gleich der Live-Prompt', () => {
 describe('Schalterwert → Version', () => {
   test.each([
     [undefined, 'v1.4'], [null, 'v1.4'], ['', 'v1.4'], ['v1.4', 'v1.4'], ['v1.5', 'v1.5'],
-    ['V1.5', 'v1.4'], [' v1.5', 'v1.4'], ['v1.6', 'v1.4'], ['1.5', 'v1.4'], [true, 'v1.4'], [1.5, 'v1.4'],
+    ['V1.5', 'v1.4'], [' v1.5', 'v1.4'], ['v1.6', 'v1.6'], ['V1.6', 'v1.4'], ['v1.7', 'v1.4'], ['1.5', 'v1.4'], [true, 'v1.4'], [1.5, 'v1.4'],
     ['toString', 'v1.4'], ['__proto__', 'v1.4'],
   ])('%p → %s', (wert, version) => {
     expect(PROMPT.promptVersionAus(wert)).toBe(version);

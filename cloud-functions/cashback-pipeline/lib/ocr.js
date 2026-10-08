@@ -17,6 +17,7 @@ const { GoogleGenAI } = require('@google/genai');
 const { vertexStandort } = require('./geminiModelle');
 const { geminiKennung, nutztVertex, ZWECK } = require('./geminiKennung');
 const { belegBereinigen } = require('./belegart');
+const { abgleichOptionen, istPunkteZahlungZeile, itemsOhnePunkteZahlung } = require('./punkteZahlung');
 const {
   SYSTEM_PROMPT,
   USER_PROMPT,
@@ -46,6 +47,10 @@ const DEFAULT_MODEL = process.env.CASHBACK_OCR_MODEL || 'gemini-3.5-flash';
 // (opts.thinkingConfig hat Vorrang). ACHTUNG: Gemini 3 kennt `thinkingBudget`
 // nicht mehr (Vertex lehnt es seit 22.09.2026 teilweise mit 400 ab) — für
 // gemini-3.5-flash diesen Schalter NICHT setzen, sondern thinkingLevel nutzen.
+// Dafür gibt es seit 08.10.2026 den Firestore-Schalter
+// `cashback_config/v1.ocrDenkstufe` (lib/geminiModelle.js denkstufeAus): die
+// Robust-Leiter übergibt die Stufe dann als opts.thinkingConfig, und die hat
+// hier Vorrang vor diesem Env-Schalter (Begründung: lib/ocr_robust.js).
 const THINKING_BUDGET_RAW = process.env.CASHBACK_OCR_THINKING_BUDGET;
 const THINKING_BUDGET =
   THINKING_BUDGET_RAW != null && THINKING_BUDGET_RAW !== '' && Number.isFinite(Number(THINKING_BUDGET_RAW))
@@ -206,8 +211,11 @@ async function extractReceipt(imageBytes, mimeType, opts = {}) {
 
   // Prompt v1.5 (04.10.2026): Belegart normalisieren und bei einer Online-
   // Bestellung die Kundenanschrift aus dem Kopf nehmen — HIER, vor jeder
-  // Speicherung (Zwischenstand, Zweitprüfung, OCR-Feld am Bon).
-  parsed = belegBereinigen(parsed);
+  // Speicherung (Zwischenstand, Zweitprüfung, OCR-Feld am Bon). Die Fassung
+  // der Lesung entscheidet, ob eingelöste Punkte in die Artikelsumme einer
+  // Rechnung ohne Endbetrag zählen (v1.6: nein, lib/punkteZahlung.js; jede
+  // andere Fassung: {} → wie bisher).
+  parsed = belegBereinigen(parsed, abgleichOptionen(opts.promptVersion || PROMPT_VERSION));
 
   const usage = response.usageMetadata || {};
   return {
@@ -368,7 +376,15 @@ function reconcileMitRabattZeilen(parsed, zeilen, sumItemsCents, total) {
   };
 }
 
-function reconcile(parsed) {
+/**
+ * @param {object} parsed  Lesung (items[], totalCents, subtotalCents …)
+ * @param {object} [opts]  Abgleich-Optionen zur Fassung der Lesung
+ *        (lib/punkteZahlung.js abgleichOptionen). Nur `punkteAlsZahlung: true`
+ *        (Prompt v1.6) ändert etwas: negative Zeilen mit eingelösten Punkten
+ *        zählen nicht zur Summe (Zahlungsmittel, Regel 17) — das Ergebnis trägt
+ *        dann `punkteZahlungCents`. Ohne Angabe: Abgleich wie vor dem 08.10.2026.
+ */
+function reconcile(parsed, opts = {}) {
   if (!parsed || !Array.isArray(parsed.items)) {
     return {
       ok: false,
@@ -377,6 +393,16 @@ function reconcile(parsed) {
       signedDeltaCents: null,
       direction: 'unknown',
     };
+  }
+  // Prompt v1.6 (08.10.2026): eine Punkte-Zahlungszeile wie eine Zahlungszeile
+  // behandeln — aus der Summe (und aus den Rabattzeilen) nehmen und den
+  // übrigen Abgleich unverändert rechnen. Ohne solche Zeile: kein Unterschied.
+  if (opts && opts.punkteAlsZahlung === true) {
+    const ohne = itemsOhnePunkteZahlung(parsed.items, opts);
+    if (ohne.length !== parsed.items.length) {
+      const punkteZahlungCents = parsed.items.reduce((acc, it) => acc + (istPunkteZahlungZeile(it) ? -it.priceCents : 0), 0);
+      return { ...reconcile({ ...parsed, items: ohne }), punkteZahlungCents };
+    }
   }
   const sumItemsCents = parsed.items.reduce(
     (acc, it) => acc + (Number.isFinite(it.priceCents) ? it.priceCents : 0),
@@ -450,9 +476,87 @@ function isPfandItem(it) {
   return /pfand|leergut/.test(n);
 }
 
-function countEligibleItems(parsed) {
-  if (!parsed || !Array.isArray(parsed.items)) return 0;
-  return parsed.items.filter(
+/**
+ * ═══ Storno- und Rückgabezeilen beim Zählen aufrechnen (08.10.2026) ═══
+ * Prompt v1.5 Regel 16 lässt Storno- und Rückgabezeilen als eigene NEGATIVE
+ * Zeile stehen; der stornierte Artikel bleibt dann als positive Zeile in
+ * `items`. Ohne Aufrechnung zählt er als gekaufter Artikel — an der
+ * Auszahlungsschwelle (minItems 6) wird aus „ohne Prämie" eine Zahlung.
+ * Gemessen: v1.5-Lesungen bon_mumv7kswsr3h16 (dm, ZEILENSTORNO) und
+ * bon_muo34502ujmnpb (ALDI, zwei Artikelstorno-Zeilen gegen eine Kiwi-Zeile)
+ * zählten je einen Artikel zu viel. v1.4 tut es auch, nur seltener (das
+ * Modell rechnet oft selbst auf): 20 von 9.273 Live-Bons 08.09.–08.10.2026
+ * zählten zu viel, einer davon wurde dadurch bezahlt (bon_muiepzbxzy5qyk,
+ * „Del.Boule Rustique 0,79 / -0,79", 6 statt 5 Artikel, 8 ct).
+ *
+ * Regel (nur für die ZÄHLUNG; Abgleich/Summen bleiben unberührt):
+ *   • Eine negative Zeile, die weder Pfand noch Warenkorb-Rabatt ist, wird
+ *     gegen einen positiven Artikel GLEICHEN Namens aufgerechnet (Name ohne
+ *     Storno-Wörter und Artikelnummern; gleich oder einer ist Anfang des
+ *     anderen, mind. 4 Zeichen) — bevorzugt einen mit genau diesem Betrag.
+ *   • Eine als Storno bezeichnete Zeile ohne Namenstreffer trifft nur einen
+ *     Artikel mit GENAU diesem Betrag.
+ *   • Aufgerechnet wird der Betrag: mehrere Teil-Stornos (4 × 0,49 € Kiwi
+ *     gegen −0,49 und −1,47) heben einen Artikel zusammen auf; ein kleiner
+ *     Nachlass mit Artikelnamen (Ferrero 2,79 / −0,21) lässt ihn stehen.
+ *     Gezählt wird ein Artikel, solange ein Rest > 0 bleibt — wie ein Artikel,
+ *     dessen Preis nach Regel C auf 0 fällt, schon heute nicht zählt.
+ *   • Ohne Treffer bleibt alles wie bisher (eine Retoure eines früheren
+ *     Einkaufs hebt keinen heute gekauften anderen Artikel auf).
+ * Hinter dem Schalter `cashback_config/v1.stornoAufrechnen` (Prüfrunde
+ * 08.10.2026, Befund „alle Schalter aus → jede Geldentscheidung unverändert"):
+ *   • fehlt / false / ungültig → Zählung OHNE Aufrechnung, exakt wie vor dem
+ *     08.10.2026 (zaehleOhneAufrechnung, Test in __tests__/stornoZaehlung.test.js).
+ *   • 'shadow' → Zählung wie bisher; index.js meldet `storno-zaehlung-abweichend`,
+ *     wenn die Aufrechnung eine andere Zahl ergäbe (Beobachtung ohne Wirkung).
+ *   • true → Aufrechnung wirkt — für die Geldentscheidung (index.js), die
+ *     Lese-Fingerabdrücke der Robust-Leiter (lib/ocr_robust.js; Feld-Gate 6w
+ *     vergleicht deren Betrag) und die Zweitprüfung (lib/refereePolicy.js
+ *     refereeFingerprint/plausibel). Dann für JEDE Prompt-Version (v1.4 tut es
+ *     seltener, s. o.).
+ * Gemessen am Bestand (nur gelesen, 9.378 Bons 08.09.–08.10.2026): bei 20 ändert
+ * sich die Zahl, 2 fielen unter minItems, einer davon war bezahlt (8 ct). Die
+ * Wirkung geht nur nach unten (weniger Zahlungen). Bezahlte Bons bleiben auch
+ * mit Schalter unberührt (Bestandsschutz: weder Storno noch Betragskorrektur).
+ */
+const STORNO_WORT = /storno|stornier/i;
+
+function artikelSchluessel(name) {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/artikelstorno|zeilenstorno|sofortstorno|storniert|storno/g, ' ')
+    .replace(/\b\d{5,}\b/g, ' ') // Artikelnummern (ALDI/Lidl: „734384 Müller Milchreis")
+    .replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+function gleicherArtikel(a, b) {
+  if (!a || !b) return false;
+  const [kurz, lang] = a.length <= b.length ? [a, b] : [b, a];
+  return kurz.length >= 4 && lang.startsWith(kurz);
+}
+
+/**
+ * Schalterwert `cashback_config/v1.stornoAufrechnen` → 'aus' | 'shadow' | 'an'.
+ * Nur das boolesche `true` schaltet ein, nur der String 'shadow' beobachtet;
+ * alles andere (fehlend, false, 'true', Tippfehler) ist 'aus'.
+ */
+function stornoModus(wert) {
+  if (wert === true) return 'an';
+  if (wert === 'shadow') return 'shadow';
+  return 'aus';
+}
+
+/** Gesetzt, aber weder false noch ein gültiger Wert — index.js meldet das. */
+function stornoWertUngueltig(wert) {
+  return wert != null && wert !== false && stornoModus(wert) === 'aus';
+}
+
+/**
+ * Zählung OHNE Aufrechnung — der Stand vor dem 08.10.2026, Zeichen für Zeichen
+ * die frühere countEligibleItems. Gilt, solange der Schalter nicht `true` ist.
+ */
+function zaehleOhneAufrechnung(items) {
+  return items.filter(
     (it) =>
       it &&
       typeof it.name === 'string' &&
@@ -466,6 +570,38 @@ function countEligibleItems(parsed) {
 }
 
 /**
+ * @param {object} parsed  Lesung (items[]).
+ * @param {object} [opts]
+ * @param {boolean} [opts.stornoAufrechnen]  NUR `true` rechnet Storno-/Rückgabe-
+ *        zeilen auf (Schalter `stornoAufrechnen === true`, s. stornoModus).
+ *        Ohne Angabe: Zählung wie vor dem 08.10.2026.
+ */
+function countEligibleItems(parsed, opts = {}) {
+  if (!parsed || !Array.isArray(parsed.items)) return 0;
+  if (!opts || opts.stornoAufrechnen !== true) return zaehleOhneAufrechnung(parsed.items);
+  const artikel = [];
+  const negativ = [];
+  for (const it of parsed.items) {
+    if (!it || typeof it.name !== 'string' || !Number.isFinite(it.priceCents)) continue;
+    // Pfand ist kein Artikel; eine Rabattzeile (Prompt v1.5) auch nicht —
+    // selbst wenn das Modell sie entgegen Regel 16 mit positivem Preis liefert.
+    if (isPfandItem(it) || istRabattKategorie(it)) continue;
+    if (it.priceCents > 0) artikel.push({ rest: it.priceCents, schluessel: artikelSchluessel(it.name) });
+    else if (it.priceCents < 0) negativ.push(it);
+  }
+  for (const zeile of negativ) {
+    const betrag = -zeile.priceCents;
+    const schluessel = artikelSchluessel(zeile.name);
+    const offen = artikel.filter((a) => a.rest > 0);
+    const namensgleich = offen.filter((a) => gleicherArtikel(a.schluessel, schluessel));
+    let ziel = namensgleich.find((a) => a.rest === betrag) || namensgleich[0] || null;
+    if (!ziel && STORNO_WORT.test(`${zeile.name} ${zeile.raw || ''}`)) ziel = offen.find((a) => a.rest === betrag) || null;
+    if (ziel) ziel.rest -= betrag;
+  }
+  return artikel.filter((a) => a.rest > 0).length;
+}
+
+/**
  * Apply tier formula from the cashback config.
  */
 function tierFor(eligibleItemCount, tiers) {
@@ -476,4 +612,4 @@ function tierFor(eligibleItemCount, tiers) {
   return 0;
 }
 
-module.exports = { extractReceipt, reconcile, basketDiscountCents, countEligibleItems, tierFor, isPfandItem, istWarenkorbRabattZeile, istRabattKategorie, DEFAULT_MODEL };
+module.exports = { extractReceipt, reconcile, basketDiscountCents, countEligibleItems, stornoModus, stornoWertUngueltig, tierFor, isPfandItem, istWarenkorbRabattZeile, istRabattKategorie, DEFAULT_MODEL };

@@ -137,12 +137,15 @@ describe('Schalter ocrPrompt → Version jeder Lesung', () => {
     ['fehlt', undefined, 'v1.4'],
     ['v1.4', 'v1.4', 'v1.4'],
     ['v1.5', 'v1.5', 'v1.5'],
+    // Seit 08.10.2026 gültig (lib/prompt.js v1.6, Schema wie v1.5).
+    ['v1.6', 'v1.6', 'v1.6'],
     ['ungültig (V1.5)', 'V1.5', 'v1.4'],
-    ['ungültig (v1.6)', 'v1.6', 'v1.4'],
+    ['ungültig (V1.6)', 'V1.6', 'v1.4'],
+    ['ungültig (v1.7)', 'v1.7', 'v1.4'],
   ])('Schalter %s → %s', async (_name, wert, version) => {
     konfig(wert === undefined ? {} : { ocrPrompt: wert });
     bonAnlegen();
-    antworten = version === 'v1.5' ? [parsedV15(), parsedV15()] : [parsedV14(), parsedV14()];
+    antworten = version === 'v1.4' ? [parsedV14(), parsedV14()] : [parsedV15(), parsedV15()];
     await verarbeiten();
 
     const p = PROMPT.promptFuer(version);

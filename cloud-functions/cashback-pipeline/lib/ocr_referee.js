@@ -105,6 +105,9 @@ function temperatureFor(model) {
  * @param {string|null} [ctx.erstlesungVersion] ocr.promptVersion der Erstlesung — wählt
  *                                            den Prompt (lib/prompt_referee.js); ohne
  *                                            Angabe der Live-Stand v1.4.
+ * @param {boolean} [ctx.stornoAufrechnen]   Nur true: Fingerabdrücke zählen mit Storno-
+ *                                            Aufrechnung (Schalter cashback_config/v1.
+ *                                            stornoAufrechnen, wie die Erstlesungen).
  * @param {Function} [ctx.extract]            Testnaht; Standard extractReceipt.
  * @param {() => number} [ctx.clock]          Testnaht; Standard Date.now.
  * @returns {Promise<{result: object, chosen: object|null}>}
@@ -157,7 +160,7 @@ async function runReferee(imageBytes, mimeType, ctx) {
     }
     if (r) {
       lesungen.push(r);
-      const fp = refereeFingerprint(r);
+      const fp = refereeFingerprint(r, ctx.stornoAufrechnen === true ? { stornoAufrechnen: true } : {});
       fps.push(fp);
       if (!keys.has(fp.merchant ?? null)) {
         keys.set(fp.merchant ?? null, await ctx.merchantKeyFor(fp.merchant, fp.bonCountry));

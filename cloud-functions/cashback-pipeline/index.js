@@ -62,10 +62,11 @@ const TREMENDOUS_WEBHOOK_SECRET = defineSecret('TREMENDOUS_WEBHOOK_SECRET');
 // Trigger-Secret (kein neues Secret nötig). ClickUp 86caf62v6.
 const CASHBACK_ADMIN_KEY = defineSecret('NUTRITION_SCRAPER_TRIGGER_KEY');
 
-const { extractReceipt, reconcile, countEligibleItems, tierFor, isPfandItem, DEFAULT_MODEL } = require('./lib/ocr');
+const { extractReceipt, reconcile, countEligibleItems, stornoModus, stornoWertUngueltig, tierFor, isPfandItem, DEFAULT_MODEL } = require('./lib/ocr');
 const { extractReceiptCVHybrid } = require('./lib/ocr_cvhybrid');
 const { extractReceiptRobust } = require('./lib/ocr_robust');
 const { promptVersionAus } = require('./lib/prompt');
+const { denkstufeAus, ocrDenkstufeWirksam } = require('./lib/geminiModelle');
 const { uebernehmeClientKontext, logZusammenfassung: clientKontextLog } = require('./lib/clientKontext');
 const { moneyFieldAgreement, normMerchant } = require('./lib/fieldAgreement');
 const { refereeMode, shouldRequestReferee, infraVerhindert: refereeInfraVerhindert, einheitlicheUhrzeit } = require('./lib/refereePolicy');
@@ -118,6 +119,7 @@ const {
 } = require('./lib/doppelBon');
 const { pruefeKandidaten: bildKandidatenPruefen } = require('./lib/bildVergleich');
 const { istOnlineBestellung, belegBereinigen, onlineMerkmal } = require('./lib/belegart');
+const { abgleichOptionen } = require('./lib/punkteZahlung');
 const {
   computeDHash,
   hammingDistance,
@@ -335,6 +337,11 @@ function buildOcrField(ocr, recon, escalation) {
     confidence: ocr.parsed.ocrConfidence ?? null,
     // Self-consistency confidence from the robust engine (high/medium/low/none)
     // + attempts — for monitoring + an optional approval gate.
+    // Trägt seit 08.10.2026 auch die Denkstufe der normalen Lesungen
+    // (`robust.denkstufe`, je Lesung `robust.reads[].denkstufe`) — sie geht
+    // nur mit, weil `robust` hier GANZ übernommen wird. Wer `robust` je
+    // auf einzelne Felder kürzt, muss `denkstufe` mitnehmen (Auswertung
+    // Alt/Neu hängt daran, __tests__/ocrDenkstufe.test.js).
     robust: ocr.robust ?? null,
     // Token-Verbrauch der GEWÄHLTEN Lesung (nicht Summe aller Versuche —
     // dafür steht robust.attempts daneben). `thoughts` sind die unsichtbaren
@@ -361,6 +368,10 @@ function buildOcrField(ocr, recon, escalation) {
       signedDeltaCents: recon.signedDeltaCents,
       direction: recon.direction,
       basketDiscountCents: recon.basketDiscountCents ?? null,
+      // Nur Prompt v1.6 mit einer Punkte-Zeile in items (lib/punkteZahlung.js):
+      // so viel wurde als Zahlungsmittel aus der Summe genommen. Sonst kein
+      // Feld — das OCR-Feld bleibt wie vor dem 08.10.2026.
+      ...(Number.isFinite(recon.punkteZahlungCents) ? { punkteZahlungCents: recon.punkteZahlungCents } : {}),
     },
   };
 }
@@ -382,7 +393,10 @@ function ocrFromCache(cachedOcr) {
     // Self-Consistency-Ergebnis MIT übernehmen (Money-Ops-Review 02.09.):
     // ohne `robust` sah das Review-Gate 6w bei jedem Retry/Reprocessing
     // conf=null → kein Halt → ungeprüfte Gutschrift, und der Final-Write
-    // überschrieb robust am Doc mit null.
+    // überschrieb robust am Doc mit null. Ganz übernommen — damit auch die
+    // Denkstufe der gespeicherten Lesung (`robust.denkstufe`, 08.10.2026):
+    // der Cache-Pfad liest nicht neu, also gilt die gespeicherte Stufe, nicht
+    // der aktuelle Schalter.
     robust: cachedOcr.robust ?? null,
     inputTokens: cachedOcr.chosenReadTokens?.input ?? null,
     outputTokens: cachedOcr.chosenReadTokens?.output ?? null,
@@ -394,7 +408,9 @@ function ocrFromCache(cachedOcr) {
   const recon =
     cachedOcr.reconciliation && typeof cachedOcr.reconciliation.ok === 'boolean'
       ? cachedOcr.reconciliation
-      : reconcile(ocr.parsed);
+      // Abgleich nach der Fassung der gespeicherten Lesung (v1.6: Punkte als
+      // Zahlungsmittel, lib/punkteZahlung.js; sonst wie bisher).
+      : reconcile(ocr.parsed, abgleichOptionen(ocr.promptVersion));
   const escalation = cachedOcr.escalation || { fired: false };
   return { ocr, recon, escalation };
 }
@@ -608,12 +624,41 @@ const DEFAULT_CONFIG = {
   // Altes, nirgends gelesenes Feld (steht so auch in cashback_config/v1) —
   // NICHT der Prompt-Schalter. Der heißt `ocrPrompt` (unten).
   ocrPromptVersion: 'v1.0',
-  // Prompt der Bon-OCR (lib/prompt.js, 05.10.2026): 'v1.4' | 'v1.5'. Fehlt
+  // Prompt der Bon-OCR (lib/prompt.js, 05.10.2026): 'v1.4' | 'v1.5' | 'v1.6'
+  // (v1.6 seit 08.10.2026: Nachbesserung von LOW + v1.5 — Kassenzeit statt
+  // TSE-Zeit, Artikelrabatt nie aufs Pfand, Wiederholzeilen einzeln,
+  // eingelöste Punkte als Zahlungsmittel; nicht gemessen). Fehlt
   // der Wert oder ist er ungültig, gilt v1.4 — der Live-Stand bis zum
   // Umschalten. Wirkt beim nächsten Bon, ohne Deploy; gelesene Bons behalten
   // ihre Version (OCR-Cache), eine angefangene Leiter der anderen Version
   // wird frisch gelesen.
   ocrPrompt: 'v1.4',
+  // Denkstufe der normalen Flash-Lesungen der Robust-OCR (Basis + verbessertes
+  // Bild, 08.10.2026, lib/geminiModelle.js ocrDenkstufeWirksam): nur 'LOW'
+  // (einziger gemessener Wert; MEDIUM/HIGH ohne Ausweich-Stufe, s. dort).
+  // Fehlt der Wert oder ist er ungültig, gilt das Verhalten wie bisher (keine
+  // Denk-Vorgabe, Anfragen byte-gleich). Wirkt NUR zusammen mit
+  // `ocrPrompt: 'v1.5'` oder `'v1.6'` — im Code erzwungen: mit v1.4 wird keine
+  // Stufe gesendet und `ocr-denkstufe-ohne-v15` gemeldet. Unter wirksamem LOW
+  // zählt eine Einigung zweier LOW-Lesungen nur bei exaktem Abgleich
+  // (lib/ocr_robust.js findAgreementNurExakt). Jedes der beiden Felder
+  // schaltet LOW also ab, die Reihenfolge beim Setzen/Entfernen ist gleich-
+  // gültig. Eskalation, Zweitprüfung und cv-hybrid bleiben unberührt. Wirkt
+  // beim nächsten frisch gelesenen Bon, ohne Deploy; gelesene Bons behalten
+  // ihre Stufe (OCR-Cache), ein Zwischenstand einer anderen Stufe wird frisch
+  // gelesen.
+  ocrDenkstufe: null,
+  // Storno-/Rückgabezeilen beim Zählen der anrechenbaren Artikel aufrechnen
+  // (08.10.2026, lib/ocr.js countEligibleItems). NUR `true` wirkt — dann für
+  // die Geldentscheidung (minItems/Stufen), die Lese-Fingerabdrücke (Feld-Gate
+  // 6w) und die Zweitprüfung, für jede Prompt-Version. 'shadow' zählt wie
+  // bisher und meldet `storno-zaehlung-abweichend`, wenn die Aufrechnung eine
+  // andere Zahl ergäbe. Fehlt der Wert oder ist er ungültig: Zählung exakt wie
+  // vor dem 08.10.2026 (ungültig wird als `storno-aufrechnen-ungueltig`
+  // gemeldet). Wirkt ohne Deploy beim nächsten Lauf; gelesene Bons behalten
+  // ihre gespeicherten Fingerabdrücke (OCR-Cache), die Geldentscheidung zählt
+  // nach dem aktuellen Schalter. Bezahlte Bons schützt der Bestandsschutz.
+  stornoAufrechnen: false,
   manualReviewThreshold: 0.65,
   autoApproveThreshold: 0.85,
   kycRequiredAt: 2000,
@@ -2625,6 +2670,15 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
         err.code = 'config_unavailable';
         throw err;
       }
+      // Storno-Aufrechnung beim Zählen (Schalter stornoAufrechnen, 08.10.2026):
+      // EINMAL je Lauf aus dem strikt gelesenen config bestimmt und überall
+      // gleich verwendet — Robust-Leiter, Zweitprüfung, Geldentscheidung.
+      // Nur `true` wirkt; ein Tippfehler bedeutet „aus" und wird gemeldet.
+      const stornoWahl = stornoModus(config.stornoAufrechnen);
+      const stornoZaehl = stornoWahl === 'an' ? { stornoAufrechnen: true } : {};
+      if (stornoWertUngueltig(config.stornoAufrechnen)) {
+        logger.warn('storno-aufrechnen-ungueltig', { cashbackId, wert: String(config.stornoAufrechnen).slice(0, 40) });
+      }
 
       // 1) Download image bytes from Storage
       const bucket = admin.storage().bucket(receipt.storage.bucket);
@@ -2705,7 +2759,7 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
         // bevor der Final-Write das OCR-Feld neu schreibt (idempotent). Setzt
         // die Bereinigung erst hier die Artikelsumme als Endbetrag einer
         // Online-Rechnung ein, gilt der gespeicherte Abgleich nicht mehr.
-        const parsedBereinigt = belegBereinigen(cachedOcr.parsed);
+        const parsedBereinigt = belegBereinigen(cachedOcr.parsed, abgleichOptionen(cachedOcr.promptVersion));
         const summeNeu = Boolean(parsedBereinigt && parsedBereinigt.summeAusArtikeln && !cachedOcr.parsed.summeAusArtikeln);
         ({ ocr, recon, escalation } = ocrFromCache({
           ...cachedOcr,
@@ -2764,11 +2818,36 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
           // Laufbudget + Fortsetzung (03.10.2026): reicht die Zeit dieses
           // Laufs nicht, kommt KEIN Ergebnis zurück, sondern ein Zwischenstand
           // — ablegen, neu zustellen, nichts entscheiden.
+          // Denkstufe der normalen Lesungen (08.10.2026): derselbe, oben STRIKT
+          // gelesene `config` — keine zusätzliche Lesung. Gilt auch für die
+          // Fortsetzung eines Zwischenstands (passt dessen Stufe nicht, liest die
+          // Leiter frisch); NICHT für den Cache-Pfad oben (kein Modellaufruf)
+          // und nicht für die Zweitprüfung (Schritt 3b, eigene Stufe). Ein
+          // gesetzter, aber ungültiger Wert wirkt nicht — melden, damit ein
+          // Tippfehler nicht still „aus" bedeutet. Ebenso wirkt die Stufe nur
+          // mit Prompt v1.5 oder v1.6 (gemessen ist nur v1.5; v1.6 ist deren
+          // Nachbesserung): ist nur `ocrDenkstufe` gesetzt, liest die Leiter
+          // wie bisher und meldet es.
+          // lib/ocr_robust.js prüft dieselbe Regel noch einmal dort, wo die
+          // Stufe gesendet wird (eine Quelle: ocrDenkstufeWirksam).
+          const ocrPromptVersion = promptVersionAus(config.ocrPrompt);
+          const denkWahl = ocrDenkstufeWirksam(config.ocrDenkstufe, ocrPromptVersion);
+          if (denkWahl.grund === 'ungueltig') {
+            logger.warn('ocr-denkstufe-ungueltig', { cashbackId, wert: String(config.ocrDenkstufe).slice(0, 40) });
+          } else if (denkWahl.grund === 'ohne_v15') {
+            logger.warn('ocr-denkstufe-ohne-v15', { cashbackId, denkstufe: denkstufeAus(config.ocrDenkstufe), promptVersion: ocrPromptVersion });
+          }
           try {
             ocr = await extractReceiptRobust(bytes, mimeType, {
               model: config.ocrModel,
               // Schalter cashback_config/v1.ocrPrompt — ungültig/fehlend → v1.4.
-              promptVersion: promptVersionAus(config.ocrPrompt),
+              promptVersion: ocrPromptVersion,
+              // Schalter cashback_config/v1.ocrDenkstufe — nur 'LOW' und nur mit
+              // v1.5/v1.6, sonst keine Vorgabe (wie vor dem Schalter).
+              denkstufe: denkWahl.denkstufe,
+              // Schalter cashback_config/v1.stornoAufrechnen — nur true zählt die
+              // Fingerabdrücke mit Aufrechnung, sonst wie vor dem 08.10.2026.
+              stornoAufrechnen: stornoWahl === 'an',
               escalationGate,
               laufStart,
               zwischenstand: receipt.ocrZwischenstand || null,
@@ -2798,11 +2877,13 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
         }
         // Belegart normalisieren, Lieferanschrift entfernen — für jede Engine
         // (die Gemini-Lesungen tun es schon in lib/ocr.js; idempotent).
-        ocr.parsed = belegBereinigen(ocr.parsed);
+        ocr.parsed = belegBereinigen(ocr.parsed, abgleichOptionen(ocr.promptVersion));
 
         // 3) Reconciliation — asymmetric tolerance (Σ < total: ±200¢ for
         //    Pfand; Σ > total: only ±50¢ — that's the suspicious direction).
-        recon = reconcile(ocr.parsed);
+        //    Mit den Optionen der Fassung (v1.6: eingelöste Punkte zählen als
+        //    Zahlungsmittel nicht zur Summe, lib/punkteZahlung.js).
+        recon = reconcile(ocr.parsed, abgleichOptionen(ocr.promptVersion));
 
         // 3a) Escalation: if primary failed recon AND DocAI is configured,
         //     re-run the bon through DocAI Expense Parser. Take whichever
@@ -2922,7 +3003,7 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
                 isReceipt: ocr.parsed?.isReceipt !== false,
                 totalCents: Number.isFinite(ocr.parsed?.totalCents) ? ocr.parsed.totalCents : null,
                 bonDate: ocr.parsed?.bonDate ?? null,
-                eligibleItems: countEligibleItems(ocr.parsed),
+                eligibleItems: countEligibleItems(ocr.parsed, stornoZaehl),
               }];
           const { result, chosen } = await runReferee(bytes, mimeType, {
             reason: anfrage.reason,
@@ -2931,6 +3012,8 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
             // Schalter: die Prüfung ersetzt diese Lesung und wird an ihr
             // gemessen — zwei Fassungen werden nicht gemischt (05.10.2026).
             erstlesungVersion: ocr.promptVersion ?? null,
+            // Zählung wie die Erstlesungen (Schalter stornoAufrechnen).
+            stornoAufrechnen: stornoWahl === 'an',
             // Marktnamen über den Resolver vergleichen, wie im Gate 6w.
             merchantKeyFor: async (name, land) => {
               const roh = normMerchant(name);
@@ -3005,7 +3088,9 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
               ocr.inputTokens = chosen.inputTokens ?? null;
               ocr.outputTokens = chosen.outputTokens ?? null;
               ocr.thoughtsTokens = chosen.thoughtsTokens ?? null;
-              recon = reconcile(ocr.parsed);
+              // Fassung der Prüf-Lesung ('referee-v2+v1.6' → Punkte als
+              // Zahlungsmittel; sonst wie bisher).
+              recon = reconcile(ocr.parsed, abgleichOptionen(ocr.promptVersion));
             }
             // Sofort ablegen: eine spätere Wiederaufnahme (Sweeper) darf die
             // bezahlte Prüfung nicht wiederholen. Transaktional, nur mit eigenem
@@ -3297,7 +3382,21 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
       //      gewählten Aktion (receipt.campaignId). Die Aktion definiert
       //      Tiers/Flat, minItems, Wochenlimit, Per-User-Cap und Budget.
       //      Keine globalen Earning-Regeln mehr.
-      const eligibleItemCount = countEligibleItems(ocr.parsed);
+      const eligibleItemCount = countEligibleItems(ocr.parsed, stornoZaehl);
+      // Beobachtung (Schalter 'shadow') bzw. Nachweis der Wirkung (true): die
+      // jeweils andere Zählung nur rechnen und melden, wenn sie abweicht. Kein
+      // Feld am Bon, keine Wirkung auf das Geld.
+      if (stornoWahl !== 'aus') {
+        const andere = countEligibleItems(ocr.parsed, stornoWahl === 'an' ? {} : { stornoAufrechnen: true });
+        if (andere !== eligibleItemCount) {
+          logger.info('storno-zaehlung-abweichend', {
+            cashbackId,
+            modus: stornoWahl,
+            ohneAufrechnung: stornoWahl === 'an' ? andere : eligibleItemCount,
+            mitAufrechnung: stornoWahl === 'an' ? eligibleItemCount : andere,
+          });
+        }
+      }
 
       // Aktion FRÜH laden (vor dem Gate), damit ihr `maxAgeDays` bereits im
       // Alters-Gate greift (Config aus cashback_campaigns). 86ca0wbg7.

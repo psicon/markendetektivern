@@ -27,14 +27,22 @@
  *   zusätzlich, dass Regel 16 des Haupt-Prompts (Rabattzeilen als negative
  *   Items, Coupon-Fix 05.10.2026) hier nicht gilt — die Zweitprüfung führt
  *   solche Zeilen weiter in basketDiscounts.
+ * referee-v2+v1.6 (2026-10-08) — Zusatz wortgleich wie bei v1.5, nur die
+ *   Grundlage ist der Haupt-Prompt v1.6 (Kassenzeit statt TSE-Zeit, Artikel-
+ *   rabatt nie aufs Pfand, Wiederholzeilen einzeln, eingelöste Punkte als
+ *   Zahlungsmittel, totalCents VOR der Punkteverrechnung). Regel I unten nennt
+ *   eingelöste Punkte schon als Zahlungszeile — passt zu Regel 17 von v1.6.
+ *   Die Rabatte nach Regel 16 bleiben auch hier in basketDiscounts; Regel 17
+ *   rechnet sie beim Endbetrag mit („zu zahlender Betrag + Punkte").
  */
 
 'use strict';
 
 const { promptFuer, STANDARD_VERSION } = require('./prompt');
 
-// Regeln G–I (und K) sind in beiden Fassungen wortgleich; v1.5 ergänzt G um
-// einen Satz und verliert J (steht dort als Regel 12 im Haupt-Prompt).
+// Regeln G–I (und K) sind in allen Fassungen wortgleich; v1.5 ergänzt G um
+// einen Satz und verliert J (steht dort als Regel 12 im Haupt-Prompt). v1.6
+// übernimmt den Zusatz von v1.5 unverändert (ZUSATZ_AB_V15).
 const REGEL_G = `G. **Rabatte auf den ganzen Einkauf** (z. B. „5% Rabatt Warenkorb",
    „Gutschein Netto-App -2,00", „10 € Coupon", Mitarbeiterrabatt), die NICHT
    unmittelbar unter einem bestimmten Artikel stehen, sind KEINE Items. Trage
@@ -51,6 +59,12 @@ I. **Zahlungszeilen** (BAR, EC-Karte, Kreditkarte, Gutschein- oder
 const NICHTS_ERZWINGEN = `**Nichts erzwingen.** Passt die Summe nicht, liefere trotzdem, was
    gedruckt ist. Unlesbare Ziffern NIE raten, damit eine Summe aufgeht.`;
 
+const ZUSATZ_AB_V15 = `${REGEL_G}
+   Regel 16 gilt in der Zweitprüfung NICHT: solche Zeilen gehören nur in
+   basketDiscounts, nie in items.
+${REGEL_HI}
+J. ${NICHTS_ERZWINGEN}`;
+
 const ZUSATZ = {
   'v1.4': `${REGEL_G}
 ${REGEL_HI}
@@ -59,11 +73,8 @@ J. **bonComplete**: true nur, wenn Marktname/Kopf, die Artikelliste bis zur
    Bon abgeschnitten, verdeckt oder an entscheidenden Stellen unlesbar ist.
    null, wenn du es nicht beurteilen kannst.
 K. ${NICHTS_ERZWINGEN}`,
-  'v1.5': `${REGEL_G}
-   Regel 16 gilt in der Zweitprüfung NICHT: solche Zeilen gehören nur in
-   basketDiscounts, nie in items.
-${REGEL_HI}
-J. ${NICHTS_ERZWINGEN}`,
+  'v1.5': ZUSATZ_AB_V15,
+  'v1.6': ZUSATZ_AB_V15,
 };
 
 const BASKET_DISCOUNTS = {
@@ -110,12 +121,12 @@ ${ZUSATZ[b.VERSION]}`,
   });
 }
 
-const REFEREE_PROMPTS = Object.freeze({ 'v1.4': bauen('v1.4'), 'v1.5': bauen('v1.5') });
+const REFEREE_PROMPTS = Object.freeze({ 'v1.4': bauen('v1.4'), 'v1.5': bauen('v1.5'), 'v1.6': bauen('v1.6') });
 
 /**
- * Zweitprüfungs-Prompt zur Version der Erstlesung. Alles außer 'v1.5' (auch
- * Bestand v1.3, DocAI, cv-hybrid, fehlende Angabe) bekommt v1.4 — den
- * bisherigen Live-Stand.
+ * Zweitprüfungs-Prompt zur Version der Erstlesung. Alles außer 'v1.5' und
+ * 'v1.6' (auch Bestand v1.3, DocAI, cv-hybrid, fehlende Angabe) bekommt v1.4 —
+ * den bisherigen Live-Stand.
  * @param {string|null|undefined} erstlesungVersion  ocr.promptVersion am Bon
  */
 function refereePromptFuer(erstlesungVersion) {

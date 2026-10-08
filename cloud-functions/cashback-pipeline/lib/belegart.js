@@ -1,5 +1,7 @@
 'use strict';
 
+const { itemsOhnePunkteZahlung } = require('./punkteZahlung');
+
 /**
  * Belegart einer Lesung — Kassenbon, App-Kassenbon oder Online-Bestellung
  * (Prompt v1.5, Entscheidung Patrick 04.10.2026).
@@ -99,9 +101,13 @@ function onlineMerkmal(parsed) {
  * Normalisiert die v1.5-Felder einer Lesung und entfernt bei einer Online-
  * Bestellung jede Anschrift aus dem Kopf. Gibt eine KOPIE zurück; idempotent.
  * @param {object} parsed  ocr.parsed
+ * @param {object} [abgleich]  Abgleich-Optionen zur Fassung der Lesung
+ *        (lib/punkteZahlung.js abgleichOptionen). Mit `punkteAlsZahlung`
+ *        (Prompt v1.6) zählen eingelöste Punkte nicht zur Artikelsumme —
+ *        dieselbe Summe wie reconcile() mit denselben Optionen.
  * @returns {object}
  */
-function belegBereinigen(parsed) {
+function belegBereinigen(parsed, abgleich = {}) {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return parsed;
   const out = { ...parsed };
   // Eine Lesung ohne jedes v1.5-Feld (Prompt v1.4 hinter dem Schalter
@@ -118,8 +124,9 @@ function belegBereinigen(parsed) {
     out.bonComplete = out.bonComplete === true ? true : out.bonComplete === false ? false : null;
   }
   if (SUMME_AUS_ARTIKELN.has(out.belegart) && !Number.isFinite(out.totalCents) && Array.isArray(out.items)) {
-    // Dieselbe Summe wie reconcile() in lib/ocr.js.
-    const summe = out.items.reduce((acc, it) => acc + (it && Number.isFinite(it.priceCents) ? it.priceCents : 0), 0);
+    // Dieselbe Summe wie reconcile() in lib/ocr.js (mit denselben Optionen).
+    const summe = itemsOhnePunkteZahlung(out.items, abgleich)
+      .reduce((acc, it) => acc + (it && Number.isFinite(it.priceCents) ? it.priceCents : 0), 0);
     if (summe > 0) {
       out.totalCents = summe;
       out.summeAusArtikeln = true;

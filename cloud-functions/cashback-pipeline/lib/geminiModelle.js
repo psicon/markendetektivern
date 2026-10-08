@@ -108,6 +108,77 @@ function ausweichStandort(model, envWert) {
 const ERLAUBTE_DENKSTUFEN = new Set(['MINIMAL', 'LOW', 'MEDIUM', 'HIGH']);
 
 /**
+ * ═══ Denkstufe der normalen Flash-Lesungen (08.10.2026) ═══
+ * Schalter `cashback_config/v1.ocrDenkstufe`: 'LOW' gibt den Basis-Lesungen
+ * und den Lesungen am verbesserten Bild der Robust-OCR (lib/ocr_robust.js) ein
+ * `thinkingConfig: { thinkingLevel: 'LOW' }` mit. Fehlt der Wert oder ist er
+ * ungültig, gilt das Verhalten wie bisher: KEINE Denk-Vorgabe (das Modell denkt
+ * nach seinem eigenen Standard). Ab Werk ist das Feld nicht gesetzt — der
+ * Deploy ändert an den Anfragen nichts (byte-gleich belegt in
+ * __tests__/ocrDenkstufe.test.js).
+ *
+ * Nicht betroffen: Eskalation (eskalationsOptionen oben, eigene Stufe HIGH/
+ * Ausweich LOW), Zweitprüfung (lib/ocr_referee.js, eigene Stufe) und die
+ * Rückfall-Engine cv-hybrid. Sie übergeben ihre Stufe selbst bzw. bleiben wie
+ * sie sind.
+ *
+ * NUR 'LOW' ist freigegeben — der einzige gemessene Wert (Messung 08.10.:
+ * LOW ≈ ohne Denken). MEDIUM und HIGH sind für die normalen Lesungen nicht
+ * gemessen, und dort gibt es keinen Ausweg auf eine niedrigere Stufe (anders
+ * als bei der Eskalation, HIGH → LOW): ein Denk-Ausreißer bis MAX_TOKENS
+ * (ocr_json_decode) verbraucht den Lese-Platz ohne Ersatzversuch — ersetzt
+ * wird nur der Zeitabbruch (lib/ocr_robust.js `verbraucht`). Gemessen an der
+ * Eskalation mit HIGH: 11 von 52 Versuchen bis MAX_TOKENS, 2 am Zeitlimit.
+ * Folge wären weniger Lesungen, seltener Einigung, mehr Eskalation und mehr
+ * Bons mit Bewertung none/low. MEDIUM/HIGH erst nach eigener Messung UND mit
+ * Ausweich-Stufe für die normalen Lesungen freigeben.
+ *
+ * LOW wirkt NUR zusammen mit Prompt v1.5 (`ocrPrompt: 'v1.5'`) — nur diese
+ * Kombination ist an ≥ 268 Bons gemessen. v1.4 + LOW lief nur in der ersten
+ * Messung (60 Bons) und lehnte dort 4 von 58 korrekten Bons ab, 3 davon mit
+ * Coupon (v1.4 verlangt das Umrechnen auf die Artikel, ohne Denken scheitert es).
+ * Die Kopplung steht im Code (`ocrDenkstufeWirksam`), nicht nur in der
+ * Anleitung: mit v1.4 wird die Stufe nicht gesendet und gemeldet
+ * (`ocr-denkstufe-ohne-v15`). Die Reihenfolge beim Setzen und Entfernen der
+ * beiden Felder ist damit gleichgültig; jedes der beiden schaltet LOW ab.
+ * Seit 08.10.2026 wirkt LOW auch mit v1.6 — der Nachbesserung genau dieser
+ * Variante (lib/prompt.js, gleiches Schema, Regeln aus Messung 2). v1.6 + LOW
+ * ist NICHT gemessen. Grund-Code (`ohne_v15`) und Meldung
+ * (`ocr-denkstufe-ohne-v15`) behalten ihren Namen, damit Auswertungen der
+ * Logs nicht brechen; sie bedeuten „weder v1.5 noch v1.6".
+ *
+ * Genau geprüft wie `ocrPrompt` (lib/prompt.js promptVersionAus): Groß-
+ * schreibung, keine Leerzeichen, nur dieser Wert. MINIMAL kennt Gemini 3
+ * zwar, ist aber nicht gemessen und deshalb hier nicht freigegeben. Ein
+ * ungültiger Wert wirkt nicht — index.js meldet ihn (`ocr-denkstufe-ungueltig`),
+ * damit ein Tippfehler nicht still „aus" bedeutet.
+ */
+const OCR_DENKSTUFEN = new Set(['LOW']);
+
+/** Prompt-Fassungen, mit denen die Denkstufe wirkt (v1.5 gemessen, v1.6 = deren Nachbesserung). */
+const OCR_DENKSTUFE_PROMPTE = new Set(['v1.5', 'v1.6']);
+
+/** Wert von `cashback_config/v1.ocrDenkstufe` → 'LOW' | null (keine Vorgabe). */
+function denkstufeAus(wert) {
+  return typeof wert === 'string' && OCR_DENKSTUFEN.has(wert) ? wert : null;
+}
+
+/**
+ * Wirksame Denkstufe einer Leiter: gültiger Wert UND Prompt v1.5 oder v1.6.
+ * @param {*} wert Schalterwert `ocrDenkstufe`
+ * @param {string} promptVersion bereits geprüfte Version (lib/prompt.js promptVersionAus)
+ * @returns {{ denkstufe: 'LOW'|null, grund: null|'ungueltig'|'ohne_v15' }}
+ *   grund null = nichts zu melden (Wert fehlt, oder er wirkt).
+ */
+function ocrDenkstufeWirksam(wert, promptVersion) {
+  if (wert == null) return { denkstufe: null, grund: null };
+  const stufe = denkstufeAus(wert);
+  if (!stufe) return { denkstufe: null, grund: 'ungueltig' };
+  if (!OCR_DENKSTUFE_PROMPTE.has(promptVersion)) return { denkstufe: null, grund: 'ohne_v15' };
+  return { denkstufe: stufe, grund: null };
+}
+
+/**
  * Zeitlimit je Eskalationslesung. gemini-2.5-pro lief ohne Limit (gemessen
  * 01.10.2026 an 38 eskalierten Bons: Median 57 s, p90 119 s, Maximum 198 s).
  * 3.5-flash HIGH ist im Mittel schneller (erfolgreiche Lesungen ≤ 140 s),
@@ -179,6 +250,10 @@ module.exports = {
   vertexStandort,
   ausweichStandort,
   eskalationsOptionen,
+  denkstufeAus,
+  ocrDenkstufeWirksam,
+  OCR_DENKSTUFEN,
+  OCR_DENKSTUFE_PROMPTE,
   ESKALATION_MODELL_STANDARD,
   ESKALATION_DENKSTUFE_STANDARD,
   ESKALATION_AUSWEICH_DENKSTUFE_STANDARD,

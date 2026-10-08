@@ -18,6 +18,7 @@
  */
 
 const { reconcile, basketDiscountCents, countEligibleItems } = require('./ocr');
+const { abgleichOptionen } = require('./punkteZahlung');
 const { moneyFieldAgreement, normMerchant } = require('./fieldAgreement');
 
 /**
@@ -115,9 +116,11 @@ function shouldRequestReferee(input = {}) {
  * ocr_robust zählt hier die ERWEITERTE Summenprobe (Warenkorb-Rabatt) und die
  * Selbstauskunft zur Vollständigkeit. Keine `undefined`-Werte (Firestore).
  */
-function refereeFingerprint(read) {
+function refereeFingerprint(read, zaehl = {}) {
   const p = (read && read.parsed) || {};
-  const recon = reconcile(p);
+  // Abgleich nach der Fassung der Lesung ('referee-v2+v1.6' → eingelöste
+  // Punkte als Zahlungsmittel, lib/punkteZahlung.js; sonst wie bisher).
+  const recon = reconcile(p, abgleichOptionen(read && read.promptVersion));
   return {
     isReceipt: p.isReceipt === true,
     merchant: p.merchant == null ? null : String(p.merchant).slice(0, 120),
@@ -127,7 +130,9 @@ function refereeFingerprint(read) {
     totalCents: Number.isFinite(p.totalCents) ? p.totalCents : null,
     subtotalCents: Number.isFinite(p.subtotalCents) ? p.subtotalCents : null,
     itemCount: Array.isArray(p.items) ? p.items.length : 0,
-    eligibleItems: countEligibleItems(p),
+    // Wie die Erstlesungen zählen (Schalter stornoAufrechnen, nur true rechnet
+    // auf, lib/ocr.js) — plausibel() und die Zeugen-Einigung vergleichen beide.
+    eligibleItems: countEligibleItems(p, zaehl),
     reconOk: recon.ok === true,
     reconDirection: recon.direction || null,
     basketDiscountCents: basketDiscountCents(p),

@@ -55,13 +55,78 @@
  *     am Bon ab und stellt sofort neu zu; der nächste Lauf setzt genau dort
  *     fort (`opts.zwischenstand`). Eine unterbrochene Leiter liefert bei
  *     gleichen Lesungen exakt dasselbe Ergebnis wie eine durchgelaufene.
+ *
+ * ═══ Denkstufe der normalen Lesungen (08.10.2026, ab Werk aus) ═══
+ * `opts.denkstufe` (Schalter cashback_config/v1.ocrDenkstufe, geprüft über
+ * lib/geminiModelle.js ocrDenkstufeWirksam): 'LOW' gibt den Basis-Lesungen und
+ * den Lesungen am verbesserten Bild ein `thinkingConfig: { thinkingLevel }`
+ * mit — aber NUR, wenn diese Leiter mit Prompt v1.5 oder v1.6 liest (gemessen
+ * ist nur v1.5 + LOW, v1.6 ist deren Nachbesserung; sonst
+ * `ocr-denkstufe-ohne-v15` und keine Vorgabe). Ohne
+ * gültigen Wert bleibt jede Anfrage, wie sie war (keine Denk-Vorgabe). Die
+ * Eskalation behält ihre eigene Stufe (HIGH, nach Fehlversuch LOW). Messung
+ * 08.10.: LOW ≈ ohne Denken.
+ *   • MEDIUM/HIGH sind nicht freigegeben: für die normalen Lesungen gibt es
+ *     keine Ausweich-Stufe, und ein Denk-Ausreißer bis MAX_TOKENS verbraucht
+ *     den Platz (nur der Zeitabbruch wird ersetzt, `verbraucht` unten).
+ *   • Vorrang vor CASHBACK_OCR_THINKING_BUDGET: eine übergebene Denk-Konfiguration
+ *     schlägt in lib/ocr.js den Env-Schalter. Gewollt: Vertex lehnt
+ *     `thinkingBudget` bei gemini-3.5-flash seit 22.09.2026 teilweise mit 400
+ *     ab (gemessen, s. CLAUDE.md), und laut Gemini-3-Doku sind beide Felder in
+ *     EINER Anfrage unzulässig (400; nicht selbst gemessen) — es kann also nur
+ *     eines gelten. Der Firestore-Schalter ist die gemessene, ohne Deploy
+ *     umkehrbare Betriebsentscheidung; die Env-Variable ist Deploy-Stand und
+ *     laut lib/ocr.js für Gemini 3 ohnehin nicht zu setzen. Für Modelle vor
+ *     Gemini 3 (config.ocrModel auf 2.5) wirkt der Schalter NICHT — sie kennen
+ *     keine Denkstufen; dort gilt weiter der Env-Schalter.
+ *   • Am Bon: `ocr.robust.denkstufe` (Stufe der normalen Lesungen, null = keine
+ *     Vorgabe; fehlt das Feld, stammt der Bon von vor dem Schalter) und je
+ *     Lesung `robust.reads[].denkstufe` (tatsächlich gesendete Stufe, bei der
+ *     Eskalation deren eigene). So lassen sich Alt und Neu trennen.
+ *   • Ein Zwischenstand einer ANDEREN Stufe wird verworfen (wie beim Prompt):
+ *     eine Leiter mischt keine Stufen, `robust.denkstufe` bleibt eindeutig.
+ *   • Seit 08.10.2026 wirkt LOW mit Prompt v1.5 UND v1.6 (v1.6 = Nachbesserung
+ *     dieser Variante, lib/prompt.js).
+ *
+ * ═══ Unter LOW zählt eine Einigung nur bei exaktem Abgleich (08.10.2026) ═══
+ * Messung 2 (268 Bons, LOW + v1.5): 18 Freigaben mit Bewertung 'high' trugen
+ * falsche Artikelpreise — 9 davon mit einer Summenabweichung innerhalb der
+ * Pfand-Toleranz (Σ bis 2 € unter dem Endbetrag gilt als abgeglichen), 9 mit
+ * sich aufhebenden Fehlern. Zwei LOW-Lesungen irren dabei gemeinsam (dasselbe
+ * Modell, dieselbe Stufe). Deshalb gilt mit wirksamer Stufe LOW:
+ *   • Einigen sich NUR normale LOW-Lesungen (Basis- und Verbessert-Lesungen),
+ *     zählen dafür nur Lesungen, deren Abgleich EXAKT aufgeht (Σ Items =
+ *     Endbetrag auf den Cent, ohne Pfand-Toleranz; bei Rabattzeilen die
+ *     Belegkette auf den Cent). Es braucht zwei solche Lesungen mit derselben
+ *     Folge (name#Preis).
+ *   • Sonst läuft die Leiter weiter wie bei fehlender Einigung (weitere
+ *     Basis-Lesung, Deckel-Prüfung, verbessertes Bild, Eskalation, am Ende
+ *     'low'/'none').
+ *   • Eine Einigung MIT einer Eskalations-Lesung (eigene Stufe HIGH bzw. deren
+ *     Ausweich-Stufe) zählt wie bisher — sie ist die unabhängige Bestätigung,
+ *     die zwei LOW-Lesungen allein nicht liefern. Eine Folge, die zwei LOW-
+ *     Lesungen nur ungefähr abgleichen, kann so in der Eskalation bestätigt
+ *     werden ('pro-agreement').
+ *   • Die sich aufhebenden Fehler fängt das NICHT (Σ geht dort exakt auf);
+ *     dafür sind die Regeln C/E von Prompt v1.6 da.
+ * Ohne LOW (Schalter aus, v1.4, ungültiger Wert, Modell vor Gemini 3) ist die
+ * Einigung unverändert (findAgreement ohne Option, Zeichen für Zeichen wie
+ * vor dem 08.10.2026). Am Bon nur mit LOW: `robust.einigungNurExakt: true`
+ * und je Lesung `robust.reads[].reconExakt` (so lässt sich zählen, wie oft
+ * die Regel eine Einigung zurückgestellt hat).
+ *
+ * ═══ Abgleich je Fassung (08.10.2026) ═══
+ * `reconciles()` gleicht jede Lesung mit den Optionen IHRER Fassung ab
+ * (lib/punkteZahlung.js abgleichOptionen): nur v1.6 behandelt eingelöste
+ * Punkte als Zahlungsmittel. Alle Lesungen einer Leiter haben dieselbe Fassung.
  */
 
 'use strict';
 
 const { extractReceipt: extractReceiptDefault, reconcile, countEligibleItems, DEFAULT_MODEL } = require('./ocr');
+const { abgleichOptionen } = require('./punkteZahlung');
 const { enhanceForOcr: enhanceForOcrDefault } = require('./imageEnhance');
-const { eskalationsOptionen } = require('./geminiModelle');
+const { eskalationsOptionen, denkstufeAus, ocrDenkstufeWirksam, istGemini3 } = require('./geminiModelle');
 const { ZWECK } = require('./geminiKennung');
 // Prompt-Version (Schalter cashback_config/v1.ocrPrompt, 05.10.2026): ohne
 // Angabe v1.4 — der Live-Stand. Alle Lesungen einer Leiter (Basis, Bild-
@@ -128,12 +193,27 @@ const ZEIT = zeitOptionen();
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const sigOf = (items) => (items || []).map((i) => `${norm(i.name)}#${i.priceCents}`).join('|');
 
+// Abgleich mit den Optionen der Fassung DIESER Lesung (v1.6: eingelöste Punkte
+// als Zahlungsmittel; jede andere Fassung: {} → wie bisher).
+const abgleichVon = (read) => reconcile(read.parsed, abgleichOptionen(read.promptVersion));
+
 function reconciles(read) {
-  return !!read && read.parsed && read.parsed.isReceipt !== false && reconcile(read.parsed).ok;
+  return !!read && read.parsed && read.parsed.isReceipt !== false && abgleichVon(read).ok;
 }
 
-/** A (name#price) sequence shared by ≥2 reconciling reads → return one such read. */
-function findAgreement(reads) {
+/** Geht der Abgleich auf den Cent auf (ohne Pfand-Toleranz)? */
+function exakt(read) {
+  if (!reconciles(read)) return false;
+  return abgleichVon(read).signedDeltaCents === 0;
+}
+
+/**
+ * A (name#price) sequence shared by ≥2 reconciling reads → return one such read.
+ * `opts.nurExakt` (wirksame Denkstufe LOW, Begründung im Kopf der Datei):
+ * findAgreementNurExakt. Ohne Option unverändert.
+ */
+function findAgreement(reads, opts = {}) {
+  if (opts && opts.nurExakt === true) return findAgreementNurExakt(reads);
   const counts = new Map();
   for (const r of reads) {
     if (!reconciles(r)) continue;
@@ -153,6 +233,34 @@ function findAgreement(reads) {
 }
 
 /**
+ * Einigung unter Denkstufe LOW. Je Folge (name#Preis) der abgeglichenen
+ * Lesungen:
+ *   • enthält sie eine Eskalations-Lesung, zählen alle ihre Lesungen (wie
+ *     bisher);
+ *   • sonst (nur normale LOW-Lesungen) zählen nur die exakt abgeglichenen.
+ * Gewählt wird wie bisher die Folge mit den meisten zählenden Lesungen (bei
+ * Gleichstand die zuerst gelesene), ab zwei; zurück kommt ihre erste zählende
+ * Lesung. Bei einer Folge mit Eskalations-Lesung ist das dieselbe Lesung wie
+ * in findAgreement — die Bewertung ('high'/'medium') bleibt also gleich.
+ */
+function findAgreementNurExakt(reads) {
+  const folgen = new Map();
+  for (const r of reads) {
+    if (!reconciles(r)) continue;
+    const s = sigOf(r.parsed.items);
+    if (!folgen.has(s)) folgen.set(s, []);
+    folgen.get(s).push(r);
+  }
+  let beste = null;
+  for (const lesungen of folgen.values()) {
+    const mitEskalation = lesungen.some((r) => r.__pro);
+    const zaehlend = mitEskalation ? lesungen : lesungen.filter(exakt);
+    if (!beste || zaehlend.length > beste.length) beste = zaehlend;
+  }
+  return beste && beste.length >= 2 ? beste[0] : null;
+}
+
+/**
  * Fingerabdruck EINER Lesung über die prämienrelevanten Größen (86cbet2w1).
  *
  * Bis hierher wurden alle nicht gewählten Lesungen in pack() verworfen — die
@@ -165,7 +273,7 @@ function findAgreement(reads) {
  * Dokument nachvollziehbar und auf dem Cache-/Wiederholungspfad neu
  * berechenbar, ohne das Bild noch einmal zu lesen.
  */
-function readFingerprint(r) {
+function readFingerprint(r, zaehl = {}) {
   const p = (r && r.parsed) || {};
   return {
     isReceipt: p.isReceipt !== false,
@@ -175,19 +283,27 @@ function readFingerprint(r) {
     bonTime: typeof p.bonTime === 'string' ? p.bonTime.slice(0, 5) : null,
     totalCents: Number.isFinite(p.totalCents) ? p.totalCents : null,
     itemCount: Array.isArray(p.items) ? p.items.length : 0,
-    eligibleItems: countEligibleItems(p),
+    // Zählung je nach Schalter stornoAufrechnen (opts.stornoAufrechnen, nur
+    // true rechnet auf; lib/ocr.js). Das Feld-Gate 6w vergleicht den daraus
+    // folgenden Betrag — es muss so zählen wie die Geldentscheidung.
+    eligibleItems: countEligibleItems(p, zaehl),
     reconOk: reconciles(r),
     model: r && r.__pro ? 'pro' : r && r.__enh ? 'flash-enhanced' : 'flash',
+    // Gesendete Denkstufe dieser Lesung (08.10.2026): null = keine Vorgabe.
+    // Fehlt das Feld, kam die Lesung aus einem Zwischenstand von vor dem
+    // Schalter — die Stufe ist dann unbekannt, nicht „keine".
+    ...(r && r.__denkstufe !== undefined ? { denkstufe: r.__denkstufe } : {}),
   };
 }
 
-function pack(chosen, confidence, method, reads, failedAttempts = 0) {
+function pack(chosen, confidence, method, reads, failedAttempts = 0, zaehl = {}) {
   const proAttempts = reads.filter((r) => r && r.__pro).length;
   const usedEnhanced = reads.some((r) => r && r.__enh);
   const eskalation = reads.find((r) => r && r.__pro);
   const out = { ...chosen };
   delete out.__pro;
   delete out.__enh;
+  delete out.__denkstufe;
   out.engine = 'gemini-robust';
   out.robust = {
     confidence, // 'high' | 'medium' | 'low' | 'none'
@@ -203,7 +319,7 @@ function pack(chosen, confidence, method, reads, failedAttempts = 0) {
     agreement: confidence === 'high' || confidence === 'medium',
     // Alle Lesungen als Fingerabdruck — Grundlage der feldweisen Prüfung im
     // Freigabe-Gate. Kostet keinen zusätzlichen Modell-Aufruf.
-    reads: reads.map(readFingerprint),
+    reads: reads.map((r) => readFingerprint(r, zaehl)),
   };
   return out;
 }
@@ -224,6 +340,9 @@ function lesungSichern(r) {
     inputTokens: zahlOderNull(r.inputTokens),
     outputTokens: zahlOderNull(r.outputTokens),
     thoughtsTokens: zahlOderNull(r.thoughtsTokens),
+    // Firestore nimmt kein undefined — unbekannte Stufe (Lesung aus einem
+    // älteren Zwischenstand) bleibt ohne Feld.
+    ...(r.__denkstufe !== undefined ? { denkstufe: r.__denkstufe } : {}),
   };
 }
 
@@ -240,6 +359,7 @@ function lesungLaden(s) {
   };
   if (s.stufe === 'pro') r.__pro = true;
   if (s.stufe === 'enh') r.__enh = true;
+  if (s.denkstufe === null || typeof s.denkstufe === 'string') r.__denkstufe = s.denkstufe;
   return r;
 }
 
@@ -251,16 +371,20 @@ const ganzzahlIn = (v, min, max) => Number.isInteger(v) && v >= min && v <= max;
  * gleiche Zahl an Basis-Lesungen) und frisch ist. Sonst: frisch lesen — ein
  * verworfener Zwischenstand kostet Lesungen, nie eine falsche Entscheidung.
  * Gleicher Prompt heißt seit dem Schalter (05.10.2026): die Version, mit der
- * DIESER Lauf liest — Lesungen von v1.4 und v1.5 werden nie gemischt.
+ * DIESER Lauf liest — Lesungen von v1.4, v1.5 und v1.6 werden nie gemischt.
+ * Ebenso die Denkstufe der normalen Lesungen (08.10.2026, `denkstufe`, null =
+ * keine Vorgabe). Ein Zwischenstand von vor dem Schalter trägt kein Feld und
+ * gilt als „keine Vorgabe" — ohne Schalter wird er also wie bisher fortgesetzt.
  *
  * @returns {{stand: object|null, grund: string|null}}
  */
-function zwischenstandLaden(roh, { model, eskModel, maxFlash, jetzt, promptVersion = PROMPT_STANDARD }) {
+function zwischenstandLaden(roh, { model, eskModel, maxFlash, jetzt, promptVersion = PROMPT_STANDARD, denkstufe = null }) {
   if (!roh || typeof roh !== 'object') return { stand: null, grund: null };
   const nein = (grund) => ({ stand: null, grund });
   if (roh.v !== ZWISCHENSTAND_VERSION) return nein('version');
   if (roh.model !== model || roh.eskModel !== eskModel) return nein('modell');
   if (roh.promptVersion !== promptVersion) return nein('prompt');
+  if ((roh.denkstufe ?? null) !== (denkstufe ?? null)) return nein('denkstufe');
   if (roh.maxFlash !== maxFlash) return nein('max_flash');
   if (!Number.isFinite(roh.gespeichertMs) || jetzt - roh.gespeichertMs > ZWISCHENSTAND_MAX_ALTER_MS) return nein('alter');
   if (!ganzzahlIn(roh.flash, 0, maxFlash) || !ganzzahlIn(roh.enh, 0, 2) || !ganzzahlIn(roh.esk, 0, 2)
@@ -322,8 +446,16 @@ function neuerStand() {
  *   zwischenstand: am Bon abgelegter Stand eines früheren Laufs (roh, wie aus
  *     Firestore) — wird geprüft; unpassend → frisch lesen.
  *   zeit / clock: Testnähte; Standard zeitOptionen() / Date.now.
- *   promptVersion: 'v1.4' | 'v1.5' (lib/prompt.js promptVersionAus); fehlt
+ *   promptVersion: 'v1.4' | 'v1.5' | 'v1.6' (lib/prompt.js promptVersionAus); fehlt
  *     sie oder ist sie ungültig, liest die Leiter mit v1.4.
+ *   stornoAufrechnen: nur `true` (Schalter cashback_config/v1.stornoAufrechnen)
+ *     zählt die anrechenbaren Artikel der Fingerabdrücke mit Storno-Aufrechnung
+ *     (lib/ocr.js countEligibleItems); sonst wie vor dem 08.10.2026.
+ *   denkstufe: 'LOW' (lib/geminiModelle.js ocrDenkstufeWirksam) für Basis-
+ *     und Verbessert-Lesungen, nur zusammen mit promptVersion 'v1.5' oder
+ *     'v1.6'; fehlt sie, ist sie ungültig oder liest die Leiter mit v1.4: ohne
+ *     Denk-Vorgabe wie bisher (Begründung im Kopf der Datei). Wirkt LOW, zählt
+ *     eine Einigung zweier LOW-Lesungen nur bei exaktem Abgleich.
  *   escalationGate: optionale async Funktion (reads) => string|null.
  *   Eskalations-Deckel (Kosten, 86cb-Nachtrag 19.08.2026): Liefert sie einen
  *   Grund (z.B. 'bon_too_old'), wird die TEURE Leiter (Enhance-Lesungen +
@@ -346,6 +478,29 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
   const maxFlash = opts.maxFlash || MAX_FLASH;
   // Prompt, Schema und Versions-Etikett — für JEDE Lesung dieser Leiter gleich.
   const prompt = promptOptionen(opts.promptVersion);
+  // Denkstufe der normalen Lesungen (08.10.2026). Wirkt nur mit Prompt v1.5
+  // oder v1.6 (gemessen ist nur v1.5; v1.6 ist deren Nachbesserung; lib/geminiModelle.js
+  // ocrDenkstufeWirksam) — die Regel steht HIER, wo die Stufe gesendet wird,
+  // damit auch Aufrufer außer index.js sie nicht umgehen. Nur Gemini 3 kennt
+  // Denkstufen (`thinkingLevel`); ein älteres Modell nimmt nur `thinkingBudget`
+  // — dann wirkt der Schalter nicht. Beides sichtbar gemeldet, der Bon
+  // dokumentiert null.
+  const denkWahl = ocrDenkstufeWirksam(opts.denkstufe, prompt.promptVersion);
+  if (denkWahl.grund === 'ohne_v15') console.warn('ocr-denkstufe-ohne-v15', { promptVersion: prompt.promptVersion, denkstufe: denkstufeAus(opts.denkstufe) });
+  const denkstufe = denkWahl.denkstufe && istGemini3(model) ? denkWahl.denkstufe : null;
+  if (denkWahl.denkstufe && !denkstufe) console.warn('ocr-denkstufe-ignoriert', { model, denkstufe: denkWahl.denkstufe });
+  // Ohne Stufe: KEIN Feld — die Aufruf-Optionen bleiben exakt wie bisher.
+  const denkVorgabe = denkstufe ? { thinkingConfig: { thinkingLevel: denkstufe } } : {};
+  // Unter der WIRKSAMEN Stufe LOW zählt eine Einigung zweier LOW-Lesungen nur
+  // bei exaktem Abgleich (Kopf der Datei). Hängt an `denkstufe`, nicht am
+  // Schalter: wo die Stufe nicht gesendet wird, gilt die Einigung wie bisher.
+  const nurExakt = denkstufe === 'LOW';
+  const einigung = { nurExakt };
+  // Storno-Aufrechnung beim Zählen der Fingerabdrücke (Schalter
+  // cashback_config/v1.stornoAufrechnen, 08.10.2026): nur `true` wirkt, sonst
+  // zählen die Fingerabdrücke wie vor dem 08.10.2026. Ändert keine Anfrage.
+  const stornoAn = opts.stornoAufrechnen === true;
+  const zaehl = stornoAn ? { stornoAufrechnen: true } : {};
   const zeit = opts.zeit || ZEIT;
   const clock = opts.clock || Date.now;
   const frist = Number.isFinite(opts.laufStart) ? opts.laufStart + zeit.budgetMs : null;
@@ -355,7 +510,7 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
   // Fenster im Budget.
   const eskLimit = Math.min(esk.timeoutMs > 0 ? esk.timeoutMs : leseLimit, zeit.budgetMs - zeit.reserveMs);
 
-  const geladen = zwischenstandLaden(opts.zwischenstand, { model, eskModel: esk.model, maxFlash, jetzt: clock(), promptVersion: prompt.promptVersion });
+  const geladen = zwischenstandLaden(opts.zwischenstand, { model, eskModel: esk.model, maxFlash, jetzt: clock(), promptVersion: prompt.promptVersion, denkstufe });
   if (geladen.grund) console.warn('ocr-zwischenstand-verworfen', { grund: geladen.grund });
   const st = geladen.stand || neuerStand();
   // Auch ein verworfener Stand zählt als Lauf — sonst begänne die Zählung bei
@@ -417,6 +572,7 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
       model,
       eskModel: esk.model,
       promptVersion: prompt.promptVersion,
+      denkstufe,
       maxFlash,
       gespeichertMs: clock(),
       laeufe: st.laeufe,
@@ -436,6 +592,20 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
   };
 
   const fertig = (out) => {
+    // Stufe der normalen Lesungen dieser Leiter (null = keine Vorgabe) — trennt
+    // Bons vor und nach dem Umschalten (08.10.2026).
+    out.robust.denkstufe = denkstufe;
+    // Nur bei eingeschalteter Aufrechnung vermerkt (sonst kein Feld → der Bon
+    // sieht aus wie vor dem Schalter). Zeigt, wie `reads[].eligibleItems` zählt.
+    if (stornoAn) out.robust.stornoAufrechnen = true;
+    // Nur unter LOW vermerkt (sonst kein Feld → Bon wie vor dem 08.10.2026):
+    // dass die strengere Einigung galt, und je Lesung, ob sie exakt abglich.
+    if (nurExakt) {
+      out.robust.einigungNurExakt = true;
+      out.robust.reads.forEach((fp, i) => {
+        if (st.reads[i]) fp.reconExakt = exakt(st.reads[i]);
+      });
+    }
     out.robust.laeufe = st.laeufe;
     out.robust.zeitAbbrueche = st.zeitAbbrueche;
     if (st.ausweichGenutzt) out.robust.escalationFallbackThinking = st.ausweichGenutzt;
@@ -449,14 +619,17 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
     if (!fensterFrei(leseLimit)) anhalten();
     const n = Math.max(1, Math.min(2 - st.reads.length, maxFlash - st.flash));
     const ergebnisse = await Promise.all(
-      Array.from({ length: n }, (_, k) => versuch(`flash-${st.flash + k + 1}`, imageBytes, mimeType, { model, timeoutMs: leseLimit, ...prompt, zweck: ZWECK.BON_OCR })),
+      Array.from({ length: n }, (_, k) => versuch(`flash-${st.flash + k + 1}`, imageBytes, mimeType, { model, timeoutMs: leseLimit, ...prompt, ...denkVorgabe, zweck: ZWECK.BON_OCR })),
     );
     for (const e of ergebnisse) {
       if (verbraucht(e)) st.flash++;
-      if (e.r) st.reads.push(e.r);
+      if (e.r) {
+        e.r.__denkstufe = denkstufe;
+        st.reads.push(e.r);
+      }
     }
-    const agreed = findAgreement(st.reads);
-    if (agreed) return fertig(pack(agreed, 'high', 'flash-agreement', st.reads, st.failed.length));
+    const agreed = findAgreement(st.reads, einigung);
+    if (agreed) return fertig(pack(agreed, 'high', 'flash-agreement', st.reads, st.failed.length, zaehl));
   }
 
   // Eskalations-Deckel: Vor der teuren Leiter (Enhance + Pro) prüfen, ob der
@@ -476,7 +649,7 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
   const gekappt = (capReason) => {
     const best = st.reads.find(reconciles) || st.reads[0];
     if (!best) return null;
-    const out = pack(best, reconciles(best) ? 'low' : 'none', `escalation-capped:${capReason}`, st.reads, st.failed.length);
+    const out = pack(best, reconciles(best) ? 'low' : 'none', `escalation-capped:${capReason}`, st.reads, st.failed.length, zaehl);
     out.robust.cappedReason = capReason;
     return fertig(out);
   };
@@ -501,13 +674,14 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
   if (enhanced) {
     while (st.enh < 2) {
       if (!fensterFrei(leseLimit)) anhalten();
-      const e = await versuch(`enhanced-${st.enh + 1}`, escImg, 'image/jpeg', { model, timeoutMs: leseLimit, ...prompt, zweck: ZWECK.BON_OCR_VERBESSERT });
+      const e = await versuch(`enhanced-${st.enh + 1}`, escImg, 'image/jpeg', { model, timeoutMs: leseLimit, ...prompt, ...denkVorgabe, zweck: ZWECK.BON_OCR_VERBESSERT });
       if (verbraucht(e)) st.enh++;
       if (!e.r) continue;
       e.r.__enh = true;
+      e.r.__denkstufe = denkstufe;
       st.reads.push(e.r);
-      const agreed = findAgreement(st.reads);
-      if (agreed) return fertig(pack(agreed, 'high', 'enhanced-agreement', st.reads, st.failed.length));
+      const agreed = findAgreement(st.reads, einigung);
+      if (agreed) return fertig(pack(agreed, 'high', 'enhanced-agreement', st.reads, st.failed.length, zaehl));
     }
   }
 
@@ -547,12 +721,14 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
       continue;
     }
     e.r.__pro = true;
+    // Eigene Stufe der Eskalation (unabhängig vom Schalter); 2.5-pro-Rückweg ohne.
+    e.r.__denkstufe = (denken && denken.thinkingLevel) || null;
     if (ausweichen) st.ausweichGenutzt = denken.thinkingLevel;
     st.reads.push(e.r);
-    const agreed = findAgreement(st.reads);
+    const agreed = findAgreement(st.reads, einigung);
     if (agreed) {
       const conf = agreed.__pro ? 'medium' : 'high';
-      return fertig(pack(agreed, conf, 'pro-agreement', st.reads, st.failed.length));
+      return fertig(pack(agreed, conf, 'pro-agreement', st.reads, st.failed.length, zaehl));
     }
   }
 
@@ -569,13 +745,13 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
 
   // Phase 3 — no agreement. Prefer any reconciling read (best-effort), low conf.
   const anyRec = st.reads.find(reconciles);
-  if (anyRec) return fertig(pack(anyRec, 'low', 'reconcile-no-agreement', st.reads, st.failed.length));
+  if (anyRec) return fertig(pack(anyRec, 'low', 'reconcile-no-agreement', st.reads, st.failed.length, zaehl));
 
   // Phase 4 — nothing reconciles; hand back the first read for the recon gate.
   // `reads` ist hier garantiert nicht leer (Infrastruktur-Gate oben) — der
   // Stub-Fallback bleibt nur als Form-Sicherheit erhalten.
   const first = st.reads[0] || { parsed: { isReceipt: false, items: [] }, model, promptVersion: null, latencyMs: 0 };
-  return fertig(pack(first, 'none', 'no-reconcile', st.reads, st.failed.length));
+  return fertig(pack(first, 'none', 'no-reconcile', st.reads, st.failed.length, zaehl));
 }
 
 module.exports = {
