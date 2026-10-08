@@ -77,7 +77,7 @@ const { SPERREN, ladeSperren, kontoSperreVon, sperreAusDaten } = require('./kont
 const { auffaelligkeiten } = require('./ort');
 const { bildDefektOf } = require('./einreichung');
 const { warnungen } = require('./warnungen');
-const { mitWiederholung, arbeite, schlafe } = require('./ki');
+const { mitWiederholung, arbeite, schlafe, geminiKennung, KI_ZWECK } = require('./ki');
 const { ladeProduktsuche } = require('./produktsuche');
 const {
   modusPreisBildschirm, modusPreisBeleg, schalterRohOf, preisQuelleOf, lesedienstBonOf, lesedienstOhneBonOf, bildKopf, bildschirmMerkmal, preisBildschirmLage,
@@ -250,7 +250,8 @@ const AUDIT_ANWEISUNG_PREISBELEG = AUDIT_ZEILEN
 
 const teil = (bucket, slot, pfad) => [{ text: `— Foto "${slot}":` }, { fileData: { fileUri: `gs://${bucket}/${pfad}`, mimeType: 'image/jpeg' } }];
 
-async function frage(ai, bucket, images, slots, text) {
+/** `zweck`: Kosten-Kennung (src/ki.js) — ohne Angabe die Nachlesung. */
+async function frage(ai, bucket, images, slots, text, zweck = KI_ZWECK.FOTO_RUNDE_NACHLESUNG) {
   const parts = [];
   for (const s of slots) if (images[s]) parts.push(...teil(bucket, s, images[s]));
   parts.push({ text });
@@ -259,7 +260,7 @@ async function frage(ai, bucket, images, slots, text) {
     contents: [{ role: 'user', parts }],
     // MIT Denken: der Namer liest mit thinkingBudget 0 und übersieht dabei
     // genau die Angaben, die hier fehlen.
-    config: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 8000, thinkingConfig: { thinkingLevel: 'LOW' } },
+    config: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 8000, thinkingConfig: { thinkingLevel: 'LOW' }, ...geminiKennung(zweck) },
   }));
   return JSON.parse(String(r.text ?? '').replace(/^```json\s*|```\s*$/g, ''));
 }
@@ -377,7 +378,7 @@ async function bildAudit(ai, bucket, x, { preisQuelle = false, beleg = false } =
   });
   const r = await mitWiederholung(() => ai.models.generateContent({
     model: MODELL, contents: [{ role: 'user', parts }],
-    config: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 8000, thinkingConfig: { thinkingLevel: 'LOW' } },
+    config: { responseMimeType: 'application/json', temperature: 0, maxOutputTokens: 8000, thinkingConfig: { thinkingLevel: 'LOW' }, ...geminiKennung(KI_ZWECK.FOTO_RUNDE_BILDPRUEFUNG) },
   }));
   return bildAuditAntwort(JSON.parse(String(r.text ?? '').replace(/^```json\s*|```\s*$/g, '')), { preisQuelle, beleg: preisQuelle && beleg });
 }
@@ -905,7 +906,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   });
   const ohneZweitlesung = await arbeite(zuBestaetigen, async (d) => {
     try {
-      const zweit = await frage(ai, bucket, d.x.images || {}, ['ean'], PROMPT_EAN);
+      const zweit = await frage(ai, bucket, d.x.images || {}, ['ean'], PROMPT_EAN, KI_ZWECK.FOTO_RUNDE_BARCODE);
       eanFoto.set(d.id, eanFotoBestaetigen(eanFoto.get(d.id), zweit && zweit.sicher !== false ? zweit.ean : null));
     } catch (e) {
       eanFoto.set(d.id, eanFotoOhneZweitlesung(eanFoto.get(d.id), String(e.message)));

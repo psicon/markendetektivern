@@ -34,6 +34,7 @@ const { extractReceipt } = require('./ocr');
 const { refereePromptFuer } = require('./prompt_referee');
 const { refereeFingerprint, decideReferee } = require('./refereePolicy');
 const { istGemini3, ausweichStandort, ESKALATION_MODELL_STANDARD } = require('./geminiModelle');
+const { ZWECK } = require('./geminiKennung');
 
 const REFEREE_MODEL = process.env.CASHBACK_OCR_REFEREE_MODEL || 'gemini-3.1-pro-preview';
 const REFEREE_FALLBACK_MODEL = process.env.CASHBACK_OCR_REFEREE_FALLBACK_MODEL || ESKALATION_MODELL_STANDARD;
@@ -144,6 +145,8 @@ async function runReferee(imageBytes, mimeType, ctx) {
         temperature: temperatureFor(model),
         ...(rueckfall && REFEREE_FALLBACK_LOCATION ? { location: REFEREE_FALLBACK_LOCATION } : {}),
         timeoutMs: Math.min(READ_TIMEOUT_MS, rest - 10_000),
+        // Kosten-Kennung — auch der Rückfall auf 3.5-flash zählt als Zweitprüfung.
+        zweck: ZWECK.BON_ZWEITPRUEFUNG,
       });
     } catch (e) {
       fehler.push(`${model}: ${kurz(e)}`);

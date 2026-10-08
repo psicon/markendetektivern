@@ -198,6 +198,17 @@ describe('Trockenlauf', () => {
     expect(r.laufAt).toEqual(expect.any(String));
   });
 
+  it('Zweitlesung trägt die Kosten-Kennung bon-runde (08.10.2026)', async () => {
+    lege('receipts/b1', bon('b1'));
+    await trocken();
+    expect(mockGenerate).toHaveBeenCalledTimes(1);
+    const { config } = mockGenerate.mock.calls[0][0];
+    expect(config.labels).toEqual({ funktion: 'review-console', zweck: 'bon-runde' });
+    // Sonst unverändert.
+    expect(config.thinkingConfig).toEqual({ thinkingLevel: 'LOW' });
+    expect(config.abortSignal).toBeDefined();
+  });
+
   it('vermerkt eine Beanstandung der Zweitlesung NICHT am Bon', async () => {
     lege('receipts/b1', bon('b1'));
     mockGenerate.mockResolvedValue(antwort(zweit({ endsummeCent: 12000 })));

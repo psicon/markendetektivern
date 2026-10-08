@@ -182,3 +182,22 @@ test('Hersteller ohne Herstellerfoto gelesen → kein manufacturerOcr (löst kei
   assert.equal(p.productNameOcr, ANTWORT.productName);
   assert.deepEqual(p.priceOcr, { priceCents: 69, source: 'preisschild' });
 });
+
+test('Kosten-Kennung: kennung landet in jeder Anfrage-Konfiguration, ohne kennung keine labels (08.10.2026)', async () => {
+  const kennung = { labels: { funktion: 'crowd-upload-namer', zweck: 'foto-name' } };
+  assert.deepEqual(geminiKonfig(Type, { kennung }).labels, kennung.labels);
+  assert.equal('labels' in geminiKonfig(Type), false);
+  assert.deepEqual(geminiKonfig(Type, { ohneDenken: true, kennung }).labels, kennung.labels);
+
+  // Auch der Wiederholungsversuch ohne Denk-Einstellung behält die Kennung.
+  const ai = fakeAi([fehler('400 INVALID_ARGUMENT: thinking level is not supported', 400), ANTWORT]);
+  await leseMitWiederholung({ ai, model: 'm', parts: [], Type, schlafen, kennung });
+  assert.equal(ai.aufrufe.length, 2);
+  for (const c of ai.aufrufe) assert.deepEqual(c.labels, kennung.labels);
+  assert.equal('thinkingConfig' in ai.aufrufe[1], false);
+
+  // Ohne kennung (AI-Studio-Pfad liefert {}) geht die Anfrage ohne labels raus.
+  const ohne = fakeAi([ANTWORT]);
+  await leseMitWiederholung({ ai: ohne, model: 'm', parts: [], Type, schlafen });
+  assert.equal('labels' in ohne.aufrufe[0], false);
+});

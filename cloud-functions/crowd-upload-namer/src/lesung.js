@@ -92,9 +92,10 @@ const ANFRAGE_TIMEOUT_MS = 60 * 1000;
 /**
  * Gemini-Konfiguration. `thinkingLevel` statt `thinkingBudget` (siehe oben);
  * die Denk-Token zählen zum Ausgabelimit — mit 'LOW' waren es 0–98, das alte
- * Limit von 512 wäre knapp, darum 4096.
+ * Limit von 512 wäre knapp, darum 4096. `kennung`: Kosten-Kennung aus
+ * src/geminiKennung.js (`{ labels }` auf dem Vertex-Pfad, sonst `{}`).
  */
-function geminiKonfig(Type, { ohneDenken = false } = {}) {
+function geminiKonfig(Type, { ohneDenken = false, kennung = {} } = {}) {
   return {
     responseMimeType: 'application/json',
     responseSchema: responseSchema(Type),
@@ -102,6 +103,7 @@ function geminiKonfig(Type, { ohneDenken = false } = {}) {
     ...(ohneDenken ? {} : { thinkingConfig: { thinkingLevel: 'LOW' } }),
     maxOutputTokens: 4096,
     httpOptions: { timeout: ANFRAGE_TIMEOUT_MS },
+    ...kennung,
   };
 }
 
@@ -190,7 +192,7 @@ const schlafenStandard = (ms) => new Promise((r) => setTimeout(r, ms));
 async function leseMitWiederholung({
   ai, model, parts, Type,
   versuche = 3, zeitgrenzeVersuche = 2, pausenMs = [3000, 10000],
-  schlafen = schlafenStandard, beobachter = null,
+  schlafen = schlafenStandard, beobachter = null, kennung = {},
 }) {
   let letzter = null;
   let zeitgrenzen = 0;
@@ -202,7 +204,7 @@ async function leseMitWiederholung({
       const response = await ai.models.generateContent({
         model,
         contents: [{ role: 'user', parts }],
-        config: geminiKonfig(Type, { ohneDenken }),
+        config: geminiKonfig(Type, { ohneDenken, kennung }),
       });
       const rawText = extractText(response);
       if (!rawText || !rawText.trim()) throw new Error('empty gemini response');

@@ -2,3 +2,5 @@ node_modules/
 firebase-debug.log
 firebase-debug.*.log
 *.local
+# Ergebnisdateien der Einmal-Skripte (enthalten Nutzer-IDs)
+.*.result.json

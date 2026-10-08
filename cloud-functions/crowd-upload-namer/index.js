@@ -34,6 +34,7 @@ const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
 const { GoogleGenAI, Type } = require('@google/genai');
 const { leseMitWiederholung } = require('./src/lesung');
+const { geminiKennung, nutztVertex, ZWECK } = require('./src/geminiKennung');
 const { leseEinreichung } = require('./src/fotos');
 const { erstlaufBeginnen, erstlaufAbschliessen, nachlauf } = require('./src/ablauf');
 
@@ -41,12 +42,12 @@ const { erstlaufBeginnen, erstlaufAbschliessen, nachlauf } = require('./src/abla
 // monatlichen Spending-Cap der Rechnungskontostufe — bei Erreichen liefern
 // ALLE Keys des Kontos 429. Vertex AI rechnet uebers GCP-Projekt-Billing und
 // kennt das Limit nicht; gemini-3.5-flash ist unter 'global' publiziert
-// (geprueft 19.08.2026). GEMINI_USE_VERTEX=false = alter Key-Pfad.
+// (geprueft 19.08.2026). GEMINI_USE_VERTEX=false = alter Key-Pfad. Dieselbe
+// Regel entscheidet, ob die Kosten-Kennung mitgeht (src/geminiKennung.js).
 let _ai = null;
 function getGenAIClient() {
   if (_ai) return _ai;
-  const useVertex = String(process.env.GEMINI_USE_VERTEX ?? 'true') !== 'false';
-  if (useVertex) {
+  if (nutztVertex()) {
     _ai = new GoogleGenAI({
       vertexai: true,
       project: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'markendetektive-895f7',
@@ -90,7 +91,7 @@ function lesen(daten, { beobachter = null, id = null } = {}) {
     ladeBild,
     id,
     logger,
-    lese: (parts, opts = {}) => leseMitWiederholung({ ai: getGenAIClient(), model: MODEL, parts, Type, beobachter, ...opts }),
+    lese: (parts, opts = {}) => leseMitWiederholung({ ai: getGenAIClient(), model: MODEL, parts, Type, beobachter, kennung: geminiKennung(ZWECK.FOTO_NAME), ...opts }),
   });
 }
 

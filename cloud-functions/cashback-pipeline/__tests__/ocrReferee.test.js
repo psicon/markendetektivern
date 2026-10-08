@@ -69,6 +69,7 @@ describe('runReferee', () => {
     expect(o.responseSchema.properties.basketDiscounts).toBeDefined();
     expect(o.userPrompt).toMatch(/Zweitprüfung/);
     expect(o.systemInstruction).toMatch(/basketDiscounts/);
+    expect(o.zweck).toBe('bon-zweitpruefung');
   });
 
   test('kein Hinweis auf Ablehngrund oder Upload-Datum im Prompt (lädt zum Zurechtbiegen ein)', async () => {
@@ -88,6 +89,8 @@ describe('runReferee', () => {
     const extract = fakeExtract([quota, lesung(), lesung()]);
     const { result } = await runReferee(Buffer.from('x'), 'image/jpeg', ctx(extract));
     expect(extract.aufrufe.map((o) => o.model)).toEqual([REFEREE_MODEL, REFEREE_FALLBACK_MODEL, REFEREE_FALLBACK_MODEL]);
+    // Auch der Rückfall steht in der Rechnung als Zweitprüfung (Kosten-Kennung).
+    expect(extract.aufrufe.map((o) => o.zweck)).toEqual(['bon-zweitpruefung', 'bon-zweitpruefung', 'bon-zweitpruefung']);
     expect(extract.aufrufe[0].thinkingConfig).toEqual({ thinkingLevel: 'LOW' });
     expect(extract.aufrufe[1].thinkingConfig).toEqual({ thinkingLevel: 'HIGH' });
     expect(extract.aufrufe[1].thinkingConfig.thinkingBudget).toBeUndefined();

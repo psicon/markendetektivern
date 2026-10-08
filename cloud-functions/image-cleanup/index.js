@@ -42,6 +42,7 @@ const {
   deleteCleanedImage,
   COLLECTION_TO_SUBFOLDER,
 } = require('./pipeline');
+const { geminiKennung, ZWECK } = require('./geminiKennung');
 
 // ─── Init ──────────────────────────────────────────────────────────
 
@@ -103,6 +104,9 @@ async function runPipeline(collection, productId, source) {
     genAI,
     collection,
     productId,
+    // Kosten-Kennung (08.10.2026): nur wenn genAI ein Vertex-Client ist; gilt
+    // auch für die Strategien A und B (die übernehmen params.options).
+    options: { kennung: geminiKennung(ZWECK.BILD_FREISTELLEN, genAI) },
   });
   const ms = Date.now() - t0;
   if (result.status === 'error') {

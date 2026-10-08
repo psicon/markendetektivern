@@ -101,6 +101,7 @@ const {
   callGeminiManufacturer,
 } = require('./src/manufacturer');
 const { inputHash } = require('./src/hash');
+const { ZWECK } = require('./src/genaiClient');
 
 if (!admin.apps.length) admin.initializeApp();
 
@@ -1392,6 +1393,8 @@ async function runExternalAssessment(db, ean, opts = {}) {
       apiKey: apiKey || GEMINI_API_KEY.value(),
       snapshot: snap,
       category: categoryName,
+      // Eigene Kosten-Kennung: externe Produkte getrennt vom Katalog.
+      zweck: ZWECK.EXTERN_BEWERTUNG,
     });
   } catch (e) {
     console.error(`[ai-external] Gemini failed für ${norm}:`, e.message);

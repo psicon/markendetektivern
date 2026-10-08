@@ -28,7 +28,7 @@
  */
 
 const { Type } = require('@google/genai');
-const { getGenAIClient } = require('./genaiClient');
+const { getGenAIClient, geminiKennung, ZWECK } = require('./genaiClient');
 
 const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
 
@@ -148,6 +148,8 @@ async function callGeminiManufacturer({ apiKey, snapshot, model = DEFAULT_MODEL 
       // gemessen, siehe CLAUDE.md). Die Denk-Token zählen zu maxOutputTokens.
       thinkingConfig: { thinkingLevel: 'LOW' },
       maxOutputTokens: 4096,
+      // Kosten-Kennung (08.10.2026), nur auf dem Vertex-Pfad (src/genaiClient.js).
+      ...geminiKennung(ZWECK.HERSTELLER_BEWERTUNG),
     },
   });
 

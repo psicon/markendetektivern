@@ -18,7 +18,7 @@ const { FieldValue } = require('firebase-admin/firestore');
 const logger = require('firebase-functions/logger');
 const { GoogleGenAI, Type } = require('@google/genai');
 const { bearbeitbar, konfliktLage, betragsGrenzen, zwillingsUrteil, entscheideBon, budgetUrteil, wirksameAktionId, beanstandungGilt, LIVE, MERKEN } = require('./bonRegeln');
-const { mitWiederholung, arbeite } = require('./ki');
+const { mitWiederholung, arbeite, geminiKennung, KI_ZWECK } = require('./ki');
 const { resolverAufruf } = require('./resolverAufruf');
 
 const MODELL = 'gemini-3.5-flash';
@@ -83,6 +83,8 @@ async function zweitlesung(ai, storage, pfad, bis = Infinity) {
       // Ohne eigenes Zeitlimit kann ein hängender Aufruf die ganze Runde ins
       // Funktions-Timeout ziehen — dann fehlt der Bericht.
       abortSignal: AbortSignal.timeout(Math.min(LESE_TIMEOUT_MS, rest())),
+      // Kosten-Kennung (08.10.2026, src/ki.js).
+      ...geminiKennung(KI_ZWECK.BON_RUNDE),
     },
     });
   });

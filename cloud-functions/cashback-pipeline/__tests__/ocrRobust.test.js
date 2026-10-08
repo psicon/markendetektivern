@@ -78,6 +78,12 @@ test('Standard-Eskalation: gemini-3.5-flash, HIGH, Standort eu — auf dem verbe
   expect(out.robust.reads.map((r) => r.model)).toEqual(['flash', 'flash', 'flash', 'flash-enhanced', 'flash-enhanced', 'pro']);
 });
 
+test('Kosten-Kennung je Stufe: Basis bon-ocr, verbessertes Bild bon-ocr-verbessert, Eskalation bon-ocr-eskalation', async () => {
+  const extract = fakeExtract([lesung(A, 368), lesung(B, 368), lesung(C, 368), lesung(D, 368), lesung(B.slice(0, 1).concat(D.slice(1)), 368), lesung(A, 368)]);
+  await robust.extractReceiptRobust(Buffer.from('x'), 'image/png', { model: 'gemini-3.5-flash', extract, enhance });
+  expect(extract.aufrufe.map((a) => a.zweck)).toEqual(['bon-ocr', 'bon-ocr', 'bon-ocr', 'bon-ocr-verbessert', 'bon-ocr-verbessert', 'bon-ocr-eskalation']);
+});
+
 test('zwei einige Eskalationslesungen → medium (wie bisher bei 2.5-pro)', async () => {
   const extract = fakeExtract([lesung(A, 368), lesung(B, 368), lesung(C, 368), lesung(D, 368), lesung([{ name: 'X', priceCents: 368 }], 368), lesung([{ name: 'Y', priceCents: 368 }], 368), lesung([{ name: 'Y', priceCents: 368 }], 368)]);
   const out = await robust.extractReceiptRobust(Buffer.from('x'), 'image/jpeg', { extract, enhance });
@@ -121,7 +127,8 @@ test('Rückweg per Env: CASHBACK_OCR_PRO_MODEL=gemini-2.5-pro → der alte Aufru
   // aber ein Zeitlimit, damit auch der Rückweg das Laufbudget einhält. Der
   // Prompt wird seit dem Schalter (05.10.2026) ausdrücklich übergeben — ohne
   // Angabe v1.4, also derselbe Text wie zuvor über die Modul-Voreinstellung.
-  expect(esk).toEqual({ mime: 'image/jpeg', model: 'gemini-2.5-pro', timeoutMs: 170000, ...require('../lib/prompt').promptOptionen('v1.4') });
+  // Kosten-Kennung der Stufe seit 08.10.2026 (lib/geminiKennung.js).
+  expect(esk).toEqual({ mime: 'image/jpeg', model: 'gemini-2.5-pro', timeoutMs: 170000, ...require('../lib/prompt').promptOptionen('v1.4'), zweck: 'bon-ocr-eskalation' });
   expect(out.robust.escalationModel).toBe('gemini-2.5-pro');
 });
 

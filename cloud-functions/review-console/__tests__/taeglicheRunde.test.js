@@ -14,7 +14,7 @@
 // ── In-Memory-Firestore ────────────────────────────────────────────────
 const mockStore = new Map();
 const mockWrites = [];
-const mockLage = { sperrenFehler: false, listeFehler: false, configFehler: 0, configLesungen: 0, auditAufrufe: [], auditTexte: [], zweitLesungen: [], leserAufrufe: [], downloadFehler: () => false, updateFehler: () => false, txUpdateFehler: () => false };
+const mockLage = { sperrenFehler: false, listeFehler: false, configFehler: 0, configLesungen: 0, auditAufrufe: [], auditTexte: [], zweitLesungen: [], leserAufrufe: [], kennungen: [], downloadFehler: () => false, updateFehler: () => false, txUpdateFehler: () => false };
 const mockSentinel = { __feld: 'serverTimestamp' };
 const mockDelete = { __feld: 'delete' };
 const mockListe = new Map(); // Pfad → { md5, size }
@@ -150,9 +150,12 @@ jest.mock('@google/genai', () => ({
   GoogleGenAI: function GoogleGenAI() {
     return {
       models: {
-        generateContent: async ({ contents }) => {
+        generateContent: async ({ contents, config }) => {
           const parts = contents[0].parts;
           const text = parts.map((p) => p.text || '').join('\n');
+          // Kosten-Kennung je Aufrufart (08.10.2026).
+          const art = text.includes('Lies die EAN/GTIN') ? 'barcode' : text.includes('Lies zwei Angaben, sonst nichts') ? 'preis' : 'audit';
+          mockLage.kennungen.push({ art, labels: config && config.labels });
           const pfade = parts.filter((p) => p.fileData).map((p) => p.fileData.fileUri.replace('gs://b/', ''));
           if (text.includes('Lies die EAN/GTIN')) {
             // Zweite Lesung nur des Barcode-Fotos (nur bei Abweichung).
@@ -246,6 +249,7 @@ beforeEach(() => {
   mockLage.auditTexte = [];
   mockLage.zweitLesungen = [];
   mockLage.leserAufrufe = [];
+  mockLage.kennungen = [];
   mockLage.downloadFehler = () => false;
   mockStriche.clear();
   mockLage.updateFehler = () => false;
@@ -264,6 +268,32 @@ beforeEach(() => {
   mockStore.set('cashback_config/v1', { fotoWorker: true, barcodeKorrektur: true });
 });
 afterEach(() => dateSpy.mockRestore());
+
+describe('Kosten-Kennung (08.10.2026, src/ki.js)', () => {
+  it('Bildprüfung, Preis-Nachlesung und zweite Barcode-Lesung tragen je ihren Zweck', async () => {
+    einreichung('frei');
+    einreichung('k', { uid: 'u2', ean: '4250231136474' });
+    mockAudit.set(doc('k').images.ean, '4013602313647');
+    mockZweit.set(doc('k').images.ean, '');
+    einreichung('np', { uid: 'u3', ean: '4006040081107', preis: null });
+    mockNachlese.set('crowduploads/u3/np/preis.jpg', [{ priceCents: 129, priceImageKind: 'preisschild' }, { priceCents: 129, priceImageKind: 'preisschild' }]);
+    await scharf();
+    const nachArt = (art) => mockLage.kennungen.filter((k) => k.art === art).map((k) => k.labels);
+    expect(nachArt('audit').length).toBeGreaterThanOrEqual(3);
+    for (const l of nachArt('audit')) expect(l).toEqual({ funktion: 'review-console', zweck: 'foto-runde-bildpruefung' });
+    expect(nachArt('preis')).toEqual([
+      { funktion: 'review-console', zweck: 'foto-runde-nachlesung' },
+      { funktion: 'review-console', zweck: 'foto-runde-nachlesung' },
+    ]);
+    expect(nachArt('barcode')).toEqual([{ funktion: 'review-console', zweck: 'foto-runde-barcode' }]);
+  });
+
+  it('alle Zwecke halten das Label-Format ein', () => {
+    const { KI_ZWECK, KI_FUNKTION, geminiKennung } = jest.requireActual('../src/ki');
+    for (const w of [KI_FUNKTION, ...Object.values(KI_ZWECK)]) expect(w).toMatch(/^[a-z][a-z0-9_-]{0,62}$/);
+    expect(geminiKennung(KI_ZWECK.BON_RUNDE)).toEqual({ labels: { funktion: 'review-console', zweck: 'bon-runde' } });
+  });
+});
 
 describe('Morgenrunde — Entscheidungen Patrick 02.10.2026', () => {
   it('saubere Einreichung → freigegeben, Foto-Nummer gespeichert', async () => {

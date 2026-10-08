@@ -62,6 +62,7 @@
 const { extractReceipt: extractReceiptDefault, reconcile, countEligibleItems, DEFAULT_MODEL } = require('./ocr');
 const { enhanceForOcr: enhanceForOcrDefault } = require('./imageEnhance');
 const { eskalationsOptionen } = require('./geminiModelle');
+const { ZWECK } = require('./geminiKennung');
 // Prompt-Version (Schalter cashback_config/v1.ocrPrompt, 05.10.2026): ohne
 // Angabe v1.4 — der Live-Stand. Alle Lesungen einer Leiter (Basis, Bild-
 // verbesserung, Eskalation) nutzen DIESELBE Version.
@@ -448,7 +449,7 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
     if (!fensterFrei(leseLimit)) anhalten();
     const n = Math.max(1, Math.min(2 - st.reads.length, maxFlash - st.flash));
     const ergebnisse = await Promise.all(
-      Array.from({ length: n }, (_, k) => versuch(`flash-${st.flash + k + 1}`, imageBytes, mimeType, { model, timeoutMs: leseLimit, ...prompt })),
+      Array.from({ length: n }, (_, k) => versuch(`flash-${st.flash + k + 1}`, imageBytes, mimeType, { model, timeoutMs: leseLimit, ...prompt, zweck: ZWECK.BON_OCR })),
     );
     for (const e of ergebnisse) {
       if (verbraucht(e)) st.flash++;
@@ -500,7 +501,7 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
   if (enhanced) {
     while (st.enh < 2) {
       if (!fensterFrei(leseLimit)) anhalten();
-      const e = await versuch(`enhanced-${st.enh + 1}`, escImg, 'image/jpeg', { model, timeoutMs: leseLimit, ...prompt });
+      const e = await versuch(`enhanced-${st.enh + 1}`, escImg, 'image/jpeg', { model, timeoutMs: leseLimit, ...prompt, zweck: ZWECK.BON_OCR_VERBESSERT });
       if (verbraucht(e)) st.enh++;
       if (!e.r) continue;
       e.r.__enh = true;
@@ -537,6 +538,8 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
       ...(Number.isFinite(esk.temperature) ? { temperature: esk.temperature } : {}),
       // Hartes Zeitlimit je Lesung (lib/geminiModelle.js), nie über das Budget.
       timeoutMs: eskLimit,
+      // Kosten-Kennung: die Eskalation steht in der Rechnung als eigene Stufe.
+      zweck: ZWECK.BON_OCR_ESKALATION,
     });
     if (verbraucht(e, { eskalation: true })) st.esk++;
     if (!e.r) {

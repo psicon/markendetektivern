@@ -15,6 +15,7 @@
 
 const { GoogleGenAI } = require('@google/genai');
 const { vertexStandort } = require('./geminiModelle');
+const { geminiKennung, nutztVertex, ZWECK } = require('./geminiKennung');
 const { belegBereinigen } = require('./belegart');
 const {
   SYSTEM_PROMPT,
@@ -59,9 +60,9 @@ function getClient(model, standort) {
   // auf den isReceipt:false-Stub zurueck und der Nutzer sieht faelschlich
   // "kein Kassenbon". Vertex AI rechnet ueber die normale GCP-Abrechnung
   // und kennt dieses Stufenlimit nicht. Default = Vertex; per
-  // GEMINI_USE_VERTEX=false zurueck auf den AI-Studio-Key.
-  const useVertex = String(process.env.GEMINI_USE_VERTEX ?? 'true') !== 'false';
-  if (useVertex) {
+  // GEMINI_USE_VERTEX=false zurueck auf den AI-Studio-Key. Dieselbe Regel
+  // entscheidet, ob die Kosten-Kennung mitgeht (lib/geminiKennung.js).
+  if (nutztVertex()) {
     // Standort ist MODELL-abhaengig (gemessen 01.10.2026, s. geminiModelle.js):
     // gemini-3.5-flash global/eu, gemini-3.1-pro-preview nur global,
     // gemini-2.5-pro (Rueckweg bis 20.10.) europe-west4. Ein ausdruecklich
@@ -95,6 +96,8 @@ function getClient(model, standort) {
  * @param {string} [opts.model]
  * @param {string} [opts.location]  Vertex-Standort; ohne Angabe je Modell
  *                                  (lib/geminiModelle.js → vertexStandort).
+ * @param {string} [opts.zweck]     Kosten-Kennung der Stufe (lib/geminiKennung.js
+ *                                  ZWECK); ohne Angabe 'bon-ocr'.
  * @returns {Promise<{
  *   parsed: object,
  *   model: string,
@@ -153,6 +156,9 @@ async function extractReceipt(imageBytes, mimeType, opts = {}) {
         : THINKING_BUDGET != null && /flash/i.test(model)
           ? { thinkingConfig: { thinkingBudget: THINKING_BUDGET } }
           : {}),
+      // Kosten-Kennung je Stufe (08.10.2026) — nur auf dem Vertex-Pfad, auf
+      // dem AI-Studio-Pfad würde das SDK die Anfrage ablehnen.
+      ...geminiKennung(opts.zweck || ZWECK.BON_OCR),
     },
   });
 

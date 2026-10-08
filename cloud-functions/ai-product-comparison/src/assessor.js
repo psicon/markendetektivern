@@ -25,7 +25,7 @@
  */
 
 const { Type } = require('@google/genai');
-const { getGenAIClient } = require('./genaiClient');
+const { getGenAIClient, geminiKennung, ZWECK } = require('./genaiClient');
 
 const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
 
@@ -226,7 +226,11 @@ function isAssessable(s) {
   return hasNutrition || hasIngredients;
 }
 
-async function callGeminiAssessment({ apiKey, snapshot, category, model = DEFAULT_MODEL }) {
+/**
+ * `zweck`: Kosten-Kennung (src/genaiClient.js) — dieselbe Bewertung läuft für
+ * Katalog-Produkte (Standard) und für externe Produkte (runExternalAssessment).
+ */
+async function callGeminiAssessment({ apiKey, snapshot, category, model = DEFAULT_MODEL, zweck = ZWECK.PRODUKT_BEWERTUNG }) {
   const ai = getGenAIClient(apiKey);
   const userContent = buildUserContent({ product: snapshot, category });
 
@@ -244,6 +248,8 @@ async function callGeminiAssessment({ apiKey, snapshot, category, model = DEFAUL
       // gemessen, siehe CLAUDE.md). Die Denk-Token zählen zu maxOutputTokens.
       thinkingConfig: { thinkingLevel: 'LOW' },
       maxOutputTokens: 4096,
+      // Kosten-Kennung (08.10.2026), nur auf dem Vertex-Pfad.
+      ...geminiKennung(zweck),
     },
   });
 

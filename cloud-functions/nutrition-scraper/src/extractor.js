@@ -70,6 +70,20 @@ function getClient() {
   return _client;
 }
 
+/**
+ * Kosten-Kennung (08.10.2026): alle Live-Funktionen rufen Vertex unter
+ * demselben Dienstkonto auf — ohne Kennung trennt die Rechnung die Codebases
+ * nicht. Vertex nimmt `labels` an der Anfrage an (GenerateContentRequest.labels,
+ * laut API nur für Abrechnung). Der Client oben ist fest Vertex, es gibt keinen
+ * AI-Studio-Pfad (dort würde das SDK labels vor dem Senden ablehnen). Werte nur
+ * a-z, 0-9, _ und -, beginnend mit Buchstabe, höchstens 63 Zeichen.
+ * scrapeSingleUrl, scrapeEan und scrapeBatch teilen diesen einen Aufruf.
+ */
+const KENNUNG = Object.freeze({ funktion: 'nutrition-scraper', zweck: 'produktsuche-auslesen' });
+function geminiKennung() {
+  return { labels: { ...KENNUNG } };
+}
+
 /** Ein Aufruf mit hartem Zeitlimit (Muster aus cashback-pipeline/lib/ocr.js). */
 async function callGemini({ systemInstruction, userText, model }) {
   const abort = new AbortController();
@@ -84,6 +98,7 @@ async function callGemini({ systemInstruction, userText, model }) {
       maxOutputTokens: 4096,
       thinkingConfig: { thinkingLevel: 'LOW' },
       abortSignal: abort.signal,
+      ...geminiKennung(),
     },
   });
   request.catch(() => {});
@@ -560,4 +575,4 @@ async function extractFromHtml({
   };
 }
 
-module.exports = { extractFromHtml, stripHtml, ExtractUnavailableError };
+module.exports = { extractFromHtml, stripHtml, ExtractUnavailableError, geminiKennung };

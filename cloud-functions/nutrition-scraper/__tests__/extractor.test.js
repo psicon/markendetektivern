@@ -140,3 +140,14 @@ test('nur die Datenfelder des Prompts: fremde Schlüssel und Objekte fallen weg 
   expect(Object.keys(r).filter((k) => !k.startsWith('_')).sort()).toEqual(['attr_allergene', 'attr_ingredientStatement', 'nutr_Energie_val']);
   expect(kostenZeilen()[0]).toMatchObject({ auftrag: 'produktsuche' });
 });
+
+test('Kosten-Kennung: jede Anfrage trägt labels mit Codebase und Zweck (Client ist fest Vertex, 08.10.2026)', async () => {
+  gemini.antworten.push(antwort({ confidence: 0.9, attr_ingredientStatement: 'Wasser' }));
+  await extractFromHtml({ html: SEITE, ean: '1' });
+  expect(gemini.anfragen[0].config.labels).toEqual({ funktion: 'nutrition-scraper', zweck: 'produktsuche-auslesen' });
+  // Werte im Label-Format (a-z, 0-9, _ und -, beginnend mit Buchstabe, ≤ 63 Zeichen).
+  for (const w of Object.values(gemini.anfragen[0].config.labels)) expect(w).toMatch(/^[a-z][a-z0-9_-]{0,62}$/);
+  // Sonst unverändert: Denkstufe und Zeitlimit-Signal.
+  expect(gemini.anfragen[0].config.thinkingConfig).toEqual({ thinkingLevel: 'LOW' });
+  expect(gemini.anfragen[0].config.abortSignal).toBeDefined();
+});

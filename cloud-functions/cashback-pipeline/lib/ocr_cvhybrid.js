@@ -27,6 +27,7 @@
 const { ImageAnnotatorClient } = require('@google-cloud/vision');
 const { GoogleGenAI } = require('@google/genai');
 const { vertexStandort } = require('./geminiModelle');
+const { geminiKennung, nutztVertex, ZWECK } = require('./geminiKennung');
 const {
   SYSTEM_PROMPT,
   buildUserPrompt,
@@ -57,9 +58,9 @@ function getGenAIClient(model) {
   // auf den isReceipt:false-Stub zurueck und der Nutzer sieht faelschlich
   // "kein Kassenbon". Vertex AI rechnet ueber die normale GCP-Abrechnung
   // und kennt dieses Stufenlimit nicht. Default = Vertex; per
-  // GEMINI_USE_VERTEX=false zurueck auf den AI-Studio-Key.
-  const useVertex = String(process.env.GEMINI_USE_VERTEX ?? 'true') !== 'false';
-  if (useVertex) {
+  // GEMINI_USE_VERTEX=false zurueck auf den AI-Studio-Key. Dieselbe Regel
+  // entscheidet, ob die Kosten-Kennung mitgeht (lib/geminiKennung.js).
+  if (nutztVertex()) {
     // Standort ist MODELL-abhaengig — dieselbe Aufloesung wie ocr.js
     // (lib/geminiModelle.js, gemessen 01.10.2026).
     const location = vertexStandort(model);
@@ -132,6 +133,8 @@ async function callGeminiTextParser(ocrText, model) {
         // Bons werden mittendrin abgeschnitten → kaputtes JSON →
         // cv_hybrid_json_decode. gemini-2.5-flash kann deutlich mehr.
         maxOutputTokens: 32768,
+        // Kosten-Kennung (08.10.2026), nur auf dem Vertex-Pfad.
+        ...geminiKennung(ZWECK.BON_OCR_TEXT),
       },
     });
     const latencyMs = Date.now() - started;

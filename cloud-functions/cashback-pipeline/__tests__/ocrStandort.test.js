@@ -28,7 +28,16 @@ jest.mock('@google/genai', () => ({
   },
 }));
 
-const ENV_KEYS = ['GEMINI_USE_VERTEX', 'GEMINI_VERTEX_LOCATION', 'GEMINI_VERTEX_LOCATION_PRO', 'CASHBACK_OCR_THINKING_BUDGET'];
+// Texterkennung der Rückfall-Engine cv-hybrid — nur für den Kennungs-Test unten.
+jest.mock('@google-cloud/vision', () => ({
+  ImageAnnotatorClient: class {
+    async documentTextDetection() {
+      return [{ fullTextAnnotation: { text: 'REWE\nMilch 1,19\nSUMME 1,19' } }];
+    }
+  },
+}));
+
+const ENV_KEYS = ['GEMINI_USE_VERTEX', 'GEMINI_VERTEX_LOCATION', 'GEMINI_VERTEX_LOCATION_PRO', 'CASHBACK_OCR_THINKING_BUDGET', 'GEMINI_API_KEY'];
 let gesichert;
 let extractReceipt;
 
@@ -96,4 +105,46 @@ test('übergebene Denkstufe schlägt den Budget-Schalter (sonst 400 bei Gemini 3
   });
   await extractReceipt(bild, 'image/jpeg', { model: 'gemini-3.5-flash', thinkingConfig: { thinkingLevel: 'HIGH' } });
   expect(anfragen[0].req.config.thinkingConfig).toEqual({ thinkingLevel: 'HIGH' });
+});
+
+// ── Kosten-Kennung (08.10.2026, lib/geminiKennung.js) ─────────────────────
+
+test('Kennung: Vertex-Pfad schickt labels mit, ohne Angabe Stufe bon-ocr', async () => {
+  await extractReceipt(bild, 'image/jpeg', { model: 'gemini-3.5-flash' });
+  expect(anfragen[0].req.config.labels).toEqual({ funktion: 'cashback-pipeline', zweck: 'bon-ocr' });
+});
+
+test('Kennung: übergebene Stufe kommt beim SDK an (Eskalation unter eu)', async () => {
+  await extractReceipt(bild, 'image/jpeg', { model: 'gemini-3.5-flash', location: 'eu', zweck: 'bon-ocr-eskalation' });
+  expect(anfragen[0].location).toBe('eu');
+  expect(anfragen[0].req.config.labels).toEqual({ funktion: 'cashback-pipeline', zweck: 'bon-ocr-eskalation' });
+});
+
+test('Kennung: AI-Studio-Pfad (GEMINI_USE_VERTEX=false) schickt KEINE labels — das SDK lehnte sie dort ab', async () => {
+  process.env.GEMINI_USE_VERTEX = 'false';
+  process.env.GEMINI_API_KEY = 'test-schluessel';
+  jest.isolateModules(() => {
+    ({ extractReceipt } = require('../lib/ocr'));
+  });
+  await extractReceipt(bild, 'image/jpeg', { model: 'gemini-3.5-flash', zweck: 'bon-ocr-eskalation' });
+  expect(erzeugt[0]).toEqual({ apiKey: 'test-schluessel' });
+  expect(anfragen[0].req.config).not.toHaveProperty('labels');
+});
+
+test('Kennung: cv-hybrid-Textparser → bon-ocr-text auf Vertex, ohne labels auf AI Studio', async () => {
+  let extractReceiptCVHybrid;
+  jest.isolateModules(() => {
+    ({ extractReceiptCVHybrid } = require('../lib/ocr_cvhybrid'));
+  });
+  await extractReceiptCVHybrid(bild, 'image/jpeg', { model: 'gemini-3.5-flash' });
+  expect(anfragen[0].req.config.labels).toEqual({ funktion: 'cashback-pipeline', zweck: 'bon-ocr-text' });
+
+  anfragen.length = 0;
+  process.env.GEMINI_USE_VERTEX = 'false';
+  process.env.GEMINI_API_KEY = 'test-schluessel';
+  jest.isolateModules(() => {
+    ({ extractReceiptCVHybrid } = require('../lib/ocr_cvhybrid'));
+  });
+  await extractReceiptCVHybrid(bild, 'image/jpeg', { model: 'gemini-3.5-flash' });
+  expect(anfragen[0].req.config).not.toHaveProperty('labels');
 });

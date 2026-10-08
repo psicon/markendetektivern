@@ -27,13 +27,16 @@
 const admin = require('firebase-admin');
 const { onDocumentWritten, onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { onRequest } = require('firebase-functions/v2/https');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineSecret } = require('firebase-functions/params');
-const { GoogleGenAI } = require('@google/genai');
+const logger = require('firebase-functions/logger');
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
 
 const matcher = require('./matcher');
+const { ai } = require('./gemini');
+const { nachlauf, LAUF_ZEIT_MS, LAUF_RESERVE_MS } = require('./nachlauf');
 
 const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 const TRIGGER_KEY = defineSecret('NUTRITION_SCRAPER_TRIGGER_KEY');
@@ -66,31 +69,6 @@ const norm = (s) =>
     .replace(/ü/g, 'ue')
     .replace(/ß/g, 'ss')
     .replace(/[^a-z0-9]/g, '');
-
-let _ai = null;
-function ai() {
-  if (_ai) return _ai;
-  // Backend-Umschaltung (Incident 19.08.2026): AI-Studio-Keys haengen am
-  // monatlichen Spending-Cap der Rechnungskontostufe — bei Erreichen liefern
-  // ALLE Keys des Kontos 429. Vertex AI rechnet uebers GCP-Projekt-Billing
-  // und kennt das Limit nicht. gemini-embedding-001 ist unter 'global'
-  // publiziert und liefert byte-identische Embeddings wie AI Studio
-  // (Kosinus 1.0000 gegen Bestandsvektoren verifiziert 19.08.2026) — der
-  // Vektor-Index bleibt kompatibel. GEMINI_USE_VERTEX=false = alter Key-Pfad.
-  const useVertex = String(process.env.GEMINI_USE_VERTEX ?? 'true') !== 'false';
-  if (useVertex) {
-    _ai = new GoogleGenAI({
-      vertexai: true,
-      project: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'markendetektive-895f7',
-      location: process.env.GEMINI_VERTEX_LOCATION || 'global',
-    });
-    return _ai;
-  }
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('GEMINI_API_KEY not set');
-  _ai = new GoogleGenAI({ apiKey });
-  return _ai;
-}
 
 /**
  * Embed eine Liste Strings → number[][] (gleiche Reihenfolge).
@@ -405,9 +383,15 @@ exports.backfillEmbeddingsManual = onRequest(
 
 // Trigger: jede neue Bon-Zeile (purchased_products) wird gematcht.
 // Alias-Lexikon sorgt dafür, dass Embed/KI nur bei NEUEN Strings laufen.
+// Die Zeile bekommt eine Frist knapp vor dem Function-Ende (08.10.2026):
+// Gemini-Pick und Einbettung hören rechtzeitig auf, die Zeile schreibt einen
+// eindeutigen Status ('pick-timeout' …) statt vom 120-s-Abbruch getroffen zu
+// werden. Die Reserve deckt Schreiben, Journey-Abschluss und Kaltstart.
+const MATCH_TRIGGER_TIMEOUT_S = 120;
 exports.onPurchasedProductMatch = onDocumentCreated(
-  { ...COMMON, document: 'users/{uid}/purchased_products/{ppId}', timeoutSeconds: 120, memory: '512MiB' },
+  { ...COMMON, document: 'users/{uid}/purchased_products/{ppId}', timeoutSeconds: MATCH_TRIGGER_TIMEOUT_S, memory: '512MiB' },
   async (event) => {
+    const deadlineAt = Date.now() + MATCH_TRIGGER_TIMEOUT_S * 1000 - matcher.SCHREIB_RESERVE_MS;
     const snap = event.data;
     if (!snap) return;
     const d = snap.data() || {};
@@ -440,11 +424,41 @@ exports.onPurchasedProductMatch = onDocumentCreated(
         merchantName: d.merchantName || null,
         merchantLand: d.merchantLand || null,
         bonDate: d.bonDate || null,
-      }, noClose ? { noClose: true } : {});
+      }, noClose ? { noClose: true, deadlineAt } : { deadlineAt });
     } catch (e) {
       console.error('onPurchasedProductMatch failed', event.params, e);
       await snap.ref.set({ matchStatus: 'error', matchError: e.message }, { merge: true }).catch(() => {});
     }
+  },
+);
+
+// Nachlauf (08.10.2026, nachlauf.js): Zeilen, die an Zeit oder Kontingent
+// scheiterten ('pick-timeout', 'pick-429', 'shortlist-timeout',
+// 'embed-failed'), werden nach 15 min / 1 h / 6 h erneut zugeordnet — immer
+// mit noClose. maxInstances 1 + concurrency 1: nie zwei Durchgänge parallel.
+// retryCount 0: der nächste Takt ist die Wiederholung.
+// Ausschalten ohne Deploy: `_meta/zuordnungNachlauf` = { aktiv: false }.
+exports.matchNachlauf = onSchedule(
+  {
+    region: REGION,
+    schedule: '*/15 * * * *',
+    timeZone: 'Europe/Berlin',
+    retryCount: 0,
+    timeoutSeconds: LAUF_ZEIT_MS / 1000,
+    memory: '512MiB',
+    maxInstances: 1,
+    concurrency: 1,
+    secrets: [GEMINI_API_KEY],
+  },
+  async () => {
+    const start = Date.now();
+    const schalter = await db.collection('_meta').doc('zuordnungNachlauf').get();
+    if (schalter.exists && (schalter.data() || {}).aktiv === false) {
+      logger.info('zuordnung-nachlauf: ausgeschaltet (_meta/zuordnungNachlauf.aktiv = false)');
+      return;
+    }
+    const bericht = await nachlauf({ db, matchLine: matcher.matchLine, logger, laufEndeAt: start + LAUF_ZEIT_MS - LAUF_RESERVE_MS });
+    if (bericht.gefunden) logger.info('zuordnung-nachlauf: Durchgang', bericht);
   },
 );
 
