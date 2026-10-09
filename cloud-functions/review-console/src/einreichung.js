@@ -488,10 +488,13 @@ function eanIndex(docs) {
  * Die Warteschlange der Produktfotos aus den offenen Dokumenten und dem Index.
  * `kontoSperre(uid)` liefert 'gesperrt' | 'unbekannt' | null (src/kontoSperre.js).
  *
- * Einreichungen gesperrter Konten stehen am ENDE (`gesperrt: true`, Zähler
- * `counts.gesperrt`): sie bleiben stumm liegen (Entscheidung Patrick
- * 02.10.2026, „nicht freigeben"), warten also auf niemanden — vorne würden sie
- * die Fälle verdrängen, die auf eine Entscheidung warten.
+ * Einreichungen gesperrter Konten bleiben stumm liegen (Entscheidung Patrick
+ * 02.10.2026, „nicht freigeben") und warten auf niemanden. Seit 09.10.2026
+ * blendet die Warteschlange sie aus (Patrick: „ausblenden" — sie sollen das
+ * Dashboard nicht vermüllen, aber weder abgelehnt noch verworfen werden; eine
+ * sichtbare Ablehnung triebe die Person auf ein neues Konto). Ihre Zahl steht
+ * in `ausgeblendetGesperrt`. Mit `p.gesperrte === true` kommen sie zurück,
+ * am ENDE (`gesperrt: true`, Zähler `counts.gesperrt`).
  */
 function baueFotoListe(openDocs, byEan, p, q, kontoSperre = () => null) {
   let rows = openDocs.map((d) => {
@@ -515,12 +518,14 @@ function baueFotoListe(openDocs, byEan, p, q, kontoSperre = () => null) {
   });
   if (q) rows = rows.filter((r) => r._suche.some((v) => v && String(v).toLowerCase().includes(q)));
   rows = rows.map(({ _suche, ...r }) => r);
+  const ausgeblendetGesperrt = p.gesperrte === true ? 0 : rows.filter((r) => r.gesperrt).length;
+  if (ausgeblendetGesperrt) rows = rows.filter((r) => !r.gesperrt);
   if (p.verdict && p.verdict !== 'all') rows = rows.filter((r) => r.verdict === p.verdict);
   rows.sort((a, b) => (a.gesperrt ? 1 : 0) - (b.gesperrt ? 1 : 0) || (a.createdAt ?? 0) - (b.createdAt ?? 0));
   const counts = rows.reduce((acc, r) => ((acc[r.verdict] = (acc[r.verdict] || 0) + 1), acc), {});
   const gesperrt = rows.filter((r) => r.gesperrt).length;
   if (gesperrt) counts.gesperrt = gesperrt;
-  return { type: 'photos', rows, total: rows.length, counts };
+  return { type: 'photos', rows, total: rows.length, counts, ...(ausgeblendetGesperrt ? { ausgeblendetGesperrt } : {}) };
 }
 
 module.exports = {

@@ -204,11 +204,19 @@ describe('Ablehnung in der Prüfkonsole: Code am Dokument für die App', () => {
 });
 
 describe('Warteschlange', () => {
-  it('zeigt gesperrte Konten als gesperrt (am Ende), unabhängig vom EAN-Zwischenspeicher', async () => {
+  it('blendet gesperrte Konten aus (Patrick 09.10.), unabhängig vom EAN-Zwischenspeicher', async () => {
     lege('k');
     lege('j', { userId: 'u2', ean: ANDERE, createdAt: ts(T0 + 1000) });
     mockStore.set('cashback_sperren/u1', { gesperrt: true });
     const r = await konsole.reviewQueue({ ...admin, data: { type: 'photos' } });
+    expect(r.rows.map((x) => x.id)).toEqual(['j']);
+    expect(r.ausgeblendetGesperrt).toBe(1);
+  });
+  it('zeigt gesperrte Konten auf Wunsch (gesperrte: true) als gesperrt am Ende', async () => {
+    lege('k');
+    lege('j', { userId: 'u2', ean: ANDERE, createdAt: ts(T0 + 1000) });
+    mockStore.set('cashback_sperren/u1', { gesperrt: true });
+    const r = await konsole.reviewQueue({ ...admin, data: { type: 'photos', gesperrte: true } });
     expect(r.rows.map((x) => x.id)).toEqual(['j', 'k']);
     expect(r.rows[1]).toMatchObject({ id: 'k', verdict: 'locked', reasons: ['konto_gesperrt'], gesperrt: true });
     expect(r.rows[0].verdict).toBe('ok');

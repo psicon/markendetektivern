@@ -135,11 +135,21 @@ describe('precheckOf: gesperrte Konten und Barcode-Foto (Entscheidungen Patrick 
     expect(pre).toMatchObject({ verdict: 'hold', reasons: ['ean_unsicher'] });
     expect(pre.dupFoto).toBeUndefined();
   });
-  it('Warteschlange reicht die Kontosperre je Person durch; gesperrte stehen am Ende und zählen getrennt', () => {
+  it('Warteschlange blendet gesperrte Konten aus und zählt sie getrennt (Patrick 09.10.)', () => {
     const l = baueFotoListe([
       doc('k', basis({ ean: GUELTIG, productNameOcr: 'Skyr', createdAt: T0 })),
       doc('j', basis({ userId: 'u2', ean: ANDERE, productNameOcr: 'Quark', createdAt: T0 + STUNDE })),
     ], new Map(), {}, '', (uid) => (uid === 'u1' ? 'gesperrt' : null));
+    expect(l.rows.map((r) => r.id)).toEqual(['j']);
+    expect(l.counts).toEqual({ ok: 1 });
+    expect(l.ausgeblendetGesperrt).toBe(1);
+  });
+  it('mit gesperrte: true kommen sie zurück — am Ende, getrennt gezählt', () => {
+    const l = baueFotoListe([
+      doc('k', basis({ ean: GUELTIG, productNameOcr: 'Skyr', createdAt: T0 })),
+      doc('j', basis({ userId: 'u2', ean: ANDERE, productNameOcr: 'Quark', createdAt: T0 + STUNDE })),
+    ], new Map(), { gesperrte: true }, '', (uid) => (uid === 'u1' ? 'gesperrt' : null));
+    expect(l.ausgeblendetGesperrt).toBeUndefined();
     expect(l.rows.map((r) => r.id)).toEqual(['j', 'k']);
     expect(l.rows[1]).toMatchObject({ verdict: 'locked', reasons: ['konto_gesperrt'], gesperrt: true });
     expect(l.rows[0].gesperrt).toBeUndefined();
