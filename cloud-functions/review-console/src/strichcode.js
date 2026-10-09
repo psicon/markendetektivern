@@ -237,23 +237,56 @@ async function bildPruefen(bild, { maxPixel = MAX_PIXEL, maxBytes = MAX_DEKODIER
 }
 
 /**
+ * Zweiter Versuch, wenn das Original keine Striche ergab (09.10.2026): das Foto
+ * auf höchstens VARIANTE_PX Kantenlänge verkleinert, in Graustufen mit
+ * gestrecktem Kontrast, als Baseline-JPEG. Gemessen an 36 offenen
+ * Barcode-Fotos: Original 25 gelesen, mit dieser Variante 27; keine Variante
+ * las eine falsche Nummer. Bewusst NUR diese eine: eine stärker verkleinerte
+ * (1400 px) las bei einem Moser-Roth-Foto zusätzlich die erfundene GTIN
+ * 8061161001710 neben der echten. sharp verkleinert JPEG schon beim Laden
+ * (shrink-on-load), der Speicher bleibt klein; das Ergebnis geht durch
+ * dieselbe Prüfung (bildPruefen) wie jedes Bild.
+ */
+const VARIANTE_PX = 2000;
+
+async function variante(bild) {
+  const sharp = require('sharp');
+  return sharp(bild, { limitInputPixels: MAX_PIXEL, sequentialRead: true }).rotate()
+    .resize({ width: VARIANTE_PX, height: VARIANTE_PX, fit: 'inside', withoutEnlargement: true })
+    .grayscale().normalise().jpeg({ quality: 92, progressive: false }).toBuffer();
+}
+
+async function liesEinmal(bild, { zeitMs, maxPixel, maxBytes }) {
+  // VOR dem Dekodieren: ein zu großes Bild sprengt sonst den Speicher der Instanz.
+  const nein = await bildPruefen(bild, { maxPixel, maxBytes });
+  if (nein) return nein;
+  const daten = new Uint8Array(bild.buffer, bild.byteOffset, bild.byteLength);
+  const roh = await mitZeit(laden().then((zx) => zx.readBarcodes(daten, LESE_OPTIONEN)), zeitMs);
+  return nummernAus(roh);
+}
+
+/**
  * Ein Bild lesen. Wirft nie: Fehler, Zeitüberschreitung, unlesbare Datei,
  * zu großes Bild (bildPruefen) → `{fehler}`; sonst `{gelesen}` (kann leer
- * sein: keine Striche gefunden).
+ * sein: keine Striche gefunden). Findet das Original keine Striche, folgt ein
+ * Versuch mit der Graustufen-Variante (`variante: 'grau'` am Ergebnis);
+ * scheitert der, bleibt es beim leeren Ergebnis des Originals.
  * @param {Buffer|Uint8Array} bild  die JPEG-Datei in voller Auflösung (nicht die Kachel)
  */
-async function liesBild(bild, { zeitMs = ZEIT_MS, maxPixel = MAX_PIXEL, maxBytes = MAX_DEKODIER_BYTES } = {}) {
+async function liesBild(bild, { zeitMs = ZEIT_MS, maxPixel = MAX_PIXEL, maxBytes = MAX_DEKODIER_BYTES, mitVariante = true } = {}) {
   try {
     if (!bild || !bild.length) return { fehler: 'leere_datei' };
-    // VOR dem Dekodieren: ein zu großes Bild sprengt sonst den Speicher der Instanz.
-    const nein = await bildPruefen(bild, { maxPixel, maxBytes });
-    if (nein) return nein;
-    const daten = new Uint8Array(bild.buffer, bild.byteOffset, bild.byteLength);
-    const roh = await mitZeit(laden().then((zx) => zx.readBarcodes(daten, LESE_OPTIONEN)), zeitMs);
-    return nummernAus(roh);
+    const r = await liesEinmal(bild, { zeitMs, maxPixel, maxBytes });
+    if (!mitVariante || r.fehler || r.gelesen.length) return r;
+    try {
+      const v = await liesEinmal(await mitZeit(variante(bild), zeitMs), { zeitMs, maxPixel, maxBytes });
+      return !v.fehler && v.gelesen.length ? { ...v, variante: 'grau' } : r;
+    } catch (e) {
+      return r;
+    }
   } catch (e) {
     return { fehler: kurz(e) };
   }
 }
 
-module.exports = { liesBild, bildPruefen, dekodierBytes, nummernAus, mitZeit, LESER, FORMATE, LESE_OPTIONEN, ZEIT_MS, MAX_PIXEL, MAX_DEKODIER_BYTES, BILD_FORMATE };
+module.exports = { liesBild, VARIANTE_PX, bildPruefen, dekodierBytes, nummernAus, mitZeit, LESER, FORMATE, LESE_OPTIONEN, ZEIT_MS, MAX_PIXEL, MAX_DEKODIER_BYTES, BILD_FORMATE };

@@ -234,6 +234,12 @@ function einreichung(id, { uid = 'u1', ean = EAN, status = 'pending', createdAt 
 const doc = (id) => mockStore.get(`crowd_uploads/${id}`);
 /** Was der Strichcode-Leser heute auf dem Barcode-Foto von `id` liest (Pflicht-Zeuge der Korrektur). */
 const striche = (id, ...nummern) => mockStriche.set(doc(id).images.ean, { gelesen: nummern });
+// Strichcode-Leser liest genau die gespeicherte Nummer → Halt aufgehoben, keine Korrektur (Entscheidung Patrick 09.10.2026).
+const gleichDurchLeser = (id, ean = EAN) => {
+  expect(doc(id).status).toBe('approved');
+  expect(doc(id).eanKorrektur).toBeUndefined();
+  expect(doc(id).eanFotoOcr).toMatchObject({ befund: 'gleich', grund: 'strichcode_bestaetigt', ean, zeuge: { art: 'striche', gelesen: [ean] } });
+};
 const scharf = (extra = {}) => taeglicheRunde({ dryRun: false, projekt: 'p', bucketName: 'b', ausloeser: 'manuell', ...extra });
 
 beforeEach(() => {
@@ -2420,6 +2426,8 @@ describe('Barcode-Korrektur (Entscheidung Patrick 06.10.2026: „ja")', () => {
         mockAudit.set(doc('k').images.ean, '');
         mockStriche.set(doc('k').images.ean, ergebnis);
         const b = await scharf();
+        // Liest er genau die gespeicherte: Halt aufgehoben, keine Korrektur (09.10.2026).
+        if (ergebnis.gelesen && ergebnis.gelesen[0] === EAN) { gleichDurchLeser('k'); continue; }
         expect(doc('k').status).toBe('pending');
         expect(doc('k').eanKorrektur).toBeUndefined();
         expect(b.wartetAufDich[0]).toMatchObject({ id: 'k', grund: 'ean_abweichend' });
@@ -2442,6 +2450,8 @@ describe('Barcode-Korrektur (Entscheidung Patrick 06.10.2026: „ja")', () => {
         einreichung('k', gestern());
         mockAudit.set(doc('k').images.ean, heute);
         const b = await scharf();
+        // Der Leser (Mock: liest, was das Modell liest) liest die gespeicherte → Halt aufgehoben (09.10.2026).
+        if (heute === EAN) { gleichDurchLeser('k'); continue; }
         expect(doc('k').status).toBe('pending');
         expect(doc('k').eanKorrektur).toBeUndefined();
         expect(b.wartetAufDich[0].grund).toMatch(/^ean_/);
@@ -2493,7 +2503,9 @@ describe('Barcode-Korrektur (Entscheidung Patrick 06.10.2026: „ja")', () => {
       expect(doc('k').eanFotoOcr).toMatchObject({ ean: '4001382088125', befund: 'unsicher', grund: 'lesungen_uneinig_tage' });
       expect(b.wartetAufDich[0]).toMatchObject({ id: 'k', grund: 'ean_unsicher' });
       expect(b.wartetAufDich[0].hinweis).toMatch(new RegExp(`am ${GESTERN} ${ANDERE} gelesen, heute abweichend \\(4001382088125\\), gespeichert ist ${ANDERE}`));
-      expect(mockLage.leserAufrufe).toEqual([]); // keine zweite Korrektur → kein Leser
+      // Keine zweite Korrektur; der Leser läuft nur für 4d (Bestätigung der gespeicherten Nummer, 09.10.2026) und liest sie nicht.
+      expect(mockLage.leserAufrufe).toEqual([doc('k').images.ean]);
+      expect(b.eanKorrektur.leser).toEqual({ bestaetigt: 0, widerspricht: 0, nicht_gelesen: 0, fehler: 0 });
     });
 
     it('alter Rückfall in review.rundeOffen (der Befund, aus dem die Korrektur entstand) hält NICHT mehr', async () => {
@@ -2794,6 +2806,7 @@ describe('Prüfrunde 06.10.2026 zur Barcode-Korrektur: Lücken über mehrere Lä
 
     it('2a: Halt (ANDERE zweimal), Tag 1 liest die gespeicherte, Tag 2 nichts lesbar → nie korrigiert', async () => {
       einreichung('k', halt);
+      striche('k'); // Strichcode-Leser liest nichts — sonst hebt 4d den Halt auf (eigener Test unten, 09.10.2026)
       mockAudit.set(doc('k').images.ean, EAN);
       await scharf();
       expect(doc('k').eanFotoOcr).toMatchObject({ befund: 'unsicher', grund: 'lesungen_uneinig_tage', ean: ANDERE, zweit: EAN });
@@ -2824,8 +2837,18 @@ describe('Prüfrunde 06.10.2026 zur Barcode-Korrektur: Lücken über mehrere Lä
       expect(doc('k').status).toBe('pending');
     });
 
+    it('2a′: Halt (ANDERE zweimal), Tag 1 liest das Modell die gespeicherte UND der Strichcode-Leser genau sie → Halt aufgehoben, freigegeben, nie korrigiert (Entscheidung Patrick 09.10.2026)', async () => {
+      einreichung('k', halt);
+      mockAudit.set(doc('k').images.ean, EAN);
+      const b = await scharf();
+      gleichDurchLeser('k');
+      expect(doc('k').eanFotoOcr.aufgehoben).toMatchObject({ art: 'unsicher', ean: ANDERE }); // heutiger Widerspruch machte den Halt erst `unsicher`
+      expect(b.eanKorrektur.leserGleich).toMatchObject({ geprueft: 1, bestaetigt: 1, angewandt: 1 });
+    });
+
     it('2c: Halt, Tag 1 Widerspruch, Tag 2 Bildprüfung scheitert, Tag 3 nichts lesbar → nie korrigiert', async () => {
       einreichung('k', halt);
+      striche('k'); // Strichcode-Leser liest nichts (sonst 4d, siehe 2a′)
       mockAudit.set(doc('k').images.ean, EAN);
       await scharf();
       mockAudit.set(doc('k').images.ean, 'AUDIT_FEHLER');
@@ -2971,7 +2994,9 @@ describe('Prüfrunde 06.10.2026 (Übergang, Rückweg, Schalter)', () => {
       const b = await scharf();
       expect(doc('k').eanKorrektur).toBeUndefined();
       expect(doc('k').status).toBe('pending');
-      expect(mockLage.leserAufrufe).toEqual([]); // kein Kandidat → der Leser läuft gar nicht
+      // Kein Kandidat der Korrektur; der Leser läuft nur für 4d (09.10.2026) und liest nicht die gespeicherte.
+      expect(mockLage.leserAufrufe).toEqual([doc('k').images.ean]);
+      expect(b.eanKorrektur.leser).toEqual({ bestaetigt: 0, widerspricht: 0, nicht_gelesen: 0, fehler: 0 });
       const f = b.wartetAufDich.find((x) => x.id === 'k');
       expect(f).toMatchObject({ grund: 'ean_abweichend' });
       expect(f.hinweis).toMatch(/Befund des alten Codes ohne Vermerk/);
@@ -3168,7 +3193,9 @@ describe('Prüfrunde 06.10.2026 (Runde 3): Strichcode-Leser als Pflicht-Zeuge un
     });
     for (const [id, ergebnis] of faelle) mockStriche.set(doc(id).images.ean, ergebnis);
     const b = await scharf();
-    for (const [id, , , text] of faelle) {
+    // Liest der Leser genau die gespeicherte → Halt aufgehoben (09.10.2026); alle anderen liegen.
+    gleichDurchLeser('gespeichert');
+    for (const [id, , , text] of faelle.filter(([fid]) => fid !== 'gespeichert')) {
       expect(doc(id).status).toBe('pending');
       expect(doc(id).eanKorrektur).toBeUndefined();
       const f = b.wartetAufDich.find((x) => x.id === id);
@@ -3206,12 +3233,12 @@ describe('Prüfrunde 06.10.2026 (Runde 3): Strichcode-Leser als Pflicht-Zeuge un
     striche('vollkorn', '4311501799130'); // die Striche zeigen die gespeicherte (richtige) Nummer
     striche('fusilli'); // keine lesbaren Striche
     const b = await scharf();
-    for (const id of ['vollkorn', 'fusilli']) {
-      expect(doc(id).status).toBe('pending');
-      expect(doc(id).eanKorrektur).toBeUndefined();
-    }
+    // Vollkornbrot: die Striche zeigen genau die gespeicherte Nummer → Halt aufgehoben, freigegeben (09.10.2026, echter Fall).
+    gleichDurchLeser('vollkorn', '4311501799130');
+    expect(doc('fusilli').status).toBe('pending');
+    expect(doc('fusilli').eanKorrektur).toBeUndefined();
     expect(b.abgelehnt).toBe(0);
-    expect(b.eanKorrektur).toMatchObject({ korrigiert: 0, kandidaten: 2, leser: { widerspricht: 1, nicht_gelesen: 1 } });
+    expect(b.eanKorrektur).toMatchObject({ korrigiert: 0, kandidaten: 2, leser: { widerspricht: 1, nicht_gelesen: 1 }, leserGleich: { bestaetigt: 1, angewandt: 1, nichtGelesen: 1 } });
   });
 
   it('Korrektur verworfen, Fall offen, Foto heute nicht lesbar → liegt (ean_abweichend), wird nicht freigegeben (Befund „mittel")', async () => {
@@ -3254,7 +3281,9 @@ describe('Prüfrunde 06.10.2026 (Runde 3): Strichcode-Leser als Pflicht-Zeuge un
     const b = await scharf();
     expect(doc('k').status).toBe('pending');
     expect(doc('k').eanKorrektur).toBeUndefined();
-    expect(mockLage.leserAufrufe).toEqual([]);
+    // Nur 4d (09.10.2026) liest, und nicht die gespeicherte → kein Korrektur-Kandidat, Halt bleibt.
+    expect(mockLage.leserAufrufe).toEqual([doc('k').images.ean]);
+    expect(b.eanKorrektur.leser).toEqual({ bestaetigt: 0, widerspricht: 0, nicht_gelesen: 0, fehler: 0 });
     const f = b.wartetAufDich.find((x) => x.id === 'k');
     expect(f).toMatchObject({ grund: 'ean_unsicher' });
     expect(f.hinweis).toMatch(new RegExp(`am ${GESTERN} ${EAN} \\(= gespeichert\\) gelesen, heute abweichend \\(${ANDERE}\\)`));
@@ -3500,6 +3529,7 @@ describe('Prüfrunde 2 zur Barcode-Korrektur (06.10.2026): mehrdeutiger Leser, `
     it('Tag 2 zweimal F, Tag 3 unlesbar — der Leser liest jeweils F → nie korrigiert, eanFotoOcr wird `unsicher`', async () => {
       einreichung('k', mitHalt());
       // Tag 1: das Foto zeigt heute die GESPEICHERTE Nummer → Widerspruch über Tage → unsicher; eanFotoOcr nicht speicherbar
+      striche('k'); // Strichcode-Leser liest nichts (sonst hebt 4d den Halt auf, 09.10.2026)
       mockAudit.set(doc('k').images.ean, EAN);
       eanFotoOcrScheitert();
       await scharf();
@@ -3526,6 +3556,7 @@ describe('Prüfrunde 2 zur Barcode-Korrektur (06.10.2026): mehrdeutiger Leser, `
 
     it('Tag 2 unlesbar, Tag 3 zweimal F + Leser F → nie korrigiert', async () => {
       einreichung('k', mitHalt());
+      striche('k'); // Strichcode-Leser liest nichts (sonst hebt 4d den Halt auf, 09.10.2026)
       mockAudit.set(doc('k').images.ean, EAN);
       eanFotoOcrScheitert();
       await scharf();
@@ -3544,6 +3575,7 @@ describe('Prüfrunde 2 zur Barcode-Korrektur (06.10.2026): mehrdeutiger Leser, `
 
     it('Gegenprobe: Widerspruch ohne Schreibfehler gespeichert → ebenso nie korrigiert', async () => {
       einreichung('k', mitHalt());
+      striche('k'); // Strichcode-Leser liest nichts (sonst hebt 4d den Halt auf, 09.10.2026)
       mockAudit.set(doc('k').images.ean, EAN);
       await scharf();
       expect(doc('k').eanFotoOcr).toMatchObject({ befund: 'unsicher' });
@@ -3591,10 +3623,86 @@ describe('Prüfrunde 2 zur Barcode-Korrektur (06.10.2026): mehrdeutiger Leser, `
 
     it('offene Einreichung: Befund wird wie bisher geschrieben (in einer Transaktion)', async () => {
       einreichung('k', mitHalt());
+      striche('k'); // Strichcode-Leser liest nichts (sonst hebt 4d den Halt auf, 09.10.2026)
       mockAudit.set(doc('k').images.ean, EAN);
       const b = await scharf();
       expect(doc('k').eanFotoOcr).toMatchObject({ befund: 'unsicher', grund: 'lesungen_uneinig_tage' });
       expect(b.eanFotoEntschiedenInzwischen).toBe(0);
     });
+  });
+});
+
+describe('4d: Strichcode-Leser bestätigt die gespeicherte Nummer (Entscheidung Patrick 09.10.2026)', () => {
+  const GESTERN = '2026-10-05_080000';
+  const morgen = (n = 1) => dateSpy.mockImplementation(() => T0 + n * TAG_MS);
+  const unsicherGestern = { eanFotoOcr: { ean: ANDERE, befund: 'unsicher', zweit: null, lauf: GESTERN } };
+
+  it('alter `unsicher`-Halt, heute nichts lesbar, Leser liest genau die gespeicherte → freigegeben, ohne Korrektur; Bericht zählt', async () => {
+    einreichung('k', unsicherGestern);
+    mockAudit.set(doc('k').images.ean, '');
+    striche('k', EAN);
+    const b = await scharf();
+    gleichDurchLeser('k');
+    expect(b.eanKorrektur.leserGleich).toMatchObject({ geprueft: 1, bestaetigt: 1, angewandt: 1, faelle: [{ id: 'k', ean: EAN, aufgehoben: 'unsicher', angewandt: true }] });
+    expect(b.freigegeben).toBe(1);
+  });
+
+  it('heutige Abweichung (Modell liest zweimal etwas anderes), Leser liest die gespeicherte → freigegeben, keine Korrektur', async () => {
+    einreichung('k');
+    mockAudit.set(doc('k').images.ean, ANDERE);
+    striche('k', EAN);
+    await scharf();
+    gleichDurchLeser('k');
+  });
+
+  it('Schalter `barcodeKorrektur` aus → nur im Bericht, der Fall liegt weiter', async () => {
+    mockStore.set('cashback_config/v1', { fotoWorker: true, barcodeKorrektur: false });
+    einreichung('k', unsicherGestern);
+    mockAudit.set(doc('k').images.ean, '');
+    striche('k', EAN);
+    const b = await scharf();
+    expect(doc('k').status).toBe('pending');
+    expect(b.wartetAufDich.find((x) => x.id === 'k')).toMatchObject({ grund: 'ean_unsicher' });
+    expect(b.eanKorrektur.leserGleich).toMatchObject({ bestaetigt: 1, angewandt: 0, faelle: [{ id: 'k', angewandt: false }] });
+  });
+
+  it('zwei Strichcodes auf dem Foto (darunter die gespeicherte) → Halt bleibt', async () => {
+    einreichung('k', unsicherGestern);
+    mockAudit.set(doc('k').images.ean, '');
+    striche('k', EAN, '4001382088125');
+    const b = await scharf();
+    expect(doc('k').status).toBe('pending');
+    expect(b.eanKorrektur.leserGleich).toMatchObject({ geprueft: 1, bestaetigt: 0, andere: 1 });
+  });
+
+  it('übrige Regeln gelten danach unverändert: eigene Freigabe derselben Nummer vor 3 Tagen → abgelehnt als doppelt', async () => {
+    einreichung('alt', { status: 'approved', createdAt: T0 - 4 * TAG_MS });
+    einreichung('k', unsicherGestern);
+    mockAudit.set(doc('k').images.ean, '');
+    striche('k', EAN);
+    await scharf();
+    expect(doc('k')).toMatchObject({ status: 'rejected', rejectReason: 'doppelt_eingereicht' });
+    expect(doc('k').eanKorrektur).toBeUndefined();
+  });
+
+  it('gesperrtes Konto: der Leser läuft gar nicht, der Fall bleibt stumm liegen', async () => {
+    mockStore.set('cashback_sperren/u1', { gesperrt: true });
+    einreichung('k', unsicherGestern);
+    mockAudit.set(doc('k').images.ean, '');
+    striche('k', EAN);
+    await scharf();
+    expect(doc('k').status).toBe('pending');
+    expect(mockLage.leserAufrufe).toEqual([]);
+  });
+
+  it('Trockenlauf: wird gerechnet, nichts gespeichert', async () => {
+    einreichung('k', unsicherGestern);
+    mockAudit.set(doc('k').images.ean, '');
+    striche('k', EAN);
+    const b = await taeglicheRunde({ dryRun: true, projekt: 'p', bucketName: 'b', ausloeser: 'manuell' });
+    expect(doc('k').status).toBe('pending');
+    expect(doc('k').eanFotoOcr).toMatchObject({ befund: 'unsicher' });
+    expect(b.eanKorrektur.leserGleich).toMatchObject({ bestaetigt: 1 });
+    morgen(0);
   });
 });

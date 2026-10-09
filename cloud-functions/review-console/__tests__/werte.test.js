@@ -974,3 +974,30 @@ describe('Prüfrunde 2 zur Barcode-Korrektur (06.10.2026): mehrdeutiger Leser, `
     expect(eanKorrekturKandidat(danach, nichtLesbar)).toBeNull();
   });
 });
+
+describe('eanGleichDurchStriche: Strichcode-Leser bestätigt die gespeicherte Nummer (Entscheidung Patrick 09.10.2026)', () => {
+  const { eanGleichDurchStriche, eanFotoEintrag } = require('../src/werte');
+  const S = '4061464833821';
+  const F = '4000417025005';
+  const halt = { art: 'abweichend', gelesen: F, gespeichert: S, bestaetigt: true };
+  it('liest genau S → gleich mit Zeugen und aufgehobenem Halt; in eanFotoOcr abgelegt', () => {
+    const g = eanGleichDurchStriche(halt, S, { gelesen: [S] });
+    expect(g).toMatchObject({ art: 'gleich', gelesen: S, gespeichert: S, grund: 'strichcode_bestaetigt', zeuge: [S], aufgehoben: { art: 'abweichend', ean: F } });
+    expect(eanFotoEintrag(g)).toMatchObject({ ean: S, befund: 'gleich', grund: 'strichcode_bestaetigt', zeuge: { art: 'striche', gelesen: [S] }, aufgehoben: { art: 'abweichend', ean: F } });
+    expect(eanGleichDurchStriche({ art: 'unsicher', gelesen: F, gespeichert: S }, S, { gelesen: [S], variante: 'grau' })).toMatchObject({ art: 'gleich', variante: 'grau' });
+    // dieselbe GTIN als UPC/mit führender 0
+    expect(eanGleichDurchStriche(halt, '0' + S, { gelesen: [S] })).toMatchObject({ art: 'gleich' });
+  });
+  it('fail-closed: zwei Strichcodes (auch mit S), Treffergrenze, nichts, andere Nummer, Fehler, kein Lauf → null', () => {
+    for (const st of [{ gelesen: [S, F] }, { gelesen: [S], voll: true }, { gelesen: [] }, { gelesen: [F] }, { fehler: 'download: 503' }, null, undefined]) {
+      expect(eanGleichDurchStriche(halt, S, st)).toBeNull();
+    }
+  });
+  it('nur für haltende Befunde, nur mit gültiger gespeicherter Nummer', () => {
+    for (const b of [null, { art: 'gleich', gelesen: S }, { art: 'kein_urteil', gelesen: null }, { art: 'korrigiert', gelesen: F }]) {
+      expect(eanGleichDurchStriche(b, S, { gelesen: [S] })).toBeNull();
+    }
+    expect(eanGleichDurchStriche(halt, '4061464833820', { gelesen: ['4061464833820'] })).toBeNull(); // falsche Prüfziffer
+    expect(eanGleichDurchStriche(halt, null, { gelesen: [S] })).toBeNull();
+  });
+});

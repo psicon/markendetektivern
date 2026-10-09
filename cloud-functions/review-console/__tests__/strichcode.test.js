@@ -76,6 +76,13 @@ describe('nummernAus (rein)', () => {
 });
 
 describe('liesBild (echter Leser, WASM aus dem Paket)', () => {
+  it('kontrastarmes Foto: das Original liest nichts, die Graustufen-Variante schon (09.10.2026) — gekennzeichnet; ohne Variante leer', async () => {
+    const flau = await sharp(await png('4000417025005', 'EAN-13')).flatten({ background: '#ffffff' }).grayscale()
+      .linear(0.06, 0.47 * 255).resize({ width: 3000 }).jpeg({ quality: 90 }).toBuffer();
+    expect(await liesBild(flau, { mitVariante: false })).toEqual({ gelesen: [] });
+    expect(await liesBild(flau)).toEqual({ gelesen: ['4000417025005'], variante: 'grau' });
+  }, 30000);
+
   it('EAN-13, EAN-8, UPC-A und UPC-E — UPC als 13-stellige GTIN', async () => {
     expect(await liesBild(await jpg('4061464833821', 'EAN-13'))).toEqual({ gelesen: ['4061464833821'] });
     expect(await liesBild(await jpg('96385074', 'EAN-8'))).toEqual({ gelesen: ['96385074'] });

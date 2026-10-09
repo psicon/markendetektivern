@@ -69,7 +69,7 @@ const {
 const {
   eanOf, nameOf, preisOf, policyOf, einreichZeit, pruefzifferOk, vollstaendigkeitOf, preisHinweisOf, eanSchluessel, PREIS_ARTEN,
   eanFotoBefund, eanFotoBestaetigen, eanFotoOhneZweitlesung, eanFotoVorbefund, eanFotoMitVorbefund, eanFotoEintrag, EAN_HALTEN,
-  eanAbgleichOf, eanKorrekturOf, eanKorrekturAus, eanKorrekturKandidat, strichcodeUrteil, eanFotoGegenFrueher, eanFotoKorrigiert, eanKorrekturEintrag, gtin14, eanNummern,
+  eanAbgleichOf, eanKorrekturOf, eanKorrekturAus, eanKorrekturKandidat, strichcodeUrteil, eanGleichDurchStriche, eanFotoGegenFrueher, eanFotoKorrigiert, eanKorrekturEintrag, gtin14, eanNummern,
   eanKorrekturVerworfen,
 } = require('./werte');
 const { liesBild, mitZeit, LESER } = require('./strichcode');
@@ -986,9 +986,10 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   korrekturStand.gebremst = korrekturBremse(korrekturStand.ausHeuteGeplant, korrekturStand.frischGeprueft);
   const korrekturVon = new Map();
   const leserVon = new Map(); // id → strichcodeUrteil (für Hinweis und Bericht)
+  // Ergebnis des Strichcode-Lesers je Fall — von der Korrektur (4c) und von 4d genutzt, je Fall höchstens einmal gelesen.
+  const stricheVon = new Map();
   if (!korrekturStand.gebremst && kandidatVon.size) {
     const dVon = new Map(zuBearbeiten.map((d) => [d.id, d]));
-    const stricheVon = new Map();
     const ohneLeser = await arbeite([...kandidatVon.keys()].map((id) => dVon.get(id)), async (d) => {
       stricheVon.set(d.id, await stricheVomFoto(storage, d.x.images && d.x.images.ean));
     }, PARALLEL_STRICHE, frist);
@@ -1040,6 +1041,52 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     return alt;
   };
 
+  // 4d) Gespeicherte Nummer vom Strichcode-Leser bestätigt (Entscheidung
+  //     Patrick 09.10.2026: „ja"). Hält ein Befund an (abweichend/unsicher,
+  //     heute oder aus einem früheren Lauf) und wurde nicht korrigiert, liest
+  //     der Leser das Original des Barcode-Fotos. Liest er GENAU die
+  //     gespeicherte Nummer und keine andere, ist der Halt aufgehoben — die
+  //     Nummer haben zwei unabhängige Strichleser gelesen (Scanner der App und
+  //     dieser), die Modell-Lesungen der Ziffern waren falsch
+  //     (werte.eanGleichDurchStriche). Am 09.10. wären so 8 von 16
+  //     Barcode-Halten ohne Menschen freigekommen. Angewandt nur mit dem
+  //     Schalter der Barcode-Korrektur (`barcodeKorrektur === true`), sonst
+  //     nur im Bericht. Alle übrigen Regeln (Wochen-Sperre, Preis, Fotos)
+  //     gelten danach unverändert.
+  //     Im Trockenlauf (oder ohne Speichern) nur gerechnet: gespeichert wird
+  //     der Befund davor — ein aufgehobener Halt am Dokument wirkt in Konsole
+  //     und nächstem Lauf wie eine Entscheidung (wie die Korrektur, 4c).
+  const gleichStand = { geprueft: 0, bestaetigt: 0, angewandt: 0, nichtGelesen: 0, fehler: 0, andere: 0, faelle: [] };
+  const vorGleich = new Map(); // id → Befund vor 4d
+  {
+    const halteFaelle = zuBearbeiten.filter((d) => {
+      const b = eanFoto.get(d.id);
+      return !!b && EAN_HALTEN.has(b.art) && !korrekturVon.has(d.id) && kontoVon.get(d.id) !== 'gesperrt';
+    });
+    const ohneLeser = await arbeite(halteFaelle.filter((d) => !stricheVon.has(d.id)), async (d) => {
+      stricheVon.set(d.id, await stricheVomFoto(storage, d.x.images && d.x.images.ean));
+    }, PARALLEL_STRICHE, frist);
+    const ohne = new Set(ohneLeser.map((d) => d.id));
+    for (const d of halteFaelle) {
+      if (ohne.has(d.id)) { gleichStand.fehler++; continue; }
+      const s = stricheVon.get(d.id);
+      gleichStand.geprueft++;
+      const g = eanGleichDurchStriche(eanFoto.get(d.id), eanAbgleichOf(d.x), s);
+      if (!g) {
+        if (!s || s.fehler) gleichStand.fehler++;
+        else if (!s.gelesen || !s.gelesen.length) gleichStand.nichtGelesen++;
+        else gleichStand.andere++;
+        continue;
+      }
+      gleichStand.bestaetigt++;
+      if (gleichStand.faelle.length < 50) gleichStand.faelle.push({ id: d.id, ean: g.gelesen, aufgehoben: g.aufgehoben.art, ...(g.variante ? { variante: g.variante } : {}), angewandt: korrekturAn });
+      if (!korrekturAn) continue;
+      vorGleich.set(d.id, eanFoto.get(d.id));
+      eanFoto.set(d.id, g);
+      gleichStand.angewandt++;
+    }
+  }
+
   const refVon = new Map(pending.map((d) => [d.id, d.ref]));
   const eanFotoStand = { nichtGespeichert: 0, nichtGespeichertHalten: 0, entschiedenInzwischen: 0 };
   // Ein übernommener alter Befund wird nicht neu geschrieben — außer er stand
@@ -1049,7 +1096,9 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   if (schreibtAngaben) {
     const zuSpeichern = [...eanFoto.entries()]
       // Trockenlauf: statt der (nicht gespeicherten) Korrektur der Befund davor.
-      .map(([id, b]) => [id, b.art === 'korrigiert' && !speichertKorrektur ? vorKorrektur.get(id) : b])
+      .map(([id, b]) => [id, b.art === 'korrigiert' && !speichertKorrektur ? vorKorrektur.get(id)
+        // Trockenlauf: statt des aufgehobenen Halts (4d) der Befund davor.
+        : vorGleich.has(id) && !speichertKorrektur ? vorGleich.get(id) : b])
       .filter(([, b]) => !!b && !altUnveraendert(b));
     await arbeite(zuSpeichern, async ([id, b]) => {
       const korrektur = b.art === 'korrigiert' ? eanKorrekturEintrag(b.korrektur, LESER) : null;
@@ -1239,7 +1288,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     // Strichcode-Leser hat einen Kandidaten NICHT bestätigt (oder der Schalter
     // ist aus / die Korrektur wartet): sagen, was er las (Prüfrunde 06.10.2026).
     const lu = leserVon.get(d.id);
-    if (lu && !(ef && ef.art === 'korrigiert')) {
+    if (lu && !(ef && (ef.art === 'korrigiert' || ef.art === 'gleich'))) {
       eanFotoHinweis = `${eanFotoHinweis || (ef ? `Barcode-Foto zeigt ${ef.gelesen}, gespeichert ist ${ef.gespeichert}` : `Barcode ${pol.ean}`)} — ${leserText(lu)}`;
     }
     const rf = { ...(rettungFehler.get(d.id) || {}) };
@@ -1305,6 +1354,8 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       aufgeschoben: korrekturStand.aufgeschoben,
       // Schalter `barcodeKorrektur` (nur true wendet an) und was ohne ihn vorgeschlagen wäre.
       schalter: korrekturAn,
+      // Halte-Befunde, deren gespeicherte Nummer der Strichcode-Leser bestätigt (4d, 09.10.2026).
+      leserGleich: gleichStand,
       ...(korrekturSchalterUnbekannt ? { schalterUnbekannt: korrekturSchalterUnbekannt } : {}),
       vorgeschlagen: korrekturStand.vorgeschlagen.length,
       vorgeschlagenFaelle: korrekturStand.vorgeschlagen.slice(0, 100),

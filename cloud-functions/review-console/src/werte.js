@@ -631,6 +631,9 @@ function eanFotoEintrag(b) {
     // ohne Speichern gelesener nicht (taeglicheRunde 4c).
     ...(befund === 'abweichend' ? { bestaetigt: b.bestaetigt === true, zweit: ziffern(b.zweit).slice(0, 14) || null, korrekturfaehig: b.korrekturfaehig !== false } : {}),
     ...(befund === 'unsicher' ? { zweit: b.zweit || null } : {}),
+    // Vom Strichcode-Leser bestätigt (eanGleichDurchStriche, 09.10.2026): Zeuge und aufgehobener Halt fürs Audit.
+    ...(befund === 'gleich' && Array.isArray(b.zeuge) ? { zeuge: { art: 'striche', gelesen: b.zeuge.slice(0, 4), ...(b.variante ? { variante: b.variante } : {}) } } : {}),
+    ...(befund === 'gleich' && b.aufgehoben ? { aufgehoben: b.aufgehoben } : {}),
     // Notbremse der Korrektur (06.10.2026): dieser Befund wird nie mehr automatisch korrigiert.
     ...(befund === 'abweichend' && b.korrekturGebremst ? { korrekturGebremst: String(b.korrekturGebremst).slice(0, 40) } : {}),
     ...(b.fehler ? { fehler: String(b.fehler).slice(0, 80) } : {}),
@@ -771,6 +774,46 @@ function strichcodeUrteil(k, striche) {
   const mehrdeutig = new Set(alle.map(gtin14)).size > 1 || striche.voll === true;
   if (hat(k && k.ean) && !liestGespeicherte && !mehrdeutig) return { art: 'bestaetigt', gelesen };
   return { art: 'widerspricht', gelesen, liestGespeicherte, ...(mehrdeutig ? { mehrdeutig: true } : {}) };
+}
+
+/**
+ * Hebt der Strichcode-Leser einen Barcode-Halt auf? (Entscheidung Patrick
+ * 09.10.2026: „ja" zu „Nachlesen der Striche in die Morgenrunde einbauen".)
+ *
+ * Anlass: am 09.10. hingen 16 offene Fälle an `ean_unsicher`/`ean_abweichend`,
+ * weil das Modell die Ziffern auf dem Barcode-Foto uneinig oder falsch las.
+ * Bei 8 davon las der Strichcode-Leser genau die gespeicherte Nummer — die
+ * Warnung war falsch, ein Mensch musste trotzdem ran. Die gespeicherte Nummer
+ * kommt vom Scanner der App (liest ebenfalls Striche); liest ein ZWEITER,
+ * unabhängiger Strichleser auf dem Foto dieselbe Nummer, ist sie bestätigt.
+ *
+ * Diese Entscheidung hebt bewusst die Regel vom 03.10. auf, dass ein einmal
+ * angehaltener Fall nur in der Konsole frei wird — aber nur für genau diese
+ * Klasse, und nur mit dem Leser als Zeugen, nie mit Modell-Lesungen allein.
+ *
+ * Bedingung (fail-closed): der Befund hält an (abweichend/unsicher), die
+ * gespeicherte Nummer hat eine gültige Prüfziffer, der Leser lief ohne Fehler
+ * und las GENAU EINE Nummer — die gespeicherte. Zwei Strichcodes auf dem Foto
+ * (auch wenn die gespeicherte darunter ist), nichts gelesen, eine andere
+ * Nummer → null, der Halt bleibt.
+ * @param {object|null} befund  Befund des Laufs (nach eanFotoMitVorbefund)
+ * @param {string|null} gespeichertRoh  eanAbgleichOf(x)
+ * @param {{gelesen?:string[], fehler?:string, voll?:boolean, variante?:string}|null} striche  strichcode.liesBild
+ * @returns {object|null}  Befund `gleich` mit Zeugen, sonst null
+ */
+function eanGleichDurchStriche(befund, gespeichertRoh, striche) {
+  if (!befund || !EAN_HALTEN.has(befund.art)) return null;
+  const s = ziffern(gespeichertRoh);
+  if (!s || !pruefzifferOk(s)) return null;
+  if (!striche || typeof striche !== 'object' || striche.fehler || striche.voll === true) return null;
+  const alle = (Array.isArray(striche.gelesen) ? striche.gelesen : []).map(ziffern).filter((g) => g && pruefzifferOk(g));
+  const verschieden = new Set(alle.map(gtin14));
+  if (verschieden.size !== 1 || !verschieden.has(gtin14(s))) return null;
+  return {
+    art: 'gleich', gelesen: s, gespeichert: s, grund: 'strichcode_bestaetigt',
+    zeuge: alle.slice(0, 4), ...(striche.variante ? { variante: String(striche.variante).slice(0, 20) } : {}),
+    aufgehoben: { art: befund.art, ean: ziffern(befund.gelesen || befund.roh).slice(0, 14) || null, lauf: (befund.vorbefund && befund.vorbefund.lauf) || null },
+  };
 }
 
 /**
@@ -992,6 +1035,6 @@ module.exports = {
   pruefzifferOk, eanOf, nameOf, preisOf, policyOf, einreichZeit, herstellerAnzeige, vollstaendigkeitOf, herkunftOf, preisHinweisOf, PREIS_ARTEN,
   gtin14, eanSchluessel, eanVarianten, istHandelsCode, eanFotoOf, eanFotoBefund, eanFotoBestaetigen,
   eanFotoOhneZweitlesung, eanFotoVorbefund, eanFotoMitVorbefund, eanFotoEintrag, stellenAbstand, MAX_LESEFEHLER_STELLEN, EAN_HALTEN,
-  eanKorrigierbar, eanKorrekturOf, eanAbgleichOf, durchKorrekturErledigt, eanKorrekturAus, eanKorrekturKandidat, strichcodeUrteil, eanFotoKorrigiert, eanKorrekturEintrag, eanFotoHalteQuellen,
+  eanKorrigierbar, eanKorrekturOf, eanAbgleichOf, durchKorrekturErledigt, eanKorrekturAus, eanKorrekturKandidat, strichcodeUrteil, eanGleichDurchStriche, eanFotoKorrigiert, eanKorrekturEintrag, eanFotoHalteQuellen,
   heuteWiderspricht, eanVorherOf, eanNummern, teilenNummer, eanKorrekturVerworfen, LETZTER_LAUF_OHNE_VERMERK, eanFotoGegenFrueher, eanFotoFreigegebenOf,
 };

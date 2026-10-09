@@ -83,6 +83,25 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
 
 ## Regeln, die nicht verhandelbar sind
 
+- **Strichcode-Leser bestätigt die gespeicherte Nummer → Barcode-Halt
+  aufgehoben (Entscheidung Patrick 09.10.2026: „ja").** Schritt 4d der Runde:
+  hält ein Befund an (`abweichend`/`unsicher`, heute oder aus einem früheren
+  Lauf) und wurde nicht korrigiert, liest `src/strichcode.js` das Original des
+  Barcode-Fotos. Liest er GENAU EINE Nummer und das ist die gespeicherte, wird
+  `eanFotoOcr` zu `gleich` (`grund: 'strichcode_bestaetigt'`, `zeuge`,
+  `aufgehoben`), danach laufen alle anderen Regeln (Wochen-Sperre, Preis,
+  Fotos) normal. Zwei Codes, nichts, eine andere Nummer, Fehler → Halt bleibt.
+  Hebt die Regel vom 03.10. („ein Halt wird nur in der Konsole aufgehoben")
+  für genau diese Klasse auf — nie mit Modell-Lesungen allein. Nur mit
+  `barcodeKorrektur === true`; Trockenlauf/Schalter aus: nur im Bericht
+  (`eanKorrektur.leserGleich`). Anlass: am 09.10. hingen 16 Fälle an der
+  Barcode-Prüfung, bei 8 las der Leser genau die gespeicherte Nummer — er lief
+  bis dahin nur für Korrektur-Kandidaten. Seit demselben Tag liest der Leser
+  bei leerem Ergebnis ein zweites Mal (Graustufen, ≤ 2000 px, `variante:
+  'grau'`): an 36 offenen Fotos 25 → 27 gelesen, keine falsche Nummer; eine
+  stärkere Verkleinerung (1400 px) las eine erfundene GTIN und ist deshalb
+  nicht drin.
+
 - **Dieselbe Person, dasselbe Produkt: einmal pro Woche (Entscheidung Patrick
   02.10.2026: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche").**
   Rollierend 168 h gegen die eigenen FREIGEGEBENEN Einreichungen derselben
