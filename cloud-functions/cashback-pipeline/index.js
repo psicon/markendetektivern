@@ -61,6 +61,8 @@ const TREMENDOUS_WEBHOOK_SECRET = defineSecret('TREMENDOUS_WEBHOOK_SECRET');
 // Admin-Key für resolveCashbackReview — wiederverwendet das projektweite
 // Trigger-Secret (kein neues Secret nötig). ClickUp 86caf62v6.
 const CASHBACK_ADMIN_KEY = defineSecret('NUTRITION_SCRAPER_TRIGGER_KEY');
+// Mistral OCR als Zeuge der Bon-Lesung, Parallelbetrieb (09.10.2026, lib/mistralZeuge.js).
+const MISTRAL_API_KEY = defineSecret('MISTRAL_API_KEY');
 
 const { extractReceipt, reconcile, countEligibleItems, stornoModus, stornoWertUngueltig, tierFor, isPfandItem, DEFAULT_MODEL } = require('./lib/ocr');
 const { extractReceiptCVHybrid } = require('./lib/ocr_cvhybrid');
@@ -119,6 +121,7 @@ const {
 } = require('./lib/doppelBon');
 const { pruefeKandidaten: bildKandidatenPruefen } = require('./lib/bildVergleich');
 const { istOnlineBestellung, belegBereinigen, onlineMerkmal } = require('./lib/belegart');
+const { zeugeAusfuehren } = require('./lib/mistralZeuge');
 const { abgleichOptionen } = require('./lib/punkteZahlung');
 const {
   computeDHash,
@@ -2588,7 +2591,7 @@ exports.processCashback = onMessagePublished(
     // — die 540 s sind damit nur noch die äußere Sicherung.
     timeoutSeconds: 540,
     memory: '1GiB',
-    secrets: [GEMINI_API_KEY],
+    secrets: [GEMINI_API_KEY, MISTRAL_API_KEY],
   },
   async (event) => {
     // Uhr des Laufs: ab hier zählen Laufbudget der OCR und Laufzeitgrenze.
@@ -4460,6 +4463,23 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
         duplicateOfReceiptId: duplicateOf?.receiptId ?? null,
         duplicateSameUser: duplicateOf?.sameUser ?? null,
       });
+
+      // 9) Mistral-Zeuge im PARALLELBETRIEB (Patrick 09.10.2026): erst NACH der
+      //    fertigen Entscheidung, schreibt nur `zeugeMistral`, wirft nie — ein Fehler
+      //    hier darf nie in den catch darunter laufen (der würde den Bon als
+      //    gescheitert zählen). Nur mit cashback_config/v1.mistralZeuge === 'shadow',
+      //    nicht bei knappem Laufbudget, nicht doppelt bei erneuter Zustellung.
+      if (config?.mistralZeuge === 'shadow' && !receipt.zeugeMistral && Date.now() - laufStart < 400000) {
+        try {
+          let key = '';
+          try { key = MISTRAL_API_KEY.value(); } catch { key = ''; }
+          const zeuge = await zeugeAusfuehren({ bytes, mimeType, ocr, key, istOnline: istOnlineBestellung });
+          if (zeuge) await docRef.update({ zeugeMistral: zeuge });
+          logger.info('mistral-zeuge', { cashbackId, status: zeuge?.status, ms: zeuge?.ms ?? null, einigGeld: zeuge?.gegenFinal?.einigGeld ?? null });
+        } catch (e) {
+          logger.warn('mistral-zeuge-fehler', { cashbackId, err: String(e && e.message || e).slice(0, 200) });
+        }
+      }
     } catch (err) {
       // 86ca0wbg7 (A): transienten Fehler NICHT voreilig als 'rejected' zeigen
       // (sonst sieht der User „abgelehnt", obwohl gleich ein Retry läuft). Nur
