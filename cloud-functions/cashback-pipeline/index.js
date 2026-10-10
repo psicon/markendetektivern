@@ -121,7 +121,8 @@ const {
 } = require('./lib/doppelBon');
 const { pruefeKandidaten: bildKandidatenPruefen } = require('./lib/bildVergleich');
 const { istOnlineBestellung, belegBereinigen, onlineMerkmal } = require('./lib/belegart');
-const { zeugeAusfuehren, zeugeFragen } = require('./lib/mistralZeuge');
+const { zeugeAusfuehren, zeugeFragen, vergleich: zeugeVergleich, bestaetigung: zeugeBestaetigung } = require('./lib/mistralZeuge');
+const { haikuLesen } = require('./lib/haikuLeser');
 const { abgleichOptionen } = require('./lib/punkteZahlung');
 const {
   computeDHash,
@@ -2900,9 +2901,16 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
                 return bericht;
               }
             : undefined;
+          // Haiku 5.5 als erste Lesung (Patrick 10.10.2026), nur zusammen mit dem
+          // scharfen Mistral-Zeugen: ohne Zeugen gäbe es nichts, das die eine
+          // Haiku-Lesung bestätigt. Rückweg: haikuLeser auf 'shadow' oder entfernen.
+          const ersterLeser = config.haikuLeser === true && zeuge
+            ? () => haikuLesen(bytes, { promptVersion: ocrPromptVersion })
+            : undefined;
           try {
             ocr = await extractReceiptRobust(bytes, mimeType, {
               zeuge,
+              ersterLeser,
               model: config.ocrModel,
               // Schalter cashback_config/v1.ocrPrompt — ungültig/fehlend → v1.4.
               promptVersion: ocrPromptVersion,
@@ -4540,6 +4548,41 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
         } catch (e) {
           logger.warn('mistral-zeuge-fehler', { cashbackId, err: String(e && e.message || e).slice(0, 200) });
         }
+      }
+      // 10) Haiku 5.5 im PARALLELBETRIEB (Patrick 10.10.2026): liest NACH der
+      //     fertigen Entscheidung, schreibt nur `zeugeHaiku`, wirft nie. Vergleich
+      //     mit dem Endergebnis und die Frage, ob der Mistral-Zeuge dieses Bons
+      //     die Haiku-Lesung bestätigt hätte (Summenprobe + Summe/Tag/Uhrzeit).
+      if (config?.haikuLeser === 'shadow' && !receipt.zeugeHaiku && Date.now() - laufStart < 400000) {
+        const t0 = Date.now();
+        let zh;
+        try {
+          const h = await haikuLesen(bytes, { promptVersion: ocr.promptVersion || undefined });
+          const hp = h.parsed || {};
+          const preise = (Array.isArray(hp.items) ? hp.items : []).map((x) => x && x.priceCents).filter(Number.isInteger);
+          const finalPreise = (Array.isArray(ocr.parsed?.items) ? ocr.parsed.items : []).map((x) => x && x.priceCents).filter(Number.isInteger);
+          const zErg = ocr.robust?.zeuge?.ergebnis || receipt.zeugeMistral?.ergebnis || null;
+          const hRecon = reconcile(hp, abgleichOptionen(h.promptVersion));
+          zh = {
+            status: 'ok', at: new Date().toISOString(), ms: Date.now() - t0, modell: h.model,
+            ein: h.inputTokens ?? null, aus: h.outputTokens ?? null,
+            ergebnis: { markt: hp.merchant == null ? null : String(hp.merchant).slice(0, 80), datum: hp.bonDate ?? null, zeit: hp.bonTime ?? null, summe: hp.totalCents ?? null, preise: preise.slice(0, 200) },
+            summenprobe: Boolean(hRecon && hRecon.ok),
+            artikel: countEligibleItems(hp, stornoZaehl),
+            artikelFinal: countEligibleItems(ocr.parsed || {}, stornoZaehl),
+            gegenFinal: zeugeVergleich({ summe: hp.totalCents ?? null, datum: hp.bonDate ?? null, zeit: hp.bonTime ?? null, preise },
+              { summe: ocr.parsed?.totalCents ?? null, datum: ocr.parsed?.bonDate ?? null, zeit: ocr.parsed?.bonTime ?? null, preise: finalPreise }),
+            mistralHaetteBestaetigt: zErg ? Boolean(hRecon && hRecon.ok) && zeugeBestaetigung(zErg, hp).ok : null,
+          };
+        } catch (e) {
+          zh = { status: 'fehler', at: new Date().toISOString(), ms: Date.now() - t0, fehler: String(e && e.message || e).slice(0, 200) };
+        }
+        try {
+          await docRef.update({ zeugeHaiku: zh });
+        } catch (e) {
+          logger.warn('haiku-zeuge-schreiben-fehler', { cashbackId, err: String(e && e.message || e).slice(0, 200) });
+        }
+        logger.info('haiku-zeuge', { cashbackId, status: zh.status, ms: zh.ms, einigGeld: zh.gegenFinal?.einigGeld ?? null, mistral: zh.mistralHaetteBestaetigt ?? null });
       }
     } catch (err) {
       // 86ca0wbg7 (A): transienten Fehler NICHT voreilig als 'rejected' zeigen

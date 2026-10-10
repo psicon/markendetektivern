@@ -288,7 +288,7 @@ function readFingerprint(r, zaehl = {}) {
     // folgenden Betrag — es muss so zählen wie die Geldentscheidung.
     eligibleItems: countEligibleItems(p, zaehl),
     reconOk: reconciles(r),
-    model: r && r.__pro ? 'pro' : r && r.__enh ? 'flash-enhanced' : 'flash',
+    model: r && r.__pro ? 'pro' : r && r.__enh ? 'flash-enhanced' : r && r.__haiku ? 'haiku' : 'flash',
     // Gesendete Denkstufe dieser Lesung (08.10.2026): null = keine Vorgabe.
     // Fehlt das Feld, kam die Lesung aus einem Zwischenstand von vor dem
     // Schalter — die Stufe ist dann unbekannt, nicht „keine".
@@ -304,6 +304,7 @@ function pack(chosen, confidence, method, reads, failedAttempts = 0, zaehl = {})
   delete out.__pro;
   delete out.__enh;
   delete out.__denkstufe;
+  delete out.__haiku;
   out.engine = 'gemini-robust';
   out.robust = {
     confidence, // 'high' | 'medium' | 'low' | 'none'
@@ -626,7 +627,44 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
   // Fortsetzung (Zwischenstand) fragt nicht erneut. Ein Fehler des Zeugen ist
   // nie ein Urteil über den Bon — dann ebenfalls wie bisher weiter.
   const zeugeFenster = Number.isFinite(opts.zeugeFensterMs) ? opts.zeugeFensterMs : 30000;
-  if (typeof opts.zeuge === 'function' && st.reads.length === 0 && st.flash === 0 && maxFlash >= 2
+  // Erste Lesung durch einen anderen, billigen Leser (Haiku 5.5, Schalter
+  // cashback_config/v1.haikuLeser === true, Patrick 10.10.2026). Bestätigt der
+  // Zeuge, gilt sie (Methode 'zeuge-agreement', robust.ersterLeser). Sonst wird
+  // sie VERWORFEN — sie mischt sich nie in die Einigung der Gemini-Lesungen —,
+  // und die Leiter läuft exakt wie ohne Zeugen (zwei Basis-Lesungen gleichzeitig).
+  if (typeof opts.zeuge === 'function' && typeof opts.ersterLeser === 'function'
+    && st.reads.length === 0 && st.flash === 0 && maxFlash >= 2
+    && fensterFrei(leseLimit + zeugeFenster + (Number.isFinite(opts.ersterLeserFensterMs) ? opts.ersterLeserFensterMs : 60000))) {
+    let h = null;
+    try {
+      h = await opts.ersterLeser();
+    } catch (err) {
+      zeugeBerichtRef.wert = { status: 'erster_leser_fehler', fehler: String(err && err.message ? err.message : err).slice(0, 200) };
+      console.warn('ocr-erster-leser-fehler', { err: String(err && err.message ? err.message : err).slice(0, 200) });
+    }
+    if (h && h.parsed) {
+      h.__haiku = true;
+      h.__denkstufe = null;
+      if (reconciles(h) && (!nurExakt || exakt(h))) {
+        let bericht = null;
+        try {
+          bericht = await opts.zeuge(h);
+        } catch (err) {
+          bericht = { status: 'fehler', fehler: String(err && err.message ? err.message : err).slice(0, 200) };
+        }
+        if (bericht) bericht.ersterLeser = h.model || 'haiku';
+        zeugeBerichtRef.wert = bericht;
+        if (bericht && bericht.bestaetigt === true) {
+          const out = pack(h, 'high', 'zeuge-agreement', [h], st.failed.length, zaehl);
+          out.robust.zeuge = bericht;
+          out.robust.ersterLeser = h.model || 'haiku';
+          return fertig(out);
+        }
+      } else {
+        zeugeBerichtRef.wert = { status: 'nicht_gefragt', grund: 'summenprobe', ersterLeser: h.model || 'haiku' };
+      }
+    }
+  } else if (typeof opts.zeuge === 'function' && st.reads.length === 0 && st.flash === 0 && maxFlash >= 2
     && fensterFrei(leseLimit + zeugeFenster)) {
     const e = await versuch(`flash-${st.flash + 1}`, imageBytes, mimeType, { model, timeoutMs: leseLimit, ...prompt, ...denkVorgabe, zweck: ZWECK.BON_OCR });
     if (verbraucht(e)) st.flash++;
