@@ -4918,6 +4918,16 @@ Produktdaten), 3 % Zeitüberschreitungen. Offen bei Patrick: Datenschutzvertrag
 (DPA) und Zero Data Retention bei Mistral, Schlüssel rotieren (neue Version von
 Secret `MISTRAL_API_KEY` wirkt erst nach Redeploy), Datenschutzerklärung (Anwalt).
 
+**Haiku 5.5 als erste Lesung (seit 10.10.2026, Commit 1893e2d1, Patrick „ja auf jeden fall“):**
+Schalter `cashback_config/v1.haikuLeser`: `'shadow'` = Haiku liest nach der Entscheidung
+(`receipts.zeugeHaiku`), `true` = Haiku ist die erste Lesung (nur zusammen mit
+`mistralZeuge === true`); nicht bestätigt → Haiku-Lesung verworfen, Gemini-Leiter
+unverändert. Rückweg: `'shadow'`. Läuft über Vertex (Model Garden, Projekt freigeschaltet
+10.10.), Endpunkt `global`, `:rawPredict`, Leseanleitung = Gemini-Prompt der Version.
+Lesetest 150 Bons: Geld 99 %, alle Preise 88 %, ~0,23 ct je Lesung; mit Mistral 77 %
+bestätigt, 0 Geldfehler. Bildtyp aus den Bytes bestimmen (die App-Angabe stimmt nicht
+immer), über 4,9 MB direkt Gemini.
+
 ## Gemini läuft über VERTEX AI, nicht AI Studio (Incident 19.08.2026)
 
 **Was passiert ist:** Der AI-Studio-Monatsdeckel („monthly spending cap",
