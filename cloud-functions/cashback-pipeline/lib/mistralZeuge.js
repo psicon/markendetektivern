@@ -151,4 +151,62 @@ async function zeugeAusfuehren({ bytes, mimeType, ocr, key, istOnline = () => fa
   }
 }
 
-module.exports = { zeugeAusfuehren, vergleich, normalisieren, preisAnteil, lesen, SCHEMA, ZEITLIMIT_MS };
+// ─── Scharfer Betrieb (Patrick 10.10.2026: „sofort scharf schalten“) ─────────
+//
+// Schalter `cashback_config/v1.mistralZeuge === true`: nach EINER Gemini-Lesung
+// fragt die Lese-Leiter Mistral (lib/ocr_robust.js `opts.zeuge`). Bestätigt der
+// Zeuge Summe, Tag/Monat und Uhrzeit — und index.js zusätzlich den Markt und den
+// Betrag —, gilt die eine Lesung; sonst läuft die Leiter wie bisher weiter.
+// Rückweg ohne Deploy: Schalter auf 'shadow' (Parallelbetrieb) oder entfernen.
+//
+// Vergleichsregel, gemessen am Parallelbetrieb 09./10.10.2026 (445 Bons):
+//   • Summe exakt gleich und > 0.
+//   • Tag und Monat gleich, das JAHR zählt nicht: Mistral liest die zweistellige
+//     Jahreszahl oft als 2020/2023; die Pipeline plausibilisiert das Jahr ohnehin
+//     (plausibilizeBonDate) — es gilt das Jahr der Gemini-Lesung.
+//   • Uhrzeit höchstens 2 Minuten auseinander, sofern beide eine lesen
+//     (gedruckte Kassenzeit vs. TSE-Zeit liegen oft 1 Minute auseinander).
+// Damit 383 von 445 bestätigt, darunter 0 mit anderem Geldergebnis.
+const ZEIT_TOLERANZ_MIN = 2;
+
+function minuten(t) {
+  const m = /(\d{1,2}):(\d{2})/.exec(String(t || ''));
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+/**
+ * Bestätigt der Zeuge die Gemini-Lesung auf den Geldfeldern?
+ * @param {object} ergebnis normalisierte Mistral-Antwort ({summe, datum, zeit})
+ * @param {object} parsed   Gemini-Lesung (parsed: totalCents, bonDate, bonTime)
+ */
+function bestaetigung(ergebnis, parsed) {
+  const e = ergebnis || {};
+  const p = parsed || {};
+  const summe = Number.isInteger(e.summe) && e.summe > 0 && e.summe === p.totalCents;
+  const tagMonat = (d) => (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(5, 10) : null);
+  const datum = tagMonat(e.datum) != null && tagMonat(e.datum) === tagMonat(p.bonDate);
+  const a = minuten(e.zeit);
+  const b = minuten(p.bonTime);
+  const zeit = a == null || b == null ? null : Math.abs(a - b) <= ZEIT_TOLERANZ_MIN;
+  return { summe, datum, zeit, ok: summe && datum && zeit !== false };
+}
+
+/**
+ * Zeugen zu EINER Gemini-Lesung befragen. Wirft nie. Liefert den Bericht, der an
+ * `ocr.robust.zeuge` landet (ohne Artikelnamen). `bestaetigt` setzt erst der
+ * Aufrufer, nachdem er Markt und Betrag geprüft hat.
+ */
+async function zeugeFragen({ bytes, mimeType, parsed, key, istOnline = () => false, fetchImpl, jetzt = () => Date.now(), zeitlimitMs = ZEITLIMIT_MS }) {
+  const at = new Date(jetzt()).toISOString();
+  if (!key) return { status: 'kein_schluessel', at };
+  if (istOnline(parsed || {})) return { status: 'online_ausgelassen', at };
+  const t0 = jetzt();
+  try {
+    const { modell, seiten, ergebnis } = await lesen(bytes, mimeType, { key, fetchImpl, zeitlimitMs });
+    return { status: 'ok', at, ms: jetzt() - t0, modell, seiten, ergebnis, vergleich: bestaetigung(ergebnis, parsed) };
+  } catch (e) {
+    return { status: 'fehler', at, ms: jetzt() - t0, fehler: String(e && e.message || e).slice(0, 200) };
+  }
+}
+
+module.exports = { zeugeAusfuehren, zeugeFragen, bestaetigung, vergleich, normalisieren, preisAnteil, lesen, SCHEMA, ZEITLIMIT_MS, ZEIT_TOLERANZ_MIN };

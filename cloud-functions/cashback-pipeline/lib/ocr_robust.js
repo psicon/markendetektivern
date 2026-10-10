@@ -591,6 +591,7 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
     throw err;
   };
 
+  const zeugeBerichtRef = { wert: null };
   const fertig = (out) => {
     // Stufe der normalen Lesungen dieser Leiter (null = keine Vorgabe) — trennt
     // Bons vor und nach dem Umschalten (08.10.2026).
@@ -608,9 +609,48 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
     }
     out.robust.laeufe = st.laeufe;
     out.robust.zeitAbbrueche = st.zeitAbbrueche;
+    // Bericht des Mistral-Zeugen (Phase 0), auch wenn er nicht bestätigt hat.
+    if (zeugeBerichtRef.wert && !out.robust.zeuge) out.robust.zeuge = zeugeBerichtRef.wert;
     if (st.ausweichGenutzt) out.robust.escalationFallbackThinking = st.ausweichGenutzt;
     return out;
   };
+
+  // Phase 0 — Mistral-Zeuge (Patrick 10.10.2026, Schalter
+  // cashback_config/v1.mistralZeuge === true; index.js reicht `opts.zeuge` nur
+  // dann). EINE Basis-Lesung statt zwei gleichzeitig; besteht sie ihre eigene
+  // Summenprobe, wird der Zeuge gefragt. Bestätigt er (Summe, Tag/Monat,
+  // Uhrzeit; Markt und Betrag prüft der Aufrufer), gilt diese Lesung —
+  // Bewertung 'high', Methode 'zeuge-agreement'. Sonst zählt die Lesung als
+  // erste Basis-Lesung, und Phase 1 läuft genau wie bisher weiter (kostet
+  // nichts extra, nur die Wartezeit des Zeugen). Nur auf frischer Leiter: eine
+  // Fortsetzung (Zwischenstand) fragt nicht erneut. Ein Fehler des Zeugen ist
+  // nie ein Urteil über den Bon — dann ebenfalls wie bisher weiter.
+  const zeugeFenster = Number.isFinite(opts.zeugeFensterMs) ? opts.zeugeFensterMs : 30000;
+  if (typeof opts.zeuge === 'function' && st.reads.length === 0 && st.flash === 0 && maxFlash >= 2
+    && fensterFrei(leseLimit + zeugeFenster)) {
+    const e = await versuch(`flash-${st.flash + 1}`, imageBytes, mimeType, { model, timeoutMs: leseLimit, ...prompt, ...denkVorgabe, zweck: ZWECK.BON_OCR });
+    if (verbraucht(e)) st.flash++;
+    if (e.r) {
+      e.r.__denkstufe = denkstufe;
+      st.reads.push(e.r);
+      if (reconciles(e.r) && (!nurExakt || exakt(e.r))) {
+        let zeugeBericht = null;
+        try {
+          zeugeBericht = await opts.zeuge(e.r);
+        } catch (err) {
+          zeugeBericht = { status: 'fehler', fehler: String(err && err.message ? err.message : err).slice(0, 200) };
+        }
+        zeugeBerichtRef.wert = zeugeBericht;
+        if (zeugeBericht && zeugeBericht.bestaetigt === true) {
+          const out = pack(e.r, 'high', 'zeuge-agreement', st.reads, st.failed.length, zaehl);
+          out.robust.zeuge = zeugeBericht;
+          return fertig(out);
+        }
+      } else {
+        zeugeBerichtRef.wert = { status: 'nicht_gefragt', grund: 'summenprobe' };
+      }
+    }
+  }
 
   // Phase 1 — flash self-consistency with early stop on agreement. Solange
   // noch keine zwei Lesungen da sind, laufen die fehlenden gleichzeitig (eine
