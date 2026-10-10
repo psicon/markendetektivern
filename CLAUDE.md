@@ -4892,6 +4892,32 @@ neu zugestellt hatte. Regeln (umgesetzt in `cashback-pipeline`, Zweig
   `LAUF_MAX_MS` (`lib/laufAnspruch.js`) mit — der Anspruch muss länger leben als
   jeder Lauf, der noch schreiben kann.
 
+## Bon-Lesung: Mistral-Zeuge scharf (seit 10.10.2026, Patrick: „sofort scharf schalten“)
+
+Schalter `cashback_config/v1.mistralZeuge`: `true` = scharf, `'shadow'` =
+Parallelbetrieb (Zeuge erst nach der Entscheidung, ändert nichts), fehlt = aus.
+**Rückweg ohne Deploy: auf `'shadow'` setzen** — die Leiter läuft dann bitgenau
+wie vor dem 10.10. (Test „ohne Zeuge“ in `__tests__/mistralZeugeScharf.test.js`).
+Code-Rückweg: Cloud-Run-Revision `processcashback-00080-dox`.
+
+Scharf: EINE Gemini-Lesung (statt zwei gleichzeitig); besteht sie die
+Summenprobe, liest Mistral OCR (`lib/mistralZeuge.js`, ~0,44 ct, 25 s Limit).
+Gilt nur, wenn ALLES passt: Summe exakt, Tag/Monat gleich (Jahr zählt nicht —
+Mistral liest „26“ oft als 2020/2023), Uhrzeit ±2 min, Markt-Resolver sagt bei
+beiden gleich „unser Markt ja/nein“ (Mistral ohne Eigenmarken-Stufe), Prämie
+bleibt bei ±1 Artikel gleich (±2 bei Pfand-Toleranz). Dann `robust.method =
+'zeuge-agreement'`, Bewertung `high`; sonst läuft die Leiter wie bisher weiter.
+Bericht je Bon in `ocr.robust.zeuge` (keine Artikelnamen). Online-Bestellungen
+gehen nie an Mistral.
+
+Gemessen im Parallelbetrieb 09./10.10. (445 Bons): 86 % bestätigt, 0 mit
+anderem Geldergebnis, Gemini-Lesungen etwa halbiert (~13 → ~7 ct je Bon).
+Bekannte Schwächen: Mistral-Artikelpreise nur zu 35 % ganz richtig (Preise der
+bestätigten Bons stammen aus EINER Gemini-Lesung — mehr Preisfehler in den
+Produktdaten), 3 % Zeitüberschreitungen. Offen bei Patrick: Datenschutzvertrag
+(DPA) und Zero Data Retention bei Mistral, Schlüssel rotieren (neue Version von
+Secret `MISTRAL_API_KEY` wirkt erst nach Redeploy), Datenschutzerklärung (Anwalt).
+
 ## Gemini läuft über VERTEX AI, nicht AI Studio (Incident 19.08.2026)
 
 **Was passiert ist:** Der AI-Studio-Monatsdeckel („monthly spending cap",
