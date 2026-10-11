@@ -123,6 +123,7 @@ const { pruefeKandidaten: bildKandidatenPruefen } = require('./lib/bildVergleich
 const { istOnlineBestellung, belegBereinigen, onlineMerkmal } = require('./lib/belegart');
 const { zeugeAusfuehren, zeugeFragen, vergleich: zeugeVergleich, bestaetigung: zeugeBestaetigung } = require('./lib/mistralZeuge');
 const { haikuLesen } = require('./lib/haikuLeser');
+const { plausibilizeBonDate: plausibilizeBonDateLib } = require('./lib/bonDatum');
 const { abgleichOptionen } = require('./lib/punkteZahlung');
 const {
   computeDHash,
@@ -865,29 +866,8 @@ function bonAgeDays(iso, refMs = Date.now()) {
   return Math.floor((refMs - ms) / (24 * 60 * 60 * 1000));
 }
 
-/**
- * 86cb9zuq1: Jahres-Fehllesung erkennen. Liest die OCR „24.08.26" als
- * 2020-08-24, landet der Bon als bon_too_old — obwohl Tag+Monat exakt dem
- * Upload-Tag entsprechen (37 Live-Fälle, alle dieses Musters; niemand lädt
- * Jahre später am selben Kalendertag hoch). Regel: Tag+Monat == Upload-Tag
- * (Berlin) UND Jahr != Upload-Jahr → Jahr auf das Upload-Jahr korrigieren.
- * @returns {{ bonDate: string|null, corrected: null|{from:string,to:string,reason:string} }}
- */
-function plausibilizeBonDate(iso, uploadedAt) {
-  if (typeof iso !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
-    return { bonDate: iso ?? null, corrected: null };
-  }
-  const up = uploadedAt instanceof Date && Number.isFinite(uploadedAt.getTime()) ? uploadedAt : new Date();
-  const upIso = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(up); // YYYY-MM-DD
-  const upYear = upIso.slice(0, 4);
-  if (iso.slice(5) === upIso.slice(5) && iso.slice(0, 4) !== upYear) {
-    const to = `${upYear}-${iso.slice(5)}`;
-    return { bonDate: to, corrected: { from: iso, to, reason: 'year_misread_same_day' } };
-  }
-  return { bonDate: iso, corrected: null };
-}
+// plausibilizeBonDate: lib/bonDatum.js (11.10.2026 ausgelagert, damit testbar).
+const plausibilizeBonDate = (iso, uploadedAt) => plausibilizeBonDateLib(iso, uploadedAt, { maxTage: MAX_BON_AGE_DAYS });
 
 /**
  * Per-user purchased-products trail (architecture §3.2). One doc per
@@ -2798,7 +2778,10 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
             ? async (reads) => {
                 const parsedReads = reads.map((r) => r && r.parsed).filter((p) => p && p.isReceipt !== false);
                 if (parsedReads.length < 2) return null;
-                const ages = parsedReads.map((p) => bonAgeDays(p.bonDate));
+                // Mit derselben Jahres-Korrektur wie das Alters-Gate (11.10.2026) —
+                // sonst kappte ein verlesenes Jahr die Leiter als „zu alt“.
+                const upGate = receipt.createdAt?.toDate ? receipt.createdAt.toDate() : new Date();
+                const ages = parsedReads.map((p) => bonAgeDays(plausibilizeBonDate(p.bonDate, upGate).bonDate, upGate.getTime()));
                 if (ages.every((a) => a != null)) {
                   const maxAge = await lazyEffectiveMaxAge();
                   if (Math.min(...ages) > maxAge + ESCALATION_CAP_AGE_MARGIN_DAYS) return 'bon_too_old';
