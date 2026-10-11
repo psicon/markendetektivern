@@ -642,17 +642,28 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
       zeugeBerichtRef.wert = { status: 'erster_leser_fehler', fehler: String(err && err.message ? err.message : err).slice(0, 200) };
       console.warn('ocr-erster-leser-fehler', { err: String(err && err.message ? err.message : err).slice(0, 200) });
     }
+    // Für die 2-aus-3-Prüfung und die Messung: Geldfelder der Haiku-Lesung
+    // (ohne Artikelnamen) und, falls gefragt, das Ergebnis des Mistral-Zeugen.
+    let haikuErgebnis = null;
+    let mistralErgebnis = null;
     if (h && h.parsed) {
       h.__haiku = true;
       h.__denkstufe = null;
-      if (reconciles(h) && (!nurExakt || exakt(h))) {
+      const hp = h.parsed;
+      const hStimmt = reconciles(h) && (!nurExakt || exakt(h));
+      haikuErgebnis = { markt: hp.merchant == null ? null : String(hp.merchant).slice(0, 80), datum: hp.bonDate ?? null, zeit: hp.bonTime ?? null, summe: Number.isInteger(hp.totalCents) ? hp.totalCents : null, summenprobe: hStimmt };
+      if (hStimmt) {
         let bericht = null;
         try {
           bericht = await opts.zeuge(h);
         } catch (err) {
           bericht = { status: 'fehler', fehler: String(err && err.message ? err.message : err).slice(0, 200) };
         }
-        if (bericht) bericht.ersterLeser = h.model || 'haiku';
+        if (bericht) {
+          bericht.ersterLeser = h.model || 'haiku';
+          bericht.ersteLesung = haikuErgebnis;
+          if (bericht.status === 'ok' && bericht.ergebnis) mistralErgebnis = bericht.ergebnis;
+        }
         zeugeBerichtRef.wert = bericht;
         if (bericht && bericht.bestaetigt === true) {
           const out = pack(h, 'high', 'zeuge-agreement', [h], st.failed.length, zaehl);
@@ -661,7 +672,50 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
           return fertig(out);
         }
       } else {
-        zeugeBerichtRef.wert = { status: 'nicht_gefragt', grund: 'summenprobe', ersterLeser: h.model || 'haiku' };
+        zeugeBerichtRef.wert = { status: 'nicht_gefragt', grund: 'summenprobe', ersterLeser: h.model || 'haiku', ersteLesung: haikuErgebnis };
+      }
+    }
+
+    // 2-aus-3 (11.10.2026, Schalter cashback_config/v1.zweiAusDrei === true):
+    // statt sofort zwei Gemini-Lesungen gleichzeitig EINE Gemini-Lesung. Stimmt sie
+    // mit Mistral oder mit der Haiku-Lesung überein (dieselbe Regel: Summe, Tag/Monat,
+    // Jahr, Uhrzeit ±2, Markt ja/nein, Prämie stabil), gilt die GEMINI-Lesung — zwei
+    // verschiedene Modelle sind sich einig, und die Artikelpreise kommen von Gemini.
+    // Wurde Mistral noch nicht gefragt (Haiku fiel aus oder ging nicht auf), wird es
+    // jetzt zur Gemini-Lesung gefragt. Sonst läuft die Leiter weiter; die Lesung zählt
+    // als erste Basis-Lesung, es geht also nichts verloren.
+    if (opts.zweiAusDrei === true && typeof opts.zeugePruefen === 'function' && fensterFrei(leseLimit)) {
+      const e = await versuch(`flash-${st.flash + 1}`, imageBytes, mimeType, { model, timeoutMs: leseLimit, ...prompt, ...denkVorgabe, zweck: ZWECK.BON_OCR });
+      if (verbraucht(e)) st.flash++;
+      if (e.r) {
+        e.r.__denkstufe = denkstufe;
+        st.reads.push(e.r);
+        if (reconciles(e.r) && (!nurExakt || exakt(e.r))) {
+          const versuche = [];
+          if (mistralErgebnis) versuche.push(['mistral', mistralErgebnis]);
+          if (haikuErgebnis && haikuErgebnis.summenprobe) versuche.push(['haiku', haikuErgebnis]);
+          let bericht = zeugeBerichtRef.wert || {};
+          for (const [mit, erg] of versuche) {
+            let res = null;
+            try { res = await opts.zeugePruefen(e.r, erg); } catch (err) { res = null; }
+            if (res && res.bestaetigt === true) {
+              const out = pack(e.r, 'high', 'zwei-aus-drei', st.reads, st.failed.length, zaehl);
+              out.robust.zeuge = { ...bericht, zweiAusDrei: { mit, grund: null } };
+              return fertig(out);
+            }
+          }
+          if (!mistralErgebnis) {
+            let b2 = null;
+            try { b2 = await opts.zeuge(e.r); } catch (err) { b2 = null; }
+            if (b2 && b2.bestaetigt === true) {
+              const out = pack(e.r, 'high', 'zwei-aus-drei', st.reads, st.failed.length, zaehl);
+              out.robust.zeuge = { ...b2, ersterLeser: bericht.ersterLeser || (h && h.model) || null, ersteLesung: haikuErgebnis, zweiAusDrei: { mit: 'mistral_nachgefragt', grund: null } };
+              return fertig(out);
+            }
+            if (b2) bericht = { ...bericht, nachgefragt: { status: b2.status, grund: b2.grund ?? null, ergebnis: b2.ergebnis ?? null } };
+          }
+          zeugeBerichtRef.wert = { ...bericht, zweiAusDrei: { mit: null, grund: 'keine_einigung' } };
+        }
       }
     }
   } else if (typeof opts.zeuge === 'function' && st.reads.length === 0 && st.flash === 0 && maxFlash >= 2

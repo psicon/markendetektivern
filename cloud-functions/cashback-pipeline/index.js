@@ -2841,6 +2841,44 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
           //    Summenprobe nur mit Pfand-Toleranz aufging). Nahe an einer
           //    Schwelle (Mindestartikel, Stufe) liest die Leiter wie bisher.
           // Jeder Fehler hier heißt „nicht bestätigt" → volle Leiter.
+          // Markt- und Betragsprüfung einer Lesung `r` gegen das Ergebnis eines
+          // Zeugen ({markt, datum, zeit, summe}) — für Mistral wie für die
+          // 2-aus-3-Prüfung (11.10.2026) dieselbe Regel.
+          const zeugePruefen = async (r, ergebnis, bericht = {}) => {
+            const p = (r && r.parsed) || {};
+            bericht.bestaetigt = false;
+            bericht.vergleich = zeugeBestaetigung(ergebnis, p);
+            if (!bericht.vergleich.ok) {
+              bericht.grund = 'geldfelder';
+            } else {
+              const [g, m] = await Promise.all([
+                resolveMerchant(p.merchant, p.bonCountry, p.items, marktOptionen(p)).catch(() => undefined),
+                resolveMerchant(ergebnis.markt, p.bonCountry, null, { ...marktOptionen(p), eigenmarke: false }).catch(() => undefined),
+              ]);
+              const n = countEligibleItems(p, stornoZaehl);
+              const abgleich = reconcile(p, abgleichOptionen(r.promptVersion));
+              const spanne = abgleich.ok && abgleich.signedDeltaCents === 0 ? 1 : 2;
+              let betragStabil = false;
+              try {
+                const cid = config.campaignsEnabled ? (receipt.campaignId || null) : null;
+                const kampagne = cid ? await loadCampaignById(cid) : null;
+                const betrag = (k) => (kampagne ? campaignRewardCents(Math.max(0, k), kampagne, config) : tierFor(Math.max(0, k), config.tiers));
+                const b0 = betrag(n);
+                betragStabil = Array.from({ length: 2 * spanne + 1 }, (_, i) => n - spanne + i).every((k) => betrag(k) === b0);
+              } catch (e) {
+                betragStabil = false;
+              }
+              bericht.marktGemini = g === undefined ? 'fehler' : g ? g.id : null;
+              bericht.marktZeuge = m === undefined ? 'fehler' : m ? m.id : null;
+              bericht.artikel = n;
+              bericht.spanne = spanne;
+              if (g === undefined || m === undefined) bericht.grund = 'markt_fehler';
+              else if (Boolean(g) !== Boolean(m)) bericht.grund = 'markt';
+              else if (!betragStabil) bericht.grund = 'betrag_schwelle';
+              else bericht.bestaetigt = true;
+            }
+            return bericht;
+          };
           const zeuge = config.mistralZeuge === true
             ? async (r) => {
                 const p = (r && r.parsed) || {};
@@ -2851,34 +2889,8 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
                 bericht.bestaetigt = false;
                 if (bericht.status !== 'ok') {
                   bericht.grund = bericht.status;
-                } else if (!bericht.vergleich.ok) {
-                  bericht.grund = 'geldfelder';
                 } else {
-                  const [g, m] = await Promise.all([
-                    resolveMerchant(p.merchant, p.bonCountry, p.items, marktOptionen(p)).catch(() => undefined),
-                    resolveMerchant(bericht.ergebnis.markt, p.bonCountry, null, { ...marktOptionen(p), eigenmarke: false }).catch(() => undefined),
-                  ]);
-                  const n = countEligibleItems(p, stornoZaehl);
-                  const abgleich = reconcile(p, abgleichOptionen(r.promptVersion));
-                  const spanne = abgleich.ok && abgleich.signedDeltaCents === 0 ? 1 : 2;
-                  let betragStabil = false;
-                  try {
-                    const cid = config.campaignsEnabled ? (receipt.campaignId || null) : null;
-                    const kampagne = cid ? await loadCampaignById(cid) : null;
-                    const betrag = (k) => (kampagne ? campaignRewardCents(Math.max(0, k), kampagne, config) : tierFor(Math.max(0, k), config.tiers));
-                    const b0 = betrag(n);
-                    betragStabil = Array.from({ length: 2 * spanne + 1 }, (_, i) => n - spanne + i).every((k) => betrag(k) === b0);
-                  } catch (e) {
-                    betragStabil = false;
-                  }
-                  bericht.marktGemini = g === undefined ? 'fehler' : g ? g.id : null;
-                  bericht.marktZeuge = m === undefined ? 'fehler' : m ? m.id : null;
-                  bericht.artikel = n;
-                  bericht.spanne = spanne;
-                  if (g === undefined || m === undefined) bericht.grund = 'markt_fehler';
-                  else if (Boolean(g) !== Boolean(m)) bericht.grund = 'markt';
-                  else if (!betragStabil) bericht.grund = 'betrag_schwelle';
-                  else bericht.bestaetigt = true;
+                  await zeugePruefen(r, bericht.ergebnis, bericht);
                 }
                 logger.info('mistral-zeuge-scharf', { cashbackId, status: bericht.status, ms: bericht.ms ?? null, bestaetigt: bericht.bestaetigt, grund: bericht.grund ?? null });
                 return bericht;
@@ -2894,6 +2906,9 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
             ocr = await extractReceiptRobust(bytes, mimeType, {
               zeuge,
               ersterLeser,
+              // 2-aus-3 (11.10.2026): nur bei true; Rückweg = Feld entfernen.
+              zweiAusDrei: config.zweiAusDrei === true,
+              zeugePruefen: zeuge ? (r, ergebnis) => zeugePruefen(r, ergebnis, {}) : undefined,
               model: config.ocrModel,
               // Schalter cashback_config/v1.ocrPrompt — ungültig/fehlend → v1.4.
               promptVersion: ocrPromptVersion,

@@ -54,7 +54,7 @@ describe('haikuLesen', () => {
   });
   test('wirft bei unbekanntem Format, zu großem Bild, HTTP-Fehler und kaputtem JSON', async () => {
     await expect(haikuLesen(Buffer.from('%PDF'), { token: 'x' })).rejects.toMatchObject({ code: 'haiku_bildformat' });
-    await expect(haikuLesen(Buffer.concat([JPEG, Buffer.alloc(5e6)]), { token: 'x' })).rejects.toMatchObject({ code: 'haiku_bild_zu_gross' });
+    await expect(haikuLesen(Buffer.concat([JPEG, Buffer.alloc(5e6)]), { token: 'x' })).rejects.toMatchObject({ code: 'haiku_bildformat' });
     await expect(haikuLesen(JPEG, { token: 'x', fetchImpl: antwort({ error: 'x' }, 400) })).rejects.toMatchObject({ code: 'haiku_http' });
     await expect(haikuLesen(JPEG, { token: 'x', fetchImpl: antwort({ content: [{ type: 'text', text: '{"items": [1,' }] }) })).rejects.toMatchObject({ code: 'haiku_json' });
   });
@@ -97,5 +97,55 @@ describe('Leiter Phase 0 mit erstem Leser', () => {
     expect(zeuge).not.toHaveBeenCalled();
     expect(out.robust.zeuge).toMatchObject({ status: 'nicht_gefragt', grund: 'summenprobe' });
     expect(extract.aufrufe).toHaveLength(2);
+  });
+});
+
+describe('2-aus-3 (Schalter zweiAusDrei)', () => {
+  const haiku = (total) => async () => ({ ...lesung(A, total), model: 'claude-haiku-5-5' });
+  const B = [{ name: 'Milch', priceCents: 119 }, { name: 'Brot', priceCents: 250 }];
+  // Prüfung wie in index.js vereinfacht: Summe des Zeugen = Summe der Lesung.
+  const pruefen = jest.fn(async (r, erg) => ({ bestaetigt: erg.summe === r.parsed.totalCents }));
+  beforeEach(() => pruefen.mockClear());
+
+  test('Mistral widerspricht Haiku, stimmt aber mit EINER Gemini-Lesung überein: fertig nach 1 Gemini-Lesung', async () => {
+    const extract = fakeExtract([lesung(A, 368)]);
+    const zeuge = jest.fn(async () => ({ status: 'ok', bestaetigt: false, grund: 'geldfelder', ergebnis: { summe: 368, datum: '2026-10-09', zeit: '10:00', markt: 'REWE' } }));
+    // Haiku liest 369 (falsch, geht aber auf: Artikel 119+250)
+    const out = await robust.extractReceiptRobust(JPEG, 'image/jpeg', { extract, enhance, zeuge, ersterLeser: async () => ({ ...lesung(B, 369), model: 'claude-haiku-5-5' }), zweiAusDrei: true, zeugePruefen: pruefen });
+    expect(extract.aufrufe).toHaveLength(1);
+    expect(out.robust).toMatchObject({ method: 'zwei-aus-drei', confidence: 'high', attempts: 1 });
+    expect(out.robust.zeuge.zweiAusDrei.mit).toBe('mistral');
+    expect(out.model).not.toBe('claude-haiku-5-5');
+  });
+  test('Gemini stimmt mit Haiku überein (Mistral nicht): Gemini-Lesung gilt', async () => {
+    const extract = fakeExtract([lesung(A, 368)]);
+    const zeuge = jest.fn(async () => ({ status: 'ok', bestaetigt: false, grund: 'geldfelder', ergebnis: { summe: 999, datum: '2026-10-09', zeit: '10:00', markt: 'REWE' } }));
+    const out = await robust.extractReceiptRobust(JPEG, 'image/jpeg', { extract, enhance, zeuge, ersterLeser: haiku(368), zweiAusDrei: true, zeugePruefen: pruefen });
+    expect(extract.aufrufe).toHaveLength(1);
+    expect(out.robust.zeuge.zweiAusDrei.mit).toBe('haiku');
+  });
+  test('Haiku fällt aus: Mistral wird zur Gemini-Lesung gefragt', async () => {
+    const extract = fakeExtract([lesung(A, 368)]);
+    const zeuge = jest.fn(async () => ({ status: 'ok', bestaetigt: true }));
+    const out = await robust.extractReceiptRobust(JPEG, 'image/jpeg', { extract, enhance, zeuge, ersterLeser: async () => { throw new Error('haiku_zeitlimit: 45000 ms'); }, zweiAusDrei: true, zeugePruefen: pruefen });
+    expect(zeuge).toHaveBeenCalledTimes(1);
+    expect(extract.aufrufe).toHaveLength(1);
+    expect(out.robust.zeuge.zweiAusDrei.mit).toBe('mistral_nachgefragt');
+  });
+  test('keine Einigung: Leiter läuft weiter, erste Gemini-Lesung zählt mit', async () => {
+    const extract = fakeExtract([lesung(A, 368), lesung(A, 368)]);
+    const zeuge = jest.fn(async () => ({ status: 'ok', bestaetigt: false, grund: 'geldfelder', ergebnis: { summe: 999 } }));
+    const out = await robust.extractReceiptRobust(JPEG, 'image/jpeg', { extract, enhance, zeuge, ersterLeser: haiku(777), zweiAusDrei: true, zeugePruefen: pruefen });
+    expect(extract.aufrufe).toHaveLength(2);
+    expect(out.robust).toMatchObject({ method: 'flash-agreement', attempts: 2 });
+    expect(out.robust.zeuge.zweiAusDrei).toMatchObject({ grund: 'keine_einigung' });
+  });
+  test('ohne Schalter: wie bisher zwei Gemini-Lesungen gleichzeitig, Haiku-Geldfelder werden vermerkt', async () => {
+    const extract = fakeExtract([lesung(A, 368), lesung(A, 368)]);
+    const zeuge = async () => ({ status: 'ok', bestaetigt: false, grund: 'geldfelder', ergebnis: { summe: 999 } });
+    const out = await robust.extractReceiptRobust(JPEG, 'image/jpeg', { extract, enhance, zeuge, ersterLeser: haiku(368), zeugePruefen: pruefen });
+    expect(extract.aufrufe).toHaveLength(2);
+    expect(pruefen).not.toHaveBeenCalled();
+    expect(out.robust.zeuge.ersteLesung).toMatchObject({ summe: 368, summenprobe: true });
   });
 });

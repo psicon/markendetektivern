@@ -25,13 +25,18 @@
  */
 
 const admin = require('firebase-admin');
+const sharp = require('sharp');
 const { promptOptionen } = require('./prompt');
 const { belegBereinigen } = require('./belegart');
 const { abgleichOptionen } = require('./punkteZahlung');
 
 const MODELL = 'claude-haiku-5-5';
 const ORT = 'global';
-const ZEITLIMIT_MS = 60000;
+// Gemessen 10./11.10.2026 an 65 erfolgreichen Lesungen: p95 37 s, p99 44 s, max 44 s.
+// Die beiden Abbrüche nach 60 s kamen nie zurück — 45 s spart Wartezeit, ohne Lesungen zu verlieren.
+const ZEITLIMIT_MS = 45000;
+// Anthropic nimmt je Bildseite höchstens 8000 Pixel (gemessen: 4 lange Bons scheiterten).
+const MAX_SEITE = 7900;
 // Anthropic nimmt je Bild höchstens 5 MB (gemessen: ein 5,2-MB-Bon scheiterte).
 const MAX_BYTES = 4.9e6;
 const AUFWAND = 'medium';
@@ -65,10 +70,33 @@ function fehler(code, text) {
  * @param {Buffer} bytes
  * @param {object} [o] { promptVersion, projekt, fetchImpl, token, zeitlimitMs }
  */
-async function haikuLesen(bytes, o = {}) {
+/**
+ * Bild für Haiku tauglich machen: zu lange Seiten verkleinern, zu große Dateien neu
+ * kodieren, fremde Formate (z. B. HEIC, falls sharp sie lesen kann) in JPEG wandeln.
+ * Nur die KOPIE für Haiku — Gemini liest weiter das Original in voller Qualität.
+ */
+async function bildVorbereiten(bytes) {
   const typ = bildTyp(bytes);
-  if (!typ) throw fehler('haiku_bildformat', 'kein JPEG/PNG/WebP/GIF');
-  if (bytes.length > MAX_BYTES) throw fehler('haiku_bild_zu_gross', `${bytes.length} Bytes`);
+  let meta = null;
+  try {
+    meta = await sharp(bytes).metadata();
+  } catch (e) {
+    if (!typ) throw fehler('haiku_bildformat', 'nicht lesbar');
+  }
+  const zuLang = meta && ((meta.width || 0) > MAX_SEITE || (meta.height || 0) > MAX_SEITE);
+  if (typ && !zuLang && bytes.length <= MAX_BYTES) return { daten: Buffer.from(bytes), typ, angepasst: null };
+  if (!meta) throw fehler('haiku_bildformat', 'kein JPEG/PNG/WebP/GIF');
+  for (const qualitaet of [90, 80, 70]) {
+    let bild = sharp(bytes);
+    if (zuLang) bild = bild.resize({ width: MAX_SEITE, height: MAX_SEITE, fit: 'inside', withoutEnlargement: true });
+    const daten = await bild.jpeg({ quality: qualitaet }).toBuffer();
+    if (daten.length <= MAX_BYTES) return { daten, typ: 'image/jpeg', angepasst: zuLang ? 'verkleinert' : 'neu_kodiert' };
+  }
+  throw fehler('haiku_bild_zu_gross', `${bytes.length} Bytes`);
+}
+
+async function haikuLesen(bytes, o = {}) {
+  const { daten, typ, angepasst } = await bildVorbereiten(bytes);
   const prompt = promptOptionen(o.promptVersion);
   const projekt = o.projekt || process.env.GCLOUD_PROJECT || 'markendetektive-895f7';
   const token = o.token || (await zugangsToken());
@@ -91,7 +119,7 @@ async function haikuLesen(bytes, o = {}) {
         messages: [{
           role: 'user',
           content: [
-            { type: 'image', source: { type: 'base64', media_type: typ, data: Buffer.from(bytes).toString('base64') } },
+            { type: 'image', source: { type: 'base64', media_type: typ, data: daten.toString('base64') } },
             { type: 'text', text: `${prompt.userPrompt}\nJSON-Schema der Antwort:\n${JSON.stringify(prompt.responseSchema)}` },
           ],
         }],
@@ -125,7 +153,8 @@ async function haikuLesen(bytes, o = {}) {
     inputTokens: j.usage?.input_tokens ?? null,
     outputTokens: j.usage?.output_tokens ?? null,
     thoughtsTokens: null,
+    ...(angepasst ? { bildAngepasst: angepasst } : {}),
   };
 }
 
-module.exports = { haikuLesen, bildTyp, MODELL, MAX_BYTES };
+module.exports = { haikuLesen, bildTyp, bildVorbereiten, MODELL, MAX_BYTES, MAX_SEITE };

@@ -26,7 +26,9 @@ const SCHEMA = {
   properties: {
     haendler: { type: 'string', description: 'Name der Handelskette bzw. des Ladens, wie auf dem Bon' },
     datum: { type: 'string', description: 'Kaufdatum JJJJ-MM-TT' },
-    uhrzeit: { type: 'string', description: 'Gedruckte Kassenzeit HH:MM, NICHT die TSE-Zeit' },
+    // 11.10.2026: bei App-Screenshots (Kaufland, Lidl Plus …) las Mistral die Uhrzeit der
+    // Handy-Statusleiste oben links (gemessen: 10:06 statt Kassenzeit 10:54).
+    uhrzeit: { type: 'string', description: 'Kassenzeit HH:MM, wie sie auf dem Kassenbon selbst steht (z. B. „Zeit: 10:54“ beim Datum). NICHT die TSE-Zeit und NIEMALS die Uhrzeit der Handy-Statusleiste oben in einem Bildschirmfoto' },
     endsumme_cent: { type: 'integer', description: 'Gedruckte Endsumme (SUMME) in Cent, vor Abzug eingelöster Punkte' },
     positionen: {
       type: 'array',
