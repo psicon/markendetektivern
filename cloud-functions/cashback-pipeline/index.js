@@ -2868,6 +2868,13 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
               } catch (e) {
                 betragStabil = false;
               }
+              // An der Prämiengrenze genügt es, wenn der Zeuge SELBST gezählt hat und
+              // dieselbe Zahl anrechenbarer Artikel liest (nur Haiku liefert eine
+              // Zählung, Mistral nicht) — zwei Modelle zählen dann unabhängig gleich.
+              if (!betragStabil && Number.isInteger(ergebnis.artikel) && ergebnis.artikel === n) {
+                betragStabil = true;
+                bericht.artikelBestaetigt = true;
+              }
               bericht.marktGemini = g === undefined ? 'fehler' : g ? g.id : null;
               bericht.marktZeuge = m === undefined ? 'fehler' : m ? m.id : null;
               bericht.artikel = n;

@@ -651,7 +651,7 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
       h.__denkstufe = null;
       const hp = h.parsed;
       const hStimmt = reconciles(h) && (!nurExakt || exakt(h));
-      haikuErgebnis = { markt: hp.merchant == null ? null : String(hp.merchant).slice(0, 80), datum: hp.bonDate ?? null, zeit: hp.bonTime ?? null, summe: Number.isInteger(hp.totalCents) ? hp.totalCents : null, summenprobe: hStimmt };
+      haikuErgebnis = { markt: hp.merchant == null ? null : String(hp.merchant).slice(0, 80), datum: hp.bonDate ?? null, zeit: hp.bonTime ?? null, summe: Number.isInteger(hp.totalCents) ? hp.totalCents : null, artikel: countEligibleItems(hp, zaehl), summenprobe: hStimmt };
       if (hStimmt) {
         let bericht = null;
         try {
