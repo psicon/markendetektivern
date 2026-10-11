@@ -179,12 +179,19 @@ function minuten(t) {
  * @param {object} ergebnis normalisierte Mistral-Antwort ({summe, datum, zeit})
  * @param {object} parsed   Gemini-Lesung (parsed: totalCents, bonDate, bonTime)
  */
-function bestaetigung(ergebnis, parsed) {
+function bestaetigung(ergebnis, parsed, { jetzt = Date.now() } = {}) {
   const e = ergebnis || {};
   const p = parsed || {};
   const summe = Number.isInteger(e.summe) && e.summe > 0 && e.summe === p.totalCents;
   const tagMonat = (d) => (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(5, 10) : null);
-  const datum = tagMonat(e.datum) != null && tagMonat(e.datum) === tagMonat(p.bonDate);
+  const jahr = (d) => (typeof d === 'string' && /^\d{4}/.test(d) ? d.slice(0, 4) : null);
+  // Das Jahr zählt nur, wenn die Lesungen sich darin unterscheiden: dann muss
+  // das Jahr der Gemini-Lesung das laufende sein (Mistral hat sich verlesen).
+  // Vorfall 11.10.2026 (bon_mv3g41ngk06agr): Gemini las „2020-10-09“, Mistral
+  // „2026-10-09“ — ohne diese Bedingung bestätigt, als zu alt abgelehnt.
+  const aktuell = String(new Date(jetzt).getUTCFullYear());
+  const jahrOk = jahr(e.datum) === jahr(p.bonDate) || jahr(p.bonDate) === aktuell;
+  const datum = tagMonat(e.datum) != null && tagMonat(e.datum) === tagMonat(p.bonDate) && jahrOk;
   const a = minuten(e.zeit);
   const b = minuten(p.bonTime);
   const zeit = a == null || b == null ? null : Math.abs(a - b) <= ZEIT_TOLERANZ_MIN;

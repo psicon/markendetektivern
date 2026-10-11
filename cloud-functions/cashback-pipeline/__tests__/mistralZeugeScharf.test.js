@@ -48,6 +48,12 @@ describe('bestaetigung', () => {
     expect(bestaetigung({ summe: 2059, datum: '2026-10-08', zeit: '08:13' }, p).ok).toBe(false);
     expect(bestaetigung({ summe: 2059, datum: null, zeit: '08:13' }, p).ok).toBe(false);
   });
+  test('falsches Jahr der Gemini-Lesung wird nie bestätigt (Vorfall 11.10.2026)', () => {
+    const jetzt = Date.parse('2026-10-11T08:00:00Z');
+    expect(bestaetigung({ summe: 2982, datum: '2026-10-09', zeit: '19:58' }, { totalCents: 2982, bonDate: '2020-10-09', bonTime: '19:58' }, { jetzt }).ok).toBe(false);
+    expect(bestaetigung({ summe: 2982, datum: '2020-10-09', zeit: '19:58' }, { totalCents: 2982, bonDate: '2026-10-09', bonTime: '19:58' }, { jetzt }).ok).toBe(true);
+    expect(bestaetigung({ summe: 2982, datum: '2025-12-30', zeit: '19:58' }, { totalCents: 2982, bonDate: '2025-12-30', bonTime: '19:58' }, { jetzt: Date.parse('2026-01-02T08:00:00Z') }).ok).toBe(true);
+  });
   test('fehlende Uhrzeit auf einer Seite hält nicht auf', () => {
     expect(bestaetigung({ summe: 2059, datum: '2026-10-09', zeit: null }, p).ok).toBe(true);
   });
