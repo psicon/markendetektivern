@@ -40,6 +40,9 @@ const MAX_SEITE = 7900;
 // Anthropic nimmt je Bild höchstens 5 MB (gemessen: ein 5,2-MB-Bon scheiterte).
 const MAX_BYTES = 4.9e6;
 const AUFWAND = 'medium';
+// Belegnummer als Doppel-Schlüssel (Patrick 12.10.2026: „mach 2“): zwei zusätzliche Felder,
+// die das Gemini-Schema nicht kennt. Fehlen sie auf dem Bon → null.
+const ZUSATZ = 'Zusätzlich zwei Felder im selben JSON-Objekt: "tseTransaktion" (die TSE-Transaktionsnummer bzw. Transaktions-Nr. des Bons, nur Ziffern, als String) und "kassenSeriennummer" (TSE- oder Kassen-Seriennummer, als String). Fehlt eine Angabe auf dem Bon: null.';
 
 /** Bildtyp aus den ersten Bytes — die Angabe der App stimmt nicht immer (Test: 5 von 150). */
 function bildTyp(bytes) {
@@ -120,7 +123,7 @@ async function haikuLesen(bytes, o = {}) {
           role: 'user',
           content: [
             { type: 'image', source: { type: 'base64', media_type: typ, data: daten.toString('base64') } },
-            { type: 'text', text: `${prompt.userPrompt}\nJSON-Schema der Antwort:\n${JSON.stringify(prompt.responseSchema)}` },
+            { type: 'text', text: `${prompt.userPrompt}\nJSON-Schema der Antwort:\n${JSON.stringify(prompt.responseSchema)}\n${ZUSATZ}` },
           ],
         }],
       }),

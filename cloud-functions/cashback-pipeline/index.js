@@ -124,6 +124,7 @@ const { istOnlineBestellung, belegBereinigen, onlineMerkmal } = require('./lib/b
 const { zeugeAusfuehren, zeugeFragen, vergleich: zeugeVergleich, bestaetigung: zeugeBestaetigung } = require('./lib/mistralZeuge');
 const { haikuLesen } = require('./lib/haikuLeser');
 const { plausibilizeBonDate: plausibilizeBonDateLib } = require('./lib/bonDatum');
+const { kassenQrLesen } = require('./lib/kassenQr');
 const { abgleichOptionen } = require('./lib/punkteZahlung');
 const {
   computeDHash,
@@ -2680,6 +2681,8 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
       let ocr;
       let recon;
       let escalation = { fired: false };
+      // Steuer-QR-Code des Bons (lib/kassenQr.js), nur auf dem Lesepfad gelesen.
+      let kassenBeleg = null;
       const cachedOcr = receipt.ocr && receipt.ocr.parsed ? receipt.ocr : null;
       // Eigenmarken-Stufe des Markt-Resolvers (Prompt v1.5, 04.10.2026): sie
       // erkennt selbstständige EDEKA-/REWE-Kaufleute, deren Bonkopf die Kette
@@ -2886,9 +2889,25 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
             }
             return bericht;
           };
+          // Steuer-QR-Code als kostenloser Zeuge (Patrick 12.10.2026: „mach 1“). Wird vor
+          // der Leiter einmal gelesen; Schalter cashback_config/v1.kassenQr (false = aus).
+          // Bestätigt der Code Summe, Datum und Uhrzeit, entfällt die Mistral-Anfrage;
+          // widerspricht er der Lesung, gilt sie als nicht bestätigt (der Code ist die
+          // Kasse selbst). Den Markt kennt der Code nicht — dort zählt die Lesung.
+          kassenBeleg = config.kassenQr === false ? null : await kassenQrLesen(bytes);
           const zeuge = config.mistralZeuge === true
             ? async (r) => {
                 const p = (r && r.parsed) || {};
+                if (kassenBeleg) {
+                  const mz = (t) => { const m = /(\d{1,2}):(\d{2})/.exec(String(t || '')); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+                  const gelesen = mz(p.bonTime);
+                  const zeit = gelesen == null ? kassenBeleg.zeiten[kassenBeleg.zeiten.length - 1]
+                    : kassenBeleg.zeiten.reduce((a, b) => (Math.abs(mz(b) - gelesen) < Math.abs(mz(a) - gelesen) ? b : a));
+                  const ergebnis = { markt: p.merchant ?? null, datum: kassenBeleg.datum, zeit, summe: kassenBeleg.summeCents };
+                  const qrBericht = await zeugePruefen(r, ergebnis, { status: 'ok', quelle: 'kassen_qr', modus: 'scharf', ergebnis, format: kassenBeleg.format });
+                  logger.info('kassen-qr-zeuge', { cashbackId, bestaetigt: qrBericht.bestaetigt, grund: qrBericht.grund ?? null });
+                  return qrBericht;
+                }
                 let key = '';
                 try { key = MISTRAL_API_KEY.value(); } catch { key = ''; }
                 const bericht = await zeugeFragen({ bytes, mimeType, parsed: p, key, istOnline: istOnlineBestellung });
@@ -4554,6 +4573,39 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
           logger.warn('mistral-zeuge-fehler', { cashbackId, err: String(e && e.message || e).slice(0, 200) });
         }
       }
+      // 11) Belegnummer als Doppel-Schlüssel — BEOBACHTUNG (Patrick 12.10.2026: „mach 2“).
+      //     Kassen-/TSE-Seriennummer + Transaktionsnummer stehen auf jedem deutschen Bon
+      //     (KassenSichV § 6): aus dem Steuer-QR-Code, sonst aus der Haiku-Lesung. Hier nur
+      //     ablegen und gegen frühere Bons nachsehen (doppelBelegSchatten) — entscheidet
+      //     nichts. Wirft nie.
+      try {
+        const hl = ocr && ocr.robust && ocr.robust.zeuge && ocr.robust.zeuge.ersteLesung;
+        const aus = kassenBeleg && kassenBeleg.transaktion
+          ? { kasse: kassenBeleg.kasse, transaktion: kassenBeleg.transaktion, quelle: 'kassen_qr' }
+          : (ocr && ocr.parsed && ocr.parsed.tseTransaktion)
+            ? { kasse: ocr.parsed.kassenSeriennummer ?? null, transaktion: String(ocr.parsed.tseTransaktion), quelle: 'haiku' }
+            : (hl && hl.tseTransaktion)
+              ? { kasse: hl.kassenSeriennummer ?? null, transaktion: String(hl.tseTransaktion), quelle: 'haiku' }
+              : null;
+        const transaktion = aus ? String(aus.transaktion).replace(/\D/g, '') : '';
+        if (aus && transaktion.length >= 2) {
+          const kasse = String(aus.kasse || '').replace(/\s/g, '').toUpperCase();
+          const markt = (merchantInfo && merchantInfo.id) || 'unbekannt';
+          const schluessel = [markt, kasse || `tag:${ocr.parsed?.bonDate || '?'}`, transaktion].join('|');
+          const treffer = await db.collection('receipts').where('belegNummer.schluessel', '==', schluessel).limit(5).get();
+          const andere = treffer.docs.filter((d) => d.id !== cashbackId).map((d) => ({ id: d.id, status: d.get('status') || null, gleicherNutzer: d.get('userId') === uid }));
+          const feld = { belegNummer: { kasse: kasse || null, transaktion, quelle: aus.quelle, schluessel } };
+          if (kassenBeleg) feld.kassenQr = { format: kassenBeleg.format, summeCents: kassenBeleg.summeCents, datum: kassenBeleg.datum, zeiten: kassenBeleg.zeiten };
+          if (andere.length) feld.doppelBelegSchatten = andere;
+          await docRef.update(feld);
+          if (andere.length) logger.info('beleg-doppel-schatten', { cashbackId, schluessel, andere });
+        } else if (kassenBeleg) {
+          await docRef.update({ kassenQr: { format: kassenBeleg.format, summeCents: kassenBeleg.summeCents, datum: kassenBeleg.datum, zeiten: kassenBeleg.zeiten } });
+        }
+      } catch (e) {
+        logger.warn('beleg-nummer-fehler', { cashbackId, err: String(e && e.message || e).slice(0, 200) });
+      }
+
       // 10) Haiku 5.5 im PARALLELBETRIEB (Patrick 10.10.2026): liest NACH der
       //     fertigen Entscheidung, schreibt nur `zeugeHaiku`, wirft nie. Vergleich
       //     mit dem Endergebnis und die Frage, ob der Mistral-Zeuge dieses Bons
