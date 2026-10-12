@@ -4928,6 +4928,24 @@ Lesetest 150 Bons: Geld 99 %, alle Preise 88 %, ~0,23 ct je Lesung; mit Mistral 
 bestätigt, 0 Geldfehler. Bildtyp aus den Bytes bestimmen (die App-Angabe stimmt nicht
 immer), über 4,9 MB direkt Gemini.
 
+**Ausbau 11./12.10.2026 (Patrick: „alles umsetzen, was Sinn macht“, „mach 1, 2 und 3“):**
+- `zweiAusDrei` (true seit 12.10.): bestätigt Mistral die Haiku-Lesung nicht, EINE Gemini-Lesung;
+  stimmt sie mit Mistral oder Haiku überein (gleiche Regel; an der Prämiengrenze reicht gleiche
+  Artikelzählung von Haiku und Gemini), gilt die Gemini-Lesung (`method 'zwei-aus-drei'`).
+  Parallelmessung vorher: 18/18 richtig. Messskript: Session-Scratch `zwei-aus-drei-messung.js`.
+- `kassenQr` (an, `false` = aus, `lib/kassenQr.js`): Steuer-QR-Code (DE TSE „V0“, AT RKSV) als
+  kostenloser Zeuge vor Mistral; Zeiten im DE-Code sind UTC → Europe/Berlin. Test 14/14 richtig;
+  ~9 % der Bons tragen ihn (Kaufland ~50 %, ALDI Nord ~1/3; Lidl/REWE/EDEKA/Penny/dm nicht).
+- Belegnummer (Beobachtung): Haiku liest `tseTransaktion`/`kassenSeriennummer` mit, QR liefert sie
+  direkt; `receipts.belegNummer.schluessel` = Markt|Kasse|Transaktion, Treffer früherer Bons in
+  `doppelBelegSchatten` — entscheidet NICHTS, erst nach Auswertung als Doppel-Regel erwägen.
+- Haiku: Bildseiten > 7900 px werden für Haiku verkleinert, Zeitlimit 45 s. Mistral-Uhrzeit:
+  nie die Handy-Statusleiste (App-Screenshots).
+- Jahreskorrektur (`lib/bonDatum.js`): Tag+Monat höchstens 7 Tage vor Upload → laufendes Jahr.
+- **Kosten genau zuordnen:** Abrechnungs-Export `revealyiq.billing_export.gcp_billing_export_v1_*`
+  (Labels `funktion`/`zweck`). Gemini = Vertex AI, vom Guthaben gedeckt; Claude Haiku =
+  Marketplace, echtes Geld; Mistral außerhalb Google.
+
 ## Gemini läuft über VERTEX AI, nicht AI Studio (Incident 19.08.2026)
 
 **Was passiert ist:** Der AI-Studio-Monatsdeckel („monthly spending cap",
