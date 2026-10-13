@@ -706,6 +706,15 @@ async function matchLine(ctx, opts = {}) {
     }
   }
 
+  // KI pausiert (Patrick 13.10.2026: „Zuordnung pausieren und später gesammelt
+  // nachholen“): Regeln und Alias-Lexikon laufen weiter (kostenlos), der KI-Weg
+  // nicht. Die Zeile bekommt KEINE matchVersion — so findet sie der spätere
+  // Sammellauf (matchBacklogManual ohne force) wieder.
+  if (opts.kiPausiert === true) {
+    if (!dryRun && ppRef) await ppRef.set({ matchStatus: 'pausiert', matchPausiertAt: FieldValue.serverTimestamp() }, { merge: true });
+    return { status: 'pausiert' };
+  }
+
   // Ab hier KI-Weg: EINE strukturierte Logzeile je Zeile mit allen
   // Stufenzeiten. Vorher stand ein gescheiterter Pick nirgends im Log
   // (nur 'pick-failed' am Dokument), die Ursache der Abbrüche blieb deshalb

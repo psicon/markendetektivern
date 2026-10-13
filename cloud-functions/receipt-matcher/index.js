@@ -388,6 +388,22 @@ exports.backfillEmbeddingsManual = onRequest(
 // eindeutigen Status ('pick-timeout' …) statt vom 120-s-Abbruch getroffen zu
 // werden. Die Reserve deckt Schreiben, Journey-Abschluss und Kaltstart.
 const MATCH_TRIGGER_TIMEOUT_S = 120;
+// Schalter `_meta/zuordnung` = { kiPausiert: true } (Patrick 13.10.2026): neue Bon-Zeilen
+// nur noch über Regeln und Alias-Lexikon zuordnen, keine KI. Rückweg: Feld entfernen
+// oder false. 60 s im Speicher gehalten (eine Lesung je Instanz und Minute).
+let zuordnungSchalter = { wert: null, bis: 0 };
+async function kiPausiert() {
+  if (Date.now() < zuordnungSchalter.bis) return zuordnungSchalter.wert;
+  let wert = false;
+  try {
+    const s = await db.doc('_meta/zuordnung').get();
+    wert = s.exists && s.get('kiPausiert') === true;
+  } catch (e) {
+    wert = zuordnungSchalter.wert === true;
+  }
+  zuordnungSchalter = { wert, bis: Date.now() + 60_000 };
+  return wert;
+}
 exports.onPurchasedProductMatch = onDocumentCreated(
   { ...COMMON, document: 'users/{uid}/purchased_products/{ppId}', timeoutSeconds: MATCH_TRIGGER_TIMEOUT_S, memory: '512MiB' },
   async (event) => {
@@ -413,6 +429,7 @@ exports.onPurchasedProductMatch = onDocumentCreated(
       ? (Date.now() - Date.parse(d.bonDate)) / 86_400_000
       : null;
     const noClose = d.backfilled === true || (bonAgeDays != null && bonAgeDays > 14);
+    const pausiert = await kiPausiert();
     try {
       await matcher.matchLine({
         itemName: d.itemName,
@@ -424,7 +441,7 @@ exports.onPurchasedProductMatch = onDocumentCreated(
         merchantName: d.merchantName || null,
         merchantLand: d.merchantLand || null,
         bonDate: d.bonDate || null,
-      }, noClose ? { noClose: true, deadlineAt } : { deadlineAt });
+      }, { ...(noClose ? { noClose: true } : {}), deadlineAt, ...(pausiert ? { kiPausiert: true } : {}) });
     } catch (e) {
       console.error('onPurchasedProductMatch failed', event.params, e);
       await snap.ref.set({ matchStatus: 'error', matchError: e.message }, { merge: true }).catch(() => {});
