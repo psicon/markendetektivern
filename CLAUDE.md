@@ -4945,6 +4945,20 @@ immer), über 4,9 MB direkt Gemini.
 - **Kosten genau zuordnen:** Abrechnungs-Export `revealyiq.billing_export.gcp_billing_export_v1_*`
   (Labels `funktion`/`zweck`). Gemini = Vertex AI, vom Guthaben gedeckt; Claude Haiku =
   Marketplace, echtes Geld; Mistral außerhalb Google.
+- **Schwere Bons mit Denkstufe LOW + v1.6 billiger lesen: NEIN (Test 13.10.2026).** 60 Bons der
+  vollen Leiter neu gelesen: 6,3 ct je Bon, aber 2 von 50 als `high` eingestufte Lesungen
+  nachweislich falsch (Datum nach dem Upload; Kaufland-Summe 20,64 statt gedruckt 26,64 €).
+  Zwei LOW-Lesungen sind korreliert — dieselbe Lehre wie „Billig zuerst“. Ursache der Summe:
+  bei Kaufland stehen „Coupon“/„Gutschein“ UNTER „Summe“ als Zahlungsmittel; Regel 16
+  (v1.5/v1.6) zog sie als Warenkorbrabatt ab. Vor einem Umschalten auf `ocrPrompt` v1.5/v1.6
+  Regel 16 ergänzen: Zeilen NACH dem gedruckten Endbetrag sind nie Rabatt.
+- **Grobe Bildsperre trifft echte Einkäufe (13.10.2026, ClickUp 12487v2f1m0):** 116 von 178
+  dHash-Sperren in 30 Tagen kamen > 1 Tag nach dem „Original“, meist App-Screenshots
+  (Lidl/Netto/Kaufland). Seit 13.10. 06:33 UTC stehen `doppelArtikel`, `doppelDatum`,
+  `bildFeinvergleich` auf `'shadow'`; erst nach Durchsicht von `doppel-treffer` und
+  `forensics-feinvergleich` auf `true`. Einzelfall von Hand nachreichen: Bon wie
+  enqueueCashback anlegen (`create()`, App-Hash = SHA-256 über den BASE64-Text der Datei,
+  `manuellAngelegt` vermerken), Spiegel auf `ocr_pending`, auf `cashback-ocr-jobs` zustellen.
 
 ## Gemini läuft über VERTEX AI, nicht AI Studio (Incident 19.08.2026)
 
