@@ -35,7 +35,9 @@ const ALIASES = [
   { id: 'aldi',      tokens: ['aldi'] },
   // Vertriebslinien der EDEKA-Gruppe: auf dem Bonkopf steht oft nur die
   // Linie, nicht "EDEKA". ACHTUNG: "nahkauf" gehört zu REWE, nicht hierher.
-  { id: 'edeka',     tokens: ['edeka', 'e center', 'e-center', 'e neukauf', 'marktkauf', 'nah & gut', 'nah und gut', 'nahundgut', 'e aktiv', 'e-aktiv', 'neukauf'] },
+  // aliasMatch bekommt den NORMALISIERTEN Namen (normalize() entfernt "&"):
+  // „nah & gut" steht hier deshalb als „nah gut".
+  { id: 'edeka',     tokens: ['edeka', 'e center', 'e-center', 'e neukauf', 'marktkauf', 'nah gut', 'nah und gut', 'nahundgut', 'nahgut', 'e aktiv', 'e-aktiv', 'neukauf'] },
   { id: 'kaufland',  tokens: ['kaufland'] },
   { id: 'penny',     tokens: ['penny'] },
   { id: 'netto',     tokens: ['netto'] },

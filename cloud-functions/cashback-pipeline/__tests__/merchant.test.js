@@ -1,5 +1,5 @@
 'use strict';
-const { chainFromItems } = require('../lib/merchant');
+const { chainFromItems, normalize, aliasMatch } = require('../lib/merchant');
 
 // Selbstständige Kaufleute drucken ihre Firma in den Bonkopf, nicht die Kette.
 // Eigenmarken sind kettenexklusiv und verraten die Kette trotzdem.
@@ -42,5 +42,24 @@ describe('chainFromItems', () => {
     expect(chainFromItems([])).toBeNull();
     expect(chainFromItems(null)).toBeNull();
     expect(chainFromItems([{}, { name: '' }, { name: null }])).toBeNull();
+  });
+});
+
+// aliasMatch bekommt den normalisierten Namen; normalize() entfernt „&".
+// Ein Token mit „&" trifft deshalb nie (Fall Tempelmann 14.10.2026).
+describe('Alias EDEKA-Vertriebslinien über normalize()', () => {
+  test.each([
+    'nah & gut Hohlfeldt',
+    'NAH & GUT',
+    'nah&gut Schiwietz',
+    'Nah und Gut George',
+    'E Center Cramer',
+    'Marktkauf Göppingen',
+  ])('%s → edeka', (raw) => {
+    expect(aliasMatch(normalize(raw))).toMatchObject({ id: 'edeka' });
+  });
+
+  test('nahkauf bleibt REWE', () => {
+    expect(aliasMatch(normalize('nahkauf Hohlfeldt'))).toMatchObject({ id: 'rewe' });
   });
 });
