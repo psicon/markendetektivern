@@ -377,7 +377,7 @@ const ganzzahlIn = (v, min, max) => Number.isInteger(v) && v >= min && v <= max;
  * keine Vorgabe). Ein Zwischenstand von vor dem Schalter trägt kein Feld und
  * gilt als „keine Vorgabe" — ohne Schalter wird er also wie bisher fortgesetzt.
  *
- * @returns {{stand: object|null, grund: string|null}}
+ * @returns {{stand: object|null, grund: string|null, zeuge?: object|null}}
  */
 function zwischenstandLaden(roh, { model, eskModel, maxFlash, jetzt, promptVersion = PROMPT_STANDARD, denkstufe = null }) {
   if (!roh || typeof roh !== 'object') return { stand: null, grund: null };
@@ -400,6 +400,9 @@ function zwischenstandLaden(roh, { model, eskModel, maxFlash, jetzt, promptVersi
     && ['flash', 'enh', 'pro'].includes(s.stufe))) return nein('form');
   return {
     grund: null,
+    // Bericht des Zeugen aus einem früheren Lauf (Haiku-Lesung, Mistral): geht
+    // nur mit an den Bon, entscheidet in der Fortsetzung nichts (15.10.2026).
+    zeuge: roh.zeuge && typeof roh.zeuge === 'object' && !Array.isArray(roh.zeuge) ? roh.zeuge : null,
     stand: {
       reads: roh.reads.map(lesungLaden),
       failed: roh.failed.map((f) => String(f)),
@@ -564,6 +567,12 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
   /** Passt ein volles Lese-Fenster noch ins Laufbudget? */
   const fensterFrei = (limit) => frist == null || frist - clock() >= limit;
 
+  // Bericht des Zeugen (Haiku-Lesung, Mistral) — auch aus einem früheren Lauf.
+  // Ging bis 15.10.2026 mit jeder Fortsetzung verloren: an allen 21 Prüffällen
+  // seit 11.10. fehlte er, und die Bon-Runde konnte die Artikelzahl nicht gegen
+  // Haikus Zählung prüfen. Er wird nur abgelegt, die Fortsetzung fragt ihn nicht.
+  const zeugeBerichtRef = { wert: geladen.zeuge || null };
+
   /** Budget erreicht: Zwischenstand mitgeben, kein Ergebnis — also keine Entscheidung. */
   const anhalten = () => {
     const err = new Error(`ocr_zeitbudget: Laufbudget erreicht nach ${st.reads.length} Lesungen (${st.failed.length} Fehlversuche, Lauf ${st.laeufe})`);
@@ -588,11 +597,12 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
       ausweichGenutzt: st.ausweichGenutzt,
       failed: st.failed.slice(),
       reads: st.reads.map(lesungSichern),
+      // JSON-Rundreise: Firestore nimmt kein undefined.
+      ...(zeugeBerichtRef.wert ? { zeuge: JSON.parse(JSON.stringify(zeugeBerichtRef.wert)) } : {}),
     };
     throw err;
   };
 
-  const zeugeBerichtRef = { wert: null };
   const fertig = (out) => {
     // Stufe der normalen Lesungen dieser Leiter (null = keine Vorgabe) — trennt
     // Bons vor und nach dem Umschalten (08.10.2026).
@@ -610,7 +620,8 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
     }
     out.robust.laeufe = st.laeufe;
     out.robust.zeitAbbrueche = st.zeitAbbrueche;
-    // Bericht des Mistral-Zeugen (Phase 0), auch wenn er nicht bestätigt hat.
+    // Bericht des Zeugen (Phase 0), auch wenn er nicht bestätigt hat — auch aus
+    // einem früheren Lauf (Zwischenstand).
     if (zeugeBerichtRef.wert && !out.robust.zeuge) out.robust.zeuge = zeugeBerichtRef.wert;
     if (st.ausweichGenutzt) out.robust.escalationFallbackThinking = st.ausweichGenutzt;
     return out;

@@ -104,8 +104,11 @@ describe('2-aus-3 (Schalter zweiAusDrei)', () => {
   const haiku = (total) => async () => ({ ...lesung(A, total), model: 'claude-haiku-5-5' });
   const B = [{ name: 'Milch', priceCents: 119 }, { name: 'Brot', priceCents: 250 }];
   // Prüfung wie in index.js vereinfacht: Summe des Zeugen = Summe der Lesung.
-  const pruefen = jest.fn(async (r, erg) => ({ bestaetigt: erg.summe === r.parsed.totalCents }));
-  beforeEach(() => pruefen.mockClear());
+  // Je Test neu angelegt: das cf-Projekt setzt `resetMocks: true`, eine einmal
+  // angelegte Implementierung wäre vor jedem Test weg (gab still `undefined`
+  // zurück — beide Bestätigungs-Tests waren dadurch seit 11.10. rot).
+  let pruefen;
+  beforeEach(() => { pruefen = jest.fn(async (r, erg) => ({ bestaetigt: erg.summe === r.parsed.totalCents })); });
 
   test('Mistral widerspricht Haiku, stimmt aber mit EINER Gemini-Lesung überein: fertig nach 1 Gemini-Lesung', async () => {
     const extract = fakeExtract([lesung(A, 368)]);

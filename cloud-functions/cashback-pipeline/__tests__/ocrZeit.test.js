@@ -250,6 +250,30 @@ describe('Laufbudget und Fortsetzung', () => {
     expect(out.robust.reads.map((r) => r.model)).toEqual(['flash', 'flash']);
   });
 
+  test('Bericht des Zeugen (Haiku-Lesung) übersteht die Fortsetzung — nur abgelegt, nicht neu gefragt (15.10.2026)', async () => {
+    const T = zeitAbbruch();
+    const extract = fakeMitUhr([ant(T, 170000), ant(T, 170000), ant(T, 170000), ant(lesung(A, 368), 170000), ant(lesung(A, 368), 15000)]);
+    const clock = () => extract.uhr.t;
+    const ersterLeser = jest.fn(async () => ({ ...lesung(A, 368), model: 'claude-haiku-5-5' }));
+    // `zeit: undefined` steht so nie in Firestore — die Ablage muss es entfernen.
+    const zeuge = jest.fn(async () => ({ status: 'ok', bestaetigt: false, grund: 'geldfelder', ergebnis: { markt: 'REWE', datum: '2026-09-28', zeit: undefined, summe: 999, preise: [119, 249] } }));
+    const err = await robust.extractReceiptRobust(Buffer.from('x'), 'image/jpeg', { extract, enhance, laufStart: 0, zeit: ZEIT, clock, zeuge, ersterLeser })
+      .then(() => null, (e) => e);
+    expect(err).toMatchObject({ code: 'ocr_zeitbudget' });
+    const stand = wieFirestore(err.zwischenstand);
+    expect(stand.zeuge).toMatchObject({ grund: 'geldfelder', ersterLeser: 'claude-haiku-5-5', ersteLesung: { summe: 368, artikel: 2, summenprobe: true } });
+    expect(stand.zeuge.ergebnis).not.toHaveProperty('zeit');
+    const laufStart2 = extract.uhr.t + 2000;
+    extract.uhr.t = laufStart2;
+    const out = await robust.extractReceiptRobust(Buffer.from('x'), 'image/jpeg', {
+      extract, enhance, laufStart: laufStart2, zeit: ZEIT, clock, zeuge, ersterLeser, zwischenstand: stand,
+    });
+    expect(ersterLeser).toHaveBeenCalledTimes(1);
+    expect(zeuge).toHaveBeenCalledTimes(1);
+    expect(out.robust).toMatchObject({ method: 'flash-agreement', laeufe: 2 });
+    expect(out.robust.zeuge).toEqual(stand.zeuge);
+  });
+
   test('ohne laufStart kein Laufbudget (Skripte/Messungen) — nur das Zeitlimit je Lesung', async () => {
     const extract = fakeMitUhr([A, B, C, D, B.slice(0, 1).concat(D.slice(1)), A].map((x) => ant(lesung(x, 368), 160000)));
     const out = await robust.extractReceiptRobust(Buffer.from('x'), 'image/jpeg', { extract, enhance, zeit: ZEIT, clock: () => extract.uhr.t });
@@ -361,6 +385,16 @@ describe('Zwischenstand prüfen', () => {
     expect(geladen.grund).toBeNull();
     expect(geladen.stand.reads).toHaveLength(3);
     expect(geladen.stand.reads[2].parsed).toBeNull();
+  });
+
+  test('Bericht des Zeugen: nur ein Objekt wird übernommen, ein verworfener Stand bringt keinen mit', async () => {
+    const stand = await standNachEinemLauf();
+    const opts = { model: stand.model, eskModel: stand.eskModel, maxFlash: stand.maxFlash, jetzt: stand.gespeichertMs };
+    expect(robust.zwischenstandLaden(stand, opts).zeuge).toBeNull();
+    expect(robust.zwischenstandLaden({ ...stand, zeuge: 'x' }, opts).zeuge).toBeNull();
+    expect(robust.zwischenstandLaden({ ...stand, zeuge: [1] }, opts).zeuge).toBeNull();
+    expect(robust.zwischenstandLaden({ ...stand, zeuge: { status: 'ok' } }, opts).zeuge).toEqual({ status: 'ok' });
+    expect(robust.zwischenstandLaden({ ...stand, v: 2, zeuge: { status: 'ok' } }, opts).zeuge).toBeUndefined();
   });
 
   test('vertippte Zahl Basis-Lesungen (CASHBACK_OCR_MAX_FLASH) gilt als Standard 3, nie als NaN', () => {
