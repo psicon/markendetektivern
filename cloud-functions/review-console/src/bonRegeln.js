@@ -266,6 +266,27 @@ function marktPasst(bon, gelesen) {
 }
 
 /**
+ * Hat ein ZWEITES Modell die Artikelzahl genauso gezählt? Haiku liest in der
+ * Pipeline jeden Bon zuerst; seine Geldfelder stehen ohne Artikelnamen in
+ * `ocr.robust.zeuge.ersteLesung` (über mehrere Läufe hinweg erst seit
+ * 15.10.2026 — vorher fehlten sie an allen Prüffällen). Die Zählung gilt nur,
+ * wenn Haikus Lesung in sich aufging (Summenprobe) und dieselbe Endsumme las —
+ * sonst zählte es womöglich einen halben oder anderen Bon. Und nur dieselbe
+ * ZAHL, nicht bloß dieselbe Stufe: dieselbe Regel wie in der Pipeline an der
+ * Prämiengrenze (index.js zeugePruefen). Ist die gespeicherte Lesung selbst
+ * Haikus (`robust.ersterLeser`), wäre es keine zweite Zählung.
+ * Gemessen 11.–15.10.2026 an 71 Bons der vollen Leiter mit aufgegangener
+ * Haiku-Lesung: 70-mal dieselbe Zahl.
+ */
+function haikuZaehltGleich(bon) {
+  const rob = bon && bon.ocr && bon.ocr.robust;
+  const h = rob && rob.zeuge && rob.zeuge.ersteLesung;
+  if (!h || h.summenprobe !== true || rob.ersterLeser) return false;
+  const n = Number(bon.eligibleItemCount);
+  return Number.isInteger(n) && h.artikel === n && Number.isInteger(h.summe) && h.summe === Number(bon.bonTotalCents);
+}
+
+/**
  * Abgleich der unabhängigen Zweitlesung mit dem Gespeicherten. Geld hängt an
  * Markt, Datum, Endsumme, Artikelzahl und daran, dass es ein echter Bon ist.
  * Wo das Feld-Gate der Pipeline Uneinigkeit vermerkt hat
@@ -295,12 +316,18 @@ function abgleich(bon, zweit, { grenzen = [] } = {}) {
   // Uneinige Artikelzahl über eine Stufengrenze: der gespeicherte Betrag könnte
   // der höhere sein. Das nachzurechnen kann die Runde nicht — Mensch.
   if (konflikte.includes('betrag')) gruende.push('betrag_uneinig');
+  let artikelzahlHaiku = null;
   if (schwach) {
     // Ohne zwei stimmige Lesungen ist auch die Artikelzahl unbestätigt. Liegt
     // sie knapp über einer Betragsgrenze, kippt eine einzige Fehllesung (eine
     // Pfandzeile) den Betrag — bon_mufb80qgcrfg8k: 6 Artikel bei Mindestzahl 6.
+    // Es sei denn, ein zweites Modell hat genauso gezählt (15.10.2026).
     const n = Number(bon.eligibleItemCount);
-    if (!Number.isFinite(n) || grenzen.some((g) => n >= g && n < g + 2)) gruende.push('artikelzahl_knapp');
+    if (!Number.isFinite(n)) gruende.push('artikelzahl_knapp');
+    else if (grenzen.some((g) => n >= g && n < g + 2)) {
+      if (haikuZaehltGleich(bon)) artikelzahlHaiku = n;
+      else gruende.push('artikelzahl_knapp');
+    }
     // Die Zweitlesung zählt ALLE Zeilen (mit Pfand). Widerspruch nur, wenn sie
     // unter eine Grenze fällt, die die gespeicherte Zahl erreicht — sonst ändert
     // die Abweichung am Betrag nichts (Prüfrunde 3: 59 vs. 57 bei Grenze 6).
@@ -308,7 +335,7 @@ function abgleich(bon, zweit, { grenzen = [] } = {}) {
     if (!(z > 0)) gruende.push('artikelzahl_nicht_gelesen');
     else if (Number.isFinite(n) && grenzen.some((g) => n >= g && z < g)) gruende.push('artikelzahl_widerspricht');
   }
-  return { ok: gruende.length === 0, gruende };
+  return { ok: gruende.length === 0, gruende, ...(artikelzahlHaiku != null ? { artikelzahlHaiku } : {}) };
 }
 
 /** Wirksame Aktion eines Bons — Kopie von cashback-pipeline/lib/campaignZeit.js (Codebases teilen keinen Code). */
@@ -379,6 +406,7 @@ function entscheideBon({ bon, zwilling = null, zweit = null, zweitFehler = null,
   const a = abgleich(bon, zweit, { grenzen });
   if (!a.ok) return { entscheidung: 'offen', grund: a.gruende[0], gruende: a.gruende, hinweis: [a.gruende.join(', '), zweit && zweit.grund].filter(Boolean).join(' · ') };
   if (!(Number(bon.cashbackCents) > 0)) return { entscheidung: 'offen', grund: 'kein_betrag' };
+  if (a.artikelzahlHaiku != null) return { entscheidung: 'freigeben', grund: null, hinweis: `Artikelzahl ${a.artikelzahlHaiku}: Haiku zählte gleich` };
   return { entscheidung: 'freigeben', grund: null };
 }
 

@@ -251,6 +251,30 @@ describe('schwache Lesungslage (weniger als zwei stimmige Lesungen)', () => {
     expect(abgleich(schwach({ eligibleItemCount: 9 }), zweit({ anzahlPositionen: 10 }), { grenzen: [4, 8] }).gruende).toContain('artikelzahl_knapp');
     expect(abgleich(schwach({ eligibleItemCount: 12 }), zweit({ anzahlPositionen: 13 }), { grenzen: [4, 8] }).ok).toBe(true);
   });
+  // Haikus erste Lesung aus der Pipeline (ohne Artikelnamen), Felder wie am Bon.
+  const mitHaiku = (h = {}, robust = {}) => schwach({ eligibleItemCount: 6, ocr: { robust: { zeuge: { ersterLeser: 'claude-haiku-5-5', ersteLesung: { summe: 9374, artikel: 6, summenprobe: true, ...h } }, ...robust } } });
+  it('Artikelzahl knapp, aber Haiku zählte dieselbe Zahl (Summenprobe ok, gleiche Summe) → freigeben (15.10.2026)', () => {
+    expect(entscheideBon({ bon: mitHaiku(), zweit: zweit({ anzahlPositionen: 8 }), grenzen: [6] }))
+      .toEqual({ entscheidung: 'freigeben', grund: null, hinweis: 'Artikelzahl 6: Haiku zählte gleich' });
+  });
+  it('… nicht bei anderer Zahl (auch nicht bei gleicher Stufe), ohne Summenprobe, anderer Summe oder wenn Haikus Lesung selbst gilt', () => {
+    const knapp = (b) => abgleich(b, zweit({ anzahlPositionen: 8 }), { grenzen: [6] });
+    [mitHaiku({ artikel: 7 }), mitHaiku({ artikel: 5 }), mitHaiku({ summenprobe: false }), mitHaiku({ summenprobe: undefined }),
+      mitHaiku({ summe: 9375 }), mitHaiku({ summe: null }), mitHaiku({ artikel: undefined }), mitHaiku({}, { ersterLeser: 'claude-haiku-5-5' }),
+      schwach({ eligibleItemCount: 6, ocr: { robust: { zeuge: { status: 'nicht_gefragt', grund: 'summenprobe' } } } }),
+    ].forEach((b) => {
+      const a = knapp(b);
+      expect(a.gruende).toContain('artikelzahl_knapp');
+      expect(a.artikelzahlHaiku).toBeUndefined();
+    });
+  });
+  it('… ein Widerspruch der Zweitlesung bleibt beim Menschen, auch wenn Haiku gleich zählte', () => {
+    expect(abgleich(mitHaiku(), zweit({ anzahlPositionen: 5 }), { grenzen: [6] }).gruende).toEqual(['artikelzahl_widerspricht']);
+  });
+  it('… weit weg von jeder Grenze ändert Haiku nichts (kein Hinweis)', () => {
+    const b = { ...mitHaiku({ artikel: 20 }), eligibleItemCount: 20 };
+    expect(entscheideBon({ bon: b, zweit: zweit(), grenzen: [6] })).toEqual({ entscheidung: 'freigeben', grund: null });
+  });
   it('Zweitlesung fällt unter eine Grenze, die die gespeicherte Zahl erreicht → Widerspruch', () => {
     expect(abgleich(schwach({ eligibleItemCount: 9 }), zweit({ anzahlPositionen: 5 }), { grenzen: [6] }).gruende).toContain('artikelzahl_widerspricht');
   });
