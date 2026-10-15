@@ -1643,6 +1643,16 @@ Lese-Sicherheit, `ocr_confidence_low|medium`).
   Lesungen, kein Vermerk, `none`): alle Felder gelten als uneinig; zusätzlich
   bleibt ein Bon liegen, dessen Artikelzahl knapp (≤ 1) über einer
   Betragsgrenze liegt, oder bei dem die Zweitlesung unter diese Grenze zählt.
+  **Ausnahme seit 15.10.2026 (Patrick: „ja, b machen"):** knapp ist kein
+  Haltegrund, wenn Haikus erste Lesung aus der Pipeline
+  (`ocr.robust.zeuge.ersteLesung`) in sich aufging, dieselbe Endsumme las und
+  GENAU dieselbe Artikelzahl zählte (dieselbe Regel wie in der Pipeline an der
+  Prämiengrenze; nie, wenn die gespeicherte Lesung selbst Haikus ist). Hinweis
+  im Bericht: „Artikelzahl N: Haiku zählte gleich". Vorher von Hand: 17 Fälle
+  seit 28.09., alle 11 entschiedenen freigegeben. Gemessen 11.–15.10. an 71
+  Leiter-Bons mit aufgegangener Haiku-Lesung: 70-mal dieselbe Zahl. Bis
+  15.10. ging die Haiku-Lesung bei Bons mit mehreren Läufen verloren (an allen
+  21 Prüffällen seit 11.10.) — Bons von davor profitieren nicht.
 - **Markt**: nur ganze Wörter, ohne Gattungs- und Rechtsformwörter (GmbH,
   Markt, Center, Drogerie, Tankstelle …) und ohne Himmelsrichtungen bei
   Kettennamen (Nord/Süd). Nennt die Lesung eine ANDERE bekannte Kette als die

@@ -4259,6 +4259,13 @@ Fehldiagnose gekostet haben:
 - **tsc-Baseline am 08.09.2026: 342 Fehler** (gemessen im Worktree, ohne
   `tools/company-os`). Die im Abschnitt oben genannten 361 stammen vom
   26.07.2026 und passen nicht mehr.
+- **Das cf-Projekt setzt `resetMocks: true`** (`jest.config.js`): eine einmal im
+  `describe` angelegte `jest.fn(impl)` verliert vor JEDEM Test ihre
+  Implementierung und gibt still `undefined` zurück. Zwei Tests der
+  2-aus-3-Prüfung waren dadurch vom 11. bis 15.10. rot, ohne dass es auffiel.
+  Attrappen mit Implementierung im `beforeEach` oder im Test selbst anlegen —
+  und vor „fertig“ den GANZEN Codebase-Ordner laufen lassen, nicht nur die
+  geänderte Testdatei.
 
 ## Ein Status-Feld ist KEIN Mechanismus — Geld-Versprechen brauchen einen Trigger
 
@@ -4891,6 +4898,12 @@ neu zugestellt hatte. Regeln (umgesetzt in `cashback-pipeline`, Zweig
 - Wer Function-Timeout, OCR-Budget oder Laufzeitgrenze ändert, zieht
   `LAUF_MAX_MS` (`lib/laufAnspruch.js`) mit — der Anspruch muss länger leben als
   jeder Lauf, der noch schreiben kann.
+- **Was ein späterer Leser am Bon erwartet, gehört in den Zwischenstand**
+  (15.10.2026). Der Zeugenbericht (Haiku-Geldfelder, Mistral-Ergebnis) lebte nur
+  im Speicher des ersten Laufs und war nach jeder Fortsetzung weg — an allen 21
+  Prüffällen seit 11.10., also genau an den Bons, für die die Bon-Runde ihn
+  braucht. Seit 7d985396 geht er mit (`ocrZwischenstand.zeuge`); in der
+  Fortsetzung entscheidet er nichts.
 
 ## Bon-Lesung: Mistral-Zeuge scharf (seit 10.10.2026, Patrick: „sofort scharf schalten“)
 
@@ -4954,11 +4967,17 @@ immer), über 4,9 MB direkt Gemini.
   Regel 16 ergänzen: Zeilen NACH dem gedruckten Endbetrag sind nie Rabatt.
 - **Grobe Bildsperre trifft echte Einkäufe (13.10.2026, ClickUp 12487v2f1m0):** 116 von 178
   dHash-Sperren in 30 Tagen kamen > 1 Tag nach dem „Original“, meist App-Screenshots
-  (Lidl/Netto/Kaufland). Seit 13.10. 06:33 UTC stehen `doppelArtikel`, `doppelDatum`,
-  `bildFeinvergleich` auf `'shadow'`; erst nach Durchsicht von `doppel-treffer` und
-  `forensics-feinvergleich` auf `true`. Einzelfall von Hand nachreichen: Bon wie
+  (Lidl/Netto/Kaufland). Vom 13.10. 06:33 bis 15.10. 09:39 UTC standen `doppelArtikel`,
+  `doppelDatum`, `bildFeinvergleich` auf `'shadow'`, seither wieder `true`. Die vier Regeln
+  über Konten (`doppelKonten`, `doppelBestellnummer`, `doppelKontenArtikel`,
+  `doppelKontenDatum`) stehen seit 15.10. 10:06 UTC auf `'shadow'` (Patrick „ja, a machen“);
+  Treffer frühestens ab 22./23.10. durchsehen, dann `true`. Einzelfall von Hand nachreichen: Bon wie
   enqueueCashback anlegen (`create()`, App-Hash = SHA-256 über den BASE64-Text der Datei,
   `manuellAngelegt` vermerken), Spiegel auf `ocr_pending`, auf `cashback-ocr-jobs` zustellen.
+- **Bon-Runde: knappe Artikelzahl frei, wenn Haiku genau gleich zählte** (15.10.2026,
+  Patrick „ja, b machen“, 5f9ecae2): Haikus erste Lesung muss aufgehen, dieselbe Endsumme
+  lesen und dieselbe Zahl anrechenbarer Artikel zählen. Vorher 17 Fälle von Hand, alle 11
+  entschiedenen freigegeben. Details: `review-console/WISSEN-FOTORUNDE.md` (Bon-Runde).
 
 ## Gemini läuft über VERTEX AI, nicht AI Studio (Incident 19.08.2026)
 
