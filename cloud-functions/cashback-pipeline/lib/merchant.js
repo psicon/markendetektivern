@@ -37,7 +37,11 @@ const ALIASES = [
   // Linie, nicht "EDEKA". ACHTUNG: "nahkauf" gehört zu REWE, nicht hierher.
   // aliasMatch bekommt den NORMALISIERTEN Namen (normalize() entfernt "&"):
   // „nah & gut" steht hier deshalb als „nah gut".
-  { id: 'edeka',     tokens: ['edeka', 'e center', 'e-center', 'e neukauf', 'marktkauf', 'nah gut', 'nah und gut', 'nahundgut', 'nahgut', 'e aktiv', 'e-aktiv', 'neukauf'] },
+  // „Zurheide Feine Kost" (EDEKA Zurheide KG, Rhein-Ruhr; Entscheidung Patrick
+  // 17.10.2026): der Logo-Schriftzug ist der gelesene Händlername, „EDEKA" steht
+  // nur in der Firmenzeile darunter. Bewusst mit „feine kost", nicht der nackte
+  // Familienname.
+  { id: 'edeka',     tokens: ['edeka', 'e center', 'e-center', 'e neukauf', 'marktkauf', 'nah gut', 'nah und gut', 'nahundgut', 'nahgut', 'e aktiv', 'e-aktiv', 'neukauf', 'zurheide feine kost', 'zurheide feinkost'] },
   { id: 'kaufland',  tokens: ['kaufland'] },
   { id: 'penny',     tokens: ['penny'] },
   { id: 'netto',     tokens: ['netto'] },

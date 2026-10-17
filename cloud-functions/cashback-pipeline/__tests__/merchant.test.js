@@ -55,8 +55,16 @@ describe('Alias EDEKA-Vertriebslinien über normalize()', () => {
     'Nah und Gut George',
     'E Center Cramer',
     'Marktkauf Göppingen',
+    // Zurheide Feine Kost = EDEKA Zurheide KG (17.10.2026), so gelesen am 23.07., 08.08. und 17.10.
+    'Zurheide! FEINE KOST',
+    'Zurheide feine Kost',
+    'Zurheide Feinkost',
   ])('%s → edeka', (raw) => {
     expect(aliasMatch(normalize(raw))).toMatchObject({ id: 'edeka' });
+  });
+
+  test('der nackte Familienname „Zurheide" ist kein Markt', () => {
+    expect(aliasMatch(normalize('Autohaus Zurheide'))).toBeNull();
   });
 
   test('nahkauf bleibt REWE', () => {
