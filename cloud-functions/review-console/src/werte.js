@@ -74,7 +74,21 @@ const herstellerAnzeige = (x) =>
 const policyOf = (id, x, serverZeit = null) => ({
   id, userId: x.userId ?? null, ean: eanOf(x), eanVorher: eanVorherOf(x), eanFotoFrei: eanFotoFreigegebenOf(x), marketId: x.marketId ?? null,
   status: x.status, createdAt: einreichZeit(x, serverZeit), priceOcr: preisOf(x), manufacturerOcr: x.manufacturerOcr ?? null,
+  gps: aufnahmeOrtOf(x),
 });
+
+/**
+ * Gerätestandort bei der Aufnahme (`capture.gps`) für die Haushalts-Regel
+ * (duplicatePolicy.evaluateHaushalt, 17.10.2026) — sonst null. Schreibt der
+ * Client; die Regel schränkt nur ein, ein fehlender Standort lässt sie aus.
+ * Bleibt in `_policy` und damit serverseitig (stripPolicy), kein Feld der
+ * Oberfläche.
+ */
+function aufnahmeOrtOf(x) {
+  const g = x && x.capture && x.capture.gps;
+  if (!g || !Number.isFinite(g.lat) || !Number.isFinite(g.lon)) return null;
+  return { lat: g.lat, lon: g.lon, genauigkeitM: Number.isFinite(g.accuracyM) ? g.accuracyM : null };
+}
 
 /**
  * Einreich-Zeitpunkt für die Regeln: der Server-Zeitpunkt des Dokuments

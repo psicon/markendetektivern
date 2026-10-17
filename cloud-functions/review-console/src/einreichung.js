@@ -10,7 +10,7 @@
  * „Barcode fehlt", und eine Einreichung mit nur nachgelesener EAN wurde nie
  * gegen Doppel geprüft.
  */
-const { evaluateDuplicate, completenessCheck, ms } = require('./duplicatePolicy');
+const { evaluateDuplicate, evaluateHaushalt, completenessCheck, ms } = require('./duplicatePolicy');
 const {
   eanOf, nameOf, preisOf, policyOf, herstellerAnzeige, vollstaendigkeitOf, herkunftOf, eanFotoBefund, eanSchluessel, EAN_HALTEN,
   eanAbgleichOf, eanKorrekturOf, durchKorrekturErledigt, eanNummern, teilenNummer, eanKorrekturVerworfen,
@@ -304,6 +304,12 @@ const OHNE_DOPPEL = { verdict: 'ok', reason: null, priorId: null, priorUserId: n
  *    `row.rundeOffen.preisBildschirm` als Hinweis `preis_bildschirm`
  *    (Befund „ablehnen") bzw. `preis_bildschirm_unsicher` (Befund „halten")
  *    bzw. `preis_beleg_unsicher` (Befund „halten" aus dem Preisbeleg, 05.10.2026).
+ *  - Haushalts-Regel (Entscheidung Patrick 17.10.2026, duplicatePolicy.evaluateHaushalt):
+ *    dieselbe EAN, freigegeben bei einem ANDEREN Konto am selben Ort (≤ 50 m)
+ *    binnen einer Stunde → `locked` (`doppelt_haushalt`); eine ältere noch
+ *    offene dort → `hold` (`haushalt_aelter_offen`). Rechnet aus denselben
+ *    `sameEanRows` (alle Konten); `dupHaushalt` trägt die Referenz nur für die
+ *    Oberfläche (Admins) — gespeichert wird sie nicht (fremde Doc-ID).
  */
 function precheckOf(row, sameEanRows, { kontoSperre = null, fotoEanRows = null, verwandteRows = null } = {}) {
   const completeness = completenessCheck(row._komplett, REQUIRED_STEPS);
@@ -311,7 +317,12 @@ function precheckOf(row, sameEanRows, { kontoSperre = null, fotoEanRows = null, 
   const dup = row._policy.ean ? evaluateDuplicate(row._policy, others) : OHNE_DOPPEL;
   const reasons = [...completeness.problems];
   if (dup.verdict === 'locked' || dup.verdict === 'hold') reasons.push(dup.reason);
-  let verdict = !completeness.ok ? 'incomplete' : dup.verdict === 'ok' ? 'ok' : dup.verdict;
+  // Haushalts-Regel (Entscheidung Patrick 17.10.2026): dieselbe EAN von einem
+  // anderen Konto am selben Ort binnen einer Stunde. Nach der Wochen-Sperre —
+  // greift die schon, ist es dieselbe Feststellung für dieselbe Person.
+  const dupHaushalt = row._policy.ean && dup.verdict === 'ok' ? evaluateHaushalt(row._policy, others) : null;
+  if (dupHaushalt && dupHaushalt.verdict !== 'ok') reasons.push(dupHaushalt.reason);
+  let verdict = !completeness.ok ? 'incomplete' : dup.verdict !== 'ok' ? dup.verdict : dupHaushalt && dupHaushalt.verdict !== 'ok' ? dupHaushalt.verdict : 'ok';
 
   const ef = row.eanFoto && row.eanFoto.art === 'abweichend' ? row.eanFoto : null;
   let dupFoto = null;
@@ -360,7 +371,10 @@ function precheckOf(row, sameEanRows, { kontoSperre = null, fotoEanRows = null, 
   const pbRunde = runde && runde.preisBildschirm ? runde.preisBildschirm : null;
   const pb = pbRunde ? pbRunde.befund : null;
   if (pb) hinweise.push(pb === 'ablehnen' ? PREIS_BILDSCHIRM : pbRunde.art === 'beleg' ? PREIS_BELEG_UNSICHER : PREIS_BILDSCHIRM_UNSICHER);
-  return { verdict, reasons, missing: completeness.missing, dup, hinweise, ...(dupFoto ? { dupFoto } : {}), ...(dupAlt ? { dupAlt } : {}), ...(kontoSperre ? { kontoSperre } : {}) };
+  return {
+    verdict, reasons, missing: completeness.missing, dup, hinweise, ...(dupFoto ? { dupFoto } : {}), ...(dupAlt ? { dupAlt } : {}),
+    ...(dupHaushalt && dupHaushalt.verdict !== 'ok' ? { dupHaushalt } : {}), ...(kontoSperre ? { kontoSperre } : {}),
+  };
 }
 
 /**

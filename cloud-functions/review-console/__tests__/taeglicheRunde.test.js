@@ -1175,9 +1175,9 @@ describe('Bildschirmfoto als Preisbeleg (Patrick 04.10.2026: „ja, bau das")', 
   it('index.js-Weg: die Schalter kommen als Werte mit → die Runde liest sie nicht ein zweites Mal', async () => {
     schalter('shadow'); // stünde im Dokument — gilt nicht, der übergebene Wert gilt
     mitPreisfoto('schirm', 'bildschirm', png(1080, 2400));
-    const b = await scharf({ preisBildschirmRegel: true, preisBelegRegel: false, barcodeKorrektur: null });
+    const b = await scharf({ preisBildschirmRegel: true, preisBelegRegel: false, barcodeKorrektur: null, haushaltRegel: null });
     // nur das Lesen der Bon-Lage (bonWorker) — kein eigenes für die Schalter
-    // (index.js reicht auch barcodeKorrektur aus demselben Lesen durch)
+    // (index.js reicht auch barcodeKorrektur und haushaltRegel aus demselben Lesen durch)
     expect(mockLage.configLesungen).toBe(1);
     expect(b.preisBildschirm.modus).toBe(true);
     expect(b.preisBildschirm.beleg.modus).toBe(false);
@@ -3704,5 +3704,66 @@ describe('4d: Strichcode-Leser bestätigt die gespeicherte Nummer (Entscheidung 
     expect(doc('k').eanFotoOcr).toMatchObject({ befund: 'unsicher' });
     expect(b.eanKorrektur.leserGleich).toMatchObject({ bestaetigt: 1 });
     morgen(0);
+  });
+});
+
+describe('Haushalts-Regel (Entscheidung Patrick 17.10.2026)', () => {
+  const MIN = 60 * 1000;
+  const ORT = { lat: 51.315, lon: 10.315, accuracyM: 15 };
+  const NEBENAN = { lat: 51.3151, lon: 10.3151, accuracyM: 12 };
+
+  it('zwei Konten, dieselbe EAN, selber Ort, 3 min nacheinander → die erste bezahlt, die zweite abgelehnt', async () => {
+    einreichung('frau', { uid: 'u1', createdAt: T0 - TAG_MS, capture: { gps: ORT } });
+    einreichung('mann', { uid: 'u2', createdAt: T0 - TAG_MS + 3 * MIN, capture: { gps: NEBENAN } });
+    const b = await scharf();
+    expect(doc('frau').status).toBe('approved');
+    expect(doc('mann')).toMatchObject({ status: 'rejected', rejectReason: 'produkt_bereits_verguetet', holdReasons: ['produkt_bereits_verguetet'] });
+    expect(doc('mann').review).toMatchObject({ reason: 'doppelt_haushalt', decidedBy: 'worker-fotorunde' });
+    expect(doc('mann').review.precheck).toMatchObject({ verdict: 'locked', reasons: ['doppelt_haushalt'], haushalt: { verdict: 'locked', reason: 'doppelt_haushalt' } });
+    expect(doc('mann').reviewNote).toContain('anderes Konto');
+    // keine fremde Doc-ID und kein fremder Standort am Dokument, das der Einreicher liest
+    expect(JSON.stringify(doc('mann'))).not.toContain('frau');
+    expect(b.ablehnGruende).toEqual({ doppelt_haushalt: 1 });
+  });
+
+  it('gestern schon bezahlte Einreichung des anderen Kontos (Rückstau) → heute abgelehnt', async () => {
+    einreichung('frau', { uid: 'u1', status: 'approved', createdAt: T0 - TAG_MS, capture: { gps: ORT } });
+    einreichung('mann', { uid: 'u2', createdAt: T0 - TAG_MS + 20 * MIN, capture: { gps: NEBENAN } });
+    await scharf();
+    expect(doc('mann')).toMatchObject({ status: 'rejected', rejectReason: 'produkt_bereits_verguetet' });
+  });
+
+  it('anderer Ort (gut 500 m) oder zwei Stunden auseinander → beide bezahlt', async () => {
+    einreichung('a1', { uid: 'u1', createdAt: T0 - TAG_MS, capture: { gps: ORT } });
+    einreichung('a2', { uid: 'u2', createdAt: T0 - TAG_MS + 3 * MIN, capture: { gps: { lat: 51.32, lon: 10.315, accuracyM: 10 } } });
+    einreichung('b1', { uid: 'u3', ean: ANDERE, createdAt: T0 - TAG_MS, capture: { gps: ORT } });
+    einreichung('b2', { uid: 'u4', ean: ANDERE, createdAt: T0 - TAG_MS + 120 * MIN, capture: { gps: NEBENAN } });
+    await scharf();
+    for (const id of ['a1', 'a2', 'b1', 'b2']) expect(doc(id).status).toBe('approved');
+  });
+
+  it('ohne Gerätestandort (ältere App) → Regel greift nicht', async () => {
+    einreichung('frau', { uid: 'u1', createdAt: T0 - TAG_MS });
+    einreichung('mann', { uid: 'u2', createdAt: T0 - TAG_MS + 3 * MIN });
+    await scharf();
+    expect(doc('frau').status).toBe('approved');
+    expect(doc('mann').status).toBe('approved');
+  });
+
+  it('Schalter haushaltRegel === false → Regel aus (Rückweg ohne Deploy); fehlt er → an', async () => {
+    mockStore.set('cashback_config/v1', { fotoWorker: true, barcodeKorrektur: true, haushaltRegel: false });
+    einreichung('frau', { uid: 'u1', createdAt: T0 - TAG_MS, capture: { gps: ORT } });
+    einreichung('mann', { uid: 'u2', createdAt: T0 - TAG_MS + 3 * MIN, capture: { gps: NEBENAN } });
+    const b = await scharf();
+    expect(doc('mann').status).toBe('approved');
+    expect(b.ablehnGruende).toEqual({});
+  });
+
+  it('Trockenlauf schreibt nichts', async () => {
+    einreichung('frau', { uid: 'u1', createdAt: T0 - TAG_MS, capture: { gps: ORT } });
+    einreichung('mann', { uid: 'u2', createdAt: T0 - TAG_MS + 3 * MIN, capture: { gps: NEBENAN } });
+    const b = await taeglicheRunde({ dryRun: true, projekt: 'p', bucketName: 'b', ausloeser: 'manuell' });
+    expect(doc('mann').status).toBe('pending');
+    expect(b.ablehnGruende).toEqual({ doppelt_haushalt: 1 });
   });
 });

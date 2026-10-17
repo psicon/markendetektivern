@@ -1215,6 +1215,35 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
 - **Lose Ware wird angenommen** (Entscheidung Patrick, 20.09.): Waagen-Codes
   sind kein Ablehngrund. Nur kennzeichnen und die Doppelprüfung zusätzlich nach
   Markt trennen.
+- **Haushalts-Regel (Entscheidung Patrick 17.10.2026: „ja, bau die
+  Haushalts-Regel").** Dasselbe Produkt (effektive EAN) vom selben Ort binnen
+  einer Stunde wird nur einmal bezahlt — auch über verschiedene Konten.
+  `duplicatePolicy.evaluateHaushalt`: Gerätestandort (`capture.gps`) beider
+  Einreichungen ≤ 50 m auseinander, beide genauer als 100 m, Einreich-Zeitpunkte
+  (Server) < 60 min auseinander, symmetrisch wie die Wochen-Sperre. Freigabe
+  eines anderen Kontos → Ablehnung `doppelt_haushalt` (am Dokument der App-Code
+  `produkt_bereits_verguetet`, Text in jeder Version; eigener Text
+  `doppelt_haushalt` liegt in productSubmissionCopy.ts für eine spätere
+  Version); ältere offene eines anderen Kontos → offen `haushalt_aelter_offen`.
+  Abgelehnte zählen nie, ohne genauen Standort greift die Regel nicht. Gilt in
+  Runde UND Konsole (precheckOf, `dupHaushalt`, Freigabe dann nur mit force);
+  die Runde schreibt die Ablehnung nur mit feststehendem Beleg (belegeVon).
+  Eigene Notbremse (≥ 6 Personen und > 3 % der Fälle → zurückgehalten), raus
+  aus der Gesamtquote. Schalter `cashback_config/v1.haushaltRegel`: an, außer
+  ausdrücklich `false` (Rückweg ohne Deploy, nur für die Runde — die Konsole
+  zeigt den Befund weiter). Am Dokument stehen weder fremde Doc-ID noch
+  Abstand/Uhrzeit (der Einreicher liest es). Anlass und Messung (18.09.–17.10.,
+  3.616 Einreichungen): zwei Konten eines Haushalts (gleiche angegebene
+  Adresse, verschiedene Handys und E-Mails) fotografierten dieselben Produkte am
+  selben Tisch, im Schnitt 3 min nacheinander — 106 Doppelzahlungen. Paare
+  fremder Konten binnen 60 min lagen entweder ≤ 28 m auseinander (genau zwei
+  Konto-Paare) oder gar nicht nahe (0 Paare zwischen 50 und 500 m); Fremde im
+  selben Laden kamen nicht vor. **Grenzen:** wer länger als eine Stunde wartet,
+  fällt heraus (mit 24 h hätte die Regel beim Haushalt 137 statt 85 Paare
+  erfasst, weiterhin nur diese zwei Konto-Paare — Entscheidung Patrick offen);
+  der Standort kommt vom Client und ließe sich mit einem veränderten Client
+  fälschen. Bei Bons fängt die Doppel-Erkennung denselben Bon schon über Konten
+  (dort 27-mal versucht, nie doppelt bezahlt).
 
 ## Was die Prüfkonsole von der Runde erfährt (Prüfrunde 2, 02.10.2026)
 

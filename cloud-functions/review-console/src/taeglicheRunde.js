@@ -60,7 +60,7 @@ const admin = require('firebase-admin');
 const { FieldValue } = require('firebase-admin/firestore');
 const logger = require('firebase-functions/logger');
 const { GoogleGenAI } = require('@google/genai');
-const { evaluateDuplicate, completenessCheck, dupZumSpeichern, appGrund, REASON } = require('./duplicatePolicy');
+const { evaluateDuplicate, evaluateHaushalt, completenessCheck, dupZumSpeichern, appGrund, REASON } = require('./duplicatePolicy');
 const {
   entscheideFall, bildBefund, fotoVorbefund, bildMitVorbefund, belegeVon, notbremse, nameAusLesungen, eanAusLesungen, rettungNichtGeschafft, rundeOffenEintrag, preisBildschirmGemeldet,
   korrekturBremse, KORREKTUR_ALT_MAX, BILD_GRUENDE, AUSSER_GESAMTQUOTE, KONTO_GESPERRT,
@@ -138,6 +138,7 @@ function noteFor(reason, ctx = {}) {
   const until = fmtDate(ctx.lockUntil);
   switch (reason) {
     case REASON.SAME_USER_WEEK: return `Dieses Produkt hast du diese Woche schon eingereicht — die erste Einreichung zählt. Ab ${until || 'nächster Woche'} zählt derselbe Artikel wieder.`;
+    case REASON.HAUSHALT: return 'Dieses Produkt kam gerade schon vom selben Ort über ein anderes Konto — pro Einkauf zählt jedes Produkt einmal. Ein anderes Produkt bringt beim nächsten Mal wieder etwas.';
     case 'unvollstaendig': return `Es fehlen Fotos (${(ctx.missing || []).join(', ') || 'siehe Liste'}). Mit allen sieben Ansichten klappt es beim nächsten Mal.`;
     case 'ean_fehlt': return 'Der Barcode (EAN, 8–14 Ziffern) ordnet das Produkt eindeutig zu — beim nächsten Mal bitte scannen oder eintippen.';
     case 'kein_produktname': return 'Der Produktname war nicht erkennbar — Vorderseite gut ausgeleuchtet und ohne Spiegelung, dann passt es.';
@@ -488,7 +489,7 @@ async function ladeMaerkte(db) {
   }
 }
 
-function regelVersion(preisBildschirmModus, preisBelegModus, barcodeKorrekturAn = false) {
+function regelVersion(preisBildschirmModus, preisBelegModus, barcodeKorrekturAn = false, haushaltAn = true) {
   const h = crypto.createHash('sha1');
   // werte.js gehört dazu: es bestimmt, welche EAN, welcher Preis und welcher
   // Hersteller in die Regeln eingehen; ort.js, wann der Aufnahmeort auffällt.
@@ -504,6 +505,9 @@ function regelVersion(preisBildschirmModus, preisBelegModus, barcodeKorrekturAn 
   h.update(`preisBildschirmRegel=${String(preisBildschirmModus)};preisBelegRegel=${String(preisBelegModus)}`);
   // Und der Schalter der Barcode-Korrektur: an/aus ändert, was entschieden wird.
   h.update(`barcodeKorrektur=${barcodeKorrekturAn === true}`);
+  // Und der Schalter der Haushalts-Regel (17.10.2026) — nur wenn aus: an ist der Normalfall,
+  // die Version vor der Regel unterscheidet sich ohnehin über duplicatePolicy.js.
+  if (haushaltAn === false) h.update('haushaltRegel=false');
   return h.digest('hex').slice(0, 10);
 }
 
@@ -624,8 +628,12 @@ async function dateiListe(storage) {
  * @param {*} [opts.barcodeKorrektur]  Rohwert des Schalters der Barcode-Korrektur
  *   (`cashback_config/v1.barcodeKorrektur`; fehlt = null). Nicht übergeben
  *   (undefined) → die Runde liest ihn selbst. NUR `true` wendet Korrekturen an.
+ * @param {*} [opts.haushaltRegel]  Rohwert des Schalters der Haushalts-Regel
+ *   (`cashback_config/v1.haushaltRegel`, Entscheidung Patrick 17.10.2026). Die Regel
+ *   gilt, außer der Schalter steht ausdrücklich auf `false` (Rückweg ohne Deploy);
+ *   nicht lesbar = an — sie schränkt nur ein, und ihre Notbremse hält Massenfälle.
  */
-async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser = 'zeitplan', vergleich = null, nurLesen = false, arbeitszeitMs = ARBEITSZEIT_MS, preisBildschirmRegel, preisBelegRegel, barcodeKorrektur } = {}) {
+async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser = 'zeitplan', vergleich = null, nurLesen = false, arbeitszeitMs = ARBEITSZEIT_MS, preisBildschirmRegel, preisBelegRegel, barcodeKorrektur, haushaltRegel } = {}) {
   if (vergleich || nurLesen) dryRun = true;
   // Nachgelesene Angaben und die Foto-Nummer sind Tatsachen über die Fotos und
   // werden auch im normalen Trockenlauf gespeichert — nur nicht beim reinen Rechnen.
@@ -658,8 +666,9 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   let pbRoh = preisBildschirmRegel;
   let belegRoh = preisBelegRegel;
   let korrekturRoh = barcodeKorrektur;
+  let haushaltRoh = haushaltRegel;
   let korrekturSchalterUnbekannt = null;
-  if (pbRoh === undefined || belegRoh === undefined || korrekturRoh === undefined) {
+  if (pbRoh === undefined || belegRoh === undefined || korrekturRoh === undefined || haushaltRoh === undefined) {
     let cfg = {};
     let lesefehler = null;
     try { cfg = (await db.doc('cashback_config/v1').get()).data() || {}; }
@@ -676,7 +685,10 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
         logger.warn('Schalter barcodeKorrektur nicht lesbar — heute keine Barcode-Korrektur', { fehler: String(lesefehler && lesefehler.message).slice(0, 160) });
       } else korrekturRoh = cfg.barcodeKorrektur ?? null;
     }
+    if (haushaltRoh === undefined) haushaltRoh = lesefehler ? null : cfg.haushaltRegel ?? null;
   }
+  // Haushalts-Regel (17.10.2026): an, außer ausdrücklich false.
+  const haushaltAn = haushaltRoh !== false;
   const pbModus = modusPreisBildschirm(pbRoh);
   const pbSchalter = schalterRohOf(pbRoh);
   const belegModus = modusPreisBeleg(belegRoh);
@@ -1239,6 +1251,10 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     // fremden Strichcode auf dem Barcode-Foto aus der Wochen-Sperre herauskommen
     // (fotoRundeRegeln.entscheideFall, `ean_alt_doppelt`).
     const dupAlt = pol.ean ? evaluateDuplicate(pol, verwandte(pol)) : null;
+    // Haushalts-Regel (Entscheidung Patrick 17.10.2026): dieselbe EAN von einem
+    // anderen Konto am selben Ort binnen einer Stunde — aus denselben Nachbarn
+    // (alle Konten, Status jetzt), also auch mit den Entscheidungen dieses Laufs.
+    const dupHaushalt = haushaltAn && pol.ean && dup.verdict === 'ok' ? evaluateHaushalt(pol, nachbarn(pol.ean, d.id)) : null;
     if (ef && ef.art === 'korrigiert') {
       eanFotoHinweis = `Barcode korrigiert: gespeichert war ${ef.gespeichert}, das Foto zeigt zweimal ${ef.gelesen}`
         + (ef.korrektur && ef.korrektur.aus === 'vorbefund' ? ` (Befund vom ${ef.korrektur.befundVom || 'früheren Lauf'})` : '')
@@ -1308,7 +1324,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       kontoSperre, comp: v.comp, dup, leer: v.leer, unlesbar: v.unlesbar,
       bild: bildMitVorbefund(bildBefund(d.id, partnerVon.get(d.id) || [], info, freigabeVon), fotoVorbefund(d.x), { vollstaendig: fotoVollstaendig(d.id) }),
       fotoAbgleichFehlt: liste == null,
-      eanFoto: ef, eanFotoHinweis, dupAlt, dupAltHinweis, eanKorrigiert: !!pol.eanVorher,
+      eanFoto: ef, eanFotoHinweis, dupAlt, dupAltHinweis, dupHaushalt, eanKorrigiert: !!pol.eanVorher,
       audit: audit.get(d.id) || null, auditFehler: auditFehler.get(d.id) || null, rettungFehler: rf,
       preisVorhanden: !!preisOf(d.x), preisHinweis: preisHinweisOf(d.x), ortAuffaellig: ort ? ort.text : null,
       namerLaeuft: namerAb != null && namerAb > start - NAMER_HAENGT_MS, preisBildDefekt,
@@ -1421,10 +1437,15 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       }
       // Mit Doppel-Befund (Referenz, „Anders"): ohne ihn fehlt in der Prüfkonsole
       // genau bei den Sperr-Ablehnungen die Grundlage fürs Zurückholen.
+      // Haushalts-Regel (17.10.2026): nur Urteil und Grund — die Referenz
+      // gehört einem anderen Konto, deren Doc-ID verriete dessen uid (das
+      // Dokument liest der Einreicher selbst, siehe dupZumSpeichern).
+      const hh = p.eingabe && p.eingabe.dupHaushalt && p.eingabe.dupHaushalt.verdict !== 'ok' ? p.eingabe.dupHaushalt : null;
       const precheck = {
-        verdict: p.comp.ok ? (p.dup.verdict === 'ok' ? 'ok' : p.dup.verdict) : 'incomplete',
-        reasons: [...p.comp.problems, ...(p.dup.reason ? [p.dup.reason] : [])],
+        verdict: p.comp.ok ? (p.dup.verdict !== 'ok' ? p.dup.verdict : hh ? hh.verdict : 'ok') : 'incomplete',
+        reasons: [...p.comp.problems, ...(p.dup.reason ? [p.dup.reason] : []), ...(hh ? [hh.reason] : [])],
         dup: dupZumSpeichern(p.dup),
+        ...(hh ? { haushalt: { verdict: hh.verdict, reason: hh.reason } } : {}),
       };
       // Die Antwort auf „Woher stammt der Preis?" (preisQuelle) bewusst NICHT
       // am Dokument: das liest der Einreicher selbst (firestore.rules), und
@@ -1628,7 +1649,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     });
   }
   if (bonNachgereicht) bonRundeHeute = bonRundeRoh(bonNachgereicht);
-  const version = regelVersion(pbModus, belegModus, korrekturAn);
+  const version = regelVersion(pbModus, belegModus, korrekturAn, haushaltAn);
   const zaehle = (liste, feld) => liste.reduce((a, p) => { const k = p[feld] || '?'; a[k] = (a[k] || 0) + 1; return a; }, {});
   const abgelehnt = plan.filter((p) => p.entscheidung === 'ablehnen' && !p.uebersprungen);
   // Gesperrte Konten liegen stumm und dauerhaft — sie warten NICHT auf eine

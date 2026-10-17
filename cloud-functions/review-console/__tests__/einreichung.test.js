@@ -552,3 +552,41 @@ describe('Rückweg: verworfene Barcode-Korrektur in der Konsole (Prüfrunde 06.1
     expect(nachbarnVon(idx, ANDERE)).toEqual([]);
   });
 });
+
+describe('Haushalts-Regel in der Konsole (Entscheidung Patrick 17.10.2026)', () => {
+  const MIN = 60 * 1000;
+  const ort = (lat, lon, accuracyM = 15) => ({ capture: { gpsStatus: 'granted_precise', gps: { lat, lon, accuracyM } } });
+  const zeile = (id, extra) => rowOf(doc(id, basis({ ean: GUELTIG, productNameOcr: 'Schwartau Schoko Mac', ...extra })));
+  const kand = zeile('k', { userId: 'u1', ...ort(51.315, 10.315) });
+  const partner = (extra = {}) => zeile('p', { userId: 'u2', status: 'approved', createdAt: T0 - 3 * MIN, ...ort(51.3151, 10.315), ...extra });
+
+  it('Freigabe eines anderen Kontos am selben Ort binnen einer Stunde → gesperrt (doppelt_haushalt)', () => {
+    const pre = precheckOf(kand, [kand, partner()]);
+    expect(pre.verdict).toBe('locked');
+    expect(pre.reasons).toContain('doppelt_haushalt');
+    expect(pre.dupHaushalt).toMatchObject({ verdict: 'locked', priorId: 'p', minuten: 3 });
+  });
+
+  it('ältere offene des anderen Kontos → halten', () => {
+    const pre = precheckOf(kand, [kand, partner({ status: 'pending' })]);
+    expect(pre).toMatchObject({ verdict: 'hold', reasons: expect.arrayContaining(['haushalt_aelter_offen']) });
+  });
+
+  it('zwei Stunden auseinander, anderer Ort oder ohne Standort → frei', () => {
+    expect(precheckOf(kand, [kand, partner({ createdAt: T0 - 120 * MIN })]).verdict).toBe('ok');
+    expect(precheckOf(kand, [kand, partner(ort(51.32, 10.315))]).verdict).toBe('ok');
+    expect(precheckOf(kand, [kand, partner({ capture: null })]).verdict).toBe('ok');
+  });
+
+  it('die Wochen-Sperre geht vor (dieselbe Person) — kein zweiter Grund', () => {
+    const eigene = zeile('e', { userId: 'u1', status: 'approved', createdAt: T0 - 3 * MIN, ...ort(51.315, 10.315) });
+    const pre = precheckOf(kand, [kand, eigene, partner()]);
+    expect(pre.reasons).toContain('sperre_woche_gleicher_nutzer');
+    expect(pre.reasons).not.toContain('doppelt_haushalt');
+  });
+
+  it('kein Standort in der Zeile für die Oberfläche (stripPolicy)', () => {
+    expect(JSON.stringify(stripPolicy(kand))).not.toContain('51.315');
+    expect(kand._policy.gps).toEqual({ lat: 51.315, lon: 10.315, genauigkeitM: 15 });
+  });
+});

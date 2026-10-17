@@ -39,6 +39,20 @@
 // Grenze exklusiv: genau 168 h später zählt derselbe Artikel wieder.
 const SAME_USER_LOCK_MS = 7 * 24 * 60 * 60 * 1000;
 
+// Haushalts-Regel (Entscheidung Patrick 17.10.2026): dasselbe Produkt vom
+// selben Ort binnen einer Stunde wird nur einmal bezahlt — auch über
+// verschiedene Konten. Gemessen 18.09.–17.10.2026 (3.616 Einreichungen, 3.417
+// mit Gerätestandort): Paare fremder Konten mit derselben EAN binnen 60 min
+// lagen entweder ≤ 28 m auseinander oder gar nicht in der Nähe (0 Paare
+// zwischen 50 und 500 m). Die nahen stammten von genau zwei Konto-Paaren, eins
+// mit derselben angegebenen Adresse (91 Paare, 82 doppelt bezahlt). Fremde
+// im selben Laden zur selben Zeit kamen nicht vor.
+const HAUSHALT_FENSTER_MS = 60 * 60 * 1000;
+const HAUSHALT_RADIUS_M = 50;
+// Nur genaue Standorte: ein grober Fix (Funkzelle, „ungefährer Standort")
+// liegt bei Fremden in derselben Stadt oft auf demselben Punkt.
+const HAUSHALT_GENAUIGKEIT_MAX_M = 100;
+
 const REASON = Object.freeze({
   // Interner Grund der Wochen-Sperre (Bericht, `review.reason`, Prüfkonsole).
   // Am Dokument steht für die App bis auf Weiteres APP_GRUND[…], siehe dort.
@@ -50,6 +64,10 @@ const REASON = Object.freeze({
   // Altbestand bis 20.09.2026 (fremde Einreichungen sperrten).
   OTHER_USER: 'sperre_30_tage_anderer_nutzer',
   PENDING_OLDER: 'doppelt_eingereicht',
+  // Haushalts-Regel (17.10.2026): Ablehngrund bzw. Halte-Grund (ältere
+  // Einreichung eines anderen Kontos vom selben Ort noch offen).
+  HAUSHALT: 'doppelt_haushalt',
+  HAUSHALT_AELTER_OFFEN: 'haushalt_aelter_offen',
 });
 
 /**
@@ -80,6 +98,13 @@ const REASON = Object.freeze({
  * Literal statt Import aus src/preisBildschirm.js: keine Abhängigkeit der
  * Doppel-Regel von der Bildschirm-Regel.
  *
+ * Haushalts-Regel → `produkt_bereits_verguetet` (17.10.2026). Dessen Text
+ * („Dieses Produkt war schon im Katalog — Jedes Produkt zählt einmal …") steht
+ * seit 05.09.2026 in jeder Version und stimmt: das Produkt ist gerade erfasst
+ * und bezahlt worden, nur eben über das andere Konto. `doppelt_eingereicht`
+ * wäre falsch („hattest DU schon eingereicht"). Ein eigener Text liegt unter
+ * `doppelt_haushalt` für eine spätere Version bereit (wie oben).
+ *
  * Der interne Grund bleibt in `review.reason` am Dokument, damit Bericht,
  * Notbremse und Auswertungen die Wochen-Sperre von anderen Doppeln trennen.
  */
@@ -87,6 +112,7 @@ const APP_GRUND = Object.freeze({
   [REASON.SAME_USER_WEEK]: REASON.PENDING_OLDER,
   [REASON.SAME_USER]: REASON.PENDING_OLDER,
   preis_bildschirm: 'fotos_unpassend',
+  [REASON.HAUSHALT]: 'produkt_bereits_verguetet',
 });
 const appGrund = (code) => APP_GRUND[code] || code;
 
@@ -241,6 +267,79 @@ function evaluateDuplicate(candidate, others) {
   };
 }
 
+/** Gerätestandort für die Haushalts-Regel — nur ein genauer Fix zählt, sonst null. */
+function haushaltOrt(gps) {
+  if (!gps || !Number.isFinite(gps.lat) || !Number.isFinite(gps.lon)) return null;
+  if (gps.lat === 0 && gps.lon === 0) return null;
+  if (!Number.isFinite(gps.genauigkeitM) || gps.genauigkeitM > HAUSHALT_GENAUIGKEIT_MAX_M) return null;
+  return gps;
+}
+
+/** Abstand zweier Punkte in Metern (Haversine). */
+function abstandM(a, b) {
+  const R = 6371e3, r = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * r, dLon = (b.lon - a.lon) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/**
+ * Haushalts-Regel (Entscheidung Patrick 17.10.2026): dasselbe Produkt vom
+ * selben Ort binnen einer Stunde wird nur einmal bezahlt — auch über
+ * verschiedene Konten. Ergänzt die Wochen-Sperre (dieselbe Person), ersetzt sie
+ * nicht; die Gründerentscheidung vom 20.09.2026 („fremde Einreichungen sperren
+ * niemanden") gilt weiter für alles, was nicht am selben Ort zur selben Zeit
+ * entstand. Anlass: zwei Konten eines Haushalts fotografierten dieselben
+ * Produkte am selben Tisch, im Schnitt 3 Minuten nacheinander, und bekamen
+ * beide Geld.
+ *
+ * „Selber Ort" = Gerätestandort (`capture.gps`) beider Einreichungen
+ * ≤ HAUSHALT_RADIUS_M auseinander, beide genauer als
+ * HAUSHALT_GENAUIGKEIT_MAX_M. Ohne genauen Standort auf einer Seite greift die
+ * Regel nicht (sie schränkt ein — im Zweifel zahlen wie bisher).
+ * „Binnen einer Stunde" = Einreich-Zeitpunkte (Server, werte.einreichZeit)
+ * weniger als HAUSHALT_FENSTER_MS auseinander, symmetrisch wie die
+ * Wochen-Sperre: wird ein älterer Fall erst nach einem jüngeren entschieden,
+ * sperrt der jüngere trotzdem.
+ *
+ * Wie bei der Wochen-Sperre bleibt immer eine Kopie freigabefähig: eine
+ * FREIGEGEBENE Einreichung eines anderen Kontos sperrt (`locked`), eine ÄLTERE
+ * noch offene hält an (`hold`), bis sie entschieden ist; eine abgelehnte zählt
+ * nie. Die Standortangabe schreibt der Client — ein veränderter Client könnte
+ * sie verfälschen und so der Regel entgehen; mehr als eine Hürde ist sie nicht.
+ *
+ * @param {object} candidate  policyOf-Objekt (id, userId, createdAt, gps {lat, lon, genauigkeitM})
+ * @param {object[]} others   andere Einreichungen derselben EAN (policyOf, beliebiger Status)
+ * @returns {{verdict:'ok'|'locked'|'hold', reason:string|null, priorId:string|null, priorIds:string[], abstandM:number|null, minuten:number|null}}
+ */
+function evaluateHaushalt(candidate, others) {
+  const ok = { verdict: 'ok', reason: null, priorId: null, priorIds: [], abstandM: null, minuten: null };
+  const ort = haushaltOrt(candidate && candidate.gps);
+  const cAt = ms(candidate && candidate.createdAt);
+  if (!ort || cAt == null || !candidate.userId) return ok;
+  const nah = [];
+  for (const o of others || []) {
+    if (!o || o.id === candidate.id || !o.userId || o.userId === candidate.userId) continue;
+    const oOrt = haushaltOrt(o.gps);
+    const t = ms(o.createdAt);
+    if (!oOrt || t == null) continue;
+    const dt = Math.abs(t - cAt);
+    if (dt >= HAUSHALT_FENSTER_MS) continue;
+    const d = abstandM(ort, oOrt);
+    if (d > HAUSHALT_RADIUS_M) continue;
+    nah.push({ o, t, d, dt });
+  }
+  const befund = (verdict, reason, liste) => ({
+    verdict, reason, priorId: liste[0].o.id, priorIds: liste.map((n) => n.o.id),
+    abstandM: Math.round(liste[0].d), minuten: Math.round(liste[0].dt / 60000),
+  });
+  const frei = nah.filter((n) => n.o.status === 'approved').sort((a, b) => b.t - a.t);
+  if (frei.length) return befund('locked', REASON.HAUSHALT, frei);
+  const aelter = nah.filter((n) => n.o.status === 'pending' && n.t < cAt).sort((a, b) => a.t - b.t);
+  if (aelter.length) return befund('hold', REASON.HAUSHALT_AELTER_OFFEN, aelter);
+  return ok;
+}
+
 /**
  * Doppel-Befund zum Speichern am Dokument (`review.precheck.dup`) — dieselbe
  * Form für Morgenrunde und Prüfkonsole. Ohne ihn fehlt beim Zurückholen einer
@@ -276,4 +375,7 @@ function completenessCheck(u, requiredSteps) {
   return { ok: problems.length === 0, problems, missing };
 }
 
-module.exports = { SAME_USER_LOCK_MS, REASON, APP_GRUND, appGrund, evaluateDuplicate, dataDiffers, manufacturerEqual, completenessCheck, dupZumSpeichern, normText, ms };
+module.exports = {
+  SAME_USER_LOCK_MS, HAUSHALT_FENSTER_MS, HAUSHALT_RADIUS_M, HAUSHALT_GENAUIGKEIT_MAX_M, REASON, APP_GRUND, appGrund,
+  evaluateDuplicate, evaluateHaushalt, dataDiffers, manufacturerEqual, completenessCheck, dupZumSpeichern, normText, ms,
+};

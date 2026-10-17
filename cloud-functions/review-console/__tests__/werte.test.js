@@ -1001,3 +1001,12 @@ describe('eanGleichDurchStriche: Strichcode-Leser bestätigt die gespeicherte Nu
     expect(eanGleichDurchStriche(halt, null, { gelesen: [S] })).toBeNull();
   });
 });
+
+describe('policyOf: Gerätestandort für die Haushalts-Regel (17.10.2026)', () => {
+  it('genauer Fix → lat, lon, Genauigkeit; ohne Fix → null', () => {
+    expect(policyOf('k', { capture: { gps: { lat: 51.3, lon: 10.3, accuracyM: 12 } } }).gps).toEqual({ lat: 51.3, lon: 10.3, genauigkeitM: 12 });
+    expect(policyOf('k', { capture: { gps: { lat: 51.3, lon: 10.3 } } }).gps).toEqual({ lat: 51.3, lon: 10.3, genauigkeitM: null });
+    expect(policyOf('k', { capture: { gpsStatus: 'denied' } }).gps).toBeNull();
+    expect(policyOf('k', {}).gps).toBeNull();
+  });
+});

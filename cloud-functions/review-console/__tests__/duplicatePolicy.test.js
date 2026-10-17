@@ -201,3 +201,81 @@ describe('dupZumSpeichern', () => {
     expect(dupZumSpeichern(null)).toBeNull();
   });
 });
+
+describe('evaluateHaushalt — Haushalts-Regel (Entscheidung Patrick 17.10.2026)', () => {
+  const { evaluateHaushalt, HAUSHALT_FENSTER_MS, HAUSHALT_RADIUS_M, HAUSHALT_GENAUIGKEIT_MAX_M } = require('../src/duplicatePolicy');
+  const MIN = 60 * 1000;
+  const ORT = { lat: 51.315, lon: 10.315, genauigkeitM: 15 };
+  const NEBENAN = { lat: 51.3151, lon: 10.315, genauigkeitM: 12 }; // ~11 m
+  const WEIT = { lat: 51.3155, lon: 10.315, genauigkeitM: 10 }; // ~56 m
+  const kand = (over = {}) => base({ id: 'k', userId: 'u1', gps: ORT, ...over });
+  const fremd = (over = {}) => base({ id: 'p', userId: 'u2', status: 'approved', createdAt: T0 - 3 * MIN, gps: NEBENAN, ...over });
+
+  test('Fenster 60 min, Radius 50 m, nur Standorte genauer als 100 m', () => {
+    expect(HAUSHALT_FENSTER_MS).toBe(60 * MIN);
+    expect(HAUSHALT_RADIUS_M).toBe(50);
+    expect(HAUSHALT_GENAUIGKEIT_MAX_M).toBe(100);
+  });
+
+  test('anderes Konto, selber Ort, 3 min vorher bezahlt → gesperrt, mit Abstand und Minuten', () => {
+    const r = evaluateHaushalt(kand(), [fremd()]);
+    expect(r).toMatchObject({ verdict: 'locked', reason: REASON.HAUSHALT, priorId: 'p', priorIds: ['p'], minuten: 3 });
+    expect(r.abstandM).toBeLessThanOrEqual(12);
+  });
+
+  test('mehr als 50 m entfernt → ok', () => {
+    expect(evaluateHaushalt(kand(), [fremd({ gps: WEIT })]).verdict).toBe('ok');
+  });
+
+  test('Zeitgrenze exklusiv: 60 min auseinander → ok, 59 min → gesperrt', () => {
+    expect(evaluateHaushalt(kand(), [fremd({ createdAt: T0 - 60 * MIN })]).verdict).toBe('ok');
+    expect(evaluateHaushalt(kand(), [fremd({ createdAt: T0 - 59 * MIN })]).verdict).toBe('locked');
+  });
+
+  test('symmetrisch: die bezahlte ist JÜNGER (Rückstau) → trotzdem gesperrt, genau eine Kopie bezahlt', () => {
+    expect(evaluateHaushalt(kand(), [fremd({ createdAt: T0 + 5 * MIN })]).verdict).toBe('locked');
+  });
+
+  test('dasselbe Konto → ok (das regelt die Wochen-Sperre)', () => {
+    expect(evaluateHaushalt(kand(), [fremd({ userId: 'u1' })]).verdict).toBe('ok');
+  });
+
+  test('abgelehnte Einreichung des anderen Kontos sperrt nie', () => {
+    expect(evaluateHaushalt(kand(), [fremd({ status: 'rejected' })]).verdict).toBe('ok');
+  });
+
+  test('ältere offene des anderen Kontos → halten; jüngere offene → ok (sie wartet auf diese)', () => {
+    expect(evaluateHaushalt(kand(), [fremd({ status: 'pending' })])).toMatchObject({ verdict: 'hold', reason: REASON.HAUSHALT_AELTER_OFFEN, priorId: 'p' });
+    expect(evaluateHaushalt(kand(), [fremd({ status: 'pending', createdAt: T0 + 2 * MIN })]).verdict).toBe('ok');
+  });
+
+  test('immer bleibt eine Kopie: zwei offene am selben Ort → die ältere ist frei, die jüngere wartet', () => {
+    const alt = base({ id: 'a', userId: 'u2', status: 'pending', createdAt: T0 - 3 * MIN, gps: NEBENAN });
+    const neu = kand();
+    expect(evaluateHaushalt(alt, [neu]).verdict).toBe('ok');
+    expect(evaluateHaushalt(neu, [alt]).verdict).toBe('hold');
+  });
+
+  test('ungenauer Standort, fehlender Standort, 0/0 oder fehlende Genauigkeit → Regel greift nicht', () => {
+    expect(evaluateHaushalt(kand(), [fremd({ gps: { ...NEBENAN, genauigkeitM: 150 } })]).verdict).toBe('ok');
+    expect(evaluateHaushalt(kand({ gps: { ...ORT, genauigkeitM: 101 } }), [fremd()]).verdict).toBe('ok');
+    expect(evaluateHaushalt(kand({ gps: null }), [fremd()]).verdict).toBe('ok');
+    expect(evaluateHaushalt(kand(), [fremd({ gps: null })]).verdict).toBe('ok');
+    expect(evaluateHaushalt(kand({ gps: { lat: 0, lon: 0, genauigkeitM: 5 } }), [fremd({ gps: { lat: 0, lon: 0, genauigkeitM: 5 } })]).verdict).toBe('ok');
+    expect(evaluateHaushalt(kand({ gps: { lat: 51.315, lon: 10.315, genauigkeitM: null } }), [fremd()]).verdict).toBe('ok');
+  });
+
+  test('mehrere bezahlte → alle als Belege, die jüngste zuerst', () => {
+    const r = evaluateHaushalt(kand(), [fremd({ id: 'p1', createdAt: T0 - 30 * MIN }), fremd({ id: 'p2', createdAt: T0 - 2 * MIN, userId: 'u3' })]);
+    expect(r).toMatchObject({ verdict: 'locked', priorId: 'p2', priorIds: ['p2', 'p1'] });
+  });
+
+  test('App-Code: produkt_bereits_verguetet (Text in jeder Version), nicht „hattest du schon eingereicht"', () => {
+    expect(appGrund(REASON.HAUSHALT)).toBe('produkt_bereits_verguetet');
+    expect(appGrund(REASON.HAUSHALT_AELTER_OFFEN)).toBe(REASON.HAUSHALT_AELTER_OFFEN);
+  });
+
+  test('die Wochen-Sperre bleibt unberührt: ein fremdes Konto sperrt dort weiterhin nie', () => {
+    expect(evaluateDuplicate(kand(), [fremd()]).verdict).toBe('ok');
+  });
+});

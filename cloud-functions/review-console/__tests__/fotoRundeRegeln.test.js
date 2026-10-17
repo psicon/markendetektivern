@@ -435,7 +435,7 @@ describe('Notbremse: neue Gründe mit eigener Bremse (02.10.2026)', () => {
   it('gesperrte Konten brauchen keine Bremse: sie werden nicht abgelehnt', () => {
     expect(AUSSER_GESAMTQUOTE.has('konto_gesperrt')).toBe(false);
     const p = [...frei(10), ...Array.from({ length: 15 }, () => ({ entscheidung: 'offen', grund: 'konto_gesperrt', audit: null }))];
-    expect(notbremse(p, { schnittQuote: 0.05 })).toEqual({ bild: false, gesamt: false, preis: false, woche: false, bildschirm: false, text: [], gelb: [] });
+    expect(notbremse(p, { schnittQuote: 0.05 })).toEqual({ bild: false, gesamt: false, preis: false, woche: false, haushalt: false, bildschirm: false, text: [], gelb: [] });
   });
   it('Wochen-Sperre trifft ungewöhnlich viele (≥ 10 und > 15 %) → zurückgehalten', () => {
     const p = [...frei(40), ...ab(12, WOCHE)];
@@ -1235,5 +1235,52 @@ describe('Barcode-Korrektur (Entscheidung Patrick 06.10.2026)', () => {
     expect(korrekturBremse(7, 10)).toBe(false);
     expect(korrekturBremse(8, 178)).toBe(false); // Stau 06.10.2026: 8 von 178
     expect(korrekturBremse(8, 0)).toBe(false);
+  });
+});
+
+describe('Haushalts-Regel (Entscheidung Patrick 17.10.2026)', () => {
+  const HH = { verdict: 'locked', reason: 'doppelt_haushalt', priorId: 'u2_geheim_1', priorIds: ['u2_geheim_1'], abstandM: 11, minuten: 3 };
+  const frei = (n) => Array.from({ length: n }, () => ({ entscheidung: 'freigeben', grund: null, audit: echt }));
+  const ab = (n, uid) => Array.from({ length: n }, (_, i) => ({ entscheidung: 'ablehnen', grund: 'doppelt_haushalt', audit: echt, x: { userId: typeof uid === 'function' ? uid(i) : uid } }));
+
+  it('gesperrt → ablehnen doppelt_haushalt, auch ohne Bildprüfung', () => {
+    expect(entscheideFall(fall({ dupHaushalt: HH, audit: null }))).toMatchObject({ entscheidung: 'ablehnen', grund: 'doppelt_haushalt', ctx: { abstandM: 11, minuten: 3 } });
+  });
+
+  it('ältere offene des anderen Kontos → offen haushalt_aelter_offen; der Hinweis nennt keine fremde Doc-ID', () => {
+    const e = entscheideFall(fall({ dupHaushalt: { ...HH, verdict: 'hold', reason: 'haushalt_aelter_offen' } }));
+    expect(e).toMatchObject({ entscheidung: 'offen', grund: 'haushalt_aelter_offen' });
+    expect(e.ctx.hinweis).toContain('Haushalts-Regel');
+    expect(e.ctx.hinweis).not.toContain('u2_geheim');
+    expect(e.ctx.hinweis).not.toMatch(/\d+ m|min/);
+  });
+
+  it('Barcode-Halt und Wochen-Sperre gehen vor; ohne Befund → freigeben', () => {
+    expect(entscheideFall(fall({ dupHaushalt: HH, eanFoto: { art: 'abweichend', gelesen: '1', gespeichert: '2' } })).grund).toBe('ean_abweichend');
+    expect(entscheideFall(fall({ dupHaushalt: HH, dup: { verdict: 'locked', reason: WOCHE, lockUntil: 1 } })).grund).toBe(WOCHE);
+    expect(entscheideFall(fall({ dupHaushalt: { verdict: 'ok' } })).entscheidung).toBe('freigeben');
+    expect(entscheideFall(fall({ dupHaushalt: null })).entscheidung).toBe('freigeben');
+  });
+
+  it('Beleg der Ablehnung ist die Freigabe des anderen Kontos', () => {
+    expect(belegeVon({ entscheidung: 'ablehnen', grund: 'doppelt_haushalt', eingabe: { dupHaushalt: HH } })).toEqual(['u2_geheim_1']);
+    expect(belegeVon({ entscheidung: 'ablehnen', grund: 'doppelt_haushalt', eingabe: {} })).toEqual([]);
+  });
+
+  it('eigene Notbremse: raus aus der Gesamtquote, zählt Personen', () => {
+    expect(AUSSER_GESAMTQUOTE.has('doppelt_haushalt')).toBe(true);
+    // ein Haushalt reicht gebündelt ein (02.10.: 45 an einem Tag) — eine Person, keine Bremse
+    const p = [...frei(100), ...ab(45, 'LdH')];
+    expect(notbremse(p, { schnittQuote: 0.1 })).toMatchObject({ haushalt: false, gesamt: false });
+    expect(p.filter((x) => x.entscheidung === 'ablehnen')).toHaveLength(45);
+    // sechs Personen bei 150 Fällen (4 %) — eher ein Standortfehler → zurückgehalten
+    const q = [...frei(144), ...ab(6, (i) => `u${i}`)];
+    const b = notbremse(q, { schnittQuote: null });
+    expect(b.haushalt).toBe(true);
+    expect(b.text.join(' ')).toContain('Haushalts-Regel');
+    expect(q.filter((x) => x.grund === 'notbremse_haushalt')).toHaveLength(6);
+    // fünf Personen → noch keine Bremse
+    const r = [...frei(145), ...ab(5, (i) => `u${i}`)];
+    expect(notbremse(r, { schnittQuote: null }).haushalt).toBe(false);
   });
 });

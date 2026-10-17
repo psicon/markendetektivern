@@ -58,6 +58,13 @@ const EIGENE_BREMSEN = Object.freeze([
   // Fehler beim Gruppieren (EAN, Nutzer) als auf echte Doppel.
   { schalter: 'woche', gruende: [REASON.SAME_USER_WEEK], halten: 'notbremse_wochensperre', basis: 'alle', min: 10, anteil: 0.15,
     text: (n, g, pz) => `${n} von ${g} Einreichungen wären wegen der Wochen-Sperre abgelehnt worden (${pz} %) — diese Ablehnungen zurückgehalten.` },
+  // Haushalts-Regel (Entscheidung Patrick 17.10.2026). Gemessen 30 Tage bis
+  // 17.10.: 91 Fälle von 2 Konto-Paaren — ein Haushalt reicht gebündelt ein
+  // (bis 45 an einem Tag), deshalb zählen PERSONEN, nicht Fälle. Viele
+  // Personen an einem Morgen deuten eher auf einen Standortfehler (alle auf
+  // einem Punkt) als auf Haushalte.
+  { schalter: 'haushalt', gruende: [REASON.HAUSHALT], halten: 'notbremse_haushalt', basis: 'alle', min: 6, anteil: 0.03, zaehle: 'personen',
+    text: (n, g, pz, personen) => `${n} Einreichungen von ${personen} Personen wären wegen der Haushalts-Regel abgelehnt worden (${pz} % der ${g}) — diese Ablehnungen zurückgehalten.` },
   // Bildschirmfoto als Preisbeleg (Patrick 04.10.2026). Beruht auf der
   // Bildprüfung. Gemessen: seit 26.09. 6 Fälle in 8,5 Tagen bei ~120
   // geprüften am Tag (~0,6 %). Gezählt werden PERSONEN, nicht Fälle
@@ -126,6 +133,8 @@ const AUSSER_GESAMTQUOTE = new Set([...EIGENE_BREMSEN.flatMap((b) => b.gruende),
  *   effektive oder ursprünglich gespeicherte Nummer, je Seite) — null = nicht gerechnet
  * @param {boolean} [f.eanKorrigiert]  die Einreichung trägt eine Barcode-Korrektur (heute oder früher)
  * @param {string|null} [f.dupAltHinweis]  Text für den Menschen zu `dupAlt`
+ * @param {{verdict:'ok'|'locked'|'hold', priorIds:string[], abstandM:number|null, minuten:number|null}|null} [f.dupHaushalt]  Haushalts-Regel
+ *   (duplicatePolicy.evaluateHaushalt, Entscheidung Patrick 17.10.2026) — null = nicht gerechnet
  * @param {string|null} [f.eanFotoHinweis]  Text für den Menschen (z. B. eigene Freigabe unter der Foto-Nummer)
  * @param {{echt:boolean, loseWare:boolean, traegtAngaben?:boolean, gleicheAnsicht:boolean, grund:string}|null} f.audit
  * @param {string|null} f.auditFehler   Fehlermeldung, wenn die Bildprüfung scheiterte
@@ -213,6 +222,19 @@ function entscheideFall(f) {
   const korrigiert = !!f.eanKorrigiert || !!(f.eanFoto && f.eanFoto.art === 'korrigiert');
   if ((f.dupAlt && f.dupAlt.verdict !== 'ok') || (korrigiert && !f.dupAlt)) {
     return offen('ean_alt_doppelt', { hinweis: f.dupAltHinweis || f.eanFotoHinweis || 'Doppel-Regel über die ursprünglich gespeicherte Barcode-Nummer: eigene Einreichung dieser Woche' });
+  }
+
+  // Haushalts-Regel (Entscheidung Patrick 17.10.2026, duplicatePolicy.
+  // evaluateHaushalt): dieselbe EAN, bezahlt bei einem anderen Konto am selben
+  // Ort binnen einer Stunde → ablehnen; dort eine ältere noch offene → erst die
+  // entscheiden. Wie die Wochen-Sperre vor der Bildprüfung: das Urteil hängt an
+  // EAN, Ort und Zeit, nicht an den Fotos. Der Hinweis nennt weder die fremde
+  // Doc-ID noch Abstand und Uhrzeit — `review.rundeOffen` liest der Einreicher
+  // selbst, und bei Fremden im selben Laden ginge ihn das nichts an.
+  const hh = f.dupHaushalt || null;
+  if (hh && hh.verdict === 'locked') return ablehnen(REASON.HAUSHALT, { abstandM: hh.abstandM, minuten: hh.minuten });
+  if (hh && hh.verdict === 'hold') {
+    return offen(REASON.HAUSHALT_AELTER_OFFEN, { hinweis: 'Dasselbe Produkt von einem anderen Konto am selben Ort binnen einer Stunde ist noch offen — erst das entscheiden (Haushalts-Regel)' });
   }
 
   // Identisches Identitätsfoto in einer FRÜHEREN Einreichung (Abgleich gegen
@@ -553,7 +575,8 @@ const rettungNichtGeschafft = () => ({ name: 'zeit_abgelaufen', ean: 'zeit_abgel
 
 /**
  * Worauf sich eine Ablehnung stützt, die eine ANDERE Einreichung als Beleg
- * nimmt: die Wochen-Sperre (eigene Freigaben im Fenster) und „Fotos
+ * nimmt: die Wochen-Sperre (eigene Freigaben im Fenster), die Haushalts-Regel
+ * (Freigabe eines anderen Kontos am selben Ort, 17.10.2026) und „Fotos
  * wiederverwendet" (ältere Einreichungen mit demselben Foto). Die Morgenrunde
  * schreibt so eine Ablehnung nur, wenn mindestens einer dieser Belege
  * feststeht — vorher entschieden oder im selben Lauf tatsächlich geschrieben
@@ -565,6 +588,11 @@ const rettungNichtGeschafft = () => ({ name: 'zeit_abgelaufen', ean: 'zeit_abgel
 function belegeVon(fall) {
   if (!fall || fall.entscheidung !== 'ablehnen') return null;
   if (fall.grund === REASON.SAME_USER_WEEK && fall.dup) return fall.dup.priorIds || (fall.dup.priorId ? [fall.dup.priorId] : []);
+  // Haushalts-Regel (17.10.2026): Beleg ist die Freigabe des anderen Kontos.
+  if (fall.grund === REASON.HAUSHALT) {
+    const hh = fall.eingabe && fall.eingabe.dupHaushalt;
+    return (hh && (hh.priorIds && hh.priorIds.length ? hh.priorIds : hh.priorId ? [hh.priorId] : [])) || [];
+  }
   if (fall.grund === 'bilder_wiederverwendet') return (fall.eingabe && fall.eingabe.bild && fall.eingabe.bild.mit) || [];
   return null;
 }
@@ -852,7 +880,7 @@ function rundeOffenVon(p) {
  * sie sind die harmlose Richtung.
  *
  *  A) Eigene Bremsen (EIGENE_BREMSEN): Preis fehlt, Wochen-Sperre,
- *     Bildschirmfoto als Preisbeleg — jede mit eigener Schwelle, bezogen auf
+ *     Haushalts-Regel, Bildschirmfoto als Preisbeleg — jede mit eigener Schwelle, bezogen auf
  *     die geprüften Fälle (Preis und Bildschirm beruhen auf der Bildprüfung)
  *     bzw. auf alle Fälle des Laufs. Gesperrte Konten brauchen
  *     keine: sie werden nicht abgelehnt, sondern liegen gelassen.
@@ -885,14 +913,14 @@ function rundeOffenVon(p) {
  *
  * @param {Array<{entscheidung:string, grund:string|null, audit?:object|null}>} plan (wird verändert)
  * @param {{schnittQuote:number|null, bildMaxAnteil?:number, bildMin?:number, gesamtMin?:number}} opts
- * @returns {{bild:boolean, gesamt:boolean, preis:boolean, woche:boolean, bildschirm:boolean, text:string[], gelb:Array<{code:string, text:string}>, ausVortagen?:Object<string,number>}}
+ * @returns {{bild:boolean, gesamt:boolean, preis:boolean, woche:boolean, haushalt:boolean, bildschirm:boolean, text:string[], gelb:Array<{code:string, text:string}>, ausVortagen?:Object<string,number>}}
  *   `bildschirm` usw.: die Bremse greift — bei der Bildschirm-Bremse auch,
  *   wenn sie nur dank der Kohorte greift und nichts Neues zurückzuhalten war;
  *   `text`: rote Warnungen; `gelb`: gelbe (es warten Fälle aus Vortagen, kein neuer Befund);
  *   `ausVortagen`: je Bremse mit `vortageGetrennt` die Größe der Kohorte, sobald sie nicht leer ist
  */
 function notbremse(plan, { schnittQuote = null, bildMaxAnteil = 0.1, bildMin = 5, gesamtMin = 10 } = {}) {
-  const ergebnis = { bild: false, gesamt: false, preis: false, woche: false, bildschirm: false, text: [], gelb: [] };
+  const ergebnis = { bild: false, gesamt: false, preis: false, woche: false, haushalt: false, bildschirm: false, text: [], gelb: [] };
   const geprueft = plan.filter((p) => p.audit).length;
   const halten = (liste, grund) => liste.forEach((p) => { p.zurueckgehaltenGrund = p.grund; p.entscheidung = 'offen'; p.grund = grund; });
   const pz = (n, g) => Math.round((100 * n) / g);
