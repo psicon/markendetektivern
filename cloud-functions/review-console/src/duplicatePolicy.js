@@ -39,15 +39,18 @@
 // Grenze exklusiv: genau 168 h später zählt derselbe Artikel wieder.
 const SAME_USER_LOCK_MS = 7 * 24 * 60 * 60 * 1000;
 
-// Haushalts-Regel (Entscheidung Patrick 17.10.2026): dasselbe Produkt vom
-// selben Ort binnen einer Stunde wird nur einmal bezahlt — auch über
-// verschiedene Konten. Gemessen 18.09.–17.10.2026 (3.616 Einreichungen, 3.417
-// mit Gerätestandort): Paare fremder Konten mit derselben EAN binnen 60 min
-// lagen entweder ≤ 28 m auseinander oder gar nicht in der Nähe (0 Paare
-// zwischen 50 und 500 m). Die nahen stammten von genau zwei Konto-Paaren, eins
-// mit derselben angegebenen Adresse (91 Paare, 82 doppelt bezahlt). Fremde
-// im selben Laden zur selben Zeit kamen nicht vor.
-const HAUSHALT_FENSTER_MS = 60 * 60 * 1000;
+// Haushalts-Regel (Entscheidung Patrick 17.10.2026, Fenster 18.10.2026 auf
+// 24 h erweitert: „ja, erweitere auf 24 Stunden", „wenn du dir sicher bist, dass
+// das bei anderen keine Nachteile hervorruft"): dasselbe Produkt vom selben Ort
+// binnen 24 Stunden wird nur einmal bezahlt — auch über verschiedene Konten.
+// Gemessen über den ganzen Bestand mit genauem Standort (11.08.–18.10.2026,
+// 4.345 Einreichungen): Paare fremder Konten mit derselben EAN binnen 24 h lagen
+// entweder ≤ 28 m auseinander oder gar nicht in der Nähe (0 Paare zwischen 50 und
+// 200 m). Die nahen stammten von genau drei Konto-Paaren, alle Haushalte (zwei mit
+// derselben angegebenen Adresse, eins ohne Adresse, aber stets ≤ 12 m): 138 Paare,
+// 116 doppelt bezahlt. Mit 60 min wären es 87 gewesen. Fremde im selben Laden oder
+// in der Nachbarschaft am selben Tag kamen nicht vor.
+const HAUSHALT_FENSTER_MS = 24 * 60 * 60 * 1000;
 const HAUSHALT_RADIUS_M = 50;
 // Nur genaue Standorte: ein grober Fix (Funkzelle, „ungefährer Standort")
 // liegt bei Fremden in derselben Stadt oft auf demselben Punkt.
@@ -284,8 +287,8 @@ function abstandM(a, b) {
 }
 
 /**
- * Haushalts-Regel (Entscheidung Patrick 17.10.2026): dasselbe Produkt vom
- * selben Ort binnen einer Stunde wird nur einmal bezahlt — auch über
+ * Haushalts-Regel (Entscheidung Patrick 17.10.2026, 24 h seit 18.10.): dasselbe
+ * Produkt vom selben Ort binnen 24 Stunden wird nur einmal bezahlt — auch über
  * verschiedene Konten. Ergänzt die Wochen-Sperre (dieselbe Person), ersetzt sie
  * nicht; die Gründerentscheidung vom 20.09.2026 („fremde Einreichungen sperren
  * niemanden") gilt weiter für alles, was nicht am selben Ort zur selben Zeit
@@ -297,7 +300,7 @@ function abstandM(a, b) {
  * ≤ HAUSHALT_RADIUS_M auseinander, beide genauer als
  * HAUSHALT_GENAUIGKEIT_MAX_M. Ohne genauen Standort auf einer Seite greift die
  * Regel nicht (sie schränkt ein — im Zweifel zahlen wie bisher).
- * „Binnen einer Stunde" = Einreich-Zeitpunkte (Server, werte.einreichZeit)
+ * „Binnen 24 Stunden" = Einreich-Zeitpunkte (Server, werte.einreichZeit)
  * weniger als HAUSHALT_FENSTER_MS auseinander, symmetrisch wie die
  * Wochen-Sperre: wird ein älterer Fall erst nach einem jüngeren entschieden,
  * sperrt der jüngere trotzdem.

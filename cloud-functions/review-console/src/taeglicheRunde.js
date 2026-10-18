@@ -138,7 +138,7 @@ function noteFor(reason, ctx = {}) {
   const until = fmtDate(ctx.lockUntil);
   switch (reason) {
     case REASON.SAME_USER_WEEK: return `Dieses Produkt hast du diese Woche schon eingereicht — die erste Einreichung zählt. Ab ${until || 'nächster Woche'} zählt derselbe Artikel wieder.`;
-    case REASON.HAUSHALT: return 'Dieses Produkt kam gerade schon vom selben Ort über ein anderes Konto — pro Einkauf zählt jedes Produkt einmal. Ein anderes Produkt bringt beim nächsten Mal wieder etwas.';
+    case REASON.HAUSHALT: return 'Dieses Produkt kam schon vom selben Ort über ein anderes Konto — pro Einkauf zählt jedes Produkt einmal. Ein anderes Produkt bringt beim nächsten Mal wieder etwas.';
     case 'unvollstaendig': return `Es fehlen Fotos (${(ctx.missing || []).join(', ') || 'siehe Liste'}). Mit allen sieben Ansichten klappt es beim nächsten Mal.`;
     case 'ean_fehlt': return 'Der Barcode (EAN, 8–14 Ziffern) ordnet das Produkt eindeutig zu — beim nächsten Mal bitte scannen oder eintippen.';
     case 'kein_produktname': return 'Der Produktname war nicht erkennbar — Vorderseite gut ausgeleuchtet und ohne Spiegelung, dann passt es.';
@@ -1252,7 +1252,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     // (fotoRundeRegeln.entscheideFall, `ean_alt_doppelt`).
     const dupAlt = pol.ean ? evaluateDuplicate(pol, verwandte(pol)) : null;
     // Haushalts-Regel (Entscheidung Patrick 17.10.2026): dieselbe EAN von einem
-    // anderen Konto am selben Ort binnen einer Stunde — aus denselben Nachbarn
+    // anderen Konto am selben Ort binnen 24 Stunden — aus denselben Nachbarn
     // (alle Konten, Status jetzt), also auch mit den Entscheidungen dieses Laufs.
     const dupHaushalt = haushaltAn && pol.ean && dup.verdict === 'ok' ? evaluateHaushalt(pol, nachbarn(pol.ean, d.id)) : null;
     if (ef && ef.art === 'korrigiert') {

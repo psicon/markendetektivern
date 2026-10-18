@@ -109,12 +109,12 @@ const REASON_COPY: Record<string, { headline: string; body: string }> = {
     body: 'Beim nächsten Produkt einfach das Preisschild am Regal oder deinen Kassenbon fotografieren — dann zählt der Datensatz.',
   },
   // 17.10.2026 (Entscheidung Patrick): Haushalts-Regel — dasselbe Produkt vom
-  // selben Ort binnen einer Stunde zählt einmal, auch über verschiedene Konten.
+  // selben Ort binnen 24 Stunden zählt einmal, auch über verschiedene Konten.
   // Der Server schreibt vorerst `produkt_bereits_verguetet` ans Dokument (alle
   // Versionen kennen ihn; review-console/src/duplicatePolicy.js, APP_GRUND) —
   // er stellt um, sobald diese Version verbreitet ist.
   doppelt_haushalt: {
-    headline: 'Dieses Produkt wurde gerade schon erfasst',
+    headline: 'Dieses Produkt wurde schon erfasst',
     body: 'Vom selben Ort zählt jedes Produkt einmal pro Einkauf — auch wenn ihr zu zweit fotografiert. Ein anderes Produkt bringt beim nächsten Mal wieder etwas.',
   },
   // 04.10.2026 (Patrick: Bildschirmfotos als Preisbeleg erkennen). Der Server

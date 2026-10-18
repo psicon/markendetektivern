@@ -306,7 +306,7 @@ const OHNE_DOPPEL = { verdict: 'ok', reason: null, priorId: null, priorUserId: n
  *    bzw. `preis_beleg_unsicher` (Befund „halten" aus dem Preisbeleg, 05.10.2026).
  *  - Haushalts-Regel (Entscheidung Patrick 17.10.2026, duplicatePolicy.evaluateHaushalt):
  *    dieselbe EAN, freigegeben bei einem ANDEREN Konto am selben Ort (≤ 50 m)
- *    binnen einer Stunde → `locked` (`doppelt_haushalt`); eine ältere noch
+ *    binnen 24 Stunden → `locked` (`doppelt_haushalt`); eine ältere noch
  *    offene dort → `hold` (`haushalt_aelter_offen`). Rechnet aus denselben
  *    `sameEanRows` (alle Konten); `dupHaushalt` trägt die Referenz nur für die
  *    Oberfläche (Admins) — gespeichert wird sie nicht (fremde Doc-ID).
@@ -318,7 +318,7 @@ function precheckOf(row, sameEanRows, { kontoSperre = null, fotoEanRows = null, 
   const reasons = [...completeness.problems];
   if (dup.verdict === 'locked' || dup.verdict === 'hold') reasons.push(dup.reason);
   // Haushalts-Regel (Entscheidung Patrick 17.10.2026): dieselbe EAN von einem
-  // anderen Konto am selben Ort binnen einer Stunde. Nach der Wochen-Sperre —
+  // anderen Konto am selben Ort binnen 24 Stunden. Nach der Wochen-Sperre —
   // greift die schon, ist es dieselbe Feststellung für dieselbe Person.
   const dupHaushalt = row._policy.ean && dup.verdict === 'ok' ? evaluateHaushalt(row._policy, others) : null;
   if (dupHaushalt && dupHaushalt.verdict !== 'ok') reasons.push(dupHaushalt.reason);

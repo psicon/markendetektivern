@@ -96,7 +96,7 @@ function noteFor(reason, ctx = {}) {
       return 'Doppelt eingereicht — die frühere Einreichung zählt.';
     // Haushalts-Regel (Entscheidung Patrick 17.10.2026).
     case REASON.HAUSHALT:
-      return 'Dieses Produkt kam gerade schon vom selben Ort über ein anderes Konto — pro Einkauf zählt jedes Produkt einmal. Ein anderes Produkt bringt beim nächsten Mal wieder etwas.';
+      return 'Dieses Produkt kam schon vom selben Ort über ein anderes Konto — pro Einkauf zählt jedes Produkt einmal. Ein anderes Produkt bringt beim nächsten Mal wieder etwas.';
     case 'unvollstaendig':
       return `Es fehlen Fotos (${(ctx.missing || []).join(', ') || 'siehe Liste'}). Mit allen sieben Ansichten klappt es beim nächsten Mal.`;
     case 'ean_fehlt':

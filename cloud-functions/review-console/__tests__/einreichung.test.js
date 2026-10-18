@@ -560,7 +560,7 @@ describe('Haushalts-Regel in der Konsole (Entscheidung Patrick 17.10.2026)', () 
   const kand = zeile('k', { userId: 'u1', ...ort(51.315, 10.315) });
   const partner = (extra = {}) => zeile('p', { userId: 'u2', status: 'approved', createdAt: T0 - 3 * MIN, ...ort(51.3151, 10.315), ...extra });
 
-  it('Freigabe eines anderen Kontos am selben Ort binnen einer Stunde → gesperrt (doppelt_haushalt)', () => {
+  it('Freigabe eines anderen Kontos am selben Ort binnen 24 Stunden → gesperrt (doppelt_haushalt)', () => {
     const pre = precheckOf(kand, [kand, partner()]);
     expect(pre.verdict).toBe('locked');
     expect(pre.reasons).toContain('doppelt_haushalt');
@@ -572,8 +572,9 @@ describe('Haushalts-Regel in der Konsole (Entscheidung Patrick 17.10.2026)', () 
     expect(pre).toMatchObject({ verdict: 'hold', reasons: expect.arrayContaining(['haushalt_aelter_offen']) });
   });
 
-  it('zwei Stunden auseinander, anderer Ort oder ohne Standort → frei', () => {
-    expect(precheckOf(kand, [kand, partner({ createdAt: T0 - 120 * MIN })]).verdict).toBe('ok');
+  it('25 Stunden auseinander, anderer Ort oder ohne Standort → frei; 5 Stunden → gesperrt', () => {
+    expect(precheckOf(kand, [kand, partner({ createdAt: T0 - 25 * 60 * MIN })]).verdict).toBe('ok');
+    expect(precheckOf(kand, [kand, partner({ createdAt: T0 - 5 * 60 * MIN })]).verdict).toBe('locked');
     expect(precheckOf(kand, [kand, partner(ort(51.32, 10.315))]).verdict).toBe('ok');
     expect(precheckOf(kand, [kand, partner({ capture: null })]).verdict).toBe('ok');
   });

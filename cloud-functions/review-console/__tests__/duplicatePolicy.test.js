@@ -211,8 +211,8 @@ describe('evaluateHaushalt — Haushalts-Regel (Entscheidung Patrick 17.10.2026)
   const kand = (over = {}) => base({ id: 'k', userId: 'u1', gps: ORT, ...over });
   const fremd = (over = {}) => base({ id: 'p', userId: 'u2', status: 'approved', createdAt: T0 - 3 * MIN, gps: NEBENAN, ...over });
 
-  test('Fenster 60 min, Radius 50 m, nur Standorte genauer als 100 m', () => {
-    expect(HAUSHALT_FENSTER_MS).toBe(60 * MIN);
+  test('Fenster 24 h (seit 18.10.2026), Radius 50 m, nur Standorte genauer als 100 m', () => {
+    expect(HAUSHALT_FENSTER_MS).toBe(24 * 60 * MIN);
     expect(HAUSHALT_RADIUS_M).toBe(50);
     expect(HAUSHALT_GENAUIGKEIT_MAX_M).toBe(100);
   });
@@ -227,9 +227,10 @@ describe('evaluateHaushalt — Haushalts-Regel (Entscheidung Patrick 17.10.2026)
     expect(evaluateHaushalt(kand(), [fremd({ gps: WEIT })]).verdict).toBe('ok');
   });
 
-  test('Zeitgrenze exklusiv: 60 min auseinander → ok, 59 min → gesperrt', () => {
-    expect(evaluateHaushalt(kand(), [fremd({ createdAt: T0 - 60 * MIN })]).verdict).toBe('ok');
-    expect(evaluateHaushalt(kand(), [fremd({ createdAt: T0 - 59 * MIN })]).verdict).toBe('locked');
+  test('Zeitgrenze exklusiv: 24 h auseinander → ok, 23:59 h → gesperrt; 3 h → gesperrt', () => {
+    expect(evaluateHaushalt(kand(), [fremd({ createdAt: T0 - 24 * 60 * MIN })]).verdict).toBe('ok');
+    expect(evaluateHaushalt(kand(), [fremd({ createdAt: T0 - (24 * 60 - 1) * MIN })]).verdict).toBe('locked');
+    expect(evaluateHaushalt(kand(), [fremd({ createdAt: T0 - 3 * 60 * MIN })]).verdict).toBe('locked');
   });
 
   test('symmetrisch: die bezahlte ist JÜNGER (Rückstau) → trotzdem gesperrt, genau eine Kopie bezahlt', () => {

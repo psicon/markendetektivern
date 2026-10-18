@@ -3733,13 +3733,15 @@ describe('Haushalts-Regel (Entscheidung Patrick 17.10.2026)', () => {
     expect(doc('mann')).toMatchObject({ status: 'rejected', rejectReason: 'produkt_bereits_verguetet' });
   });
 
-  it('anderer Ort (gut 500 m) oder zwei Stunden auseinander → beide bezahlt', async () => {
+  it('anderer Ort (gut 500 m) oder 25 Stunden auseinander → beide bezahlt', async () => {
     einreichung('a1', { uid: 'u1', createdAt: T0 - TAG_MS, capture: { gps: ORT } });
     einreichung('a2', { uid: 'u2', createdAt: T0 - TAG_MS + 3 * MIN, capture: { gps: { lat: 51.32, lon: 10.315, accuracyM: 10 } } });
     einreichung('b1', { uid: 'u3', ean: ANDERE, createdAt: T0 - TAG_MS, capture: { gps: ORT } });
-    einreichung('b2', { uid: 'u4', ean: ANDERE, createdAt: T0 - TAG_MS + 120 * MIN, capture: { gps: NEBENAN } });
+    einreichung('b1x', { uid: 'u5', ean: '4006381333931', createdAt: T0 - 2 * TAG_MS, capture: { gps: ORT } });
+    einreichung('b2x', { uid: 'u6', ean: '4006381333931', createdAt: T0 - 2 * TAG_MS + 25 * 60 * MIN, capture: { gps: NEBENAN } });
+    einreichung('b2', { uid: 'u4', ean: ANDERE, createdAt: T0 - TAG_MS + 120 * MIN, capture: { gps: { lat: 51.33, lon: 10.315, accuracyM: 10 } } });
     await scharf();
-    for (const id of ['a1', 'a2', 'b1', 'b2']) expect(doc(id).status).toBe('approved');
+    for (const id of ['a1', 'a2', 'b1', 'b2', 'b1x', 'b2x']) expect(doc(id).status).toBe('approved');
   });
 
   it('ohne Gerätestandort (ältere App) → Regel greift nicht', async () => {

@@ -58,9 +58,9 @@ const EIGENE_BREMSEN = Object.freeze([
   // Fehler beim Gruppieren (EAN, Nutzer) als auf echte Doppel.
   { schalter: 'woche', gruende: [REASON.SAME_USER_WEEK], halten: 'notbremse_wochensperre', basis: 'alle', min: 10, anteil: 0.15,
     text: (n, g, pz) => `${n} von ${g} Einreichungen wären wegen der Wochen-Sperre abgelehnt worden (${pz} %) — diese Ablehnungen zurückgehalten.` },
-  // Haushalts-Regel (Entscheidung Patrick 17.10.2026). Gemessen 30 Tage bis
-  // 17.10.: 91 Fälle von 2 Konto-Paaren — ein Haushalt reicht gebündelt ein
-  // (bis 45 an einem Tag), deshalb zählen PERSONEN, nicht Fälle. Viele
+  // Haushalts-Regel (Entscheidung Patrick 17.10.2026, 24 h seit 18.10.).
+  // Gemessen 11.08.–18.10.: 138 Fälle von 3 Konto-Paaren — ein Haushalt reicht
+  // gebündelt ein (bis 45 an einem Tag), deshalb zählen PERSONEN, nicht Fälle. Viele
   // Personen an einem Morgen deuten eher auf einen Standortfehler (alle auf
   // einem Punkt) als auf Haushalte.
   { schalter: 'haushalt', gruende: [REASON.HAUSHALT], halten: 'notbremse_haushalt', basis: 'alle', min: 6, anteil: 0.03, zaehle: 'personen',
@@ -226,7 +226,7 @@ function entscheideFall(f) {
 
   // Haushalts-Regel (Entscheidung Patrick 17.10.2026, duplicatePolicy.
   // evaluateHaushalt): dieselbe EAN, bezahlt bei einem anderen Konto am selben
-  // Ort binnen einer Stunde → ablehnen; dort eine ältere noch offene → erst die
+  // Ort binnen 24 Stunden → ablehnen; dort eine ältere noch offene → erst die
   // entscheiden. Wie die Wochen-Sperre vor der Bildprüfung: das Urteil hängt an
   // EAN, Ort und Zeit, nicht an den Fotos. Der Hinweis nennt weder die fremde
   // Doc-ID noch Abstand und Uhrzeit — `review.rundeOffen` liest der Einreicher
@@ -234,7 +234,7 @@ function entscheideFall(f) {
   const hh = f.dupHaushalt || null;
   if (hh && hh.verdict === 'locked') return ablehnen(REASON.HAUSHALT, { abstandM: hh.abstandM, minuten: hh.minuten });
   if (hh && hh.verdict === 'hold') {
-    return offen(REASON.HAUSHALT_AELTER_OFFEN, { hinweis: 'Dasselbe Produkt von einem anderen Konto am selben Ort binnen einer Stunde ist noch offen — erst das entscheiden (Haushalts-Regel)' });
+    return offen(REASON.HAUSHALT_AELTER_OFFEN, { hinweis: 'Dasselbe Produkt von einem anderen Konto am selben Ort binnen 24 Stunden ist noch offen — erst das entscheiden (Haushalts-Regel)' });
   }
 
   // Identisches Identitätsfoto in einer FRÜHEREN Einreichung (Abgleich gegen

@@ -1216,12 +1216,14 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   sind kein Ablehngrund. Nur kennzeichnen und die Doppelprüfung zusätzlich nach
   Markt trennen.
 - **Haushalts-Regel (Entscheidung Patrick 17.10.2026: „ja, bau die
-  Haushalts-Regel").** Dasselbe Produkt (effektive EAN) vom selben Ort binnen
-  einer Stunde wird nur einmal bezahlt — auch über verschiedene Konten.
+  Haushalts-Regel"; 18.10.2026 auf 24 h erweitert: „ja, erweitere auf 24
+  Stunden — wenn du dir sicher bist, dass das bei anderen keine Nachteile
+  hervorruft").** Dasselbe Produkt (effektive EAN) vom selben Ort binnen 24
+  Stunden wird nur einmal bezahlt — auch über verschiedene Konten.
   `duplicatePolicy.evaluateHaushalt`: Gerätestandort (`capture.gps`) beider
   Einreichungen ≤ 50 m auseinander, beide genauer als 100 m, Einreich-Zeitpunkte
-  (Server) < 60 min auseinander, symmetrisch wie die Wochen-Sperre. Freigabe
-  eines anderen Kontos → Ablehnung `doppelt_haushalt` (am Dokument der App-Code
+  (Server) < 24 h auseinander, symmetrisch wie die Wochen-Sperre. Freigabe eines
+  anderen Kontos → Ablehnung `doppelt_haushalt` (am Dokument der App-Code
   `produkt_bereits_verguetet`, Text in jeder Version; eigener Text
   `doppelt_haushalt` liegt in productSubmissionCopy.ts für eine spätere
   Version); ältere offene eines anderen Kontos → offen `haushalt_aelter_offen`.
@@ -1232,18 +1234,23 @@ am nächsten Morgen dran (Warnung „nicht geschafft").
   aus der Gesamtquote. Schalter `cashback_config/v1.haushaltRegel`: an, außer
   ausdrücklich `false` (Rückweg ohne Deploy, nur für die Runde — die Konsole
   zeigt den Befund weiter). Am Dokument stehen weder fremde Doc-ID noch
-  Abstand/Uhrzeit (der Einreicher liest es). Anlass und Messung (18.09.–17.10.,
-  3.616 Einreichungen): zwei Konten eines Haushalts (gleiche angegebene
-  Adresse, verschiedene Handys und E-Mails) fotografierten dieselben Produkte am
-  selben Tisch, im Schnitt 3 min nacheinander — 106 Doppelzahlungen. Paare
-  fremder Konten binnen 60 min lagen entweder ≤ 28 m auseinander (genau zwei
-  Konto-Paare) oder gar nicht nahe (0 Paare zwischen 50 und 500 m); Fremde im
-  selben Laden kamen nicht vor. **Grenzen:** wer länger als eine Stunde wartet,
-  fällt heraus (mit 24 h hätte die Regel beim Haushalt 137 statt 85 Paare
-  erfasst, weiterhin nur diese zwei Konto-Paare — Entscheidung Patrick offen);
-  der Standort kommt vom Client und ließe sich mit einem veränderten Client
-  fälschen. Bei Bons fängt die Doppel-Erkennung denselben Bon schon über Konten
-  (dort 27-mal versucht, nie doppelt bezahlt).
+  Abstand/Uhrzeit (der Einreicher liest es). Anlass: zwei Konten eines
+  Haushalts (gleiche angegebene Adresse, verschiedene Handys und E-Mails)
+  fotografierten dieselben Produkte am selben Tisch, im Schnitt 3 min
+  nacheinander. Messung vor dem 24-h-Fenster über den ganzen Bestand mit genauem
+  Standort (11.08.–18.10.2026, 4.345 Einreichungen): Paare fremder Konten mit
+  derselben EAN binnen 24 h lagen ≤ 28 m auseinander — genau drei Konto-Paare,
+  alle Haushalte (zwei mit derselben angegebenen Adresse, eins ohne Adresse,
+  aber stets ≤ 12 m), 138 Paare, 116 doppelt bezahlt — oder gar nicht nahe
+  (0 Paare zwischen 50 und 200 m). Fremde im selben Laden oder in der
+  Nachbarschaft am selben Tag kamen nicht vor; mit 60 min wären es 87 statt 138
+  gewesen. **Grenzen:** wer mehr als 24 h wartet, fällt heraus; der Standort
+  kommt vom Client und ließe sich mit einem veränderten Client fälschen. Fängt
+  die Regel künftig Fremde (Nachbarn im selben Haus, zwei Nutzer im selben
+  Laden am selben Tag), zeigt sich das im Tagesbericht unter
+  `doppelt_haushalt` — dann das Fenster wieder verkürzen. Bei Bons fängt die
+  Doppel-Erkennung denselben Bon schon über Konten (dort 27-mal versucht, nie
+  doppelt bezahlt).
 
 ## Was die Prüfkonsole von der Runde erfährt (Prüfrunde 2, 02.10.2026)
 

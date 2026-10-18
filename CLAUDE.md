@@ -3384,8 +3384,9 @@ Patrick, 02.10.: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche",
 
 ## Produktentscheidung 17.10.2026: Haushalts-Regel
 
-Patrick, 17.10.: „ja, bau die Haushalts-Regel". Dasselbe Produkt vom selben Ort
-(Gerätestandort ≤ 50 m, beide genauer als 100 m) binnen einer Stunde wird nur
+Patrick, 17.10.: „ja, bau die Haushalts-Regel"; 18.10.: „ja, erweitere auf 24
+Stunden" (nach Messung: trifft nur Haushalte). Dasselbe Produkt vom selben Ort
+(Gerätestandort ≤ 50 m, beide genauer als 100 m) binnen 24 Stunden wird nur
 einmal bezahlt — auch über verschiedene Konten. Anlass: zwei Konten eines
 Haushalts (gleiche angegebene Adresse, eigene Handys und E-Mails) reichten
 dieselben Produkte vom selben Tisch ein, 106 Doppelzahlungen. Kein Konto
@@ -3393,8 +3394,8 @@ gesperrt (Familie, wie tU89 am 14.10.). Gilt in Morgenrunde und Prüfkonsole;
 Schalter `cashback_config/v1.haushaltRegel` — an, außer ausdrücklich `false`.
 Die Gründerentscheidung vom 20.09. („fremde Einreichungen sperren niemanden")
 gilt weiter für alles, was nicht am selben Ort zur selben Zeit entstand.
-Messung, Grenzen (wer länger als eine Stunde wartet, fällt heraus; 24 h wäre
-bei gleicher Treffsicherheit wirksamer — offen bei Patrick):
+Messung und Grenzen (wer länger als 24 h wartet, fällt heraus; trifft die Regel
+künftig Fremde, zeigt es der Tagesbericht — dann das Fenster verkürzen):
 `cloud-functions/review-console/WISSEN-FOTORUNDE.md`.
 
 ## Entscheidungen Patrick 04.10.2026 (nicht erneut fragen)
