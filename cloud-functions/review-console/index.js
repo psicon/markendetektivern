@@ -1185,7 +1185,7 @@ exports.fotoRundeTaeglich = onSchedule(
     const cfg = (await db.doc('cashback_config/v1').get()).data() || {};
     const scharf = cfg.fotoWorker === true;
     // Schalter der Barcode-Korrektur aus demselben Lesen (nur true wendet an).
-    const bericht = await taeglicheRunde({ dryRun: !scharf, projekt: PROJEKT, ausloeser: 'zeitplan', preisBildschirmRegel: cfg.preisBildschirmRegel ?? null, preisBelegRegel: cfg.preisBelegRegel ?? null, barcodeKorrektur: cfg.barcodeKorrektur ?? null, haushaltRegel: cfg.haushaltRegel ?? null });
+    const bericht = await taeglicheRunde({ dryRun: !scharf, projekt: PROJEKT, ausloeser: 'zeitplan', preisBildschirmRegel: cfg.preisBildschirmRegel ?? null, preisBelegRegel: cfg.preisBelegRegel ?? null, barcodeKorrektur: cfg.barcodeKorrektur ?? null, haushaltRegel: cfg.haushaltRegel ?? null, zweifelFreigabe: cfg.zweifelFreigabe ?? null });
     logger.info(scharf ? 'Morgenrunde scharf gelaufen' : 'Morgenrunde als Trockenlauf (Schalter fotoWorker steht nicht auf true)', { lauf: bericht.lauf });
   },
 );
@@ -1207,7 +1207,7 @@ exports.fotoRundeManuell = onRequest(
     }
     const cfg = (await db.doc('cashback_config/v1').get()).data() || {};
     const scharf = req.query.scharf === '1' && cfg.fotoWorker === true;
-    const bericht = await taeglicheRunde({ dryRun: !scharf, projekt: PROJEKT, ausloeser: 'manuell', preisBildschirmRegel: cfg.preisBildschirmRegel ?? null, preisBelegRegel: cfg.preisBelegRegel ?? null, barcodeKorrektur: cfg.barcodeKorrektur ?? null, haushaltRegel: cfg.haushaltRegel ?? null });
+    const bericht = await taeglicheRunde({ dryRun: !scharf, projekt: PROJEKT, ausloeser: 'manuell', preisBildschirmRegel: cfg.preisBildschirmRegel ?? null, preisBelegRegel: cfg.preisBelegRegel ?? null, barcodeKorrektur: cfg.barcodeKorrektur ?? null, haushaltRegel: cfg.haushaltRegel ?? null, zweifelFreigabe: cfg.zweifelFreigabe ?? null });
     // Nur Zahlen zurück — die Listen (Einreichungs-IDs beginnen mit der uid)
     // stehen im Bericht in Firestore und im Dashboard, nicht in einer HTTP-Antwort.
     const { lauf, dryRun, geprueft, freigegeben, abgelehnt, offen, gebuchtCents, warnungen: warn } = bericht;

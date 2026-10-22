@@ -1284,3 +1284,67 @@ describe('Haushalts-Regel (Entscheidung Patrick 17.10.2026)', () => {
     expect(notbremse(r, { schnittQuote: null }).haushalt).toBe(false);
   });
 });
+
+describe('Zweifelsfälle freigeben (Entscheidung Patrick 22.10.2026)', () => {
+  const Z = { zweifelFreigabe: true };
+  const locked = { verdict: 'locked', reason: WOCHE, lockUntil: 1 };
+  const ok_ = { verdict: 'ok', reason: null, lockUntil: null };
+  const ohnePreis = (over = {}) => fall({ preisVorhanden: false, audit: { ...echt, preisSichtbar: false }, ...Z, ...over });
+  const ab = { art: 'abweichend', gelesen: '4000417025005', gespeichert: '4061464833821' };
+
+  it('Preis unsicher (Lesedienst sah Preisschild) → frei, mit Vermerk', () => {
+    expect(entscheideFall(ohnePreis({ preisHinweis: 'Lesedienst sah auf dem Preisfoto: preisschild' })))
+      .toMatchObject({ entscheidung: 'freigeben', zweifel: ['preis_unsicher'] });
+  });
+  it('Preis unsicher (Nachlesungen uneinig) → frei', () => {
+    expect(entscheideFall(ohnePreis({ rettungFehler: { preis: 'lesungen_uneinig' } })))
+      .toMatchObject({ entscheidung: 'freigeben', zweifel: ['preis_unsicher'] });
+  });
+  it('kein Preis aus keiner Quelle → weiter abgelehnt', () => {
+    expect(entscheideFall(ohnePreis())).toMatchObject({ entscheidung: 'ablehnen', grund: 'preis_fehlt' });
+  });
+  it('technische Ausfälle bleiben liegen (kein Zweifel, sondern kein Urteil)', () => {
+    expect(entscheideFall(ohnePreis({ rettungFehler: { preis: '429' } })).grund).toBe('nachlesen_gescheitert');
+    expect(entscheideFall(ohnePreis({ audit: { ...echt } })).grund).toBe('preis_unbeurteilt');
+  });
+  it('Preis unsicher, aber die übrigen Hürden gelten weiter', () => {
+    const pz = { preisHinweis: 'x' };
+    expect(entscheideFall(ohnePreis({ ...pz, kontoSperre: 'unbekannt' })).grund).toBe('kontosperre_unbekannt');
+    expect(entscheideFall(ohnePreis({ ...pz, ortAuffaellig: 'Ausland' })).grund).toBe('ort_auffaellig');
+    expect(entscheideFall(ohnePreis({ ...pz, kontoSperre: 'gesperrt' })).grund).toBe('konto_gesperrt');
+    expect(entscheideFall(ohnePreis({ ...pz, dup: locked })).entscheidung).toBe('ablehnen');
+  });
+  it('Barcode-Nummer abweicht, keine Doppel-Prüfung schlägt an → frei', () => {
+    expect(entscheideFall(fall({ ...Z, eanFoto: ab, dupFoto: ok_ })))
+      .toMatchObject({ entscheidung: 'freigeben', zweifel: ['ean_abweichend'] });
+  });
+  it('Barcode unsicher ohne gültige Foto-Nummer → frei', () => {
+    expect(entscheideFall(fall({ ...Z, eanFoto: { art: 'unsicher', gelesen: null, roh: '41029032', gespeichert: '4014500518565' } })))
+      .toMatchObject({ entscheidung: 'freigeben', zweifel: ['ean_unsicher'] });
+  });
+  it('Doppel-Prüfung schlägt unter irgendeiner Nummer an → bleibt beim Menschen, nie Ablehnung', () => {
+    expect(entscheideFall(fall({ ...Z, eanFoto: ab, dupFoto: locked }))).toMatchObject({ entscheidung: 'offen', grund: 'ean_abweichend' });
+    expect(entscheideFall(fall({ ...Z, eanFoto: ab, dupFoto: ok_, dup: locked }))).toMatchObject({ entscheidung: 'offen', grund: 'ean_abweichend' });
+    expect(entscheideFall(fall({ ...Z, eanFoto: ab, dupFoto: ok_, dupAlt: locked }))).toMatchObject({ entscheidung: 'offen', grund: 'ean_abweichend' });
+    // Foto-Nummer ohne Doppel-Prüfung → nicht geprüft, also liegen lassen
+    expect(entscheideFall(fall({ ...Z, eanFoto: ab }))).toMatchObject({ entscheidung: 'offen', grund: 'ean_abweichend' });
+  });
+  it('Notbremse der Korrektur → bleibt beim Menschen', () => {
+    expect(entscheideFall(fall({ ...Z, eanFoto: { ...ab, korrekturGebremst: '2026-10-22' }, dupFoto: ok_ })).grund).toBe('ean_abweichend');
+  });
+  it('Barcode im Foto da, aber nur schwer lesbar (keine EAN) → frei, wenn die Fotos echt sind', () => {
+    const ohneEan = { comp: { ok: false, problems: ['ean_fehlt'], missing: [] }, rettungFehler: { ean: 'lesungen_uneinig' } };
+    expect(entscheideFall(fall({ ...Z, ...ohneEan }))).toMatchObject({ entscheidung: 'freigeben', zweifel: ['lesung_unsicher'] });
+    expect(entscheideFall(fall({ ...Z, ...ohneEan, audit: { ...echt, echt: false } })).entscheidung).toBe('offen');
+  });
+  it('zwei Zweifel zugleich → beide vermerkt', () => {
+    expect(entscheideFall(ohnePreis({ preisHinweis: 'x', eanFoto: ab, dupFoto: ok_ })).zweifel).toEqual(['ean_abweichend', 'preis_unsicher']);
+  });
+  it('Schalter aus → alles wie vorher', () => {
+    expect(entscheideFall(ohnePreis({ zweifelFreigabe: false, preisHinweis: 'x' })).grund).toBe('preis_unsicher');
+    expect(entscheideFall(fall({ eanFoto: ab, dupFoto: ok_ })).grund).toBe('ean_abweichend');
+  });
+  it('Freigabe ohne Zweifel trägt keinen Vermerk', () => {
+    expect(entscheideFall(fall(Z)).zweifel).toBeUndefined();
+  });
+});

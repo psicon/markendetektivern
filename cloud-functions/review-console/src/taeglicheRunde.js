@@ -489,7 +489,7 @@ async function ladeMaerkte(db) {
   }
 }
 
-function regelVersion(preisBildschirmModus, preisBelegModus, barcodeKorrekturAn = false, haushaltAn = true) {
+function regelVersion(preisBildschirmModus, preisBelegModus, barcodeKorrekturAn = false, haushaltAn = true, zweifelAn = true) {
   const h = crypto.createHash('sha1');
   // werte.js gehört dazu: es bestimmt, welche EAN, welcher Preis und welcher
   // Hersteller in die Regeln eingehen; ort.js, wann der Aufnahmeort auffällt.
@@ -508,6 +508,8 @@ function regelVersion(preisBildschirmModus, preisBelegModus, barcodeKorrekturAn 
   // Und der Schalter der Haushalts-Regel (17.10.2026) — nur wenn aus: an ist der Normalfall,
   // die Version vor der Regel unterscheidet sich ohnehin über duplicatePolicy.js.
   if (haushaltAn === false) h.update('haushaltRegel=false');
+  // Ebenso Zweifelsfälle freigeben (22.10.2026) — nur wenn aus.
+  if (zweifelAn === false) h.update('zweifelFreigabe=false');
   return h.digest('hex').slice(0, 10);
 }
 
@@ -632,8 +634,11 @@ async function dateiListe(storage) {
  *   (`cashback_config/v1.haushaltRegel`, Entscheidung Patrick 17.10.2026). Die Regel
  *   gilt, außer der Schalter steht ausdrücklich auf `false` (Rückweg ohne Deploy);
  *   nicht lesbar = an — sie schränkt nur ein, und ihre Notbremse hält Massenfälle.
+ * @param {*} [opts.zweifelFreigabe]  Rohwert von `cashback_config/v1.zweifelFreigabe`
+ *   (Entscheidung Patrick 22.10.2026): Zweifelsfälle bei Preis und Barcode frei.
+ *   An, außer ausdrücklich `false`; nicht lesbar = aus (der Schalter lockert).
  */
-async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser = 'zeitplan', vergleich = null, nurLesen = false, arbeitszeitMs = ARBEITSZEIT_MS, preisBildschirmRegel, preisBelegRegel, barcodeKorrektur, haushaltRegel } = {}) {
+async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser = 'zeitplan', vergleich = null, nurLesen = false, arbeitszeitMs = ARBEITSZEIT_MS, preisBildschirmRegel, preisBelegRegel, barcodeKorrektur, haushaltRegel, zweifelFreigabe } = {}) {
   if (vergleich || nurLesen) dryRun = true;
   // Nachgelesene Angaben und die Foto-Nummer sind Tatsachen über die Fotos und
   // werden auch im normalen Trockenlauf gespeichert — nur nicht beim reinen Rechnen.
@@ -667,8 +672,10 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   let belegRoh = preisBelegRegel;
   let korrekturRoh = barcodeKorrektur;
   let haushaltRoh = haushaltRegel;
+  let zweifelRoh = zweifelFreigabe;
+  let zweifelSchalterUnlesbar = false;
   let korrekturSchalterUnbekannt = null;
-  if (pbRoh === undefined || belegRoh === undefined || korrekturRoh === undefined || haushaltRoh === undefined) {
+  if (pbRoh === undefined || belegRoh === undefined || korrekturRoh === undefined || haushaltRoh === undefined || zweifelRoh === undefined) {
     let cfg = {};
     let lesefehler = null;
     try { cfg = (await db.doc('cashback_config/v1').get()).data() || {}; }
@@ -686,9 +693,17 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       } else korrekturRoh = cfg.barcodeKorrektur ?? null;
     }
     if (haushaltRoh === undefined) haushaltRoh = lesefehler ? null : cfg.haushaltRegel ?? null;
+    if (zweifelRoh === undefined) {
+      if (lesefehler) zweifelSchalterUnlesbar = true;
+      else zweifelRoh = cfg.zweifelFreigabe ?? null;
+    }
   }
   // Haushalts-Regel (17.10.2026): an, außer ausdrücklich false.
   const haushaltAn = haushaltRoh !== false;
+  // Zweifelsfälle freigeben (Entscheidung Patrick 22.10.2026): an, außer
+  // ausdrücklich false. Anders als die Haushalts-Regel LOCKERT dieser Schalter
+  // — ist cashback_config/v1 nicht lesbar, gilt er als aus (fail-closed).
+  const zweifelAn = zweifelRoh !== false && !zweifelSchalterUnlesbar;
   const pbModus = modusPreisBildschirm(pbRoh);
   const pbSchalter = schalterRohOf(pbRoh);
   const belegModus = modusPreisBeleg(belegRoh);
@@ -1269,8 +1284,13 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
         ? ` — eigene Freigabe vom ${datumVon(dupAlt.priorId)} unter einer zugehörigen Nummer (${wer}), Wochen-Sperre, womöglich dasselbe Produkt`
         : ` — ältere eigene, noch offene Einreichung unter einer zugehörigen Nummer (${wer})`);
     }
+    // Doppel-Regel unter der Nummer vom Barcode-Foto, wann immer sie von der
+    // gespeicherten abweicht — seit 22.10.2026 Voraussetzung, damit ein
+    // Zweifelsfall beim Barcode freigegeben werden darf (fotoRundeRegeln).
+    const dupFoto = ef && ef.gelesen && ef.gelesen !== ef.gespeichert
+      ? evaluateDuplicate({ ...policyOf(d.id, d.x, d.zeit), ean: ef.gelesen }, nachbarn(ef.gelesen, d.id))
+      : null;
     if (ef && ef.art === 'abweichend') {
-      const dupFoto = evaluateDuplicate({ ...policyOf(d.id, d.x, d.zeit), ean: ef.gelesen }, nachbarn(ef.gelesen, d.id));
       eanFotoHinweis = `Barcode-Foto zeigt ${ef.gelesen}, gespeichert ist ${ef.gespeichert}`
         + (ef.bestaetigt === false ? ' (zweite Lesung gescheitert)' : '')
         + (dupFoto.verdict === 'locked' ? ` — unter der Foto-Nummer gibt es eine eigene Freigabe vom ${datumVon(dupFoto.priorId)} (Wochen-Sperre)`
@@ -1324,7 +1344,8 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       kontoSperre, comp: v.comp, dup, leer: v.leer, unlesbar: v.unlesbar,
       bild: bildMitVorbefund(bildBefund(d.id, partnerVon.get(d.id) || [], info, freigabeVon), fotoVorbefund(d.x), { vollstaendig: fotoVollstaendig(d.id) }),
       fotoAbgleichFehlt: liste == null,
-      eanFoto: ef, eanFotoHinweis, dupAlt, dupAltHinweis, dupHaushalt, eanKorrigiert: !!pol.eanVorher,
+      eanFoto: ef, eanFotoHinweis, dupAlt, dupAltHinweis, dupHaushalt, dupFoto, eanKorrigiert: !!pol.eanVorher,
+      zweifelFreigabe: zweifelAn,
       audit: audit.get(d.id) || null, auditFehler: auditFehler.get(d.id) || null, rettungFehler: rf,
       preisVorhanden: !!preisOf(d.x), preisHinweis: preisHinweisOf(d.x), ortAuffaellig: ort ? ort.text : null,
       namerLaeuft: namerAb != null && namerAb > start - NAMER_HAENGT_MS, preisBildDefekt,
@@ -1503,7 +1524,8 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
           if (p.entscheidung === 'freigeben') {
             tx.update(p.ref, {
               status: 'approved', reviewedAt: FieldValue.serverTimestamp(), reviewedBy: ENTSCHEIDER, updatedAt: FieldValue.serverTimestamp(),
-              review: { precheck, decidedBy: ENTSCHEIDER, forced: false, bildAudit: bild, lauf },
+              // `zweifel`: im Zweifel freigegeben (Entscheidung Patrick 22.10.2026) — welche Haltegründe übergangen wurden.
+              review: { precheck, decidedBy: ENTSCHEIDER, forced: false, bildAudit: bild, lauf, ...(p.zweifel ? { zweifel: p.zweifel } : {}) },
               holdReasons: FieldValue.delete(), rejectReason: FieldValue.delete(),
               // KEINE Push-Merker setzen: die Nachricht schickt der Sammler in
               // crowd-upload-reward. Ein hier gesetztes `rewardPushSentAt` hielte
@@ -1649,7 +1671,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     });
   }
   if (bonNachgereicht) bonRundeHeute = bonRundeRoh(bonNachgereicht);
-  const version = regelVersion(pbModus, belegModus, korrekturAn, haushaltAn);
+  const version = regelVersion(pbModus, belegModus, korrekturAn, haushaltAn, zweifelAn);
   const zaehle = (liste, feld) => liste.reduce((a, p) => { const k = p[feld] || '?'; a[k] = (a[k] || 0) + 1; return a; }, {});
   const abgelehnt = plan.filter((p) => p.entscheidung === 'ablehnen' && !p.uebersprungen);
   // Gesperrte Konten liegen stumm und dauerhaft — sie warten NICHT auf eine
@@ -1913,6 +1935,8 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     abgelehnt: abgelehnt.length,
     offen: offen.length,
     loseWare: plan.filter((p) => p.loseWare).length,
+    // Im Zweifel freigegeben (22.10.2026), je übergangenem Haltegrund gezählt.
+    zweifelFreigabe: { an: zweifelAn, ...zaehle(plan.filter((p) => p.entscheidung === 'freigeben' && p.zweifel).flatMap((p) => p.zweifel.map((g) => ({ g }))), 'g') },
     gebuchtCents, buchungAusstehend,
     personenBezahlt: new Set(gebucht.filter((s) => s.rewardResult === 'credited').map((s) => s.uid)).size,
     // Freigegeben, aber nicht gebucht (Pro-Kopf-Deckel, Budget leer …) — der

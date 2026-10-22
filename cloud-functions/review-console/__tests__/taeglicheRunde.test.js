@@ -72,6 +72,12 @@ function docRef(pfad) {
       // `configFehler`: so viele Lesevorgänge von cashback_config/v1 scheitern.
       if (pfad === 'cashback_config/v1') mockLage.configLesungen++;
       if (pfad === 'cashback_config/v1' && mockLage.configFehler > 0) { mockLage.configFehler--; throw new Error('UNAVAILABLE config'); }
+      // Die Bestandstests prüfen das Verhalten vor dem 22.10.2026 — Zweifelsfälle
+      // freigeben (Schalter `zweifelFreigabe`, im Betrieb an, wenn er fehlt) gilt
+      // in ihnen als aus. Die Tests dazu setzen den Schalter ausdrücklich.
+      if (pfad === 'cashback_config/v1' && mockStore.has(pfad) && !('zweifelFreigabe' in mockStore.get(pfad))) {
+        return snapshot(pfad, { ...mockStore.get(pfad), zweifelFreigabe: false });
+      }
       return snapshot(pfad, mockStore.get(pfad));
     },
     set: async (daten, opts) => { mockWrites.push({ path: pfad, art: 'set', data: kopie(daten) }); anwenden(pfad, daten, opts && opts.merge); },
@@ -1175,9 +1181,9 @@ describe('Bildschirmfoto als Preisbeleg (Patrick 04.10.2026: „ja, bau das")', 
   it('index.js-Weg: die Schalter kommen als Werte mit → die Runde liest sie nicht ein zweites Mal', async () => {
     schalter('shadow'); // stünde im Dokument — gilt nicht, der übergebene Wert gilt
     mitPreisfoto('schirm', 'bildschirm', png(1080, 2400));
-    const b = await scharf({ preisBildschirmRegel: true, preisBelegRegel: false, barcodeKorrektur: null, haushaltRegel: null });
+    const b = await scharf({ preisBildschirmRegel: true, preisBelegRegel: false, barcodeKorrektur: null, haushaltRegel: null, zweifelFreigabe: false });
     // nur das Lesen der Bon-Lage (bonWorker) — kein eigenes für die Schalter
-    // (index.js reicht auch barcodeKorrektur und haushaltRegel aus demselben Lesen durch)
+    // (index.js reicht auch barcodeKorrektur, haushaltRegel und zweifelFreigabe aus demselben Lesen durch)
     expect(mockLage.configLesungen).toBe(1);
     expect(b.preisBildschirm.modus).toBe(true);
     expect(b.preisBildschirm.beleg.modus).toBe(false);
@@ -3767,5 +3773,44 @@ describe('Haushalts-Regel (Entscheidung Patrick 17.10.2026)', () => {
     const b = await taeglicheRunde({ dryRun: true, projekt: 'p', bucketName: 'b', ausloeser: 'manuell' });
     expect(doc('mann').status).toBe('pending');
     expect(b.ablehnGruende).toEqual({ doppelt_haushalt: 1 });
+  });
+});
+
+describe('Zweifelsfälle freigeben im Lauf (Entscheidung Patrick 22.10.2026)', () => {
+  const unsicherGestern = { eanFotoOcr: { ean: ANDERE, befund: 'unsicher', zweit: null, lauf: '2026-10-05_080000' } };
+  const an = () => mockStore.set('cashback_config/v1', { fotoWorker: true, barcodeKorrektur: true, zweifelFreigabe: true });
+
+  it('Barcode unsicher, keine Doppel-Prüfung schlägt an → freigegeben, Vermerk am Dokument und im Bericht', async () => {
+    an();
+    einreichung('k', unsicherGestern);
+    mockAudit.set(doc('k').images.ean, '');
+    striche('k');
+    const b = await scharf();
+    expect(doc('k').status).toBe('approved');
+    expect(doc('k').review.zweifel).toEqual(['ean_unsicher']);
+    expect(b.zweifelFreigabe).toMatchObject({ an: true, ean_unsicher: 1 });
+  });
+
+  it('unter der Nummer vom Foto ist dasselbe Produkt diese Woche schon bezahlt → bleibt liegen', async () => {
+    an();
+    einreichung('alt', { ean: ANDERE, status: 'approved', createdAt: T0 - 2 * TAG_MS });
+    einreichung('k', unsicherGestern);
+    mockAudit.set(doc('k').images.ean, '');
+    striche('k');
+    const b = await scharf();
+    expect(doc('k').status).toBe('pending');
+    expect(b.wartetAufDich.find((x) => x.id === 'k')).toMatchObject({ grund: 'ean_unsicher' });
+  });
+
+  it('Schalter nicht lesbar → aus (er lockert, fail-closed)', async () => {
+    an();
+    einreichung('k', unsicherGestern);
+    mockAudit.set(doc('k').images.ean, '');
+    striche('k');
+    // Nur das Lesen der Schalter scheitert (das erste); die übrigen sind übergeben.
+    mockLage.configFehler = 1;
+    const b = await scharf({ preisBildschirmRegel: null, preisBelegRegel: null, barcodeKorrektur: true, haushaltRegel: null });
+    expect(doc('k').status).toBe('pending');
+    expect(b.zweifelFreigabe.an).toBe(false);
   });
 });

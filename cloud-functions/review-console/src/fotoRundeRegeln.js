@@ -150,6 +150,19 @@ const AUSSER_GESAMTQUOTE = new Set([...EIGENE_BREMSEN.flatMap((b) => b.gruende),
  * @returns {{entscheidung:'freigeben'|'ablehnen'|'offen', grund:string|null, ctx:object, loseWare?:boolean, preisBildschirmFall?:{befund:string, ohneRegel:string, wirkt:boolean, regeln:string[], kopf?:boolean, vor?:string[], vorWirkt?:string[], vorbefund?:boolean}}}
  */
 function entscheideFall(f) {
+  // Zweifelsfälle freigeben (Entscheidung Patrick 22.10.2026: „im Zweifel lieber
+  // freigeben als ablehnen", Vorschlag bestätigt mit „Ja, alles klar"). Betrifft
+  // genau drei Haltegründe: unsicherer Preis, unsicher gelesener Barcode,
+  // abweichende Barcode-Nummer. Was so freigegeben wird, trägt die Liste
+  // `zweifel` (Bericht und Dokument). Schalter `cashback_config/v1.zweifelFreigabe`
+  // — an, außer ausdrücklich false; nicht lesbar = aus (taeglicheRunde).
+  const zweifel = [];
+  const e = entscheideFallKern(f, zweifel);
+  return e.entscheidung === 'freigeben' && zweifel.length ? { ...e, zweifel } : e;
+}
+
+function entscheideFallKern(f, zweifel) {
+  const zweifelFrei = f.zweifelFreigabe === true;
   const comp = f.comp || { ok: true, problems: [], missing: [] };
   const dup = f.dup || { verdict: 'ok', reason: null, lockUntil: null };
   const rf = f.rettungFehler || {};
@@ -187,13 +200,28 @@ function entscheideFall(f) {
   // (zweite Lesung gescheitert, Waagen-Code, schon einmal korrigiert,
   // Notbremse der Korrektur, heute keine Bildprüfung); widersprechen sich die
   // Lesungen über Tage, wird der Befund `unsicher` (werte.eanFotoMitVorbefund).
-  if (f.eanFoto && f.eanFoto.art === 'abweichend') {
-    return offen('ean_abweichend', { hinweis: f.eanFotoHinweis || `Barcode-Foto zeigt ${f.eanFoto.gelesen}, gespeichert ist ${f.eanFoto.gespeichert}` });
-  }
+  // Seit 22.10.2026 (Zweifelsfälle freigeben) läuft ein solcher Fall weiter
+  // durch alle übrigen Regeln — aber nur, wenn keine Doppel-Prüfung anschlägt,
+  // weder unter der gespeicherten Nummer (`dup`, `dupAlt`) noch unter der
+  // Nummer vom Foto (`dupFoto`). Schlägt eine an, bleibt er beim Menschen und
+  // wird NIE abgelehnt (aus dem Grund oben). Ebenso nach der Notbremse der
+  // Korrektur: die meldet eine Massenauffälligkeit, keinen Einzelzweifel.
+  const eanArt = f.eanFoto ? f.eanFoto.art : null;
   // `zweifelhaft` (falsche Prüfziffer, weit weg) kommt nach der zweiten Lesung
-  // nicht mehr vor — falls doch, hält es wie `unsicher` (fail-closed).
-  if (f.eanFoto && (f.eanFoto.art === 'unsicher' || f.eanFoto.art === 'zweifelhaft')) {
-    return offen('ean_unsicher', { hinweis: f.eanFotoHinweis || `Barcode-Foto: erste Lesung ${f.eanFoto.gelesen || f.eanFoto.roh || 'ungültig'}, zweite ${f.eanFoto.zweit || 'nicht lesbar'}, gespeichert ist ${f.eanFoto.gespeichert}` });
+  // nicht mehr vor — falls doch, zählt es wie `unsicher`.
+  const eanZweifelCode = eanArt === 'abweichend' ? 'ean_abweichend'
+    : eanArt === 'unsicher' || eanArt === 'zweifelhaft' ? 'ean_unsicher' : null;
+  if (eanZweifelCode) {
+    const ef = f.eanFoto;
+    const hinweis = f.eanFotoHinweis || (eanZweifelCode === 'ean_abweichend'
+      ? `Barcode-Foto zeigt ${ef.gelesen}, gespeichert ist ${ef.gespeichert}`
+      : `Barcode-Foto: erste Lesung ${ef.gelesen || ef.roh || 'ungültig'}, zweite ${ef.zweit || 'nicht lesbar'}, gespeichert ist ${ef.gespeichert}`);
+    const fotoNummer = !!ef.gelesen && ef.gelesen !== ef.gespeichert;
+    const doppelIrgendwo = dup.verdict !== 'ok'
+      || !!(f.dupAlt && f.dupAlt.verdict !== 'ok')
+      || (fotoNummer && (!f.dupFoto || f.dupFoto.verdict !== 'ok'));
+    if (!zweifelFrei || doppelIrgendwo || ef.korrekturGebremst) return offen(eanZweifelCode, { hinweis });
+    zweifel.push(eanZweifelCode);
   }
 
   // Doppel-Regel (Konsolen-Regel, gleiche Datei wie dort). Seit der
@@ -265,8 +293,15 @@ function entscheideFall(f) {
     // tragen keinen Produkt-Barcode, das ist kein Fehler der Einreichung.
     // Waage-Etiketten wiederholen sich zwangsläufig auf allen Fotos — „dieselbe
     // Ansicht" ist bei loser Ware kein Mangel (Vergleich 24.09., Bergkäse).
-    if (audit.loseWare && audit.echt) return freigabe(f, audit, { loseWare: true });
-    if (rf.ean === 'lesungen_uneinig') return offen('lesung_unsicher', { hinweis: 'Barcode unsicher gelesen' });
+    if (audit.loseWare && audit.echt) return freigabe(f, audit, { loseWare: true }, zweifel);
+    if (rf.ean === 'lesungen_uneinig') {
+      // Barcode da, aber schwer lesbar (22.10.2026): im Zweifel frei, wenn die
+      // Bildprüfung die Fotos für echt hält. Ohne EAN greift keine
+      // Doppel-Prüfung — in Kauf genommen (Entscheidung Patrick).
+      if (!zweifelFrei || !audit.echt) return offen('lesung_unsicher', { hinweis: 'Barcode unsicher gelesen' });
+      zweifel.push('lesung_unsicher');
+      return freigabe(f, audit, {}, zweifel);
+    }
     if (rf.ean || rf.alles) return offen('nachlesen_gescheitert', { hinweis: rf.ean || rf.alles });
     return ablehnen('ean_fehlt');
   }
@@ -290,7 +325,7 @@ function entscheideFall(f) {
     return ablehnen('gleiche_ansicht_mehrfach', { hinweis: audit.grund });
   }
   if (!audit.echt) return ablehnen('fotos_unpassend', { hinweis: audit.grund });
-  return freigabe(f, audit, audit.traegtAngaben === false ? { ohneAngaben: true } : {});
+  return freigabe(f, audit, audit.traegtAngaben === false ? { ohneAngaben: true } : {}, zweifel);
 }
 
 /**
@@ -452,8 +487,8 @@ function vorbefundHinweis(bild) {
  *    nur unter IHREM Schalter (`preisBildschirmRegel` bzw. `preisBelegRegel`,
  *    preisBildschirm.preisBildschirmLage — Nachprüfung 05.10.2026).
  */
-function freigabe(f, audit, extra = {}) {
-  const e = freigabeOhneBildschirm(f, audit, extra);
+function freigabe(f, audit, extra = {}, zweifel = []) {
+  const e = freigabeOhneBildschirm(f, audit, extra, zweifel);
   // Bildschirmfoto als Preisbeleg (Patrick 04.10.2026: „ja, bau das" — erst
   // eine Woche beobachten, dann ablehnen). Bewusst HIER und nach der
   // Preis-Prüfung ausgewertet: bei 36 von 37 Bildschirmfotos der Vor-Analyse
@@ -504,17 +539,27 @@ function freigabe(f, audit, extra = {}) {
   return fallDazu(e.entscheidung === 'freigeben' ? offen(wirkt.grund, { hinweis }) : e);
 }
 
-function freigabeOhneBildschirm(f, audit, extra = {}) {
+function freigabeOhneBildschirm(f, audit, extra = {}, zweifel = []) {
   if (!f.preisVorhanden && !(audit && audit.preisSichtbar === true)) {
     const rf = f.rettungFehler || {};
-    if (rf.preis === 'lesungen_uneinig') return offen('preis_unsicher', { hinweis: 'Nur eine von zwei Nachlesungen fand einen Preis' });
-    if (rf.preis || rf.alles) return offen('nachlesen_gescheitert', { hinweis: rf.preis || rf.alles });
-    if (!audit || typeof audit.preisSichtbar !== 'boolean') return offen('preis_unbeurteilt');
-    if (f.preisHinweis) return offen('preis_unsicher', { hinweis: f.preisHinweis });
+    // Unsicherer Preis — eine Quelle sah einen Preis, eine andere nicht: seit
+    // 22.10.2026 im Zweifel frei (Entscheidung Patrick); die übrigen Hürden
+    // unten laufen wie gewohnt. Technische Ausfälle (Nachlesen gescheitert,
+    // keine Bildprüfung) bleiben liegen — kein Zweifel, sondern kein Urteil.
+    // Abgelehnt wird weiter nur, wenn KEINE Quelle einen Preis sah.
+    const zweifelFrei = f.zweifelFreigabe === true;
+    if (rf.preis === 'lesungen_uneinig') {
+      if (!zweifelFrei) return offen('preis_unsicher', { hinweis: 'Nur eine von zwei Nachlesungen fand einen Preis' });
+      zweifel.push('preis_unsicher');
+    } else if (rf.preis || rf.alles) return offen('nachlesen_gescheitert', { hinweis: rf.preis || rf.alles });
+    else if (!audit || typeof audit.preisSichtbar !== 'boolean') return offen('preis_unbeurteilt');
+    else if (f.preisHinweis) {
+      if (!zweifelFrei) return offen('preis_unsicher', { hinweis: f.preisHinweis });
+      zweifel.push('preis_unsicher');
     // Abgeschnittene Datei aus dem Android-Upload (26.09.): ist nur der untere
     // Teil weg, sieht jede Lesung „kein Preis" — die Ursache wäre unsere.
-    if (f.preisBildDefekt) return offen('bild_defekt', { hinweis: 'Preisfoto beim Hochladen beschädigt' });
-    return ablehnen('preis_fehlt');
+    } else if (f.preisBildDefekt) return offen('bild_defekt', { hinweis: 'Preisfoto beim Hochladen beschädigt' });
+    else return ablehnen('preis_fehlt');
   }
   // Keine Freigabe ohne die beiden Abgleiche, die sie verhindern könnten
   // (fail-closed für die Freigabe, Entscheidung Patrick 02.10.2026): ob das
