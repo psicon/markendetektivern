@@ -79,6 +79,7 @@ const { bildDefektOf } = require('./einreichung');
 const { warnungen } = require('./warnungen');
 const { mitWiederholung, arbeite, schlafe, geminiKennung, KI_ZWECK } = require('./ki');
 const { ladeProduktsuche } = require('./produktsuche');
+const { schattenFuerBericht } = require('./liveSchattenBericht');
 const {
   modusPreisBildschirm, modusPreisBeleg, schalterRohOf, preisQuelleOf, lesedienstBonOf, lesedienstOhneBonOf, bildKopf, bildschirmMerkmal, preisBildschirmLage,
   preisBildschirmVorbefund, preisBildschirmMitVorbefund,
@@ -637,15 +638,26 @@ async function dateiListe(storage) {
  * @param {*} [opts.zweifelFreigabe]  Rohwert von `cashback_config/v1.zweifelFreigabe`
  *   (Entscheidung Patrick 22.10.2026): Zweifelsfälle bei Preis und Barcode frei.
  *   An, außer ausdrücklich `false`; nicht lesbar = aus (der Schalter lockert).
+ * @param {string[]} [opts.nurFaelle]  EINZELFALL-EINSTIEG des Live-Schattens
+ *   (src/liveSchatten.js, Entscheidung Patrick 05.11.2026): nur diese offenen
+ *   Einreichungen werden bearbeitet, alles andere ist wie im Stapel — dieselbe
+ *   ganze Sammlung, dieselbe Storage-Liste, dieselben Schritte und Anweisungen
+ *   (eine zweite Kopie der Regeln wäre der Fehler vom 20.09.). Erzwingt
+ *   `nurLesen`: kein einziger Schreibvorgang. Die übrigen offenen Einreichungen
+ *   bleiben für die Regeln offen (ältere offene derselben EAN → halten), wie es
+ *   live wäre. Eine Notbremse greift bei einem Fall nie (Mindestzahlen).
+ * @param {object} [opts.ai]  Gemini-Client (Vorgabe: Vertex „global") — der
+ *   Schatten reicht einen messenden Mantel um denselben Client herein.
  */
-async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser = 'zeitplan', vergleich = null, nurLesen = false, arbeitszeitMs = ARBEITSZEIT_MS, preisBildschirmRegel, preisBelegRegel, barcodeKorrektur, haushaltRegel, zweifelFreigabe } = {}) {
+async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser = 'zeitplan', vergleich = null, nurLesen = false, arbeitszeitMs = ARBEITSZEIT_MS, preisBildschirmRegel, preisBelegRegel, barcodeKorrektur, haushaltRegel, zweifelFreigabe, nurFaelle = null, ai: aiVorgabe = null } = {}) {
+  if (nurFaelle) nurLesen = true;
   if (vergleich || nurLesen) dryRun = true;
   // Nachgelesene Angaben und die Foto-Nummer sind Tatsachen über die Fotos und
   // werden auch im normalen Trockenlauf gespeichert — nur nicht beim reinen Rechnen.
   const schreibtAngaben = !vergleich && !nurLesen;
   const db = admin.firestore();
   const bucket = bucketName || `${projekt}.appspot.com`;
-  const ai = new GoogleGenAI({ vertexai: true, project: projekt, location: 'global' });
+  const ai = aiVorgabe || new GoogleGenAI({ vertexai: true, project: projekt, location: 'global' });
   const start = Date.now();
   const frist = start + arbeitszeitMs;
   const tag = berlinTag(start);
@@ -740,8 +752,9 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
       delete d.x.rejectReason; delete d.x.reviewedAt; delete d.x.review;
     });
   }
+  const nurSet = nurFaelle ? new Set(nurFaelle) : null;
   const pending = alle
-    .filter((d) => d.x.status === 'pending' && (!vergleich || d.vorher))
+    .filter((d) => d.x.status === 'pending' && (!vergleich || d.vorher) && (!nurSet || nurSet.has(d.id)))
     .sort((a, b) => (a.zeit ?? 0) - (b.zeit ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
   // 0) Gesperrte Konten (Entscheidung Patrick 02.10.2026). Für sie wird nichts
@@ -1412,6 +1425,8 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
 
   if (vergleich || nurLesen) {
     return {
+      // Dieselbe Regelversion wie im Tagesbericht — der Live-Schatten legt sie je Fall ab.
+      regelVersion: regelVersion(pbModus, belegModus, korrekturAn, haushaltAn, zweifelAn),
       notbremse: bremse,
       eanKorrektur: korrekturBericht(),
       fotoAbgleich: { dateien: liste ? liste.size : null },
@@ -1420,6 +1435,8 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
         id: p.id, userId: p.x.userId ?? null, name: String(nameOf(p.x) || '?').slice(0, 60), markt: p.x.marketName || null,
         entscheidung: p.entscheidung, grund: p.grund, hinweis: p.ctx?.hinweis || null, loseWare: !!p.loseWare, zurueckgehalten: p.zurueckgehaltenGrund || null,
         preisBildschirmFall: p.preisBildschirmFall || null,
+        // Im Zweifel freigegeben (22.10.2026): welche Haltegründe übergangen wurden.
+        zweifel: p.zweifel || null,
         audit: p.audit || null, auditFehler: auditFehler.get(p.id) || null,
         // Eingaben inkl. der (nur im Speicher) nachgelesenen Werte — damit sich
         // ein Lauf nach alter Regel daneben rechnen lässt.
@@ -1924,6 +1941,11 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   });
   const gebuchtCents = gebucht.filter((s) => s.rewardResult === 'credited').reduce((s, g) => s + (Number(g.rewardCents) || 0), 0);
   const fall = (p) => ({ id: p.id, name: String(nameOf(p.x) || '?').slice(0, 60), markt: p.x.marketName || null, grund: p.grund, hinweis: p.ctx?.hinweis || null, zurueckgehalten: p.zurueckgehaltenGrund || null });
+  // Live-Schatten (Entscheidung Patrick 05.11.2026): Abgleich Schatten gegen
+  // diese Runde je Fall — erst NACH allen Entscheidungen gelesen und nur
+  // gezählt, wirft nie (src/liveSchattenBericht.js). Ändert an keiner
+  // Entscheidung etwas.
+  const liveSchatten = await schattenFuerBericht(db, plan, logger, start);
 
   const bericht = {
     lauf, tag, ausloeser, dryRun,
@@ -1984,6 +2006,7 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     bonRunde: bonRundeHeute,
     // Hintergrundsuche für unbekannte Barcodes, Vortag (src/produktsuche.js).
     produktsuche,
+    liveSchatten,
     aktionen: aktionen.filter((a) => a.active && a.endAt > start - 7 * 24 * 60 * 60 * 1000).map(({ id, kind, startAt, endAt, budgetRemainingCents, budgetTotalCents, cashbackPerBonCents }) => ({ id, kind, startAt, endAt, budgetRemainingCents, budgetTotalCents, cashbackPerBonCents })),
     warnungen: warn,
   };

@@ -1232,6 +1232,99 @@ exports.bonRundeTaeglich = onSchedule(
   },
 );
 
+/**
+ * Produktfoto-Prüfung live — Schritt 1: Schattenbetrieb (Entscheidung Patrick
+ * 05.11.2026; Logik und Grenzen: src/liveSchatten.js, WISSEN-FOTORUNDE.md
+ * „Live-Schatten“). Rechnet jeden Fall nach dem Namer mit der Morgenrunde
+ * selbst (`taeglicheRunde` mit `nurFaelle`) und legt das Ergebnis NUR in
+ * `crowd_live_schatten/{id}` ab — entscheidet nichts. Schalter
+ * `cashback_config/v1.fotoLive`: false (Standard) | 'shadow' | true (läuft in
+ * diesem Schritt wie 'shadow').
+ *
+ * Zwei Functions: der Trigger prüft nur den Übergang „Namer fertig“ und stellt
+ * einen Auftrag in die Cloud-Tasks-Warteschlange (je Einreichung ein Name, ein
+ * zweiter wird verworfen); der Arbeiter rechnet im Takt der Warteschlange
+ * (liveSchatten.TAKT), damit Spitzen nicht ins Google-Limit laufen. 429 im
+ * Modellaufruf wiederholt die Runde selbst (src/ki.js mitWiederholung).
+ */
+const { onDocumentUpdated } = require('firebase-functions/v2/firestore');
+const { onTaskDispatched } = require('firebase-functions/v2/tasks');
+const { getFunctions } = require('firebase-admin/functions');
+const { GoogleGenAI } = require('@google/genai');
+const liveSchatten = require('./src/liveSchatten');
+const SCHATTEN_ARBEITER = 'fotoSchattenPruefen';
+
+/**
+ * Adresse des Arbeiters (Cloud Run) für die Aufträge — wie in der
+ * Firebase-Anleitung zu Task-Queue-Functions (2. Generation). Nicht
+ * ermittelbar → null, dann nimmt das SDK die cloudfunctions.net-Adresse.
+ */
+let schattenZielCache = null;
+async function schattenZiel() {
+  if (schattenZielCache) return schattenZielCache;
+  // Im Emulator stellt das SDK selbst an den Task-Emulator zu — keine Anfrage an Google.
+  if (process.env.FUNCTIONS_EMULATOR === 'true') return null;
+  try {
+    const { access_token: token } = await admin.credential.applicationDefault().getAccessToken();
+    const r = await fetch(`https://cloudfunctions.googleapis.com/v2beta/projects/${PROJEKT}/locations/${REGION}/functions/${SCHATTEN_ARBEITER}`, { headers: { Authorization: `Bearer ${token}` } });
+    const j = await r.json();
+    if (j && j.serviceConfig && j.serviceConfig.uri) schattenZielCache = j.serviceConfig.uri;
+  } catch (e) {
+    logger.warn('Live-Schatten: Adresse des Arbeiters nicht ermittelbar — Vorgabe des SDK', { fehler: String(e && e.message).slice(0, 120) });
+  }
+  return schattenZielCache;
+}
+
+exports.fotoSchattenAusloeser = onDocumentUpdated(
+  // Läuft bei JEDEM Update einer Einreichung (Namer, Ortsbewertung, Runde, Vergütung) — deshalb ohne
+  // Schalter-Lesen, solange der Übergang nicht passt, und mit vielen Anfragen je Instanz: die Runde
+  // schreibt um 08:00 über 100 Entscheidungen in einer Minute.
+  { document: 'crowd_uploads/{id}', region: REGION, memory: '512MiB', cpu: 1, concurrency: 40, timeoutSeconds: 60, maxInstances: 5 },
+  async (event) => {
+    const id = event.params.id;
+    const ausgang = await liveSchatten.ausloeserFall({
+      db, id, logger,
+      vorher: event.data && event.data.before ? event.data.before.data() : null,
+      nachher: event.data && event.data.after ? event.data.after.data() : null,
+      einstellen: async (daten, name) => {
+        const uri = await schattenZiel();
+        await getFunctions().taskQueue(`locations/${REGION}/functions/${SCHATTEN_ARBEITER}`).enqueue(daten, { id: name, dispatchDeadlineSeconds: 600, ...(uri ? { uri } : {}) });
+      },
+    });
+    if (ausgang === 'eingestellt' || ausgang === 'schon_eingestellt') logger.info('Live-Schatten: Auftrag', { id, ausgang });
+  },
+);
+
+let schattenKi = null;
+exports[SCHATTEN_ARBEITER] = onTaskDispatched(
+  {
+    region: REGION, memory: '1GiB', timeoutSeconds: 540,
+    // Je Instanz ein Fall (die Runde lädt die ganze Sammlung; der Strichcode-Leser braucht bis zu 320 MB).
+    concurrency: 1, maxInstances: liveSchatten.TAKT.gleichzeitig,
+    retryConfig: { maxAttempts: liveSchatten.VERSUCHE, minBackoffSeconds: 60, maxBackoffSeconds: 600 },
+    rateLimits: { maxConcurrentDispatches: liveSchatten.TAKT.gleichzeitig, maxDispatchesPerSecond: liveSchatten.TAKT.jeSekunde },
+  },
+  async (req) => {
+    const id = req.data && typeof req.data.id === 'string' ? req.data.id : null;
+    if (!id) { logger.warn('Live-Schatten: Auftrag ohne Einreichung'); return; }
+    // Derselbe Client wie die Runde (Vertex „global“); gemessen wird im Mantel (liveSchatten.messendeKi).
+    // Im Emulator (__emu__/kette.js) nie ein echter Modellaufruf: dort gäbe es nur fremde Zugangsdaten.
+    schattenKi ||= process.env.FUNCTIONS_EMULATOR === 'true'
+      ? { models: { generateContent: async () => { throw new Error('INVALID_ARGUMENT kein Modellaufruf im Emulator'); } } }
+      : new GoogleGenAI({ vertexai: true, project: PROJEKT, location: 'global' });
+    const r = await liveSchatten.schattenFall({
+      db, id, projekt: PROJEKT, ai: schattenKi, logger,
+      versuch: Number(req.retryCount) || 0, auftrag: req.id || null,
+      werte: { stamp: () => FieldValue.serverTimestamp() },
+      kontoErstellt: async (uid) => {
+        const t = Date.parse((await admin.auth().getUser(uid)).metadata.creationTime);
+        return Number.isFinite(t) ? t : null;
+      },
+    });
+    logger.info('Live-Schatten: Fall', { id, status: r.status, ergebnis: r.ergebnis || null });
+  },
+);
+
 /** Tagesberichte fürs Dashboard (tagesbericht.html), neueste zuerst. */
 exports.reviewTagesberichte = onCall({ region: REGION, timeoutSeconds: 30 }, async (req) => {
   assertAdmin(req);

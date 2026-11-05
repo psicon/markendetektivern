@@ -24,6 +24,7 @@ hat, steht hier als Regel. Wer die Runde ändert, ändert zuerst diese Datei.
 | Bildschirmfoto als Preisbeleg | `src/preisBildschirm.js` (+ Tests), Schalter `cashback_config/v1.preisBildschirmRegel`: `false` \| `'shadow'` (Standard) \| `true` |
 | Preisbeleg „Kassenbon" (Warenkorb, fremder Händler) | dieselbe Datei, EIGENER Schalter `cashback_config/v1.preisBelegRegel`: `false` \| `'shadow'` (Standard) \| `true` (Nachprüfung 05.10.2026) |
 | Von Hand anstoßen | HTTP `fotoRundeManuell?key=…` (europe-west1) — ohne Schlüssel 403; scharf nur mit `scharf=1` und eingeschaltetem Schalter |
+| Live-Schatten (05.11.2026) | `src/liveSchatten.js` (Trigger `fotoSchattenAusloeser`, Cloud-Tasks-Arbeiter `fotoSchattenPruefen`), Ergebnis in `crowd_live_schatten/{id}`, Abgleich im Bericht `liveSchatten` (`src/liveSchattenBericht.js`); Schalter `cashback_config/v1.fotoLive`: `false` (Standard) \| `'shadow'` \| `true` (= `'shadow'` in Schritt 1) — siehe „Live-Schatten“ |
 
 Die Runde liegt bewusst in der Prüfkonsole und nicht in einer eigenen
 Codebase: eine Kopie der Doppel-Regel wäre genau der Fehler vom 20.09.
@@ -1643,6 +1644,119 @@ im ClickUp-Kanal MarkenDetektive_DevBacklog). Der Chat läuft nur, wenn die
 Claude-App auf Patricks Mac offen ist; sonst beim nächsten Start. Die Cloud
 Function hat keinen ClickUp-Zugang (kein Token im Secret Manager) — deshalb
 postet der Chat, nicht die Function.
+
+## Live-Schatten (Schritt 1 der Prüfung live, seit 05.11.2026)
+
+Entscheidungen Patrick 05.11.2026: „Ja, so" (zwei Wochen Schatten, dann
+Freigaben live, dann Ablehnungen; die Morgenrunde bleibt als Nachlauf), „Ja"
+(Betrugsschutz: Konten jünger als 7 Tage und über 20 Einreichungen in 24 h
+bleiben in der Morgenrunde), „Ja, Schatten selbst" (scharf erst nach seinem
+Ja). Entwurf: t8-fotopruefung-live (§ 1, § 3, § 7).
+
+**Ablauf.** Der Trigger `fotoSchattenAusloeser` (onDocumentUpdated auf
+`crowd_uploads`) prüft nur den Übergang „Namer fertig": `productNameOcrAt`
+gesetzt und kein geplanter Nachlauf `namerNachlesenAb` (crowd-upload-namer
+`src/ablauf.js`) — ein vorhandenes Signal, der Namer bleibt unverändert. Erst
+dann liest er `fotoLive` und stellt einen Auftrag in die Cloud-Tasks-
+Warteschlange `fotoSchattenPruefen` (Name je Einreichung fest, ein zweiter
+wird verworfen; Takt 3 gleichzeitig, 1 je Sekunde, 3 Versuche). Der Arbeiter
+übernimmt den Fall in einer Transaktion am eigenen Dokument, prüft den
+Betrugsschutz (vor jedem Modellaufruf) und rechnet sonst mit der Morgenrunde
+SELBST: `taeglicheRunde({ nurFaelle: [id] })`.
+
+**Keine zweite Kopie der Regeln** (Fehler vom 20.09.). `nurFaelle` ist der
+einzige Eingriff in die Runde: er beschränkt die offenen Fälle auf diesen
+einen und erzwingt `nurLesen`. Alles andere ist der Stapel: ganze Sammlung,
+Storage-Liste, Nachlesung, Bildprüfung, zweite Barcode-Lesung,
+Strichcode-Leser, `entscheideFall`, Doppel-Regel, Haushalt, Wochen-Sperre,
+Notbremse, dieselben Anweisungen, `gemini-3.5-flash`, `temperature 0`,
+`thinkingLevel LOW`. Der Schatten reicht nur einen messenden Mantel um den
+Client (Aufrufe, Dauer) und hängt an die Kosten-Kennung `weg: live-schatten`.
+Die übrigen offenen Einreichungen bleiben für die Regeln offen — „ältere
+eigene offen → halten" trifft live also öfter als morgens (dort ist die ältere
+schon entschieden). Das zeigt der Abgleich unter `doppelt_eingereicht`; live
+braucht es das Wiedereinstellen der jüngeren (t8 § 3). Eine Notbremse greift
+bei einem Fall nie (Mindestzahlen); die 24-h-Bremse ist Schritt 3 und für
+„Freigaben live" nicht nötig (Bremsen halten nur Ablehnungen).
+
+**Der Schatten entscheidet nichts.** Kein Statuswechsel, keine Buchung, kein
+Push, keine Sperre, kein Schreibvorgang an `crowd_uploads` (nachgewiesen im
+Emulator über `updateTime`). Nachgelesene Angaben bleiben im Speicher; die
+Runde liest sie morgens selbst. Er schreibt NUR `crowd_live_schatten/{id}` —
+bewusst nicht am Fall: den liest der Einreicher selbst (ein „wäre abgelehnt"
+wäre eine Vorwarnung), ein neues Feld dort bräuchte einen Eintrag in der
+Sperrliste der Rules und weckte alle Trigger auf `crowd_uploads`. Die neue
+Sammlung fällt unter den finalen deny-all.
+
+**Je Fall** (`crowd_live_schatten/{id}`): `status` (`laeuft` → `fertig` |
+`fehler`), `lauf`, `versuch`, `auftrag`, `startedMs`, `uploadMs`
+(Server-Zeitpunkt der Einreichung), `fertigMs`, `dauerMs`, `gesamtMs` (ab
+Upload), `modelMs` (Summe der Modellaufrufe), `modellAufrufe`, `ergebnis`
+(`freigeben` | `ablehnen` | `offen` | `betrugsschutz` | `schon_entschieden`),
+`grund`, `zurueckgehalten`, `zweifel`, `loseWare`, `regelVersion` (dieselbe
+wie im Tagesbericht), `wuerdeLive`, `wuerdeMorgenrunde` (`betrugsschutz` |
+`ablehnung` | `offen`), `modus`, `scharfAngefragt`. Keine Hinweistexte, keine
+Nummern, keine Namen. Doppelte Zustellung: `fertig` → nichts; `laeuft`
+jünger als 12 min → nichts; älter oder `fehler` → neu übernommen.
+
+**Betrugsschutz** (`liveSchatten.BETRUGSSCHUTZ`, eine Stelle): Konto jünger als
+7 Tage nach Firebase-Auth `creationTime` (`neues_konto`), Alter nicht
+ermittelbar (`kontoalter_unbekannt`, vorsichtige Richtung) oder mehr als 20
+Einreichungen derselben Person in den 24 h bis zu dieser, sie selbst
+mitgezählt (`vielreicher`) → `ergebnis: 'betrugsschutz'`, kein Modellaufruf.
+
+**Tagesbericht** `liveSchatten` (nach allen Entscheidungen gelesen, wirft nie,
+ändert keine Entscheidung — getestet: Schreibvorgänge der Runde mit und ohne
+Schatten-Dokumente gleich): `verglichen`, `gleich`, `uebereinstimmung`
+(auch `…MitGrund`), `paare` (Schlüssel „Schatten|Runde"), `jeGrund` (nach Grund
+der Runde) und `jeSchattenGrund`, `schattenFreiRundeNicht` + `lockerer`
+(Ziel 0, sonst einzeln erklären), `rundeFreiSchattenNicht` + `strenger`,
+`mcnemar` (b, c, χ² mit Stetigkeitskorrektur; über die zwei Wochen b und c
+summieren), `dauer` (Median und P99 von `gesamtMs` und Modellzeit),
+`betrugsschutz`, `rueckfaelle` (Schatten „offen" nach den Regeln, nach Grund),
+`technisch` (offen, weil Bildprüfung oder Nachlesung an unserer Technik
+scheiterten — am Schatten-Dokument `technisch`, NICHT verglichen), `fehler`,
+`laeuft`, `haengt` (länger als 12 min ohne Ergebnis), `fehlt` (kein Schatten;
+zählt jeden Morgen, solange der Fall offen ist), `faelle` (bis 300, gehashte
+Kennung). Jedes Schatten-Ergebnis zählt an GENAU einem Morgen (Fenster 24 h bis
+zum Start der Runde): ein Fall, den die Runde offen lässt, steht am nächsten
+Morgen wieder im Plan — älter → `schonVerglichen`, nach dem Start der Runde
+fertig → `nachRundenstart`. Fehler stehen am Dokument nur als Code (ein
+Firestore-Text kann Pfade mit der uid tragen). Der Goldstandard
+(Entscheidungen in der Konsole) ist noch nicht drin.
+
+**Kosten.** Modellaufrufe wie die Runde (≈ +2,2 €/Tag für zwei Wochen; kein
+zusätzliches Nachlesen — gelesen wird nur, was dem Namer fehlt). Dazu liest
+jeder Fall die ganze Sammlung wie die Runde (geschätzt ≈ 10.000 Dokumente je Fall,
+≈ 1,9 Mio. Lesevorgänge am Tag, Schätzung ≈ 0,7–1,1 €/Tag). Billiger geht
+es erst mit Schritt 0 aus t8 (Felder `eanKey`/`eanNummern`, Sammlung
+`crowd_fotos/{md5}` mit Bestand-Nachtrag) — für den Schatten bewusst nicht
+gebaut.
+
+**Einspielen** (Regeln oben gelten: Codebase allein, vorher `git log
+<deploy-zweig>..<zweig> -- cloud-functions/review-console` für jeden aktiven
+Zweig): `functions:review-console` allein; der Schalter steht danach auf
+nichts = aus. Prüfen, dass die Warteschlange `fotoSchattenPruefen` angelegt
+ist (`gcloud tasks queues describe fotoSchattenPruefen --location=europe-west1`)
+und das Dienstkonto der Functions (Compute-Standardkonto) Aufträge einstellen
+und den Arbeiter aufrufen darf: `roles/cloudtasks.enqueuer`,
+`roles/iam.serviceAccountUser` (auf sich selbst, für das OIDC-Token) und
+`roles/run.invoker` auf dem Dienst `fotoschattenpruefen`. Dann `fotoLive:
+'shadow'` und nach den ersten Einreichungen `crowd_live_schatten` sowie die Logs
+„Live-Schatten: Auftrag" / „Live-Schatten: Fall" ansehen.
+
+Die Einreichung liest der Arbeiter AUSSERHALB seiner Transaktion (Prüfrunde
+05.11.2026): ein Lesen in der Transaktion sperrt das Dokument und hielte
+Transaktionen von Runde, Namer, Konsole oder Vergütung auf. Um 08:00 teilen
+sich Schatten und Runde die Vertex-Quote; ein 429, das die Wiederholungen
+übersteht, lässt in der Runde einen Fall offen (offen: den Schatten dort
+pausieren). **Rückweg:** `fotoLive: false`
+(ohne Deploy); die Dokumente in `crowd_live_schatten` wirken auf nichts.
+
+**Tests:** `__tests__/liveSchatten.test.js` (Einzelfall gegen Stapel,
+Schalter, Betrugsschutz, Idempotenz, nichts entscheiden, Bericht);
+Emulator: `__emu__/liveSchatten.emu.test.js` (Firestore) und `__emu__/kette.js`
+(Trigger → Tasks → Arbeiter, Aufruf im Dateikopf).
 
 ## Bon-Runde (07:45, seit 24.09.2026)
 
