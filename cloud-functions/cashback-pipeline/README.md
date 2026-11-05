@@ -11,20 +11,50 @@ See `CASHBACK_ARCHITECTURE.md` (repo root) for the full design.
   the receipt doc with `status: 'ocr_pending'`, and publishes a PubSub
   message to `cashback-ocr-jobs`.
 - **`processCashback`** — PubSub-triggered, region `europe-west3`,
-  memory 1 GiB, timeout 120s. Downloads the image, runs Gemini 2.5
-  Flash OCR, reconciles Σitems vs total, applies the tier formula,
+  Downloads the image, runs the robust Gemini OCR (lib/ocr_robust.js:
+  mehrere gemini-3.5-flash-Lesungen, bei Uneinigkeit Eskalationsstufe —
+  s. „Modelle"), reconciles Σitems vs total, applies the tier formula,
   writes the structured receipt + ledger entry, then triggers the
-  push-notification (currently a stub log — Phase 2.1 wires real FCM).
+  push-notification (echt seit b00c71a, Mai 2026 — lib/push.js; der
+  Versand respektiert seit 86cbfdq5j die Abbestellung des Nutzers).
 
 ## Environment
 
 ### Secret (via Secret Manager)
 
 ```bash
-firebase functions:secrets:set GEMINI_API_KEY
-# Optional override:
-firebase functions:secrets:set CASHBACK_OCR_MODEL  # default gemini-2.5-flash
+firebase functions:secrets:set GEMINI_API_KEY   # nur Rückweg GEMINI_USE_VERTEX=false
 ```
+
+### Modelle (Stand 01.10.2026, Details: lib/geminiModelle.js)
+
+Alle Aufrufe laufen über Vertex AI. Standard ohne Env-Eintrag:
+
+| Stufe | Modell | Denkstufe | Vertex-Standort |
+|---|---|---|---|
+| Primärlesungen | `gemini-3.5-flash` (bzw. `cashback_config/v1.ocrModel`) | Standard (MEDIUM) | `global` |
+| Eskalation (Robust-OCR) | `gemini-3.5-flash` | `HIGH` | `eu` |
+| Zweitprüfung | `gemini-3.1-pro-preview` | `LOW` | `global` |
+| Rückfall Zweitprüfung (429/404) | `gemini-3.5-flash` | `HIGH` | `eu` |
+
+`gemini-2.5-pro` (bis 30.09.2026 Eskalation + Rückfall) wird auf Vertex am
+20.10.2026 abgeschaltet. Übersteuerbar per `.env` (wirkt erst nach Deploy):
+`CASHBACK_OCR_PRO_MODEL`, `CASHBACK_OCR_PRO_THINKING_LEVEL`,
+`CASHBACK_OCR_PRO_LOCATION`, `CASHBACK_OCR_PRO_TIMEOUT_MS` (Standard 150000),
+`CASHBACK_OCR_REFEREE_MODEL`, `CASHBACK_OCR_REFEREE_FALLBACK_MODEL`,
+`CASHBACK_OCR_REFEREE_FALLBACK_LOCATION`, `GEMINI_VERTEX_LOCATION`,
+`GEMINI_VERTEX_LOCATION_PRO` (nur für ein per Env gesetztes 2.5-pro).
+Warum Eskalation und Rückfall unter `eu` statt `global` laufen (zweiter
+Kapazitätspool): lib/geminiModelle.js.
+
+**Zeit (seit 03.10.2026, lib/ocr_robust.js):** jede Primär- und
+Bildverbesserungs-Lesung hat ein Zeitlimit (`CASHBACK_OCR_READ_TIMEOUT_MS`,
+Standard 170000), die ganze Leiter ein Laufbudget je Lauf
+(`CASHBACK_OCR_RUN_BUDGET_MS`, Standard 400000, erlaubt 200000–450000).
+Reicht das Budget nicht, liegt der Zwischenstand in `receipts/*.ocrZwischenstand`
+und der Bon wird sofort neu zugestellt (Log `ocr-fortsetzung`); nach 480 s
+schreibt ein Lauf keine Entscheidung mehr (`lauf_zeitgrenze`). Wer diese Werte
+ändert, prüft `LAUF_MAX_MS` in lib/laufAnspruch.js.
 
 ### Project-local config (via `.env` file, gitignored)
 
@@ -34,7 +64,7 @@ time (firebase-functions v2 native behavior). Current keys:
 ```
 DOCUMENTAI_PROCESSOR_ID=<id of the eu Expense Parser processor>
 DOCUMENTAI_LOCATION=eu
-CASHBACK_OCR_ENGINE=cv-hybrid          # or 'gemini-direct' for rollback
+CASHBACK_OCR_ENGINE=gemini-direct      # 'cv-hybrid' nur als Rollback
 CASHBACK_ESCALATE_DOCAI=true           # 'false' disables DocAI fallback
 ```
 

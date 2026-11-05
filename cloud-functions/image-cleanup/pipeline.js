@@ -276,11 +276,13 @@ async function analyzeBackground(buffer) {
 
 // ─── Gemini call ───────────────────────────────────────────────────
 
-async function runGemini(buffer, geminiClient, overrides = {}) {
+async function runGemini(buffer, geminiClient, overrides = {}, kennung = {}) {
   // Per-call overrides used by `retry-failures.js` to swap the
   // prompt and/or the model for items the default config couldn't
   // process (typically hand-in-frame photos that hit IMAGE_OTHER).
   // Passing nothing here keeps the live-trigger behaviour stable.
+  // `kennung`: Kosten-Kennung der Live-Trigger (geminiKennung.js) —
+  // `{ labels }` auf dem Vertex-Pfad, sonst `{}`; Skripte lassen sie weg.
   const promptText = overrides.promptText || PROMPT_TEXT;
   const model = overrides.model || GEMINI_MODEL;
   const responseModalities = overrides.responseModalities || ['IMAGE'];
@@ -319,6 +321,7 @@ async function runGemini(buffer, geminiClient, overrides = {}) {
         { category: 'HARM_CATEGORY_DANGEROUS_CONTENT',  threshold: 'BLOCK_NONE' },
         { category: 'HARM_CATEGORY_CIVIC_INTEGRITY',    threshold: 'BLOCK_NONE' },
       ],
+      ...kennung,
     },
   });
   const candidates = response?.candidates || [];
@@ -808,7 +811,7 @@ async function processProductImage({
         .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
         .png()
         .toBuffer();
-      sourcePng = await runGemini(prepped, genAI, options.geminiOverrides);
+      sourcePng = await runGemini(prepped, genAI, options.geminiOverrides, options.kennung);
       source = 'gemini';
     }
 

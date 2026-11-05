@@ -20,11 +20,12 @@
  * den Chips eher ungesund ist. Eine "5" für Chips heißt: relativ
  * gesehen eine bessere Chips-Wahl (z.B. weniger Fett, kein Aroma).
  *
- * Modell + Konfig identisch zum Comparator (Gemini 2.5 Flash,
- * thinkingBudget=0, niedrige Temperature).
+ * Modell + Konfig identisch zum Comparator (Gemini 3.5 Flash,
+ * thinkingLevel LOW, niedrige Temperature).
  */
 
-const { GoogleGenAI, Type } = require('@google/genai');
+const { Type } = require('@google/genai');
+const { getGenAIClient, geminiKennung, ZWECK } = require('./genaiClient');
 
 const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
 
@@ -225,8 +226,12 @@ function isAssessable(s) {
   return hasNutrition || hasIngredients;
 }
 
-async function callGeminiAssessment({ apiKey, snapshot, category, model = DEFAULT_MODEL }) {
-  const ai = new GoogleGenAI({ apiKey });
+/**
+ * `zweck`: Kosten-Kennung (src/genaiClient.js) — dieselbe Bewertung läuft für
+ * Katalog-Produkte (Standard) und für externe Produkte (runExternalAssessment).
+ */
+async function callGeminiAssessment({ apiKey, snapshot, category, model = DEFAULT_MODEL, zweck = ZWECK.PRODUKT_BEWERTUNG }) {
+  const ai = getGenAIClient(apiKey);
   const userContent = buildUserContent({ product: snapshot, category });
 
   const response = await ai.models.generateContent({
@@ -237,8 +242,14 @@ async function callGeminiAssessment({ apiKey, snapshot, category, model = DEFAUL
       responseMimeType: 'application/json',
       responseSchema: RESPONSE_SCHEMA,
       temperature: 0.2,
-      thinkingConfig: { thinkingBudget: 0 },
-      maxOutputTokens: 1024,
+      // thinkingLevel statt thinkingBudget (24.09.2026): Vertex lehnt seit
+      // 22.09. einen Teil der Anfragen mit thinkingBudget: 0 ab (400 „Thinking
+      // budget is not supported for this model"; beim Produktfoto-Namer
+      // gemessen, siehe CLAUDE.md). Die Denk-Token zählen zu maxOutputTokens.
+      thinkingConfig: { thinkingLevel: 'LOW' },
+      maxOutputTokens: 4096,
+      // Kosten-Kennung (08.10.2026), nur auf dem Vertex-Pfad.
+      ...geminiKennung(zweck),
     },
   });
 

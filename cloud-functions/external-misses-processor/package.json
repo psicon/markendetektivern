@@ -1,7 +1,7 @@
 {
   "name": "external-misses-processor",
   "version": "0.1.0",
-  "description": "Scheduled CF: bearbeitet pending external_lookup_misses durch Aufruf von nutrition-scraper.scrapeEan. So greifen Globus + 30+ andere whitelisted Shops als EAN-Backfill.",
+  "description": "Hintergrundsuche für unbekannte Barcodes: alle 10 Minuten offene external_lookup_misses beanspruchen (Transaktion, Tagesdeckel, Serper-Guthaben) und per EAN über nutrition-scraper.scrapeEan suchen.",
   "main": "index.js",
   "engines": {
     "node": "22"

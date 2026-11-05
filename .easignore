@@ -57,6 +57,11 @@ markendetektive-895f7-*.json
 GoogleService-Info.plist.bak
 
 # Build cache + dev tooling
+# Git-Historie — der Build-Worker bekommt einen Tarball und braucht sie nie.
+# Gemessen 09.09.2026: 112 MB, und EAS schliesst sie ohnehin selbst aus (das
+# Archiv war mit 89,6 MB kleiner als .git allein). Der Eintrag macht die
+# Absicht sichtbar, spart aber nach heutiger Messung nichts.
+.git/
 .expo/
 .expo-shared/
 .metro-health-check*

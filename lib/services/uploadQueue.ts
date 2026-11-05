@@ -20,14 +20,32 @@
  * Single source of truth for in-flight uploads: this module. The wizard
  * enqueues, the overview subscribes. Storage key is never written directly
  * elsewhere (per the project's state-persistence rule).
+ *
+ * ═══ Wem ein Auftrag gehört (Stufe 1 „erst einreichen, dann Konto", 25.09.2026) ═══
+ *
+ * Dieselbe Regel wie in der Bon-Warteschlange: ein Auftrag läuft nur für die
+ * uid, unter der er eingereiht wurde, oder für ein Konto, in das der Server
+ * die Übernahme dieser Gast-uid BESTÄTIGT hat. Zieht ein Auftrag um, lädt er
+ * unter der neuen uid hoch (storage.rules), behält aber die ursprüngliche uid
+ * als `docUid` für die Dokument-ID — eine Wiederholung nach der Übernahme
+ * trifft so denselben Produkt-Slot und erzeugt keine zweite Einreichung.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
 import { AppState } from 'react-native';
 
+import { auth } from '@/lib/firebase';
+import { isEffectivelyAnonymous } from '@/lib/utils/authIdentity';
 import type { CaptureContext, ClientVersion } from './captureContext';
+import { GastBestand } from './gastBestand';
+import { GastUebernahme } from './gastUebernahme';
 import { isOnline, refreshNetwork, subscribeNetwork } from './network';
-import { submitProduct, uploadProductImage, type ProductPhotoStep } from './productSubmit';
+import {
+  submitProduct,
+  uploadProductImage,
+  type CampaignResolveState,
+  type ProductPhotoStep,
+} from './productSubmit';
 import { showInfoToast } from './ui/toast';
 
 const STORAGE_KEY = 'product_upload_queue_v1';
@@ -38,6 +56,15 @@ const MAX_RETRY_DELAY_MS = 5 * 60_000;
 // infinite background spin on a permanently broken job (corrupt image, revoked
 // auth, server reject).
 const MAX_AUTO_ATTEMPTS = 5;
+// Zeitdeckel auf den abschließenden Firestore-Schreibvorgang. Firestore-Writes
+// lösen offline NIE auf und scheitern auch nicht (Projektregel) — ohne Deckel
+// hängt `runJob` unbegrenzt, sobald das Netz WÄHREND eines Auftrags ausfällt,
+// `processing` bleibt `true`, und die Warteschlange nimmt bis zum App-Neustart
+// keinen Auftrag mehr an: ohne Fehler, ohne Wiederholung, ohne Hinweis.
+// Großzügig bemessen — geschrieben wird ein kleines Dokument, davor liest
+// `submitProduct` noch den Profil-Kontext; 30 s sind ein Vielfaches davon und
+// immer noch die Hälfte des Bild-Deckels (60 s).
+const SUBMIT_TIMEOUT_MS = 30_000;
 
 export type UploadJobStatus = 'queued' | 'uploading' | 'failed';
 
@@ -46,11 +73,26 @@ export interface UploadJobStep {
   /** Persistent uri (copied into QUEUE_DIR on enqueue). */
   uri: string;
   fileName?: string;
+  /**
+   * Schon hochgeladen (26.09.2026): ein Neuversuch lädt diesen Schritt nicht
+   * erneut über Mobilfunk hoch. Gesetzt, sobald die Upload-Prüfung keine
+   * Abweichung fand. War sie nicht möglich („ungeprueft", siehe
+   * storageUploadPruefung.ts), wäre ein zweiter Upload genauso ungeprüft und
+   * brächte keine Sicherheit. Gilt nur für dieselbe uid — nach dem Umzug ins
+   * Konto liegt der Pfad unter der alten uid.
+   */
+  hochgeladen?: { uid: string; pfad: string };
 }
 
 export interface UploadJob {
   id: string;
   uid: string;
+  /**
+   * uid, unter der der Produkt-Slot ursprünglich eingereiht wurde — Teil der
+   * Dokument-ID (`productSubmissionDocId`). Bleibt beim Umzug in ein Konto
+   * erhalten. Fehlt bei Aufträgen aus alten App-Ständen; dann gilt `uid`.
+   */
+  docUid?: string;
   sessionId: string;
   productIndex: number;
   marketId: string | null;
@@ -59,6 +101,8 @@ export interface UploadJob {
   productName: string | null;
   ean: string | null;
   campaignId: string | null;
+  /** Worauf `campaignId` beruht (86cbet2nw). Fehlt bei Aufträgen aus alten App-Ständen. */
+  campaignResolve?: CampaignResolveState | null;
   steps: UploadJobStep[];
   status: UploadJobStatus;
   /** 0..100, overall across all steps of this job. */
@@ -90,6 +134,8 @@ export interface EnqueueInput {
   productName: string | null;
   ean: string | null;
   campaignId: string | null;
+  /** Worauf `campaignId` beruht (86cbet2nw). Fehlt bei Aufträgen aus alten App-Ständen. */
+  campaignResolve?: CampaignResolveState | null;
   steps: { key: ProductPhotoStep; uri: string; fileName?: string }[];
   capture?: CaptureContext | null;
   clientVersion?: ClientVersion | null;
@@ -100,6 +146,8 @@ type Listener = (jobs: UploadJob[]) => void;
 let jobs: UploadJob[] = [];
 let loaded = false;
 let processing = false;
+// Während eines Kontowechsels startet kein neuer Auftrag (pausiereUploadQueue).
+let pausiert = false;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 // Successful uploads since the queue was last drained — used to confirm a
 // finished background batch with one toast (even if the user moved on).
@@ -168,6 +216,19 @@ function getJob(id: string): UploadJob | null {
   return jobs.find((j) => j.id === id) ?? null;
 }
 
+function aktuelleUid(): string | null {
+  return auth.currentUser?.uid ?? null;
+}
+
+/**
+ * Darf dieser Auftrag JETZT laufen? Nur für die angemeldete uid selbst oder
+ * für eine Gast-uid, deren Übernahme in genau dieses Konto der Server
+ * bestätigt hat. Eine lokal nur GEMERKTE Zuordnung reicht nicht.
+ */
+function darfLaufen(job: Pick<UploadJob, 'uid'>, currentUid: string | null = aktuelleUid()): boolean {
+  return !!currentUid && (job.uid === currentUid || GastUebernahme.zielVon(job.uid) === currentUid);
+}
+
 /** Patch a job's status fields → emit + persist (durable change). */
 function setJob(id: string, patch: Partial<UploadJob>) {
   let changed = false;
@@ -180,6 +241,14 @@ function setJob(id: string, patch: Partial<UploadJob>) {
     emit();
     void persist();
   }
+}
+
+/** Einen hochgeladenen Schritt am Auftrag vermerken (persistiert, damit er
+ *  auch einen App-Neustart übersteht). */
+function merkeHochgeladen(id: string, key: ProductPhotoStep, hochgeladen: { uid: string; pfad: string }) {
+  const j = getJob(id);
+  if (!j) return;
+  setJob(id, { steps: j.steps.map((s) => (s.key === key ? { ...s, hochgeladen } : s)) });
 }
 
 /** Progress-only update → emit (ephemeral, NOT persisted to avoid hammering
@@ -214,6 +283,35 @@ async function deleteJobFiles(jobId: string) {
  *  after copying images + writing the queue (no network). */
 export async function enqueueProductUpload(input: EnqueueInput): Promise<string> {
   await ensureLoaded();
+
+  // Derselbe Produkt-Slot liegt schon in der Warteschlange → derselbe Auftrag.
+  //
+  // Zustands-Prüfung, keine Zeitsperre: ob der zweite Aufruf 200 ms oder 20 s
+  // später kommt, ist gleichgültig — es bleibt EIN Auftrag mit EINEM Bildsatz.
+  // Ohne das legte jeder weitere Tipp auf den Einreichen-Knopf einen eigenen
+  // Auftrag an, kopierte sieben Dateien und lud sie erneut hoch (Vorfall
+  // 10.09.2026: 2–3 byteidentische Einreichungen je Nutzer).
+  //
+  // Steht der Auftrag auf `failed`, ist ein erneutes Einreichen als
+  // Wiederholung zu lesen: der Auto-Versuchsvorrat wird zurückgesetzt, sonst
+  // täte der Tipp bei erschöpftem Vorrat sichtbar nichts.
+  //
+  // Der Schlüssel ist bewusst OHNE uid: derselbe Slot bleibt derselbe
+  // Auftrag, auch wenn zwischen den Tipps aus dem Gast ein Konto wurde. Die
+  // `sessionId` (12 Zufallsbytes je Wizard-Sitzung) trennt Personen ohnehin.
+  // Ohne `sessionId` wird nicht zusammengelegt — zwei verschiedene
+  // Einreichungen dürfen nie in einem Auftrag landen.
+  const bereitsDa = input.sessionId
+    ? jobs.find((j) => j.sessionId === input.sessionId && j.productIndex === input.productIndex)
+    : undefined;
+  if (bereitsDa) {
+    if (bereitsDa.status === 'failed') {
+      setJob(bereitsDa.id, { status: 'queued', attempts: 0, lastError: null });
+    }
+    void processQueue();
+    return bereitsDa.id;
+  }
+
   await ensureDir();
   const id = randomId();
 
@@ -232,6 +330,7 @@ export async function enqueueProductUpload(input: EnqueueInput): Promise<string>
   const job: UploadJob = {
     id,
     uid: input.uid,
+    docUid: input.uid,
     sessionId: input.sessionId,
     productIndex: input.productIndex,
     marketId: input.marketId,
@@ -240,6 +339,7 @@ export async function enqueueProductUpload(input: EnqueueInput): Promise<string>
     productName: input.productName,
     ean: input.ean,
     campaignId: input.campaignId,
+    campaignResolve: input.campaignResolve ?? null,
     steps,
     status: 'queued',
     progress: 0,
@@ -253,6 +353,9 @@ export async function enqueueProductUpload(input: EnqueueInput): Promise<string>
   jobs = [job, ...jobs];
   await persist();
   emit();
+  // Gast-Merker: ohne ihn wüsste ein späterer Wechsel in ein bestehendes Konto
+  // nicht, dass es hier etwas mitzunehmen gibt (Besitznachweis + Dialog).
+  if (isEffectivelyAnonymous(auth.currentUser)) await GastBestand.merke(input.uid);
   void processQueue();
   return id;
 }
@@ -278,8 +381,10 @@ export async function retryJob(id: string) {
 export async function retryAllFailed() {
   await ensureLoaded();
   let changed = false;
+  const uid = aktuelleUid();
   jobs = jobs.map((j) => {
-    if (j.status !== 'failed') return j;
+    // Nur die eigenen (sichtbaren) Aufträge — fremde bleiben unangetastet.
+    if (j.status !== 'failed' || !darfLaufen(j, uid)) return j;
     changed = true;
     return { ...j, status: 'queued' as UploadJobStatus, attempts: 0, lastError: null };
   });
@@ -305,14 +410,44 @@ export function kickUploadQueue() {
   void processQueue();
 }
 
+/** Kontowechsel läuft: keinen neuen Auftrag starten (ein laufender endet normal). */
+export function pausiereUploadQueue(): void {
+  pausiert = true;
+}
+
+export function setzeUploadQueueFort(): void {
+  pausiert = false;
+  void processQueue();
+}
+
+/**
+ * Filter für Anzeigen (Produkt-Übersicht): nur Aufträge, die für die
+ * angemeldete uid laufen dürfen. Aufträge einer anderen Person am selben
+ * Gerät oder einer noch nicht bestätigten Übernahme erscheinen nicht als eigene.
+ */
+export function sichtbareUploadJobs(liste: UploadJob[]): UploadJob[] {
+  const uid = aktuelleUid();
+  return liste.filter((j) => darfLaufen(j, uid));
+}
+
 // ─── processing ─────────────────────────────────────────────────────
 
 function pickNext(): UploadJob | null {
   // Oldest-first: jobs are stored newest-first, so iterate from the end.
+  // Wartende fremde Aufträge werden übersprungen, nicht als Fehler markiert —
+  // so endet die Schleife in processQueue, auch wenn sie liegen bleiben.
+  const uid = aktuelleUid();
   for (let i = jobs.length - 1; i >= 0; i--) {
-    if (jobs[i].status === 'queued') return jobs[i];
+    if (jobs[i].status === 'queued' && darfLaufen(jobs[i], uid)) return jobs[i];
   }
   return null;
+}
+
+/** Die Anmeldung hat während des Laufs gewechselt: zurück in die Warteschlange,
+ *  ohne einen Versuch zu verbrauchen. Ob und für wen er weiterläuft,
+ *  entscheidet pickNext beim nächsten Durchgang. */
+function zurueckstellen(jobId: string) {
+  setJob(jobId, { status: 'queued', progress: 0, lastError: null });
 }
 
 function requeueFailed() {
@@ -341,12 +476,28 @@ function scheduleRetry(attempts: number) {
 }
 
 async function runJob(job: UploadJob) {
+  // Umschreiben NUR bei einer vom Server bestätigten Übernahme (Gast → Konto).
+  // Hochgeladen wird unter der neuen uid (storage.rules: request.auth.uid ==
+  // Pfad-uid); die Dokument-ID bleibt beim ursprünglichen Slot (docUid).
+  const currentUid = aktuelleUid();
+  if (!currentUid || !darfLaufen(job, currentUid)) return; // pickNext filtert schon
+  if (job.uid !== currentUid) {
+    const docUid = job.docUid ?? job.uid;
+    console.log('[uploadQueue] bestätigte Übernahme — Auftrag zieht ins Konto', job.id);
+    setJob(job.id, { uid: currentUid, docUid });
+    job = { ...job, uid: currentUid, docUid };
+  }
+
   setJob(job.id, { status: 'uploading', progress: 0, lastError: null });
   try {
     const uploaded: Partial<Record<ProductPhotoStep, string>> = {};
     const steps = job.steps;
     for (let i = 0; i < steps.length; i++) {
       const s = steps[i];
+      if (s.hochgeladen?.uid === job.uid) {
+        uploaded[s.key] = s.hochgeladen.pfad;
+        continue;
+      }
       const path = await uploadProductImage(s.uri, job.uid, job.sessionId, job.productIndex, s.key, {
         fileName: s.fileName,
         onProgress: (pct) => {
@@ -354,20 +505,47 @@ async function runJob(job: UploadJob) {
         },
       });
       uploaded[s.key] = path;
+      merkeHochgeladen(job.id, s.key, { uid: job.uid, pfad: path });
     }
-    await submitProduct(job.uid, {
-      sessionId: job.sessionId,
-      productIndex: job.productIndex,
-      marketId: job.marketId,
-      marketName: job.marketName,
-      marketLand: job.marketLand,
-      productName: job.productName,
-      ean: job.ean,
-      campaignId: job.campaignId,
-      images: uploaded,
-      capture: job.capture ?? null,
-      clientVersion: job.clientVersion ?? null,
-    });
+    // Kontowechsel während des Hochladens: nicht mit fremdem Token einreichen.
+    if (aktuelleUid() !== job.uid) {
+      zurueckstellen(job.id);
+      return;
+    }
+    // Zeitdeckel statt unbegrenztem Warten (siehe SUBMIT_TIMEOUT_MS). Läuft er
+    // ab, wirft dieser Block — der `catch` unten markiert den Auftrag dann als
+    // 'failed', und der bestehende Auto-Wiederholungs-Pfad greift.
+    //
+    // Der Schreibvorgang kann danach trotzdem noch durchgehen. Das ist
+    // ungefährlich: die Doc-ID ist deterministisch (`productSubmissionDocId`),
+    // die Wiederholung trifft also dasselbe Dokument, und ein zweiter
+    // Schreibvorgang darauf gilt nach Bestätigung per Lesevorgang als
+    // „liegt schon vor" (`submitProduct`).
+    let deckel: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const durch = await Promise.race([
+        submitProduct(job.uid, {
+          sessionId: job.sessionId,
+          productIndex: job.productIndex,
+          marketId: job.marketId,
+          marketName: job.marketName,
+          marketLand: job.marketLand,
+          productName: job.productName,
+          ean: job.ean,
+          campaignId: job.campaignId,
+          campaignResolve: job.campaignResolve ?? null,
+          images: uploaded,
+          capture: job.capture ?? null,
+          clientVersion: job.clientVersion ?? null,
+        }, { docUid: job.docUid ?? job.uid }).then(() => true),
+        new Promise<false>((res) => {
+          deckel = setTimeout(() => res(false), SUBMIT_TIMEOUT_MS);
+        }),
+      ]);
+      if (!durch) throw new Error('submit_timeout');
+    } finally {
+      if (deckel) clearTimeout(deckel);
+    }
     // Success → the submission now lives in Firestore (status 'pending')
     // and shows up in the overview list. Drop the local job + its files.
     await deleteJobFiles(job.id);
@@ -376,6 +554,12 @@ async function runJob(job: UploadJob) {
     emit();
     completedInBatch += 1;
   } catch (e: any) {
+    // Fehlschlag, weil die Anmeldung mitten im Lauf gewechselt hat: kein
+    // Versuch verbraucht, der Auftrag wartet auf seine uid oder die Übernahme.
+    if (aktuelleUid() !== job.uid) {
+      zurueckstellen(job.id);
+      return;
+    }
     const attempts = (getJob(job.id)?.attempts ?? job.attempts) + 1;
     setJob(job.id, { status: 'failed', attempts, lastError: e?.message ?? 'upload_failed' });
     // Auto-retry with backoff only up to the cap; beyond it, wait for a manual
@@ -385,20 +569,28 @@ async function runJob(job: UploadJob) {
 }
 
 export async function processQueue(): Promise<void> {
-  await ensureLoaded();
-  if (processing) return;
-  // Don't burn per-image upload timeouts when we're clearly offline — leave
-  // jobs 'queued' (the overview shows the offline hint) and let the network
-  // listener resume us on reconnect. A fresh probe avoids stalling on a stale
-  // "offline" reading right after the app wakes.
-  if (!isOnline()) {
-    await refreshNetwork();
-    if (!isOnline()) return;
-  }
+  // Der Riegel fällt VOR dem ersten `await` und wird im `finally` wieder
+  // freigegeben. Zuvor lagen zwischen Prüfung und Setzen zwei `await`s: zwei
+  // gleichzeitige Aufrufer (Netz-Listener, AppState-Listener,
+  // `kickUploadQueue`, jedes Einreihen) rutschten beide durch und starteten
+  // ZWEI Schleifen — Aufträge liefen parallel statt nacheinander, und die
+  // erste Schleife, die leerlief, gab den Riegel frei, während die zweite noch
+  // hochlud. Der Rumpf einer async-Funktion läuft bis zum ersten `await`
+  // synchron — Prüfen und Setzen sind damit untrennbar.
+  if (pausiert || processing) return;
   processing = true;
   try {
+    await ensureLoaded();
+    // Don't burn per-image upload timeouts when we're clearly offline — leave
+    // jobs 'queued' (the overview shows the offline hint) and let the network
+    // listener resume us on reconnect. A fresh probe avoids stalling on a stale
+    // "offline" reading right after the app wakes.
+    if (!isOnline()) {
+      await refreshNetwork();
+      if (!isOnline()) return;
+    }
     let next = pickNext();
-    while (next) {
+    while (next && !pausiert) {
       await runJob(next);
       next = pickNext();
     }
@@ -406,8 +598,13 @@ export async function processQueue(): Promise<void> {
     processing = false;
   }
   // Batch drained → confirm completions once. Fires even if the user navigated
-  // away (the queue is module-level), closing the feedback loop.
-  if (completedInBatch > 0 && !jobs.some((j) => j.status === 'queued' || j.status === 'uploading')) {
+  // away (the queue is module-level), closing the feedback loop. Wartende
+  // fremde Aufträge zählen nicht — sonst käme die Bestätigung nie.
+  const uid = aktuelleUid();
+  const nochOffen = jobs.some(
+    (j) => j.status === 'uploading' || (j.status === 'queued' && darfLaufen(j, uid)),
+  );
+  if (completedInBatch > 0 && !pausiert && !nochOffen) {
     const n = completedInBatch;
     completedInBatch = 0;
     try {
@@ -436,3 +633,60 @@ subscribeNetwork((s) => {
     void processQueue();
   }
 });
+
+// Sobald der Server eine Übernahme Gast → Konto bestätigt, dürfen wartende
+// Aufträge dieser Gast-uid unter dem Konto laufen.
+GastUebernahme.beiAenderung(() => kickUploadQueue());
+
+// ─── Vor dem Wechsel in ein bestehendes Konto ───────────────────────
+
+/** Versuche je Auftrag vor dem Wechsel: einer plus eine Wiederholung
+ *  (Gegenstück zu bonUploadQueue.ts). */
+const VERSUCHE_VOR_WECHSEL = 2;
+const vorWechselZurueckgesetzt = new Set<string>();
+
+/** Offen = läuft, wartet oder wartet auf seine eine Wiederholung. */
+function offeneUploadsVon(uid: string): number {
+  return jobs.filter((j) => j.uid === uid && (j.status !== 'failed' || j.attempts < VERSUCHE_VOR_WECHSEL)).length;
+}
+
+/**
+ * Gegenstück zu bonsVorWechselAbarbeiten: Produktfotos des noch
+ * angemeldeten Gastes hochladen und einreichen, bevor die uid wechselt.
+ * Gescheiterte Aufträge bekommen einmal je Sitzung ein frisches Budget und
+ * zwei Versuche; danach halten sie den Wechsel nicht mehr auf.
+ */
+export async function uploadsVorWechselAbarbeiten(uid: string, timeoutMs: number): Promise<boolean> {
+  await ensureLoaded();
+  if (!vorWechselZurueckgesetzt.has(uid)) {
+    vorWechselZurueckgesetzt.add(uid);
+    let changed = false;
+    jobs = jobs.map((j) => {
+      if (j.uid !== uid || j.status !== 'failed') return j;
+      changed = true;
+      return { ...j, status: 'queued' as UploadJobStatus, attempts: 0, lastError: null };
+    });
+    if (changed) {
+      emit();
+      void persist();
+    }
+  }
+  void processQueue();
+  if (offeneUploadsVon(uid) === 0) return true;
+  return new Promise<boolean>((resolve) => {
+    let erledigt = false;
+    const pruefe = () => {
+      if (offeneUploadsVon(uid) === 0) fertig(true);
+    };
+    const timer = setTimeout(() => fertig(offeneUploadsVon(uid) === 0), timeoutMs);
+    function fertig(ok: boolean) {
+      if (erledigt) return;
+      erledigt = true;
+      clearTimeout(timer);
+      listeners.delete(pruefe);
+      resolve(ok);
+    }
+    listeners.add(pruefe);
+    pruefe();
+  });
+}

@@ -303,15 +303,28 @@ export function showInfoToast(
 // Die Action-Pille bleibt bis User tappt oder Toast manuell wegswiped
 // (durationMs: 8000 = lang). Standard-Errors ohne Retry sollten
 // stattdessen `showInfoToast(msg, 'error')` nutzen.
+let retryToastZaehler = 0;
+
 export function showRetryableErrorToast(
   message: string,
   onRetry: () => void,
   options?: { actionLabel?: string; colorScheme?: 'light' | 'dark' },
 ) {
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+  // Der Knopf schließt den Toast und feuert genau einmal. Vorher blieb die
+  // Fehlermeldung nach einer erfolgreichen Wiederholung noch Sekunden stehen,
+  // und jeder weitere Tipp startete den Vorgang erneut.
+  const id = `retry_${++retryToastZaehler}`;
+  let benutzt = false;
   showToast(message, 'ERROR', {
+    id,
     actionLabel: options?.actionLabel ?? 'Wiederholen',
-    onActionPress: onRetry,
+    onActionPress: () => {
+      if (benutzt) return;
+      benutzt = true;
+      toast.dismiss(id);
+      onRetry();
+    },
     colorScheme: options?.colorScheme,
     durationMs: 8000,
   });
@@ -342,10 +355,11 @@ export function showCashbackNudgeToast(
   message: string,
   onOpen: () => void,
   colorScheme?: 'light' | 'dark',
+  actionLabel = 'Zum Cashback',
 ) {
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   showToast(message, 'INFO', {
-    actionLabel: 'Zum Cashback',
+    actionLabel,
     onActionPress: onOpen,
     colorScheme,
     durationMs: 8000,

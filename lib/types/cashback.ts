@@ -110,7 +110,7 @@ export const DEFAULT_CASHBACK_CONFIG: CashbackConfigDoc = {
   throttleHours: 24,
   minItemsForPayout: 4,
   eligibleMerchants: ['aldi', 'lidl', 'edeka', 'rewe', 'kaufland', 'penny', 'netto', 'dm', 'rossmann'],
-  ocrModel: 'gemini-2.5-flash',
+  ocrModel: 'gemini-3.5-flash', // nur Spiegel des Server-Standards; die App ruft kein Gemini auf
   ocrPromptVersion: 'v1.0',
   manualReviewThreshold: 0.65,
   autoApproveThreshold: 0.85,

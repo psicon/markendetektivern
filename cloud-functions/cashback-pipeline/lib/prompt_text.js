@@ -16,7 +16,9 @@
 
 const { RESPONSE_SCHEMA } = require('./prompt');
 
-const VERSION = 'cvhybrid-v1.0';
+// cvhybrid-v1.1 (2026-09-05): Regel 7 um merchantSubtitle/storeAddress erweitert
+// (Filialadresse, teilt RESPONSE_SCHEMA v1.4 mit prompt.js).
+const VERSION = 'cvhybrid-v1.1';
 
 const SYSTEM_PROMPT = `\
 Du bist ein Spezialist für die Strukturierung von OCR-extrahierten Texten
@@ -57,6 +59,11 @@ REGELN:
    - Vorsicht bei TSE-Codes / Steuer-IDs: "REWE Group" in einem
      TSE-Block macht KEINEN Penny-Bon zu einem REWE-Bon. Schau auf den
      Header / Filialnamen.
+   - **merchantSubtitle** = wörtliche Zusatzzeile(n) unter dem Filialnamen
+     (Anschrift, Filialnummer). **storeAddress** = die Filialanschrift aus
+     dem Kopf, aufgeteilt in street (Straße + Hausnummer), zip (PLZ: DE
+     5-stellig, AT/CH 4-stellig), city (Ort ohne PLZ). Nur Gedrucktes,
+     sonst null; Filial-/Markt-/Kassennummern sind KEINE PLZ.
 8. **bonCountry**: setze 'DE' / 'AT' / 'CH' wenn erkennbar (UID-Nr,
    PLZ-Format, CHF-Währung). Sonst null.
 9. **Wenn Text kein Kassenbon ist**: isReceipt=false, notReceiptReason

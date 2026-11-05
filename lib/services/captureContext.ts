@@ -3,6 +3,7 @@ import * as Application from 'expo-application';
 import { Platform } from 'react-native';
 
 import journeyTrackingService from '@/lib/services/journeyTrackingService';
+import { anfragenOhneHaenger, mitZeitlimit } from '@/lib/services/berechtigungsWaechter';
 
 /**
  * Sammelt den Orts- und Zeitkontext im Moment der AUFNAHME.
@@ -94,6 +95,12 @@ export interface CaptureContext {
     source: string | null;
   } | null;
   journeyId: string | null;
+  /**
+   * Fehlercode/-text, wenn der GPS-Fix scheiterte (Orts-Audit 05.09.2026:
+   * `unavailable` war bis dahin nicht auswertbar, weil die Exception
+   * verworfen wurde — Ortungsdienste aus? Provider ohne Ergebnis?).
+   */
+  gpsError?: string | null;
 }
 
 export interface ClientVersion {
@@ -121,6 +128,16 @@ export async function standortStatus(): Promise<GpsStatus> {
   try {
     const p = await Location.getForegroundPermissionsAsync();
     if (!p.granted) return p.canAskAgain ? 'not_asked' : 'denied';
+
+    // Berechtigung erteilt, aber Ortungsdienste am Gerät AUS → es gibt
+    // keinen Fix. Als 'unavailable' melden, damit der Wizard den Orts-
+    // Schritt zeigt statt still ohne Ort einzureichen (Orts-Audit 05.09.:
+    // 53 Android-Einreichungen ohne Ort, alle gpsStatus unavailable).
+    try {
+      if (!(await Location.hasServicesEnabledAsync())) return 'unavailable';
+    } catch {
+      // Nicht abfragbar → optimistisch weiter; der Submit-Gate fängt es.
+    }
 
     // Android 12+ meldet eine bewusst ungenaue Freigabe direkt.
     if (p.android?.accuracy === 'coarse') return 'granted_coarse';
@@ -154,7 +171,22 @@ export async function standortStatus(): Promise<GpsStatus> {
  */
 export async function standortAnfordern(): Promise<GpsStatus> {
   try {
-    const p = await Location.requestForegroundPermissionsAsync();
+    // Erst lesen: steht der Ausgang schon fest, erscheint kein Dialog — und
+    // auf Android kam die Antwort dann erst beim nächsten Aufwachen der App
+    // (ewiger Spinner, Vorfall 25.09.2026, siehe berechtigungsWaechter.ts).
+    const vorher = await Location.getForegroundPermissionsAsync();
+    // iOS: canAskAgain=false ist verlässlich endgültig → gar nicht fragen.
+    // Android meldet es auch nach einem weggetippten Dialog oder einer
+    // abgelaufenen „Nur dieses Mal"-Freigabe — dort kommt der Dialog noch.
+    // Also fragen; ist es wirklich endgültig, kommt die Antwort ohne Dialog
+    // sofort (MainActivity.kt) bzw. nach dem Wächter.
+    if (!vorher.granted && !vorher.canAskAgain && Platform.OS === 'ios') return 'denied';
+    const p = vorher.granted
+      ? vorher
+      : await anfragenOhneHaenger(
+          () => Location.requestForegroundPermissionsAsync(),
+          () => Location.getForegroundPermissionsAsync(),
+        );
     if (!p.granted) return p.canAskAgain ? 'not_asked' : 'denied';
     if (p.android?.accuracy === 'coarse') return 'granted_coarse';
     return 'granted_precise';
@@ -163,7 +195,10 @@ export async function standortAnfordern(): Promise<GpsStatus> {
   }
 }
 
-async function holeGps(status: GpsStatus): Promise<{ gps: CaptureGps | null; status: GpsStatus }> {
+async function holeGps(
+  status: GpsStatus,
+  opts?: { ohneEinstellungsDialog?: boolean },
+): Promise<{ gps: CaptureGps | null; status: GpsStatus; error?: string | null }> {
   if (status !== 'granted_precise' && status !== 'granted_coarse') {
     return { gps: null, status };
   }
@@ -189,8 +224,17 @@ async function holeGps(status: GpsStatus): Promise<{ gps: CaptureGps | null; sta
     // danach ausdrücklich abgeräumt: gewinnt die Messung das Rennen, bliebe
     // er sonst bis zum Ablauf am Leben und hielte die Ereignisschleife auf.
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let frischFehler: unknown = null;
     const frisch = await Promise.race([
-      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).then(alsFix),
+      Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+        // Android: sonst blendet Google bei ausgeschalteter WLAN-/Mobilfunk-
+        // Ortung ungefragt „Standortgenauigkeit einschalten" ein.
+        ...(opts?.ohneEinstellungsDialog ? { mayShowUserSettingsDialog: false } : {}),
+      }).then(alsFix, (e) => {
+        frischFehler = e;
+        return null;
+      }),
       new Promise<null>((r) => {
         timer = setTimeout(() => r(null), GPS_TIMEOUT_MS);
       }),
@@ -201,11 +245,35 @@ async function holeGps(status: GpsStatus): Promise<{ gps: CaptureGps | null; sta
 
     // Ein veralteter Fix ist besser als nichts — sein Alter steht in
     // `fixAt`, die Bewertung stuft ihn serverseitig entsprechend herab.
+    // Gilt auch, wenn die frische Messung scheiterte statt nur zu dauern.
     if (bekannt) return { gps: bekannt, status };
+    if (frischFehler) throw frischFehler;
     return { gps: null, status: 'timeout' };
-  } catch {
-    return { gps: null, status: 'unavailable' };
+  } catch (e: any) {
+    // Fehlercode mitgeben — nur so ist 'unavailable' später auswertbar.
+    const error = String(e?.code || e?.message || e || 'unknown').slice(0, 120);
+    return { gps: null, status: 'unavailable', error };
   }
+}
+
+/**
+ * Kontext ohne Messergebnis — etwa wenn die Messung beim Einreichen noch
+ * nicht fertig war. Der Grund steht in `gpsStatus`, damit „zu langsam" nicht
+ * wie „alte App ohne Feld" aussieht.
+ */
+export function captureContextOhneMessung(capturedAt: number, gpsStatus: GpsStatus): CaptureContext {
+  return { capturedAt, gps: null, gpsStatus, confirmedPlace: null, journeyLocation: null, journeyId: null };
+}
+
+/**
+ * Was ein Bon vom Aufnahme-Kontext mitschickt: nur das Gerätesignal. Die
+ * IP-Ortung reist bei Bons schon im Journey-Block mit, und mehr liest der
+ * Server nicht (cashback-pipeline/lib/clientKontext.js).
+ */
+export type BonGeraeteOrt = Pick<CaptureContext, 'gpsStatus' | 'gps' | 'gpsError'>;
+
+export function bonGeraeteOrt(k: CaptureContext): BonGeraeteOrt {
+  return { gpsStatus: k.gpsStatus, gps: k.gps, ...(k.gpsError ? { gpsError: k.gpsError } : {}) };
 }
 
 /**
@@ -217,6 +285,8 @@ async function holeGps(status: GpsStatus): Promise<{ gps: CaptureGps | null; sta
 export async function erfasseCaptureContext(opts?: {
   capturedAt?: number;
   confirmedPlace?: CaptureContext['confirmedPlace'];
+  /** Android: keinen Google-Dialog „Standortgenauigkeit" einblenden (Bons). */
+  ohneEinstellungsDialog?: boolean;
 }): Promise<CaptureContext> {
   const capturedAt = opts?.capturedAt ?? Date.now();
   const basis: CaptureContext = {
@@ -230,9 +300,12 @@ export async function erfasseCaptureContext(opts?: {
 
   try {
     const status = await standortStatus();
-    const { gps, status: endStatus } = await holeGps(status);
+    const { gps, status: endStatus, error } = await holeGps(status, {
+      ohneEinstellungsDialog: opts?.ohneEinstellungsDialog,
+    });
     basis.gps = gps;
     basis.gpsStatus = endStatus;
+    if (error) basis.gpsError = error;
   } catch (e) {
     console.warn('[captureContext] Standort nicht ermittelbar (non-fatal):', e);
   }
@@ -254,4 +327,46 @@ export async function erfasseCaptureContext(opts?: {
   }
 
   return basis;
+}
+
+/**
+ * Längste Wartezeit beim Einreichen eines Bons. Die Messung startet schon beim
+ * Öffnen der Prüfseite und ist bis zum Tipp auf „Einreichen" fast immer
+ * fertig — das Limit greift nur, wenn kein GPS-Fix kommt.
+ */
+export const AUFNAHME_KONTEXT_MS = 5000;
+
+function aufnahmeKontextMessen(capturedAt: number): Promise<CaptureContext> {
+  return mitZeitlimit(
+    erfasseCaptureContext({ capturedAt, ohneEinstellungsDialog: true }).catch(() =>
+      captureContextOhneMessung(capturedAt, 'unavailable'),
+    ),
+    AUFNAHME_KONTEXT_MS,
+    captureContextOhneMessung(capturedAt, 'timeout'),
+  );
+}
+
+/** Die frühe Messung lief, bevor der Nutzer Freigabe oder Ortung eingeschaltet hat. */
+function vorFreigabeGemessen(k: CaptureContext): boolean {
+  if (k.gpsStatus === 'not_asked' || k.gpsStatus === 'denied') return true;
+  // Ortungsdienste waren aus (standortStatus → 'unavailable' ohne Fehler).
+  return k.gpsStatus === 'unavailable' && !k.gps && !k.gpsError;
+}
+
+/**
+ * Startet die Messung für einen Bon SOFORT (beim Öffnen der Prüfseite) und
+ * liefert eine Funktion, die das Ergebnis beim Einreichen abholt.
+ *
+ * Gemessen wird bei der Aufnahme, nicht beim Hochladen: die Warteschlange kann
+ * Stunden später an einem anderen Ort laufen. Fragt nie nach der Freigabe —
+ * das macht nur die Standortpflicht. Wurde Freigabe oder Ortung erst beim
+ * Einreichen eingeschaltet, zeigt die frühe Messung das noch nicht; dann wird
+ * einmal neu gemessen. Wirft nie.
+ */
+export function aufnahmeKontextStarten(capturedAt: number): () => Promise<CaptureContext> {
+  const frueh = aufnahmeKontextMessen(capturedAt);
+  return async () => {
+    const ergebnis = await frueh;
+    return vorFreigabeGemessen(ergebnis) ? aufnahmeKontextMessen(capturedAt) : ergebnis;
+  };
 }

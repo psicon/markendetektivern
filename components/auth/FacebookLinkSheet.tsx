@@ -1,4 +1,5 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -7,7 +8,11 @@ import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { auth } from '@/lib/firebase';
+import { AuthRueckkehr } from '@/lib/services/authRueckkehr';
+import { whenSheetsIdle } from '@/lib/services/sheetPresence';
 import { showInfoToast } from '@/lib/services/ui/toast';
+import { erwarteterAuthFehler } from '@/lib/utils/authFehler';
 
 /**
  * ClickUp 86cacp92p (1.19): Geführtes Facebook ↔ E-Mail/Passwort-Linking.
@@ -37,6 +42,7 @@ export function FacebookLinkSheet() {
   const handleSubmit = async () => {
     if (busy || password.length === 0) return;
     setBusy(true);
+    const vorherUid = auth.currentUser?.uid ?? null;
     try {
       await completeFacebookLink(password);
       showInfoToast(
@@ -45,7 +51,22 @@ export function FacebookLinkSheet() {
         scheme ?? undefined,
       );
       // facebookLinkPrompt wird vom Context auf null gesetzt → Sheet schließt.
+      // Hat die Anmeldung das Konto gewechselt, gilt derselbe Abschluss wie
+      // auf allen anderen Anmeldewegen (Ziel, Stapel aufräumen) — sonst blieb
+      // man als Kontoinhaber auf dem Anmelde-Screen, und „Zurück" führte auf
+      // eine Seite der alten uid (Nachprüfung Runde 2). Erst navigieren, wenn
+      // das Sheet zu ist.
+      if (auth.currentUser && auth.currentUser.uid !== vorherUid) {
+        whenSheetsIdle(() => {
+          void AuthRueckkehr.abschliessen(router).catch((err) =>
+            console.warn('[FacebookLinkSheet] Rücksprung fehlgeschlagen:', err?.message),
+          );
+        });
+      }
     } catch (e: any) {
+      // Abbruch im Mitnahme-Dialog oder fehlende Verbindung beim Wechsel in
+      // ein bestehendes Konto sind keine Fehler (lib/utils/authFehler.ts).
+      if (erwarteterAuthFehler(e, scheme)) return;
       const code = e?.code;
       const msg =
         code === 'auth/wrong-password' || code === 'auth/invalid-credential'

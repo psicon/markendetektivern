@@ -45,23 +45,22 @@
  * 61–377 km daneben und geht ohnehin nur als Landes-Signal ein.
  */
 
-const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const logger = require('firebase-functions/logger');
 const admin = require('firebase-admin');
 
-const { bewerteLocation, landAusKoordinate, MODEL_VERSION } = require('./src/scorer');
+const { MODEL_VERSION } = require('./src/scorer');
 const { findeExifGps } = require('./src/exif');
 const { findeJourneyLocation } = require('./src/journey');
+const { bonAdresseGeaendert } = require('./src/bonAdresse');
+const { bewerteDokument, minutenZwischen } = require('./src/bewerten');
+const PLZ = require('./data/plz.json');
 
 admin.initializeApp();
 const db = admin.firestore();
 
 const REGION = 'europe-west1'; // wie die übrigen crowd_uploads-Trigger
 const MAX_BILDER_FUER_EXIF = 8;
-
-/** Millisekunden zwischen zwei Zeitpunkten, in Minuten und gerundet. */
-const minutenZwischen = (aMs, bMs) =>
-  aMs == null || bMs == null ? null : Math.round(Math.abs(aMs - bMs) / 60000);
 
 exports.onCrowdUploadCreated = onDocumentCreated(
   { document: 'crowd_uploads/{id}', region: REGION, memory: '512MiB', timeoutSeconds: 120 },
@@ -163,67 +162,75 @@ exports.onCrowdUploadCreated = onDocumentCreated(
       }
     }
 
-    // ── Bewerten ─────────────────────────────────────────────────────────
-    const captureGps = doc.capture?.gps
-      ? {
-          lat: doc.capture.gps.lat,
-          lon: doc.capture.gps.lon,
-          accuracyM: doc.capture.gps.accuracyM ?? null,
-          ageMinutes: minutenZwischen(
-            doc.capture.gps.fixAt?.toDate?.().getTime() ?? capturedAtMs,
-            capturedAtMs,
-          ),
-        }
-      : null;
+    // ── Bewerten und schreiben ───────────────────────────────────────────
+    await bewertenUndSchreiben(snap.ref, id, { nachtrag, ipLocation, profileRegion, exifGps, capturedAtMs });
+  },
+);
 
-    const probableLocation = bewerteLocation({
-      submittedAtMs,
-      captureGps,
-      exifGps,
-      confirmedPlace: doc.capture?.confirmedPlace ?? null,
-      profileRegion,
-      marketLand: doc.marketLand ?? null,
-      ipLand: ipLocation?.source === 'ip' ? landAusIpOrtung(ipLocation) : null,
-      ipLocation,
-    });
+/**
+ * Neu bewerten, sobald die Filialadresse vom Kassenbon eintrifft (ploc-v2).
+ *
+ * `priceReceipt` schreibt crowd-upload-namer erst NACH der Anlage — der
+ * onCreate-Trigger oben sieht sie in aller Regel noch nicht. Ohne diesen
+ * Trigger käme die wichtigste Ortsquelle nie zum Zug. Er reagiert NUR auf
+ * eine Änderung der Bon-Adresse; das eigene Schreiben von probableLocation
+ * ändert sie nicht, eine Schleife ist ausgeschlossen.
+ */
+exports.onCrowdUploadBonAdresse = onDocumentUpdated(
+  // retry: dieser Trigger ist praktisch der einzige Weg, auf dem die
+  // Bon-Adresse zum Ort wird — ein einzelner Transaktionsfehler darf sie
+  // nicht dauerhaft verlieren. Gefahrlos: fremde Änderungen enden sofort
+  // am Filter, und die Bewertung ist deterministisch.
+  { document: 'crowd_uploads/{id}', region: REGION, memory: '256MiB', timeoutSeconds: 60, retry: true },
+  async (event) => {
+    const vorher = event.data?.before?.data();
+    const nachher = event.data?.after?.data();
+    if (!vorher || !nachher) return;
+    if (!bonAdresseGeaendert(vorher, nachher)) return;
+    await bewertenUndSchreiben(event.data.after.ref, event.params.id, {});
+  },
+);
 
-    await snap.ref.set(
+/**
+ * Bewertet aus dem FRISCHEN Dokumentstand und schreibt in einer Transaktion.
+ *
+ * Zwei Trigger schreiben probableLocation (Anlage und Bon-Adresse), und der
+ * Namer schreibt die Bon-Adresse zeitlich dazwischen. Rechnete jeder mit
+ * seinem eigenen Schnappschuss, könnte der langsamere den besseren Stand
+ * überschreiben. Darum liest jeder Schreibvorgang das Dokument in der
+ * Transaktion neu; Zusatz-Eingaben, die nur die Anlage kennt (rekonstruierte
+ * IP-Ortung, Profil, EXIF), werden hereingereicht, sonst aus dem Dokument
+ * genommen.
+ */
+async function bewertenUndSchreiben(ref, id, zusatz) {
+  const ergebnis = await db.runTransaction(async (tx) => {
+    const frisch = await tx.get(ref);
+    if (!frisch.exists) return null;
+    const doc = frisch.data();
+    const { probableLocation, resolvedBy } = bewerteDokument(doc, zusatz, PLZ);
+
+    tx.set(
+      ref,
       {
-        ...nachtrag,
+        ...(zusatz.nachtrag || {}),
         probableLocation: {
           ...probableLocation,
           computedAt: admin.firestore.FieldValue.serverTimestamp(),
-          resolvedBy: doc.capture?.gps || doc.capture?.confirmedPlace ? 'client' : 'server',
+          resolvedBy,
         },
         probableLocationAt: admin.firestore.FieldValue.serverTimestamp(),
       },
       { merge: true },
     );
-
-    logger.info('bewertet', {
-      id,
-      source: probableLocation.source,
-      confidence: probableLocation.confidence,
-      granularity: probableLocation.granularity,
-      modelVersion: MODEL_VERSION,
-      nachgetragen: Object.keys(nachtrag),
-    });
-  },
-);
-
-/**
- * Landeszuordnung der IP-Ortung. Die Stadt ist wertlos, das Land war in
- * allen vier Ground-Truth-Fällen korrekt — also wird genau das und nicht
- * mehr daraus abgeleitet.
- *
- * Die Boxen liegen bewusst NICHT hier, sondern in `scorer.landAusKoordinate`:
- * eine zweite Kopie würde früher oder später abweichen, und zwar still.
- */
-function landAusIpOrtung(loc) {
-  const { lat, lon } = loc || {};
-  if (typeof lat !== 'number' || typeof lon !== 'number') return null;
-  // Der DACH-Fallback (51.15/10.45) ist kein Ort und darf auch kein Land
-  // begründen — er steht genau dann im Feld, wenn die IP-Abfrage scheiterte.
-  if (Math.abs(lat - 51.15) < 0.01 && Math.abs(lon - 10.45) < 0.01) return null;
-  return landAusKoordinate(lat, lon);
+    return probableLocation;
+  });
+  if (!ergebnis) return;
+  logger.info('bewertet', {
+    id,
+    source: ergebnis.source,
+    confidence: ergebnis.confidence,
+    granularity: ergebnis.granularity,
+    modelVersion: MODEL_VERSION,
+    nachgetragen: Object.keys(zusatz.nachtrag || {}),
+  });
 }

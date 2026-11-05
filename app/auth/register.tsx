@@ -51,8 +51,9 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { auth as firebaseAuth } from '@/lib/firebase';
-import { OnboardingService } from '@/lib/services/onboardingService';
+import { AuthRueckkehr } from '@/lib/services/authRueckkehr';
 import { showInfoToast } from '@/lib/services/ui/toast';
+import { erwarteterAuthFehler } from '@/lib/utils/authFehler';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -90,9 +91,13 @@ export default function RegisterScreen() {
     }).start();
   };
 
+  // Onboarding erledigt + zum vorgemerkten Ziel (AuthRueckkehr), sonst Home.
   const completeAndGoHome = async () => {
-    try { await OnboardingService.markCompleted(); } catch {}
-    router.replace('/(tabs)');
+    try {
+      await AuthRueckkehr.abschliessen(router);
+    } catch {
+      router.replace('/(tabs)');
+    }
   };
 
   /**
@@ -196,7 +201,7 @@ export default function RegisterScreen() {
       if (!ok) return; // Abbruch = kein Login (86ca7x9ep)
       await completeAndGoHome();
     } catch (error: any) {
-      if (error?.code === 'auth/cancelled') return;
+      if (erwarteterAuthFehler(error, colorScheme)) return;
       console.error('Apple Sign-In error:', error);
       showInfoToast(error?.message || 'Apple-Anmeldung fehlgeschlagen.', 'error', colorScheme ?? 'light');
     } finally {
@@ -212,7 +217,7 @@ export default function RegisterScreen() {
       if (!ok) return; // Abbruch = kein Login (86ca7x9ep)
       await completeAndGoHome();
     } catch (error: any) {
-      if (error?.code === 'auth/cancelled') return;
+      if (erwarteterAuthFehler(error, colorScheme)) return;
       console.error('Google Sign-In error:', error);
       showInfoToast(error?.message || 'Google-Anmeldung fehlgeschlagen.', 'error', colorScheme ?? 'light');
     } finally {
@@ -228,7 +233,7 @@ export default function RegisterScreen() {
       if (!ok) return; // Abbruch = kein Login (86ca7x9ep)
       await completeAndGoHome();
     } catch (error: any) {
-      if (error?.code === 'auth/cancelled') return;
+      if (erwarteterAuthFehler(error, colorScheme)) return;
       // T17.2: FB-SDK-Unavailable (Sim) als warn, nicht error.
       if (error?.code === 'auth/facebook-sdk-unavailable') {
         console.warn('[Register] Facebook SDK unavailable:', error?.message);

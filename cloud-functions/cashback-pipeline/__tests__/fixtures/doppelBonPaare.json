@@ -1,0 +1,1002 @@
+[
+ {
+  "name": "echter_zweitkauf_rewe_0_43",
+  "doppel": false,
+  "a": {
+   "merchantId": "rewe",
+   "totalCents": 589,
+   "items": [
+    {
+     "name": "SHOT INGWER",
+     "priceCents": 129
+    },
+    {
+     "name": "PFAND 0,25 EURO",
+     "priceCents": 25
+    },
+    {
+     "name": "APFEL",
+     "priceCents": 199
+    },
+    {
+     "name": "CHERRYROMATOMATE",
+     "priceCents": 79
+    },
+    {
+     "name": "SALATGURKE",
+     "priceCents": 85
+    },
+    {
+     "name": "JA! MIWA.STILL",
+     "priceCents": 29
+    },
+    {
+     "name": "PFAND 0,25 EURO",
+     "priceCents": 25
+    },
+    {
+     "name": "COCA COLA VANIL",
+     "priceCents": 129
+    },
+    {
+     "name": "PFAND 0,25 EURO",
+     "priceCents": 25
+    },
+    {
+     "name": "COLA MAX",
+     "priceCents": 119
+    },
+    {
+     "name": "PFAND 0,25 EURO",
+     "priceCents": 25
+    },
+    {
+     "name": "LEERG. MW E. ST",
+     "priceCents": -15
+    },
+    {
+     "name": "LEERG. MW V. ST",
+     "priceCents": -15
+    },
+    {
+     "name": "LEERGUT EINWEG",
+     "priceCents": -250
+    }
+   ]
+  },
+  "b": {
+   "merchantId": "rewe",
+   "totalCents": 1653,
+   "items": [
+    {
+     "name": "LEBERWURST FEIN",
+     "priceCents": 139
+    },
+    {
+     "name": "BAUERNSCHNITTEN",
+     "priceCents": 99
+    },
+    {
+     "name": "SHOT INGWER",
+     "priceCents": 258
+    },
+    {
+     "name": "PFAND 0,25 EURO",
+     "priceCents": 50
+    },
+    {
+     "name": "CHERRYROMATOMATE",
+     "priceCents": 79
+    },
+    {
+     "name": "SALATGURKE",
+     "priceCents": 85
+    },
+    {
+     "name": "FRUCHTJOGHURT",
+     "priceCents": 119
+    },
+    {
+     "name": "PFAND 0,15 EUR",
+     "priceCents": 15
+    },
+    {
+     "name": "CHIPS",
+     "priceCents": 99
+    },
+    {
+     "name": "JA! MIWA.STILL",
+     "priceCents": 29
+    },
+    {
+     "name": "PFAND 0,25 EURO",
+     "priceCents": 25
+    },
+    {
+     "name": "HELLA HIMBEERE",
+     "priceCents": 139
+    },
+    {
+     "name": "PFAND 0,25 EURO",
+     "priceCents": 25
+    },
+    {
+     "name": "CC ZERO 0,85L",
+     "priceCents": 278
+    },
+    {
+     "name": "PFAND 0,25 EURO",
+     "priceCents": 50
+    },
+    {
+     "name": "DEIT PINK GRAPE.",
+     "priceCents": 149
+    },
+    {
+     "name": "PFAND 0,25 EURO",
+     "priceCents": 25
+    },
+    {
+     "name": "GEWUERZSPEKULAT.",
+     "priceCents": 169
+    },
+    {
+     "name": "LEERG. MW V. ST",
+     "priceCents": -24
+    },
+    {
+     "name": "LEERG. MW V. ST",
+     "priceCents": -30
+    },
+    {
+     "name": "LEERGUT EINWEG",
+     "priceCents": -125
+    }
+   ]
+  }
+ },
+ {
+  "name": "teilfoto_lidl",
+  "doppel": true,
+  "a": {
+   "merchantId": "lidl",
+   "totalCents": 4707,
+   "items": [
+    {
+     "name": "Speisekartoffeln",
+     "priceCents": 235
+    },
+    {
+     "name": "Bioland Möhren",
+     "priceCents": 150
+    },
+    {
+     "name": "Champignon weiß",
+     "priceCents": 120
+    },
+    {
+     "name": "Mini Romana",
+     "priceCents": 93
+    },
+    {
+     "name": "Hausmacher Blutwurst",
+     "priceCents": 245
+    },
+    {
+     "name": "Katenschinken gewürf",
+     "priceCents": 216
+    },
+    {
+     "name": "Pudd.m.Sahne Vanille",
+     "priceCents": 99
+    },
+    {
+     "name": "Pudd.m.Sahne Schoko",
+     "priceCents": 66
+    },
+    {
+     "name": "Zott S.Jogh.Bananen.",
+     "priceCents": 37
+    },
+    {
+     "name": "Zott S.Jogh.Kokos",
+     "priceCents": 37
+    },
+    {
+     "name": "Zott S.Jogh.Erdbeer.",
+     "priceCents": 37
+    },
+    {
+     "name": "Landliebe H-Mil",
+     "priceCents": 269
+    },
+    {
+     "name": "Rama Culin.Classic",
+     "priceCents": 178
+    },
+    {
+     "name": "Delikat .Mayonnaise",
+     "priceCents": 160
+    },
+    {
+     "name": "Weinsauerkraut",
+     "priceCents": 75
+    },
+    {
+     "name": "Wasser medium",
+     "priceCents": 164
+    },
+    {
+     "name": "Pfand 0,25 EM",
+     "priceCents": 150
+    },
+    {
+     "name": "Gebrannte Mandel",
+     "priceCents": 188
+    },
+    {
+     "name": "Unsere Besten Brötch",
+     "priceCents": 112
+    },
+    {
+     "name": "Toastbrötchen Mehrk.",
+     "priceCents": 93
+    },
+    {
+     "name": "Katzenst.XXL Kalb&Ge",
+     "priceCents": 160
+    },
+    {
+     "name": "Allzw.Gefrierbeut.Zi",
+     "priceCents": 141
+    },
+    {
+     "name": "Gefrierbeutel 6l",
+     "priceCents": 109
+    },
+    {
+     "name": "WC-Sitz Wenk-0515958",
+     "priceCents": 2098
+    },
+    {
+     "name": "Pfandrückgabe",
+     "priceCents": -525
+    }
+   ]
+  },
+  "b": {
+   "merchantId": "lidl",
+   "totalCents": 2181,
+   "items": [
+    {
+     "name": "Speisekartoffeln",
+     "priceCents": 235
+    },
+    {
+     "name": "Bioland Möhren",
+     "priceCents": 150
+    },
+    {
+     "name": "Champignon weiß",
+     "priceCents": 120
+    },
+    {
+     "name": "Mini Romana",
+     "priceCents": 93
+    },
+    {
+     "name": "Hausmacher Blutwurst",
+     "priceCents": 245
+    },
+    {
+     "name": "Katenschinken gewürf",
+     "priceCents": 216
+    },
+    {
+     "name": "Pudd.m.Sahne Vanille",
+     "priceCents": 99
+    },
+    {
+     "name": "Pudd.m.Sahne Schoko",
+     "priceCents": 66
+    },
+    {
+     "name": "Zott S.Jogh.Bananen.",
+     "priceCents": 37
+    },
+    {
+     "name": "Zott S.Jogh.Kokos",
+     "priceCents": 37
+    },
+    {
+     "name": "Zott S.Jogh.Erdbeer.",
+     "priceCents": 37
+    },
+    {
+     "name": "Landliebe H-Mil",
+     "priceCents": 269
+    },
+    {
+     "name": "Rama Culin.Classic",
+     "priceCents": 178
+    },
+    {
+     "name": "Delikat .Mayonnaise",
+     "priceCents": 160
+    },
+    {
+     "name": "Weinsauerkraut",
+     "priceCents": 75
+    },
+    {
+     "name": "Wasser medium",
+     "priceCents": 164
+    }
+   ]
+  }
+ },
+ {
+  "name": "andere_summe_dm_0_897",
+  "doppel": true,
+  "a": {
+   "merchantId": "dm",
+   "totalCents": 9370,
+   "items": [
+    {
+     "name": "Prof. Tücher Bambus-Mikrofaser",
+     "priceCents": 195
+    },
+    {
+     "name": "dmBio Tee Franz.Cassis 40g",
+     "priceCents": 175
+    },
+    {
+     "name": "Airwaves Cool Cassis D",
+     "priceCents": 1180
+    },
+    {
+     "name": "dmBio Ahornsirup Grad A 250ml",
+     "priceCents": 375
+    },
+    {
+     "name": "dmBio Apfel Zimt Tassenk.55g",
+     "priceCents": 145
+    },
+    {
+     "name": "dmBio Milchreis 500 g",
+     "priceCents": 155
+    },
+    {
+     "name": "dmBio Kidneybohnen 400",
+     "priceCents": 170
+    },
+    {
+     "name": "dmBio Tomatenstücke 40",
+     "priceCents": 260
+    },
+    {
+     "name": "dmBio Kräutersalz ohne Jod200g",
+     "priceCents": 165
+    },
+    {
+     "name": "dmBio Früchte Müsli 750g",
+     "priceCents": 315
+    },
+    {
+     "name": "dmBio Pesto Basilico 120g",
+     "priceCents": 195
+    },
+    {
+     "name": "dmBio Pesto Rosso 120g",
+     "priceCents": 195
+    },
+    {
+     "name": "Rotbäckchen Immunstark 125ml",
+     "priceCents": 95
+    },
+    {
+     "name": "anginetten Halstabl.Honig-Zitr",
+     "priceCents": 375
+    },
+    {
+     "name": "Dontodent Gebissreinig",
+     "priceCents": 190
+    },
+    {
+     "name": "Balea Pickel Pat. Hydrok. 24St",
+     "priceCents": 175
+    },
+    {
+     "name": "Balea Lippenpflege FrostyD15ml",
+     "priceCents": 95
+    },
+    {
+     "name": "Balea Cremedusche Sweet Embr.",
+     "priceCents": 55
+    },
+    {
+     "name": "Balea SH Pumpkin Spice",
+     "priceCents": 195
+    },
+    {
+     "name": "Balea Trockenshampoo 2",
+     "priceCents": 390
+    },
+    {
+     "name": "Balea SP Pumpkin Spice",
+     "priceCents": 195
+    },
+    {
+     "name": "Balea 3in1 HK Pumpkin Spice",
+     "priceCents": 295
+    },
+    {
+     "name": "ebelin spiralbürste Mischborst",
+     "priceCents": 795
+    },
+    {
+     "name": "alverde Rouge Multi-Color 30",
+     "priceCents": 395
+    },
+    {
+     "name": "FA22 Kuschel-Socken Fluffy",
+     "priceCents": 395
+    },
+    {
+     "name": "Postkarte",
+     "priceCents": 50
+    },
+    {
+     "name": "Postkarte Premium Allgemein",
+     "priceCents": 75
+    },
+    {
+     "name": "Yogi Tea Adventskalend",
+     "priceCents": 1980
+    },
+    {
+     "name": "ebelin Peeling-Massageschwamm",
+     "priceCents": 95
+    }
+   ]
+  },
+  "b": {
+   "merchantId": "dm",
+   "totalCents": 8731,
+   "items": [
+    {
+     "name": "Prof. Tücher Bambus-Mikrofaser",
+     "priceCents": 195
+    },
+    {
+     "name": "dmBio Tee Franz.Cassis 40g",
+     "priceCents": 175
+    },
+    {
+     "name": "Airwaves Cool Cassis D",
+     "priceCents": 980
+    },
+    {
+     "name": "dmBio Ahornsirup Grad A 250ml",
+     "priceCents": 375
+    },
+    {
+     "name": "dmBio Apfel Zimt Tassenk.55g",
+     "priceCents": 145
+    },
+    {
+     "name": "dmBio Milchreis 500 g",
+     "priceCents": 155
+    },
+    {
+     "name": "dmBio Kidneybohnen 400",
+     "priceCents": 170
+    },
+    {
+     "name": "dmBio Tomatenstücke 40",
+     "priceCents": 260
+    },
+    {
+     "name": "dmBio Kräutersalz ohne Jod200g",
+     "priceCents": 165
+    },
+    {
+     "name": "dmBio Früchte Müsli 750g",
+     "priceCents": 315
+    },
+    {
+     "name": "dmBio Pesto Basilico 120g",
+     "priceCents": 195
+    },
+    {
+     "name": "dmBio Pesto Rosso 120g",
+     "priceCents": 195
+    },
+    {
+     "name": "Rotbäckchen Immunstark 125ml",
+     "priceCents": 95
+    },
+    {
+     "name": "anginetten Halstabl.Honig-Zitr",
+     "priceCents": 300
+    },
+    {
+     "name": "Dontodent Gebissreinig",
+     "priceCents": 190
+    },
+    {
+     "name": "Balea Pickel Pat. Hydrok. 24St",
+     "priceCents": 175
+    },
+    {
+     "name": "Balea Lippenpflege FrostyD15ml",
+     "priceCents": 95
+    },
+    {
+     "name": "Balea Cremedusche Sweet Embr.",
+     "priceCents": 55
+    },
+    {
+     "name": "Balea SH Pumpkin Spice",
+     "priceCents": 195
+    },
+    {
+     "name": "Balea Trockenshampoo 2",
+     "priceCents": 390
+    },
+    {
+     "name": "Balea SP Pumpkin Spice",
+     "priceCents": 195
+    },
+    {
+     "name": "Balea 3in1 HK Pumpkin Spice",
+     "priceCents": 295
+    },
+    {
+     "name": "ebelin Spiralbürste Mischborst",
+     "priceCents": 795
+    },
+    {
+     "name": "alverde Rouge Multi-Color 30",
+     "priceCents": 395
+    },
+    {
+     "name": "FA22 Kuschel-Socken Fluffy",
+     "priceCents": 395
+    },
+    {
+     "name": "Postkarte",
+     "priceCents": 50
+    },
+    {
+     "name": "Postkarte Premium Allgemein",
+     "priceCents": 75
+    },
+    {
+     "name": "Yogi Tea Adventskalend",
+     "priceCents": 1616
+    },
+    {
+     "name": "ebelin Peeling-Massageschwamm",
+     "priceCents": 95
+    }
+   ]
+  }
+ },
+ {
+  "name": "gleichzeitig_kaufland",
+  "doppel": true,
+  "a": {
+   "merchantId": "kaufland",
+   "totalCents": 3003,
+   "items": [
+    {
+     "name": "Schnitzkorbis",
+     "priceCents": 798
+    },
+    {
+     "name": "KLC.Harzer Roller",
+     "priceCents": 298
+    },
+    {
+     "name": "KVeg. Streichgen.",
+     "priceCents": 85
+    },
+    {
+     "name": "KPlant.Hummus",
+     "priceCents": 99
+    },
+    {
+     "name": "Capri Sun Monster",
+     "priceCents": 249
+    },
+    {
+     "name": "Coca-Cola Cre. Van",
+     "priceCents": 79
+    },
+    {
+     "name": "Pfandartikel",
+     "priceCents": 25
+    },
+    {
+     "name": "KLC Paprika edels",
+     "priceCents": 66
+    },
+    {
+     "name": "KLC Oregano 12g",
+     "priceCents": 55
+    },
+    {
+     "name": "K.Chili Cheese Nug",
+     "priceCents": 189
+    },
+    {
+     "name": "KLC.Canellon",
+     "priceCents": 199
+    },
+    {
+     "name": "KLC.Tortelloni",
+     "priceCents": 199
+    },
+    {
+     "name": "KLC.Fleischwurst",
+     "priceCents": 169
+    },
+    {
+     "name": "Zwiebelmettwurst",
+     "priceCents": 199
+    },
+    {
+     "name": "K.Heringsfilet400g",
+     "priceCents": 199
+    },
+    {
+     "name": "Big Red",
+     "priceCents": 95
+    }
+   ]
+  },
+  "b": {
+   "merchantId": "kaufland",
+   "totalCents": 3003,
+   "items": [
+    {
+     "name": "Schnitzkürbis",
+     "priceCents": 798
+    },
+    {
+     "name": "KLC.Harzer Roller",
+     "priceCents": 298
+    },
+    {
+     "name": "KVeg. Streichgen.",
+     "priceCents": 85
+    },
+    {
+     "name": "KPlant.Hummus",
+     "priceCents": 99
+    },
+    {
+     "name": "Capri Sun Monster",
+     "priceCents": 249
+    },
+    {
+     "name": "Coca-Cola Cre. Van",
+     "priceCents": 79
+    },
+    {
+     "name": "Pfandartikel",
+     "priceCents": 25
+    },
+    {
+     "name": "KLC Paprika edels",
+     "priceCents": 66
+    },
+    {
+     "name": "KLC Oregano 12g",
+     "priceCents": 55
+    },
+    {
+     "name": "K.Chili Cheese Nug",
+     "priceCents": 189
+    },
+    {
+     "name": "KLC.Canellon",
+     "priceCents": 199
+    },
+    {
+     "name": "KLC.Tortelloni",
+     "priceCents": 199
+    },
+    {
+     "name": "KLC.Fleischwurst",
+     "priceCents": 169
+    },
+    {
+     "name": "Zwiebelmettwurst",
+     "priceCents": 199
+    },
+    {
+     "name": "K.Heringsfilet400g",
+     "priceCents": 199
+    },
+    {
+     "name": "Big Red",
+     "priceCents": 95
+    }
+   ]
+  }
+ },
+ {
+  "name": "saft_edeka_einfache_fassung_92",
+  "doppel": false,
+  "a": {
+   "merchantId": "edeka",
+   "totalCents": 5939,
+   "items": [
+    {
+     "name": "G&G Avocados",
+     "priceCents": 50
+    },
+    {
+     "name": "Grapefruit",
+     "priceCents": 99
+    },
+    {
+     "name": "Katjes Wunderland",
+     "priceCents": 302
+    },
+    {
+     "name": "G&G Schaumküsse",
+     "priceCents": 244
+    },
+    {
+     "name": "Mamba Cola&Friends",
+     "priceCents": 99
+    },
+    {
+     "name": "albi Nektar 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Nektar 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Nektar 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Nektar 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Nektar 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Nektar 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Multivitam.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Multivitam.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Multivitam.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Multivitam.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Multivitam.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Multivitam.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Granatapf.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Granatapf.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Granatapf.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Granatapf.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Granatapf.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Granatapf.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi O-Saft 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi O-Saft 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi O-Saft 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi O-Saft 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi O-Saft 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi O-Saft 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi heim.Apf.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi heim.Apf.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi heim.Apf.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi heim.Apf.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi heim.Apf.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi heim.Apf.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi heim.Apf.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Mehrfr.Vit.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Mehrfr.Vit.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Mehrfr.Vit.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Mehrfr.Vit.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Mehrfr.Vit.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Mehrfr.Vit.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Mehrfr.Vit.1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Mil.O-Saft 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Mil.O-Saft 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Mil.O-Saft 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Mil.O-Saft 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Mil.O-Saft 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Mil.O-Saft 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Mehrfr.Zink1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Mehrfr.Zink1l",
+     "priceCents": 111
+    }
+   ]
+  },
+  "b": {
+   "merchantId": "edeka",
+   "totalCents": 1443,
+   "items": [
+    {
+     "name": "Albi Mil.O-Saft 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "Albi Mil.O-Saft 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "Albi Mil.O-Saft 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "Albi Mil.O-Saft 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "Albi Mil.O-Saft 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "Albi Mil.O-Saft 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "Albi Mil.O-Saft 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Nektar 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Nektar 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Nektar 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Nektar 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Nektar 1l",
+     "priceCents": 111
+    },
+    {
+     "name": "albi Nektar 1l",
+     "priceCents": 111
+    }
+   ]
+  }
+ }
+]

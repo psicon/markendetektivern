@@ -37,6 +37,12 @@ export interface UserProfile {
   // setzt.
   guessedCity?: string;
   guessedBundesland?: string;
+  // Push-Abbestellung (86cbfdq5j). DAS Feld, das der Server vor jedem
+  // Versand liest (cashback-pipeline/lib/pushPolicy.js). Geschrieben
+  // ausschliesslich von lib/services/pushPreference.ts — nie beiläufig
+  // beim Speichern eines Tokens, sonst hebt eine Registrierung die
+  // Abbestellung stillschweigend wieder auf. Fehlt das Feld, gilt „erlaubt".
+  pushNotificationsEnabled?: boolean;
 }
 
 /**

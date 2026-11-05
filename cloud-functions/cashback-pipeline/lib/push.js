@@ -17,19 +17,61 @@
 
 'use strict';
 
+const crypto = require('crypto');
 const admin = require('firebase-admin');
 const { logger } = require('firebase-functions');
+const { pushErlaubt } = require('./pushPolicy');
+const { bonDeepLink } = require('./pushLinks');
+const { bonNachricht } = require('./pushTexte');
+const { gutschriftPushBeanspruchen } = require('./pushMerker');
 
+/**
+ * Token EINES Nutzers — und zwar nur, wenn er Nachrichten überhaupt will.
+ *
+ * Die Abbestellung (86cbfdq5j) wird hier geprüft, nicht beim Aufrufer: das
+ * ist der einzige Ort, an dem Empfänger entstehen. Wer künftig einen
+ * zweiten Sendeweg baut und diese Funktion nutzt, erbt die Regel
+ * automatisch — genau das hat bisher gefehlt.
+ *
+ * Beide Lesungen laufen parallel; die Nutzer-Abfrage kostet einen Read je
+ * Push und hat ihr EIGENES catch: scheitert sie, wird gesendet. Ein
+ * Firestore-Fehler darf nicht wie eine Abbestellung wirken.
+ *
+ * Die Nutzerdaten werden mit zurückgegeben, weil der Ka-ching-Text das
+ * Guthaben nach der Buchung braucht (Zahltag bei 10 €) — ohne zweite Lesung.
+ */
 async function getUserTokens(uid) {
   try {
-    const snap = await admin.firestore().collection(`users/${uid}/fcmTokens`).get();
-    return snap.docs.map((d) => ({
+    const [nutzerDaten, snap] = await Promise.all([
+      admin
+        .firestore()
+        .doc(`users/${uid}`)
+        .get()
+        .then((d) => (d.exists ? d.data() : null))
+        .catch((e) => {
+          logger.warn('[cashback.push] Nutzerdokument nicht lesbar — wird gesendet', {
+            uid,
+            err: e.message,
+          });
+          return null;
+        }),
+      admin.firestore().collection(`users/${uid}/fcmTokens`).get(),
+    ]);
+
+    const urteil = pushErlaubt(nutzerDaten);
+    if (!urteil.erlaubt) {
+      logger.info('[cashback.push] abbestellt — kein Versand', { uid, grund: urteil.grund });
+      return { entries: [], nutzerDaten };
+    }
+
+    const entries = snap.docs.map((d) => ({
       docId: d.id,
       token: String(d.get('token') || ''),
     })).filter((x) => x.token);
+    return { entries, nutzerDaten };
   } catch (e) {
-    logger.warn('[cashback.push] getUserTokens failed', { uid, err: e.message });
-    return [];
+    logger.warn('[cashback.push] Empfänger nicht lesbar', { uid, err: e.message });
+    return { entries: [], nutzerDaten: null };
   }
 }
 
@@ -62,33 +104,81 @@ async function pruneInvalidTokens(uid, entries, results) {
 }
 
 /**
- * Send a "cashback ready" push.
+ * „Ka-ching!"-Nachricht für einen vergüteten Bon.
+ *
+ * Den Text baut diese Funktion selbst (lib/pushTexte.js): sie braucht dafür
+ * das Guthaben nach der Buchung, und das liegt erst hier vor — im
+ * Nutzerdokument, das für die Abbestellung ohnehin gelesen wird.
  *
  * @param {string} uid
  * @param {object} payload
- * @param {string} payload.title
- * @param {string} payload.body
  * @param {string} payload.cashbackId
+ * @param {number} payload.cents       gutgeschriebener Betrag in Cent
+ * @param {string} [payload.markt]     Marktname vom Bon, für „Dein Bon von …"
+ * @param {number} [payload.schwelle]  Auszahlungsschwelle aus der Config
  * @param {string} [payload.deepLink]
  */
 async function sendCashbackReady(uid, payload) {
-  const entries = await getUserTokens(uid);
+  // Höchstens eine Nachricht je Bon — Merker in einer Transaktion (lib/pushMerker.js).
+  const merker = await gutschriftPushBeanspruchen({
+    db: admin.firestore(),
+    FieldValue: admin.firestore.FieldValue,
+    cashbackId: payload.cashbackId,
+    cents: payload.cents,
+  });
+  if (!merker.darf) {
+    const log = merker.grund === 'fehler' ? logger.warn : logger.info;
+    log('[cashback.push] kein Versand', { uid, cashbackId: payload.cashbackId, grund: merker.grund, err: merker.fehler });
+    return { sent: 0, skipped: merker.grund };
+  }
+
+  const { entries, nutzerDaten } = await getUserTokens(uid);
   if (!entries.length) {
     logger.info('[cashback.push] no FCM tokens', { uid });
     return { sent: 0, skipped: true };
   }
 
   const tokens = entries.map((e) => e.token);
+  // 86cb22c0m: eindeutige Push-ID für Konversions-Tracking. Wandert (a) in
+  // die data-Payload (der Client protokolliert den Tap als
+  // users/{uid}/push_events/{pushId}) und (b) ins Send-Log push_log/{pushId}
+  // (admin-only). Auswertung „wer hat nach Push X gehandelt": push_log ×
+  // push_events × receipts/crowd_uploads über uid + Zeitfenster joinen.
+  const pushId = `p_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`;
+  // Ein Pfad, den jede tap-fähige App-Version auflöst — siehe pushLinks.js,
+  // warum das bis 17.09.2026 ein Schema-Link war, den die App nie verstand.
+  const deepLink = payload.deepLink || bonDeepLink(payload.cashbackId);
+  const { title, body } = bonNachricht({
+    cents: payload.cents,
+    markt: payload.markt,
+    guthabenNachher: nutzerDaten ? nutzerDaten.cashback_balance_cents : undefined,
+    schwelle: payload.schwelle,
+  });
   const message = {
-    notification: { title: payload.title, body: payload.body },
+    notification: { title, body },
     data: {
       cashbackId: String(payload.cashbackId),
-      deepLink: payload.deepLink || `markendetektivern://cashback/pending/${payload.cashbackId}`,
+      deepLink,
       kind: 'cashback_ready',
+      pushId,
     },
     apns: {
       payload: {
-        aps: { sound: 'default', badge: 1 },
+        // KEIN `badge` hier. Bis 08.09.2026 stand an dieser Stelle
+        // `badge: 1` — hart, absolut, ohne Gegenstück. APNs setzt diesen
+        // Wert, es zählt nichts hoch: der Server schrieb 1, und niemand
+        // schrieb je 0 zurück. Die rote Eins blieb deshalb für immer am
+        // App-Symbol kleben — Wegwischen, Neustart, Ausloggen half nichts,
+        // weil der Wert Gerätezustand ist und nicht an den Einträgen in
+        // der Mitteilungszentrale hängt. Eine 1★-Rezension (07.09.2026)
+        // hat genau danach gefragt.
+        //
+        // Eine feste 1 hatte ohnehin keinen Informationswert. Kommt später
+        // eine echte Zahl (etwa offene Bons), gehört sie hierher — dann
+        // aber zusammen mit der Stelle, die sie wieder auf 0 setzt. Das
+        // Zurücksetzen macht seit 86cbfdq5j der Client
+        // (PushNotificationProvider, bei jedem Wechsel in den Vordergrund).
+        aps: { sound: 'default' },
       },
     },
     android: {
@@ -110,15 +200,36 @@ async function sendCashbackReady(uid, payload) {
 
   await pruneInvalidTokens(uid, entries, response.responses);
 
+  // Send-Log (86cb22c0m) — admin-only Collection (kein Rules-Block nötig,
+  // der Whitelist-deny-all deckt sie). Basis der Konversions-Auswertung.
+  await admin
+    .firestore()
+    .doc(`push_log/${pushId}`)
+    .set({
+      pushId,
+      uid,
+      kind: 'cashback_ready',
+      cashbackId: String(payload.cashbackId),
+      deepLink,
+      title,
+      cents: Number(payload.cents) || 0,
+      sentAt: admin.firestore.FieldValue.serverTimestamp(),
+      tokens: tokens.length,
+      success: response.successCount,
+      failure: response.failureCount,
+    })
+    .catch((e) => logger.warn('[cashback.push] push_log write failed', { pushId, err: e.message }));
+
   logger.info('[cashback.push] sent', {
     uid,
+    pushId,
     cashbackId: payload.cashbackId,
     tokens: tokens.length,
     success: response.successCount,
     failure: response.failureCount,
   });
 
-  return { sent: response.successCount, failed: response.failureCount };
+  return { sent: response.successCount, failed: response.failureCount, pushId };
 }
 
 module.exports = { sendCashbackReady };

@@ -16,6 +16,7 @@ import { interstitialAdService } from '@/lib/services/interstitialAdService';
 import journeyTrackingService from '@/lib/services/journeyTrackingService';
 import scanHistoryService, { ScanHistoryItem } from '@/lib/services/scanHistoryService';
 import ExternalProductService from '@/lib/services/externalProductService';
+import { erstelleBarcodeBestaetigung } from '@/lib/utils/barcodeBestaetigung';
 import { isExpoGo, platformLog } from '@/lib/utils/platform';
 import { Camera, CameraType, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
@@ -51,6 +52,12 @@ export default function BarcodeScannerScreen() {
   // 🔥 ROBUSTE SCAN-PRÄVENTION (StackOverflow Lösung)
   const lastScannedTimestampRef = useRef<number>(0);
   const lastScannedEANRef = useRef<string>('');  
+  // Erst nach mehreren gleichen Lesungen suchen (06.10.2026): die erste
+  // Lesung war auf Android oft eine Fehllesung mit gültiger Prüfziffer —
+  // 26 % der nur einmal gescannten unbekannten Nummern trugen ein typisches
+  // Fehlermuster und lösten bezahlte Produktsuchen aus. Gesucht wird weiter
+  // die Nummer genau so, wie sie gelesen wurde.
+  const bestaetigungRef = useRef(erstelleBarcodeBestaetigung());
   const [isSmallDevice, setIsSmallDevice] = useState(false);
   // Explizite Kameraberechtigung inkl. Settings-Fallback
   const ensureCameraPermission = async (): Promise<boolean> => {
@@ -128,6 +135,7 @@ export default function BarcodeScannerScreen() {
         setCameraReady(false); // 🎥 Kamera-Status zurücksetzen
         lastScannedTimestampRef.current = 0;
         lastScannedEANRef.current = '';
+        bestaetigungRef.current.zuruecksetzen();
       };
     }, [user, permission?.granted])
   );
@@ -621,8 +629,31 @@ export default function BarcodeScannerScreen() {
       console.log(`🚫 SCAN IGNORED: Invalid EAN format: ${data}`);
       return;
     }
-    
+
+    // Mehrfachbestätigung (lib/utils/barcodeBestaetigung.ts): Prüfziffer +
+    // mehrere gleiche Lesungen, je Nummer gezählt.
+    const stand = bestaetigungRef.current.lesen(data, timestamp);
+    if (stand.art === 'offen') return;
+    bestaetigungRef.current.zuruecksetzen();
     setScanned(true);
+
+    if (stand.art === 'mehrdeutig') {
+      // Zwei echte Codes im Bild (Regaletikett, Mehrfachpackung) — welcher
+      // gemeint ist, weiß nur der Nutzer.
+      Alert.alert('Mehrere Strichcodes erkannt', 'Welche Nummer steht auf deinem Produkt?', [
+        ...stand.nummern.slice(0, 2).map((nummer) => ({ text: nummer, onPress: () => scanUebernehmen(nummer, type) })),
+        {
+          text: 'Nochmal scannen',
+          style: 'cancel' as const,
+          onPress: () => setScanned(false),
+        },
+      ]);
+      return;
+    }
+    scanUebernehmen(stand.nummer, type);
+  };
+
+  const scanUebernehmen = (data: string, type: string) => {
     console.log(`📱 SINGLE EAN scan: ${data} (Type: ${type})`);
     
     // 🎯 Update Journey mit Scan-Details

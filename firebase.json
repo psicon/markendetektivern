@@ -65,7 +65,13 @@
         ".git",
         "firebase-debug.log",
         "firebase-debug.*.log",
-        "*.local"
+        "*.local",
+        ".*.js",
+        ".*.json",
+        ".*.jsonl",
+        ".*.log",
+        ".*.txt",
+        ".*.csv"
       ]
     },
     {
@@ -185,7 +191,9 @@
         ".git",
         "firebase-debug.log",
         "firebase-debug.*.log",
-        "*.local"
+        "*.local",
+        ".*.js",
+        ".*.json"
       ]
     },
     {
@@ -209,7 +217,13 @@
         ".git",
         "firebase-debug.log",
         "firebase-debug.*.log",
-        "*.local"
+        "*.local",
+        ".*.js",
+        ".*.json",
+        ".*.jsonl",
+        ".*.log",
+        ".*.txt",
+        ".*.csv"
       ]
     },
     {
@@ -245,7 +259,11 @@
         ".git",
         "firebase-debug.log",
         "firebase-debug.*.log",
-        "*.local"
+        "*.local",
+        "__tests__",
+        ".*.js",
+        ".*.json",
+        ".*.log"
       ]
     },
     {
@@ -286,6 +304,55 @@
         "firebase-debug.log",
         "firebase-debug.*.log",
         "*.local"
+      ]
+    },
+    {
+      "source": "cloud-functions/review-console",
+      "codebase": "review-console",
+      "runtime": "nodejs22",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local",
+        ".*.js",
+        ".*.json",
+        ".*.jsonl",
+        ".*.log",
+        ".*.txt",
+        ".*.csv",
+        "__tests__",
+        "__emu__"
+      ]
+    },
+    {
+      "source": "cloud-functions/bewertungen",
+      "codebase": "bewertungen",
+      "runtime": "nodejs22",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local",
+        "firestore-debug.log",
+        "test",
+        "werkzeuge"
+      ]
+    },
+    {
+      "source": "cloud-functions/konto-loeschung",
+      "codebase": "konto-loeschung",
+      "runtime": "nodejs22",
+      "disallowLegacyRuntimeConfig": true,
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local",
+        "test"
       ]
     }
   ],

@@ -23,7 +23,12 @@ jest.mock('expo-application', () => ({
   nativeBuildVersion: '1234',
 }));
 
-jest.mock('react-native', () => ({ Platform: { OS: 'ios' } }));
+const mockPlattform = { OS: 'ios' as 'ios' | 'android' };
+jest.mock('react-native', () => ({
+  Platform: mockPlattform,
+  // Wächter (berechtigungsWaechter.ts): 'background' = Dialog sichtbar → regulär warten.
+  AppState: { currentState: 'background', addEventListener: jest.fn(() => ({ remove: jest.fn() })) },
+}));
 
 // Ohne Typ-Argument leitet jest.fn(() => null) den Rückgabetyp `null` ab
 // und lehnt danach jedes mockReturnValue mit echten Daten ab.
@@ -37,6 +42,9 @@ jest.mock('@/lib/services/journeyTrackingService', () => ({
 }));
 
 import {
+  AUFNAHME_KONTEXT_MS,
+  aufnahmeKontextStarten,
+  bonGeraeteOrt,
   clientVersion,
   erfasseCaptureContext,
   standortAnfordern,
@@ -85,6 +93,44 @@ describe('Berechtigungsstatus wird gelesen, nie erfragt', () => {
 });
 
 describe('standortAnfordern löst den System-Dialog aus — und nur diese Funktion', () => {
+  beforeEach(() => {
+    // Standard: noch nie gefragt → der Dialog ist möglich.
+    mockLocation.getForegroundPermissionsAsync.mockResolvedValue({ granted: false, canAskAgain: true });
+    mockLocation.requestForegroundPermissionsAsync.mockReset();
+  });
+
+  it('schon erteilt → KEINE Anfrage (Android antwortete dann ohne Dialog erst beim nächsten Aufwachen)', async () => {
+    mockLocation.getForegroundPermissionsAsync.mockResolvedValue({ granted: true, canAskAgain: true });
+    expect(await standortAnfordern()).toBe('granted_precise');
+    mockLocation.getForegroundPermissionsAsync.mockResolvedValue({
+      granted: true,
+      canAskAgain: true,
+      android: { accuracy: 'coarse' },
+    });
+    expect(await standortAnfordern()).toBe('granted_coarse');
+    expect(mockLocation.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+  });
+
+  it('iOS, endgültig abgelehnt → sofort denied, KEINE Anfrage (kein ewiger Spinner)', async () => {
+    mockLocation.getForegroundPermissionsAsync.mockResolvedValue({ granted: false, canAskAgain: false });
+    expect(await standortAnfordern()).toBe('denied');
+    expect(mockLocation.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+  });
+
+  it('Android, canAskAgain=false → trotzdem fragen (weggetippter Dialog), Ergebnis entscheidet', async () => {
+    mockPlattform.OS = 'android';
+    try {
+      mockLocation.getForegroundPermissionsAsync.mockResolvedValue({ granted: false, canAskAgain: false });
+      mockLocation.requestForegroundPermissionsAsync.mockResolvedValue({ granted: true, canAskAgain: true });
+      expect(await standortAnfordern()).toBe('granted_precise');
+      expect(mockLocation.requestForegroundPermissionsAsync).toHaveBeenCalledTimes(1);
+      mockLocation.requestForegroundPermissionsAsync.mockResolvedValue({ granted: false, canAskAgain: false });
+      expect(await standortAnfordern()).toBe('denied');
+    } finally {
+      mockPlattform.OS = 'ios';
+    }
+  });
+
   it('meldet die erteilte Freigabe', async () => {
     mockLocation.requestForegroundPermissionsAsync.mockResolvedValue(erlaubt());
     expect(await standortAnfordern()).toBe('granted_precise');
@@ -232,5 +278,108 @@ describe('Die App-Version wird mitgeschrieben', () => {
     // Verbreitung eines Updates messbar noch unterscheidbar, ob ein Feld
     // wegen einer alten App fehlt.
     expect(clientVersion()).toEqual({ app: '6.0.16', build: '1234', platform: 'ios' });
+  });
+});
+
+describe('Bons: Standort bei der Aufnahme, nicht beim Hochladen', () => {
+  const fix = (ts: number) => ({ coords: { latitude: 50.1, longitude: 8.7, accuracy: 9 }, timestamp: ts });
+
+  it('misst sofort beim Start und liefert beim Einreichen dasselbe Ergebnis', async () => {
+    const jetzt = Date.now();
+    mockLocation.getLastKnownPositionAsync.mockResolvedValue(fix(jetzt));
+    const holen = aufnahmeKontextStarten(1234);
+    // Die Messung läuft schon, bevor jemand „Einreichen" tippt.
+    await Promise.resolve();
+    expect(mockLocation.getForegroundPermissionsAsync).toHaveBeenCalled();
+
+    const k = await holen();
+    expect(k.capturedAt).toBe(1234);
+    expect(k.gpsStatus).toBe('granted_precise');
+    expect(k.gps).toEqual({ lat: 50.1, lon: 8.7, accuracyM: 9, fixAt: jetzt });
+    // Kein zweiter Durchlauf bei erteilter Freigabe.
+    expect(mockLocation.getLastKnownPositionAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('fragt nie nach der Freigabe', async () => {
+    mockLocation.getForegroundPermissionsAsync.mockResolvedValue({ granted: false, canAskAgain: true });
+    await aufnahmeKontextStarten(1)();
+    expect(mockLocation.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+  });
+
+  it('Freigabe erst beim Einreichen erteilt → einmal neu gemessen', async () => {
+    mockLocation.getForegroundPermissionsAsync.mockResolvedValueOnce({ granted: false, canAskAgain: true });
+    const holen = aufnahmeKontextStarten(1);
+    await Promise.resolve();
+    mockLocation.getLastKnownPositionAsync.mockResolvedValue(fix(Date.now()));
+
+    const k = await holen();
+    expect(k.gpsStatus).toBe('granted_precise');
+    expect(k.gps).not.toBeNull();
+  });
+
+  it('hängt die Ortung, wird nach dem Zeitlimit ohne Standort eingereicht', async () => {
+    jest.useFakeTimers();
+    try {
+      mockLocation.getForegroundPermissionsAsync.mockReturnValue(new Promise(() => {}));
+      const holen = aufnahmeKontextStarten(77);
+      const ergebnis = holen();
+      await jest.advanceTimersByTimeAsync(AUFNAHME_KONTEXT_MS);
+      await expect(ergebnis).resolves.toMatchObject({ capturedAt: 77, gps: null, gpsStatus: 'timeout' });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('Android: kein ungefragter Google-Dialog „Standortgenauigkeit" bei der Bon-Messung', async () => {
+    mockLocation.getLastKnownPositionAsync.mockResolvedValue(null);
+    await aufnahmeKontextStarten(1)();
+    expect(mockLocation.getCurrentPositionAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ mayShowUserSettingsDialog: false }),
+    );
+  });
+
+  it('Produktfotos behalten ihr bisheriges Verhalten (kein Zusatz-Parameter)', async () => {
+    await erfasseCaptureContext();
+    expect(mockLocation.getCurrentPositionAsync.mock.calls[0][0]).not.toHaveProperty('mayShowUserSettingsDialog');
+  });
+
+  it('scheitert die frische Messung, bleibt ein älterer bekannter Fix erhalten', async () => {
+    const alt = Date.now() - 30 * 60 * 1000;
+    mockLocation.getLastKnownPositionAsync.mockResolvedValue(fix(alt));
+    mockLocation.getCurrentPositionAsync.mockRejectedValue(Object.assign(new Error('x'), { code: 'E_SETTINGS' }));
+    const k = await erfasseCaptureContext();
+    expect(k.gpsStatus).toBe('granted_precise');
+    expect(k.gps?.fixAt).toBe(alt);
+  });
+
+  it('Ortung erst beim Einreichen eingeschaltet → einmal neu gemessen', async () => {
+    (mockLocation as any).hasServicesEnabledAsync = jest.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
+    try {
+      const holen = aufnahmeKontextStarten(1);
+      await Promise.resolve();
+      mockLocation.getLastKnownPositionAsync.mockResolvedValue(fix(Date.now()));
+      const k = await holen();
+      expect(k.gpsStatus).toBe('granted_precise');
+      expect(k.gps).not.toBeNull();
+    } finally {
+      delete (mockLocation as any).hasServicesEnabledAsync;
+    }
+  });
+
+  it('nach einem echten Messfehler wird NICHT erneut gemessen', async () => {
+    mockLocation.getCurrentPositionAsync.mockRejectedValue(new Error('kaputt'));
+    const k = await aufnahmeKontextStarten(1)();
+    expect(k.gpsStatus).toBe('unavailable');
+    expect(k.gpsError).toBe('kaputt');
+    expect(mockLocation.getForegroundPermissionsAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('schickt vom Kontext nur das Gerätesignal mit, keine IP-Ortung', async () => {
+    mockJourney.getCurrentJourneyLocation.mockReturnValue({ lat: 1, lon: 2, city: 'X', geohash5: 'a', source: 'ip' });
+    mockJourney.getCurrentJourneyId.mockReturnValue('j1');
+    mockLocation.getLastKnownPositionAsync.mockResolvedValue(fix(Date.now()));
+    const ort = bonGeraeteOrt(await erfasseCaptureContext({ capturedAt: 5 }));
+    expect(Object.keys(ort).sort()).toEqual(['gps', 'gpsStatus']);
+    expect(bonGeraeteOrt({ ...(await erfasseCaptureContext()), gps: null, gpsError: 'E1' })).toHaveProperty('gpsError', 'E1');
   });
 });

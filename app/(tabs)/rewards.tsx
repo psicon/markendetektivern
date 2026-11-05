@@ -25,6 +25,7 @@ import {
   RewardsWalkthrough,
 } from '@/components/coachmarks/RewardsWalkthrough';
 import { FilterSheet } from '@/components/design/FilterSheet';
+import { KontoSichernKarte } from '@/components/rewards/KontoSichernKarte';
 import { fontFamily, fontWeight, radii } from '@/constants/tokens';
 import { useCoachmark } from '@/hooks/useCoachmark';
 import { useCoachmarkAnchor } from '@/hooks/useCoachmarkAnchor';
@@ -398,7 +399,7 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
   const { theme } = useTokens();
   const isFocused = useIsFocused();
   const scheme = useColorScheme() ?? 'light';
-  const { user } = useAuth();
+  const { user, isAnonymous } = useAuth();
   const payoutEmail = user?.email ?? null;
   // Live cashback state from Firestore. Falls back to 0,00 € when
   // the user isn't signed in or the backend hasn't seeded the field
@@ -598,6 +599,16 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
     } catch (e: any) {
       cleanupPayoutWait();
       setPayoutBusy(false);
+      // Auszahlung nur mit Konto + E-Mail — erzwingt der Server
+      // (requestPayout), die App sagt kurz, was fehlt.
+      if (e?.code === 'konto_erforderlich') {
+        showInfoToast('Mit einem kostenlosen Konto zahlen wir dir dein Guthaben aus.', 'info', scheme);
+        return;
+      }
+      if (e?.code === 'email_fehlt') {
+        showInfoToast('Für die Auszahlung brauchen wir eine E-Mail-Adresse in deinem Konto.', 'info', scheme);
+        return;
+      }
       const msg =
         e?.code === 'below_threshold' || e?.code === 'below_min_amount'
           ? 'Dein Guthaben reicht noch nicht für eine Auszahlung.'
@@ -1059,7 +1070,17 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
 
       {/* ── Einlösen — ein Button, kein eigener Screen. Primary-getönt,
           gleiche Zeilen-Form wie „Meine Bons" darüber → die beiden
-          Buttons sitzen dicht gruppiert. Partner-Auszahlung folgt. */}
+          Buttons sitzen dicht gruppiert. Partner-Auszahlung folgt.
+          Gäste sehen stattdessen „Konto sichern": Auszahlen geht erst mit
+          Konto (Entscheidung 25.09.2026). Der Walkthrough-Anker bleibt an
+          derselben Stelle. */}
+      {isAnonymous ? (
+        <View style={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 8 }}>
+          <View ref={redeemAnchor.ref} onLayout={redeemAnchor.onLayout}>
+            <KontoSichernKarte ziel="/(tabs)/rewards" />
+          </View>
+        </View>
+      ) : (
       <View style={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: 8 }}>
         <Pressable
           ref={redeemAnchor.ref}
@@ -1117,6 +1138,7 @@ function RedeemTab({ walkthroughVisible }: { walkthroughVisible: boolean }) {
           <MaterialCommunityIcons name="chevron-right" size={20} color={theme.primary ?? theme.textMuted} />
         </Pressable>
       </View>
+      )}
 
       {/* ── Aktive Aktionen — echte Liste (mehrere gleichzeitig möglich,
           User wählt beim Einreichen die Aktion). Sitzt unter den

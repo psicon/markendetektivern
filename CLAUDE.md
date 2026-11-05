@@ -1,5 +1,108 @@
 # Project notes for Claude Code
 
+## KI-Unternehmenssystem: bestätigte Vorgaben und aktueller Einstieg
+
+Für diese Arbeit zuerst `docs/AI_ORCHESTRATION_INTERVIEW.md` lesen.
+Der tatsächliche technische Stand steht in `tools/company-os/README.md`,
+Rollen und Abnahmen in `tools/company-os/ROLES.md`, der Wissensvertrag
+in `tools/company-os/KNOWLEDGE.md`. Historische Testzahlen und frühere
+Installationspläne nicht als aktuellen Zustand ausgeben.
+
+Patrick hat den Bau und die zentrale Staging-Einrichtung autorisiert.
+Dashboard, Steuerung, gemeinsames moderierbares Gedächtnis und austauschbare
+selbst betriebene Modelle sollen bei Hetzner laufen. Der aktuelle zentrale
+Zugang ist `https://team.revealy.de`, Server `144.76.202.144`.
+Keine bezahlten Modell-APIs oder automatisch aktivierten Zusatzcredits.
+Persönliche Codex-/Claude-Abos gehören jeweils ihrem Nutzer; keine
+Kontingentbündelung oder Limitumgehung. Ein erreichbares Dashboard ist
+kein Beleg für unbegrenzte KI-Verfügbarkeit.
+
+Patrick ist Gründer, Entwickler und derzeit für Sales, Support,
+Buchhaltung und Investor Relations verantwortlich. Julian ist Senior
+Developer; Manon ist für Marketing zuständig. Timo ist perspektivisch
+im Sales vorgesehen und hat noch keine operativen Rechte. Gehälter,
+Personal, Finanzen, Buchhaltung, Investor Relations und wichtige
+Kundeninformationen bleiben standardmäßig ausschließlich für Patrick
+sichtbar, auch in Suche, Erinnerungen und Modellkontexten. Die erneute
+Bewertung der EU-Verarbeitung ist keine pauschale Datenfreigabe.
+Produktionsveröffentlichungen und externe Nachrichten benötigen die
+entsprechende ausdrückliche Autorisierung.
+
+13 interne Prüfperspektiven sind aufgabenbezogen konfigurierbar. Eine
+KI-Perspektive ersetzt weder menschliche Zustimmung noch tatsächliche
+Kunden- oder psychologische Abnahme. Patrick gibt zunächst konkrete
+Aufgabenfassungen frei; Verantwortliche delegieren, danach folgen echte
+Ergebnisse, unabhängige Prüfungen und die Endabnahme. Quellen-, Plan-
+oder Ergebniswechsel entwerten frühere Freigaben.
+
+Stand 09.09.2026: Zentrale Stagingversion auf Hetzner installiert,
+ClickUp-Quellenprüfung und kontrollierter Statusabgleich implementiert.
+Patricks Codex-/Claude-Logins wurden erkannt; Kostenbestätigungen und
+ein echter persönlich freigegebener Produktlauf fehlen noch. ClickUp
+war zuletzt zentral nicht verbunden. Hindsight ist lokal angeschlossen,
+wartet aber auf freigegebene Quellen. BookStack ist optional und noch
+nicht installiert; Paperclip bleibt deaktiviert. Mit „Claw“ meinte
+Patrick Claude, nicht OpenClaw.
+
+Seit 09.09.2026, 13:31:39 UTC sind Claude-/Codex-Rollenprüfungen über
+die persönlichen Broker technisch angeschlossen: Anbieterwahl, separate
+versionsgebundene Datenfreigabe, vollständige Originalbelege und Quellenzitate.
+705 Linux-Tests bestanden, acht übersprungen. Persönliche Prüfprofile bleiben
+ausgeschaltet; echte Abo-Qualifikation und Kostenbestätigungen fehlen.
+Abo-Limits halten weitere Rollenprüfungen desselben persönlichen Anbieters
+auch nach Neustart an. Nur bewusstes erneutes Beauftragen durch den Owner
+gibt diese Warteschlange frei; kein automatischer Modell-/Kontowechsel.
+Details: `tools/company-os/docs/native-review-workers.md`.
+
+Seit 09.09.2026, 14:02:52 UTC ist der Text-/Markdown-Wissenseingang
+mit Originaldatei, SHA-256, Meeting-Datum und Zeilenbereich bereitgestellt.
+713 Linux-Tests bestanden, acht übersprungen. Import ist keine Modellfreigabe;
+Teamfreigabe umfasst ausdrücklich auch die vollständige Originaldatei.
+PDF/Word und automatische Meetings fehlen noch. Seit 14:24:32 UTC ist für große Bestände eine nachvollziehbare
+Wortauswahl eingebaut: alle Pflichtregeln plus sämtliche erkannten passenden
+Quellen, mit sichtbarer Auslassungsliste. 724 Linux-Tests bestanden, acht
+übersprungen. Semantische Vollständigkeit ist nicht belegt. Das ausgewählte
+Kontextpaket bleibt auf 8000 Bytes begrenzt; passt es nicht, hält der Auftrag an. Keine echte Unternehmensquelle wurde durch diesen Release importiert.
+Details: `tools/company-os/docs/knowledge-import.md`.
+
+Seit 09.09.2026, 14:53:45 UTC ist der automatische ClickUp-Eingang
+bereitgestellt: ausschließlich für Patrick sichtbar nach zentralem OAuth, mit Suche, persistentem Pausenschalter und Wartezeit
+nach Abruffehlern. Import ist standardmäßig ein privater Entwurf; eine
+Teamaufgabe benötigt ausdrückliche Teilung der vollständigen Quelle und
+die Wahl des Verantwortlichen. Keine automatische Freigabe, Zuweisung
+in ClickUp, Modellbeauftragung oder Wissensaufnahme daraus ableiten.
+743 Linux-Tests bestanden, acht übersprungen. Details und Grenzen:
+`tools/company-os/docs/clickup-intake.md`.
+Der ursprüngliche Fünf-Minuten-Takt ist überholt. Seit 15:12:47 UTC gilt
+bei noch unbekanntem ClickUp-Tarif höchstens ein automatischer Versuch
+alle drei Stunden: 60 reservierte MCP-Anfragen der Zentrale in rollierenden
+24 Stunden, davon höchstens 30 automatisch. Andere Apps teilen das entfernte
+Workspace-Kontingent; das tatsächliche Restkontingent ist unbekannt.
+Neustart, Anmeldung oder Umschalten setzen den eigenen Zähler nicht zurück.
+757 Linux-Tests bestanden, acht übersprungen; neun Betriebsprüfungen gesund.
+Details: `tools/company-os/docs/clickup-budget.md`.
+Die Tarif-/Everything-AI-Frage ist seit dieser Prüfung offen.
+
+Die vollständige autonome Entwicklungsorganisation ist noch nicht
+abgenommen. Qwen3:1.7b ist ein begrenzter Pilot. Der getrennte 8B-Versuch
+bestätigte nach korrigiertem HTTP-Zeitlimit eine echte vollständige
+Antwort, scheiterte aber an einem nicht wortgleichen Quellenzitat.
+Keine Prüferfreigabe daraus ableiten; Details und Fortsetzung stehen
+in `tools/company-os/docs/local-model-qualification-handoff-2026-09-09.md`.
+Die experimentellen Änderungen sind nicht im Live-Dashboard registriert.
+
+Betriebsstörungen eskalieren Patrick → Julian → Manon, ohne zusätzliche
+vertrauliche Leserechte. E-Mail-Adressen und Fristen sind noch zu klären;
+kein funktionierender automatischer Versand oder externes Backup behaupten.
+Seit 09.09.2026, 12:51 UTC ist der unabhängige interne Betriebsmonitor
+mit Minutenintervall und der Dashboard-Ansicht „Betrieb“ aktiv. Neun
+Kernprüfungen sind bestätigt. Eine Vorfallübernahme ist weder Reparatur
+noch Aufgabenfreigabe. Externe Hostüberwachung bleibt offen.
+Ein weiterer Stopp darf einen bestehenden privaten Gründer-Stopp weder
+herabstufen noch dessen Grund überschreiben, auch nicht bei
+`haltForRecovery()`. Nur Patrick kann ihn aufheben; unbestätigte
+Worker-Bereinigung blockiert auch seine Rückfreigabe.
+
 ## Meta-Regel: "merk dir das" → SOFORT in CLAUDE.md
 
 Wenn der User sagt **"merk dir das"**, **"schreib dir das auf"**,
@@ -113,6 +216,57 @@ Bug-Fix, Refactor, etc.):
 Tool: `mcp__…__clickup_create_task_comment` für 1, `clickup_update_task`
 mit `status: 'in review'` für 2.
 
+## Meta-Regel: Lange Antworten brauchen TLDR + Stichpunkte (User-Vorgabe 11.09.2026)
+
+User-Wortlaut: „Ich möchte, dass du dir mal merkst, dass du, wenn du das tust,
+zumindest ein TLDR hinzufügst und in Stichpunkten erklärst, inklusive
+Empfehlungen, was zu tun ist und warum."
+
+Das ist die dritte Ansage zum selben Punkt (vorher: „ich blicke bei dir nicht
+durch, weil du immer alles in einer Rolle of Text zurückgibst"). Kurz fassen
+allein reicht nicht — manche Antworten MÜSSEN lang sein (Bewertungen,
+Architekturfragen, Geld-Läufe). Dann gilt:
+
+1. **TLDR zuerst**, vor allem anderen. Zwei bis drei Zeilen, die die Frage
+   beantworten und die Empfehlung nennen. Wer nur das liest, kann entscheiden.
+2. **Danach Stichpunkte**, keine Absätze. Tabellen, wo es Zahlen sind.
+3. **Empfehlung ausdrücklich als solche kennzeichnen** — was zu tun ist UND
+   warum. Nicht die Begründung über den Text verteilen und den Leser selbst
+   schließen lassen.
+4. **Offene Entscheidungen ans Ende**, als klare Frage.
+
+Gegenprobe vor dem Absenden: Wenn die Antwort über ~10 Zeilen geht und oben
+kein TLDR steht, ist sie nicht fertig.
+
+## Meta-Regel: KURZ und in normaler Sprache (User-Vorgabe 20.09.2026)
+
+User-Wortlaut: „Ich habe nicht die Zeit, die ganze Scheiße immer zu lesen und
+mit deiner geschwurbelten Argumentation und Verbalität hier umzugehen. Halt das
+kurz." Das ist die VIERTE Ansage zum selben Punkt (vorher: Rolle of Text, TLDR-
+Regel 11.09.). Die TLDR-Regel darunter bleibt gültig, reicht aber offensichtlich
+nicht — sie hat lange Antworten nur besser sortiert statt kürzer gemacht.
+
+Ab jetzt gilt beim Antworten:
+
+1. **Standard sind 5–10 Zeilen.** Länger nur, wenn Patrick ausdrücklich Details
+   will oder eine Zahl ohne Kontext falsch verstanden würde. Im Zweifel kurz und
+   nachfragen, ob mehr gewünscht ist.
+2. **Keine internen Namen ohne Erklärung.** „Namer", „Prüfkonsole",
+   „Doppel-Regel", „Worktree", „fail-closed", „Präfix 02/2x" — das sind MEINE
+   Wörter, nicht seine. Entweder in einem Halbsatz erklären („der Dienst, der
+   aus den Fotos den Produktnamen liest") oder weglassen.
+3. **Erst das Ergebnis, dann die Folge, dann — nur wenn nötig — der Weg.**
+   Nicht die Beweisführung nacherzählen. Was ich geprüft habe, interessiert nur,
+   wenn das Ergebnis strittig ist.
+4. **Keine Tabellen für drei Zahlen.** Ein Satz reicht.
+5. **Bei ClickUp-Tasks:** im Chat EIN Satz je Task, in normaler Sprache, was
+   kaputt ist und was es ihn kostet. Die Details stehen im Task — dafür ist er da.
+6. **Gegenprobe vor dem Absenden:** Würde jemand ohne diesen Sitzungs-Kontext
+   die Antwort in 30 Sekunden verstehen? Wenn nein, kürzen.
+
+Das gilt auch für Zwischenmeldungen während der Arbeit, nicht nur für den
+Abschlussbericht.
+
 ## Meta-Regel: User-Wortlaut zweimal lesen, nicht "vereinfachen"
 
 "Selbes Aussehen, aber X" = alles bleibt, ändere NUR X. Keine
@@ -121,6 +275,34 @@ keinen Sinn → wegnehmen") — das endet in Cancel-Loops. Bei
 Unklarheit kurz fragen. Bei Vergleichen ("warum ist X auf Home
 anders als Stöbern?") **nicht** raten welche Seite gewinnt — beide
 Optionen anbieten oder fragen.
+
+## Meta-Regel: Arbeitsweise — clever, gewissenhaft, kostenbewusst, selbstgeprüft (User-Vorgabe 05.09.2026)
+
+User-Wortlaut: „immer best practices nutzen, sei clever und gewissenhaft,
+kostenorientiert und immer nach der besten lösung bestrebt (ohne die kosten
+überzustrapazieren). prüfe dich immer selbst und erschaffe rollen zur prüfung
+die passen."
+
+Was das konkret heißt — bei JEDER Aufgabe, nicht nur bei großen:
+1. **Beste Lösung, nicht schnellste.** Erst Root-Cause und Alternativen
+   abwägen, dann bauen. Workarounds nur mit Begründung + Follow-up-Task.
+2. **Kostenbewusst.** Laufende Kosten (Gemini-Calls, Firestore-Reads,
+   Storage, Builds, Token) sind Teil der Lösung: pro Vorschlag die
+   Kostenwirkung nennen und die günstigste Variante wählen, die das Ziel
+   VOLL erreicht. Nicht sparen, wo es Qualität kostet (siehe „Billig
+   zuerst"-No-Go bei der OCR) — aber auch nichts verbrennen (z.B. Re-OCR
+   von 4.700 Bons, wenn ein Feld schon im Cache steht).
+3. **Selbstprüfung ist Pflicht, mit passenden Rollen.** Vor „fertig":
+   Prüfrollen definieren, die zum Risiko der Änderung passen, und jede
+   Rolle die Änderung angreifen lassen (Skeptiker/Refuter, Geld-Buchhalter
+   bei Ledger-Änderungen, Datenschutz bei personenbezogenen Feldern,
+   Alt-Client/Migration bei Schema-Änderungen, Ops/Rollback bei Deploys,
+   Nutzer-Sicht bei Copy/UI). Bei Geld/Daten: zwei Runden gegen den
+   AKTUELLEN Stand, Funde fixen, erneut prüfen. Umsetzung: Workflow mit
+   Rollen-Agenten oder explizite Checkliste — aber nie „ich hab's gelesen,
+   passt".
+4. **Gewissenhaft berichten.** Was verifiziert ist, was nur plausibel ist,
+   was offen bleibt — getrennt und ehrlich.
 
 ## Meta-Regel: Best Practices — IMMER, ohne Ausnahme
 
@@ -262,6 +444,105 @@ werden sollten. Andere "Don't"-Regeln stehen verteilt im File
 `USE_FLYING_TABS`-Legacy etc.) — hier nur die Learnings aus
 Recent-Sessions.
 
+- **Eine Live-Barcode-Lesung ungeprüft übernehmen (Vorfall Juni–06.10.2026,
+  Foto-Assistent).** Der Assistent nahm die ERSTE Nummer, die expo-camera
+  meldete, und löste sofort aus. Android (ML Kit, je Kamerabild nur
+  `barcodes.first()`) lieferte dabei in 111 von 1.888 lesbaren Fällen (5,9 %)
+  eine falsche Nummer MIT gültiger Prüfziffer (iPhone 0,5 %); die Prüfziffer
+  allein schützt also nicht. Regel: Live-Lesungen IMMER über
+  `lib/utils/barcodeBestaetigung.ts` (Zähler je Nummer im Fenster, Prüfziffer,
+  Risikoformen strenger, zwei Codes im Bild ⇒ Nutzer wählt) — nie „erste
+  Lesung" und nie „n-mal hintereinander" (zwei Codes liefern A,B,A,B und
+  bestätigen nie). Weicht das Foto ab, die Nummer bestätigen lassen, nicht
+  ohne Nummer speichern (endet serverseitig oft in `ean_fehlt`). Die
+  abgefragte Schreibweise nie still auf 13 Stellen umformen —
+  `vergleichsform` nur zum Vergleichen. Wirkt nur mit neuem Build; die
+  Barcode-Prüfung der Morgenrunde bleibt für alte Builds Pflicht.
+
+- **Den Patch `patches/react-native+0.79.7.patch` beim RN-Upgrade still
+  verlieren (Vorfall 01.10.2026, iOS 6.0.20).** Onboarding zeigte statt des
+  Einkaufswagen-Fotos das riesige Splash-Logo — nur iOS, zufällig. Ursache ist
+  RN #58667: iOS (Fabric) gibt eine `<Image>`-Ansicht beim Bildschirmwechsel an
+  ein neues Bild weiter; ein noch wartender Rückruf der alten Anfrage
+  überschreibt danach das neue Bild (hier: Boot-Logo aus `app/index.tsx` über
+  dem vorgeladenen `background.jpg`). Trifft JEDES `<Image>` der App, auch
+  Produktbilder. Gefixt upstream am 25.09.2026 (#58669); der Patch ist eine
+  0.79-taugliche Fassung davon (Beobachter-Ring statt `shared_ptr`, weil der
+  Koordinator in 0.79 rohe Zeiger hält). Nachweis im Simulator mit 50 Runden à
+  64 Bildern: ohne Patch 59 falsche Bilder in 33 Runden, mit Patch 0 in
+  dreimal 50 Runden, alle Bilder geladen. Regeln: (1) Beim RN-Upgrade prüfen,
+  ob #58669 enthalten ist — erst dann den Patch löschen, sonst nachziehen.
+  (2) iOS-Änderungen am Startablauf auf einem echten Gerät mit Release-Build
+  prüfen; Debug/Metro verschiebt das Zeitfenster, der Simulator zeigte das
+  Onboarding fehlerfrei. (3) Der Patch wirkt nur mit einem neuen nativen
+  Build (iOS) — ein JS-Update allein behebt nichts.
+
+- **Einen bezahlten Fremddienst (KI, Suche, Rendering) scheitern lassen und das
+  als „nichts gefunden“ weitergeben (Vorfall 18.08.–01.10.2026).** Die
+  Produktdaten-Suche (`nutrition-scraper/scrapeEan`) las Shop-Seiten mit Claude
+  aus. Ab 18.08. war das Anthropic-Guthaben leer — jede Antwort 400 „credit
+  balance is too low“, der Extractor gab `null` zurück, scrapeEan meldete
+  `all_failed`, und `external-misses-processor` schloss **5.301 EANs dauerhaft als
+  'no-data'** ab, während Serper und Apify weiter bezahlt wurden. Sechs Wochen
+  unbemerkt; gefunden nur über das Funktionsinventar. Serper (Guthaben) und Apify
+  (Konto) hatten dieselbe Schwäche. Seit 02.10.: Auslesen über Gemini/Vertex,
+  `src/fehler.js` (ExtractUnavailable/SearchUnavailable/FetchUnavailable) → 503,
+  der Processor zählt `errorCount` und stellt nach 5 Fehlern auf 'error' (nie
+  'no-data'). Regeln: (1) Jeder Fremddienst-Fehler wird als eigener Fehlertyp
+  geworfen, nie als leeres Ergebnis zurückgegeben. (2) Ein Status, der eine
+  inhaltliche Aussage trifft („keine Daten“), braucht den Beweis, dass der Weg
+  dorthin funktioniert hat. (3) Dienste mit Prepaid-Guthaben (Serper: am 02.10.
+  12.249 Suchen übrig, ~120/Tag) gehören in eine Überwachung, sonst laufen sie
+  still leer. (4) Ein Status-Wechsel auf 'no-data' ohne `processedResult` ist
+  nicht nachvollziehbar — der Processor schreibt ihn seit 02.10. mit.
+
+- **Test-, Köder- oder Teildatensätze in `produkte`/`markenProdukte` anlegen, die
+  alte App-Versionen als „neueste“ laden (Vorfall 01.–08.09.2026, per Crashlytics
+  am 30.09. belegt).** `scripts/canary/create_canaries.py` legte 12 Köder mit
+  `created_at = jetzt` und OHNE `preis` an. Die Startseite von 5.x lädt
+  `orderBy('created_at','desc').limit(10)` und formatiert den Preis ungeprüft →
+  5.0.6: Startseite eine Woche lang Fehlerseite (24 Nutzer), 5.0.0–5.0.4:
+  Absturzschleife beim Start (7 Nutzer, dort stürzt zusätzlich das Fehlermelden
+  selbst ab). Erst der Datenfix am 08.09. beendete es. Alte Versionen lassen sich
+  nicht zwangsaktualisieren (es gibt KEINE Mindestversions-Sperre), deshalb:
+  (1) Künstliche Datensätze immer mit `created_at` in der Vergangenheit und allen
+  Pflichtfeldern (`preis`, `name`, Referenzen) anlegen. (2) Vor jedem Schreiben
+  neuer Dokumentformen in öffentliche Katalog-Collections prüfen, welche Abfragen
+  alte Clients darauf machen. (3) Eine Mindestversions-Sperre gehört in die App,
+  sonst bleibt jede künftige Datenänderung ein Risiko für Altversionen.
+
+- **Auf Android eine Laufzeit-Berechtigung anfragen, deren Ausgang schon
+  feststeht (Vorfall 25.09.2026, Pixel 8, Build 6.0.20-1246).** Erteilt oder
+  dauerhaft verweigert → Android antwortet ohne Dialog, und React Native
+  (`ReactActivityDelegate.mPermissionsCallback`) plus die Expo-Hülle
+  (Coroutine) stellen das Ergebnis erst beim nächsten `onResume` zu. Auf dem
+  Pixel wurde die App dabei nicht pausiert → ewiger Spinner auf „Akzeptieren“,
+  „Einstellungen öffnen“ ohne Wirkung, erst Sperren/Entsperren löste es; Expo
+  parkte danach jede weitere Abfrage (Kamera, Mitteilungen). Der Emulator
+  (Android 14 UND 16) zeigt es NICHT — dort startet GrantPermissionsActivity
+  immer kurz. Regeln: (1) Vor jeder Anfrage `get…PermissionsAsync()` lesen;
+  bei `granted` oder `!canAskAgain` NICHT anfragen. (2) Anfragen nur über
+  `anfragenOhneHaenger` (`lib/services/berechtigungsWaechter.ts`). (3) Kein
+  Knopf/Spinner ohne Zeitgrenze an einem nativen await (`mitZeitlimit`).
+  (4) `MainActivity.kt` stellt Ergebnisse sofort zu, wenn RESUMED — NICHT
+  entfernen. Diagnose-Merker: „hängt, bis man das Handy sperrt/entsperrt“ =
+  ein Ergebnis wartet auf `onResume`.
+
+- **Eine Codebase von einem Zweig ausrollen, dem Änderungen eines anderen
+  Zweigs fehlen, die schon live sind (Vorfall 23./24.09.2026).** Die
+  Zweitprüfung unsicherer Bons (19.09., von Patrick eingeschaltet) lag nur im
+  Session-Zweig; am 23.09. um 10:07 wurde `cashback-pipeline` aus
+  `feat/rnfirebase-migration` ausgerollt (EDEKA-Fix) — dort fehlte der Code, die
+  Zweitprüfung war still weg (letzte Nutzung 22.09.), Bons mit Warenkorb-Rabatt
+  wurden wieder abgelehnt. Umgekehrt hätte ein Ausrollen aus dem Session-Zweig
+  den EDEKA-Fix und den Vergütungs-Push entfernt. Firebase ERSETZT die Codebase
+  komplett, es gibt kein Zusammenführen. Regel: **vor jedem Functions-Deploy**
+  `git log <deploy-zweig>..<jeder-andere-aktive-zweig> -- cloud-functions/<codebase>`
+  prüfen — nicht leer = erst zusammenführen, dann ausrollen. Session-Zweige
+  nach dem Ausrollen zeitnah in den Arbeitszweig mergen, sonst wiederholt es
+  sich. Absicherung im Betrieb: der Tagesbericht der Morgenrunde warnt rot,
+  wenn die Zweitprüfung eingeschaltet ist, aber 48 h nicht lief.
+
 - **expo-camera `takePictureAsync` aufrufen, BEVOR `onCameraReady` gefeuert
   hat.** Verletzt den dokumentierten expo-camera-Vertrag (CameraView-Doc:
   „wait for the onCameraReady callback before calling this method"). Auf
@@ -278,12 +559,42 @@ Recent-Sessions.
   (true)}`, Shutter `disabled={capturing || !cameraReady}`, in der
   Capture-Funktion `if (!cameraReady) return;`) und `cameraReady` beim
   Remount/Teardown der CameraView (`if (!showExpoCam) setCameraReady(false)`)
-  zurücksetzen. `app/cashback/capture.tsx` macht es korrekt (Referenz);
-  `app/product-submit/wizard.tsx` tat es bis 2026-07-03 NICHT. Diagnose-Weg
+  zurücksetzen. `app/product-submit/wizard.tsx` macht es seit 2026-07-03
+  korrekt (Referenz). `app/cashback/capture.tsx` gatete bis 28.09.2026 nur
+  auf die verzögerte Montage (InteractionManager), nicht auf `onCameraReady`
+  — seitdem ebenfalls korrekt (`mountReady` ≠ `cameraReady`). Diagnose-Weg
   bei „falsche Bilder in Uploads": NICHT die Queue/Pfade verdächtigen (die
   waren sauber) — per Storage-`md5Hash` (JSON-API, ohne Download) auf
   byte-identische Objekte über Slots/Sessions scannen; identische Bytes =
   reused File/Frame, nie zwei echte Aufnahmen.
+
+- **Eine Zeitgrenze über „Tipp → fertiges Bild“ legen oder eine
+  Kamera-Unterbrechung als „gleich bereit“ melden (BonScanner, Prüfrunde
+  28.09.2026).** (1) Der langsame Teil ist die Aufbereitung (12-MP-Rendern,
+  Vision, Entzerren, JPEG). Eine knappe Grenze darüber verwirft auf alten
+  Geräten korrekte Bilder, und jeder weitere Tipp läuft wieder hinein.
+  Zweistufig begrenzen: kurz bis zur Quittung der Kamera (`willBeginCaptureFor`
+  → `onCaptureStarted`), großzügig danach. Schwere Arbeit nie im
+  Photo-Delegate: AVCapturePhotoOutput stellt ALLE Rückrufe auf einer
+  gemeinsamen Queue zu und hält damit die Quittung der nächsten Aufnahme auf.
+  (2) Während einer Unterbrechung hält die Sitzung an (`isRunning == false`).
+  `isInterrupted` deshalb ZUERST prüfen und mit Grund melden
+  (`session_interrupted`): Nebeneinander-Modus oder eine andere App geben die
+  Kamera nicht von selbst frei, „tipp nochmal“ wäre eine Schleife. Logik:
+  `modules/bon-edge-detector/src/aufnahmeZuordnung.ts`.
+
+- **Mehrere Codebases in EINEM `firebase deploy` (05.09.2026, review-console).**
+  Symptom: alle Functions der einen Codebase failen mit Container-Healthcheck
+  und `Function 'X' is not defined in the provided module`, obwohl das Modul
+  lokal sauber lädt (`node -e "console.log(Object.keys(require('./index.js')))"`
+  zeigt alle Exporte). Zweimal reproduziert (mit crowd-upload-namer, mit
+  cashback-pipeline+hosting), beide Male ging derselbe Stand **solo** sofort
+  durch — das ist die schon dokumentierte Multi-Codebase-Flake, nur in der
+  Gen2-Variante. Regel: **jede Codebase einzeln deployen.** Die echte Ursache
+  steht NUR in den Cloud-Run-Logs (`gcloud logging read
+  'resource.labels.service_name="<fn-lowercase>"'`), der Deploy-Output zeigt
+  nur den Healthcheck. Zusätzlich gilt: Deploy erst starten, wenn alle Edits
+  der Codebase geschrieben sind — ein laufendes Append landet halb im Paket.
 
 - **Legacy-Storage-Function `optimizeImage` war die ECHTE Ursache der
   „vertauschten Produktfotos" — nicht die Kamera (2026-07-03).** Der onCameraReady-
@@ -321,6 +632,45 @@ Recent-Sessions.
   `{step}.jpg`-Basename einführen — jeder Basename muss über Einreichungen/User
   hinweg eindeutig sein, damit kein Basename-gekeyter Prozess je Bilder vertauscht.
 
+- **`addDoc` auf dem Geldpfad — ein Schreibvorgang ohne Schlüssel, an dem ein
+  zweiter scheitern kann (10.09.2026).** `submitProduct` legte Produktfoto-
+  Einreichungen mit `addDoc` an; jeder Aufruf prägt eine neue Zufalls-ID, also
+  wird JEDE Wiederholung zwangsläufig ein zusätzliches Dokument. Ausgelöst hat
+  es der Einreichen-Knopf, der im ausgelieferten Stand (build 1234, `18b8cb6`)
+  nur `disabled={!allCaptured}` trug und während ≥4 s GPS-Wartezeit plus sieben
+  Dateikopien keinerlei Rückmeldung gab — jeder weitere Tipp startete einen
+  eigenen Lauf mit eigenem Bild-Token. Ergebnis: 3 Nutzer, 7 byteidentische
+  Einreichungen, jede davon abgelehnt (siehe „Eine Doppel-Regel MUSS eine Kopie
+  übrig lassen"). **Die 10–13 s zwischen den Kopien sind KEINE Frist**, sondern
+  die Laufzeit EINES Auftrags in der seriellen Warteschlange — wer nach einem
+  Retry-Timer sucht, sucht falsch. Fix (`productSubmissionDocId`): deterministische
+  Doc-ID `uid_sessionId_productIndex` + `setDoc`. Weil `firestore.rules` auf
+  `crowd_uploads` `update, delete: if false` setzt, ist der zweite Schreibvorgang
+  ein verbotenes `update` — „der erste gewinnt" ist damit SERVERSEITIG erzwungen
+  und hängt nicht an Client-Disziplin (im Emulator belegt,
+  `rules-tests/firestore.rules.test.js`). Regel: **jeder Schreibvorgang, an dem
+  Geld hängt, braucht eine deterministische ID aus fachlichen Feldern** — die
+  Buchungsseite macht es längst so (`crowd_<uploadId>`, siehe „Ein Status-Feld
+  ist kein Mechanismus"), die Erzeugungsseite tat es nicht. Zwei Ergänzungen,
+  die nicht fehlen dürfen: ohne verwertbaren Schlüssel wird auf eine Zufalls-ID
+  ausgewichen (eine Dublette ist besser als eine verlorene Einreichung), und ein
+  `permission-denied` gilt nur dann als „liegt schon vor", wenn ein Lesevorgang
+  das Dokument BESTÄTIGT — sonst verschwände eine Einreichung bei abgelaufener
+  Anmeldung lautlos. Die Doc-ID im Regelwerk an die uid zu binden wäre der
+  nächste Schritt, sperrt aber sofort alle Feldgeräte aus, die weiter Zufalls-IDs
+  schreiben — erst nach vollständiger Update-Verbreitung.
+- **Einen Auslöse-Knopf ohne Wiedereintritts-Zustand lassen, wenn danach eine
+  rückmeldungsfreie Wartezeit kommt.** Teil desselben Vorfalls. Zwei Details, die
+  eine naive Sperre nicht abdeckt: (1) `Alert.alert` blockiert NICHT — eine
+  Sperre, die im `finally` fällt, ist wieder offen, während der Erfolgs-Dialog
+  noch steht und die Fotos unverändert im State liegen; (2) ein `boolean` reicht
+  nicht, weil „läuft gerade" und „für diesen Vorgang schon erledigt" zwei
+  Zustände sind. Muster im Wizard: `submitZustand: 'idle' | 'laeuft' | 'fertig'`
+  plus ein Ref mit den bereits eingereichten Slots; die Sperre fällt erst, wenn
+  ein NEUER Vorgang beginnt. Und der Riegel gehört zusätzlich dorthin, wo Arbeit
+  entsteht (`enqueueProductUpload` gibt für denselben Slot den bestehenden
+  Auftrag zurück) — sonst kostet jeder Extra-Tipp sieben Dateikopien und sieben
+  Uploads, auch wenn am Ende nur ein Dokument übrig bleibt.
 - **Zwei React-Native-`<Modal>`s gleichzeitig sichtbar präsentieren.**
   iOS deadlockt ("Attempt to present X on Y which is already presenting Z")
   → App FRIERT EIN (kein Crash, harter Hang). Passierte als Hyperbug
@@ -743,6 +1093,32 @@ Beide Plattformen haben getrennte Zähler:
 
 EAS synchronisiert beide Stellen pro Plattform automatisch.
 
+### Android-Submit landet NUR im INTERNAL-Track — Promotion ist manuelle Pflicht
+
+`eas.json` → `submit.production.android` hat KEINEN `track`-Eintrag → EAS lädt
+aufs Default-Ziel **internal**, NICHT production. Der Play-Store-Rollout braucht
+danach IMMER die manuelle Promotion in der Play Console (Internal → Production).
+
+**Vorfall (aufgedeckt 28.08.2026):** Android vc 1234 (6.0.15, Capture/Standort-
+Feature, identischer Commit wie iOS 1264) wurde am 11.08. gebaut + submitted —
+und blieb dann **~2 Wochen unbemerkt im Internal-Track** liegen. Die Nutzer
+liefen durchgehend auf vc 1230 (6.0.13; per Reporting-API bewiesen: 0 Nutzer
+auf 1234 bis mind. 23.08.). Folge: iOS lieferte ab 11.08. Standort-Daten in
+crowd_uploads, Android gar keine — sah aus wie ein Android-Bug, war aber ein
+nie ausgerollter Release. Auch vc 1231–1233 erreichten nie ein Feld-Gerät.
+
+Regeln:
+- Nach jedem Android-Submit gehört die **Promotion zur Definition of Done**
+  (oder bewusst dokumentiert, dass der Build im Internal-Track bleibt).
+- Rollout VERIFIZIEREN, nicht annehmen: Track-Status via Android-Publisher-API
+  (edits→tracks.list, read-only) zeigt was promoted ist; die Reporting-API
+  (`crashRateMetricSet:query` mit dimension versionCode + metric distinctUsers)
+  zeigt, welche versionCodes WIRKLICH im Feld laufen (~4 Tage Daten-Latenz,
+  endTime ≤ "current freshness" sonst 400).
+- Merker: iOS-Verhalten ≠ Android-Verhalten bei identischem Commit → IMMER erst
+  prüfen, ob beide Builds überhaupt bei Nutzern angekommen sind, bevor man
+  einen Plattform-Bug sucht.
+
 ### `.easignore` ERSETZT `.gitignore` — nichts wird gemerged
 
 Sobald eine `.easignore` existiert, benutzt EAS **ausschliesslich** diese Datei
@@ -815,6 +1191,33 @@ Niemals einen iOS-Build als "TestFlight-Version 1063" verkaufen,
 solange `eas submit` nicht durch ist und Apple die Verarbeitung
 nicht abgeschlossen hat (i.d.R. 5–30 min nach submit). Bis dahin
 ist der Build NUR ein IPA-Artefakt auf den EAS-Servern.
+
+### Submit gehört zum Build — IMMER, beide Plattformen (User-Vorgabe 09.09.2026)
+
+User-Wortlaut: „beide submitten wenn sie durch sind (immer)".
+
+Ein fertiger Build ist ab jetzt kein Endzustand mehr. Wenn ein Build
+angefordert wurde und durchläuft, wird er **ohne Rückfrage submittet** —
+iOS nach TestFlight, Android in den Track, den `eas.json` vorgibt. Das
+ersetzt die frühere Praxis, nach dem Build noch einmal nachzufragen.
+
+**Was das NICHT ändert:** Builds werden weiterhin nie aus eigener Initiative
+gestartet (siehe „Builds & deploys — niemals automatisch triggern"). Die
+Regel greift erst, wenn der User einen Build bestellt hat.
+
+**Was sie NICHT abdeckt — und wo der Vorgang trotzdem stehen bleibt:** Der
+Android-Submit landet im **internen Track**. Die Freigabe für die Produktion
+ist ein Schritt von Hand in der Play Console, den ich nicht ausführen kann.
+Nach jedem Android-Submit deshalb ausdrücklich sagen, dass der Build dort
+liegt und auf die Promotion wartet — im August 2026 blieb genau so ein
+Release zwei Wochen unbemerkt liegen, während alle glaubten, es sei
+ausgerollt (siehe „Android-Submit landet NUR im INTERNAL-Track").
+
+Praktisch: `--auto-submit` beim Build mitgeben, oder nach dem Durchlauf
+`eas submit --platform <ios|android> --profile production --latest
+--non-interactive`. Danach den Submission-Status prüfen — die CLI meldet
+Fehlschläge nur unspezifisch, der ITMS-Code steht im EAS-Dashboard
+(siehe „Submission-Status lokal auslesen").
 
 ### iOS TestFlight: Pflicht-Checkliste VOR jedem Build (Juni 2026)
 
@@ -2108,6 +2511,19 @@ gewachsen + in kritischen Teilen offen). **Regeln:**
   Anonymous-Sign-In → kein `auth != null` als read-Gate einbauen, sonst Boot-
   Race), `write: if false`. `produkte/markenProdukte` hatten mal `update: if
   true` (jeder konnte den Katalog defacen) — NIE wieder.
+  **Ausnahme seit 01.09.2026:** `produkte`, `markenProdukte`, `hersteller`,
+  `hersteller_new` = `read: if request.auth != null` (Schutz gegen das
+  Abgreifen der Datenbank, `scripts/canary`). Läuft seitdem ohne Befund.
+- **Vor jedem Rules-Deploy den LIVE-Stand holen und vergleichen.** Die
+  Katalog-Sperre vom 01.09. wurde live ausgerollt, aber nie eingecheckt — am
+  26.09. hätte ein Deploy aus dem Repo sie still entfernt (gefunden nur durch
+  diesen Vergleich). Ein Rules-Deploy ERSETZT den Live-Stand komplett:
+  ```bash
+  T=$(gcloud auth print-access-token); H="x-goog-user-project: markendetektive-895f7"
+  R=$(curl -s -H "Authorization: Bearer $T" -H "$H" https://firebaserules.googleapis.com/v1/projects/markendetektive-895f7/releases/cloud.firestore | python3 -c "import sys,json;print(json.load(sys.stdin)['rulesetName'])")
+  curl -s -H "Authorization: Bearer $T" -H "$H" "https://firebaserules.googleapis.com/v1/$R" | python3 -c "import sys,json;print(json.load(sys.stdin)['source']['files'][0]['content'])" > /tmp/rules-live.txt
+  diff /tmp/rules-live.txt firestore.rules   # jede Zeile mit „<" muss gewollt wegfallen
+  ```
 - Owner-only + Owner-Feld-Check: `poll_responses`/`productRatings`/`userfeedback`/
   `pushTokens`/`crowd_uploads` verlangen `request.resource.data.userId (bzw.
   userID) == request.auth.uid`. `leaderboards/{uid}` write nur eigenes Doc.
@@ -2312,8 +2728,12 @@ werden muss (mehrfach durchexerziert, sonst 1 h verloren):
 
 ## Admin-SDK / Firestore lokal + CF-Deploy
 
-- Firestore-Admin lokal: `/tmp/sa.json` (Firestore-berechtigter Service-
-  Account). Skripte aus einem CF-Ordner MIT `firebase-admin` laufen lassen
+- Firestore-Admin lokal: **ADC des Nutzerkontos reicht** — `admin.initializeApp
+  ({ projectId: 'markendetektive-895f7' })` ohne `GOOGLE_APPLICATION_CREDENTIALS`
+  greift auf `~/.config/gcloud/application_default_credentials.json` zu. Das
+  früher genutzte `/tmp/sa.json` liegt in `/tmp` und wird von macOS aufgeräumt —
+  ist regelmäßig weg; nicht darauf aufbauen, sondern ADC nehmen (Service-Account-
+  Datei nur, wenn ein Skript Rechte braucht, die das Nutzerkonto nicht hat). Skripte aus einem CF-Ordner MIT `firebase-admin` laufen lassen
   (z.B. `cloud-functions/preference-profile-cf`), `node --check` vorher.
   Die Play-Store-SA `markendetektive-895f7-ee3923910ddd.json` hat KEINE
   Firestore-Rechte.
@@ -2323,6 +2743,12 @@ werden muss (mehrfach durchexerziert, sonst 1 h verloren):
   Bei kombiniertem Multi-Codebase-Deploy flaket Gen1 reproduzierbar beim
   Cold-Load („Function … is not defined") → einzelne Codebase solo redeployen
   geht durch.
+  Eine NEUE Funktion mit `retry: true` bricht `--non-interactive` mit „Pass the
+  --force option to deploy functions with a failure policy" ab, BEVOR etwas
+  ausgerollt wird. `--force` bestätigt dann auch das Löschen von Funktionen,
+  die im lokalen Stand fehlen — vorher mit `gcloud functions list` (Label
+  `firebase-functions-codebase`) prüfen, dass jede Live-Funktion der Codebase
+  im Quelltext steht (06.10.2026, external-product-lookup).
 - Gemini: Secret `GEMINI_API_KEY` + `@google/genai`, Modell
   `gemini-3.5-flash`, Setup in `cloud-functions/ai-product-comparison`
   (wiederverwendbar). Key lesen: `firebase-tools functions:secrets:access`.
@@ -2422,21 +2848,1440 @@ Bei Kostenfragen NIE aus Monitoring-Metriken hochrechnen, ohne diese Fakten:
   (20.017 $ von 23.000 $ übrig, bis 27.06.2028) + 855 € GenAI-Trial decken
   alles. Bei ~2.400 €/Monat Brutto-Burn ist das Guthaben ~Frühjahr 2027 leer —
   DAS ist die relevante Uhr, nicht die Monatsrechnung.
-- **Gemini läuft seit 16.08.2026 auf EIGENEM Key** (Secret-Version 2,
-  Fingerprint 84151aee2f6f, beschränkt auf generativelanguage; alle 5
-  Codebases neu deployt und auf key '2' gepinnt, End-to-End gegen
-  runComparisonForProduct bewiesen). Kosten erscheinen ab jetzt im
-  EIGENEN Projekt als Dienst "Gemini API" — die MrToots-Position
-  (crapsnap-3390b, alter Key 223ca7349d61) fällt auf ~0. Secret-Version 1
-  NICHT disablen, bis der crapsnap-Traffic bestätigt bei 0 liegt
-  (Rollback-Pfad). Merke: Functions pinnen die beim Deploy neueste
-  ENABLED-Version — eine neue Secret-Version wirkt NIE ohne Redeploy.
+- **Gemini läuft seit 19.08.2026 über VERTEX AI** (siehe Incident-Abschnitt
+  unten) — Kosten erscheinen im eigenen Projekt als Dienst "Vertex AI",
+  guthabengedeckt, ohne AI-Studio-Stufendeckel. Historie: 16.–19.08. lief es
+  auf eigenem AI-Studio-Key (Secret-Version 2, Fingerprint 84151aee2f6f; am
+  19.08. disabled, Version 3 = alter Key als Zwischen-Rollback angelegt —
+  beide Keys sind bei erreichtem Konto-Cap gleichermaßen tot). Merke:
+  Functions pinnen die beim Deploy neueste ENABLED-Version — eine neue
+  Secret-Version wirkt NIE ohne Redeploy.
 - **Firestore-Reads firmieren in der Rechnung unter Dienst "App Engine"**
   (SKU "Cloud Firestore Read Ops"). MarkenDetektive Aug-Tempo: ~190 €/Monat —
   größter eigener Serverposten; enthält die nächtlichen 4-Mio-Dokument-Reads
   der Backup-Extension, die in der Firebase-Nutzungsanzeige UNSICHTBAR sind.
 - MarkenDetektive real: ~380 €/Monat Infrastruktur + ~517 €/Monat Gemini
   (Aug-Tempo; Gemini hat sich seit Juli verdoppelt, wächst mit Bon-Volumen).
+
+## Kampagnen laufen still aus — Nachfolger ist Pflicht VOR dem Monatsende
+
+**Vorfall 01.09.2026:** Alle Cashback-Kampagnen endeten am 31.08. (endAt),
+drei blieben auf `active: true` stehen, niemand legte einen Nachfolger an.
+Folge in 2 Tagen: 157 Bons, davon 119 `no_reward (no_active_campaign)`; bei
+Produktfotos fand der Client keine Aktion mehr → 33 Uploads mit
+`campaignId: null`, die bei Freigabe NIE vergütet worden wären (der Trigger
+crowd-upload-reward bricht ohne campaignId nur mit logger.info ab — kein
+`rewardSkipped`, nichts fällt auf). Erst die Backlog-Analyse fand es.
+
+Regeln:
+- Kampagnen-Zeitraum ist die WAHRHEIT (Pipeline UND Client filtern auf
+  `active && startAt <= now <= endAt`); `active:false` beim Auslaufen setzen
+  ist Hygiene, ersetzt aber keinen Nachfolger.
+- Vor jedem Monatsende: Nachfolge-Kampagne(n) je `kind` (receipt,
+  product_photos) anlegen — Felder 1:1 klonen, Budget = Restbudget des
+  Vorgängers, `startAt` = endAt des Vorgängers. Skript-Muster: 02.09.2026
+  (`september-2026`, `produkt-fotos-september-2026`).
+- Prüf-Signal, das nie fehlen darf: Anteil `no_active_campaign` unter den
+  Bons der letzten 24 h. Steigt er sprunghaft → Kampagne fehlt.
+- Uploads, die im Loch eingingen, per `campaignId`-Backfill dem Nachfolger
+  zuordnen (Zeitraum des Nachfolgers dafür rückdatieren).
+
+## Produktentscheidungen 05.09.2026 (endgültig, nicht neu aufmachen)
+
+- **Bon-Alter: 7 Tage.** `MAX_BON_AGE_DAYS = 7` ist die Wahrheit, Kampagnen-
+  `maxAgeDays` darf großzügiger sein. Die App zeigt die Zahl aus dem Mirror.
+- **Orts-Pflicht im Produktfoto-Wizard bleibt.** Nicht lockern; der Fallback
+  (Orts-Schritt bei ausbleibendem GPS-Fix, ec63e08) nimmt die Reibung, das
+  Gate `crowd-upload-reward/src/locationGate.js` bleibt scharf.
+- **Algolia bleibt** (86c9jqmja rejected). Synonyme werden gepflegt, keine
+  Ablöse-Diskussion mehr.
+- **Bons: Einkaufsort = Filialadresse vom Bon-Kopf**, nicht Gerätestandort.
+  OCR-Prompt v1.4 liefert `storeAddress {street, zip, city}`; für den Bestand
+  parst `lib/storeAddress.js` die seit v1.0 mitgelieferte `merchantSubtitle`
+  (6.044/6.193 Bons haben sie). Landet in `receipts.store`, Mirror
+  `storeCity/storeZip`, `purchased_products.storeZip/storeCity/storeStreet`.
+  Der Consent-Text + der iOS-Purpose-String sagen je Verdien-Weg, was
+  „Standort" konkret ist (Bons: Filialadresse vom Bon; Fotos: Aufnahmeort);
+  consentVersion NICHT gebumpt (Wortlaut-Präzisierung, keine neue Daten-
+  kategorie). Präzise: bei Bons fließt kein GPS in den Datensatz, die IP-
+  Journey-Ortung (~5-km-Raster) bleibt als `receipts.journey.location`.
+  **Ergänzt 26.09.2026 (Patrick):** Bons schicken ab dem ersten App-Build nach
+  iOS 1274 / Android 1247 ZUSÄTZLICH den Gerätestandort bei der Aufnahme mit —
+  `receipts.capture.gpsStatus/gps/gpsError` + top-level `clientVersion`, exakt
+  die Feldnamen von crowd_uploads, rein additiv (Server: `cashback-pipeline/
+  lib/clientKontext.js`, prüft und verwirft unplausible Fixes). Gemessen wird
+  beim Öffnen der Prüfseite, nie beim Upload; Galerie-Bilder bekommen keinen
+  Standort. Die Filialadresse bleibt der Einkaufsort. „Kein GPS bei Bons" gilt
+  nur noch für ältere Builds. Datenschutzerklärung muss das nennen (Anwalt).
+  **Anwalt (Doc-Änderungen, kein Code):** Datenschutzerklärung sagt „kein
+  GPS-Zugriff" (Produktfotos speichern präzises GPS, Freigabe ist Bedingung)
+  und zählt die Bon-Daten ohne Filialadresse auf — beides nachziehen.
+- **Die 51 auffälligen Foto-Einreichungen vom 29.08. werden NICHT gesichtet**
+  (User-Entscheidung; alle bereits vergütet).
+
+## `ocr_confidence_low` staut Bons — und sagt nichts über die Prämie (07.09.2026)
+
+Am 07.09. lagen ALLE 23 offenen Review-Bons auf demselben Grund
+`ocr_confidence_low`, jeder mit sauberer Rekonziliation (Σ Positionen = Endsumme),
+bekanntem Markt und gültigem Bon-Datum (0–6 Tage). Das ist kein Zufall: die
+Robust-OCR verlangt Übereinstimmung auf SEQUENZ-Ebene (`name#priceCents`) über
+unabhängige Lesungen — bei 30–70 Positionen kippt eine einzige abweichend
+gelesene Artikelbezeichnung die Confidence auf `low`, obwohl kein für Geld
+relevanter Wert wackelt.
+
+Wichtig für jede Review-Entscheidung: die Prämie hängt an Markt, Bon-Datum,
+Endsumme und der Zahl anrechenbarer Artikel — NICHT an der Schreibweise
+einzelner Artikelnamen (die fließen ins Matching, nicht ins Ledger). Ein Bon mit
+`confidence: low`, aber `reconciliation.ok`, bekanntem Markt und Datum im Fenster
+ist freizugeben. Beim Nachprüfen eine unabhängige Zweitlesung des Bildes machen
+(Markt / Datum / Endsumme / ist es überhaupt ein Bon / Manipulationsspuren) und
+NUR bei Widerspruch in diesen vier Punkten ablehnen — nicht wegen der Confidence
+selbst. Skript-Muster: `cloud-functions/cashback-pipeline/.pruefe-bons.js`
+(schreibt nichts, urteilt nur).
+
+Offen (Follow-up): das Review-Gate erzeugt so einen Dauerstau, den nur jemand
+von Hand auflöst. Sinnvolle Verschärfung wäre, `low` nur dann in Review zu
+schicken, wenn zusätzlich ein für Geld relevantes Feld unsicher ist
+(Markt unbekannt, Datum fehlt, Rekonziliation schief) — sonst durchlaufen lassen.
+
+## Zweitprüfung unsicherer Bons + Warenkorb-Rabatt + Rossmann (14.09.2026)
+
+User-Vorgabe (86cbfvwge): „ein fetteres Model drüber lassen, das dann entscheiden
+kann. Wenn das auch nicht entscheiden kann, dann wird erst abgelehnt."
+
+**Wie es läuft** (`lib/refereePolicy.js` Regeln, `lib/ocr_referee.js` Aufruf,
+`lib/prompt_referee.js` Prompt, index.js Schritte 3b/6v/6y2):
+- Würde ein Bon mit Robust-Bewertung `none`/`low` wegen `reconciliation_delta`,
+  `no_bon_date`, `not_a_receipt`, `unknown_merchant` oder `bon_too_old` abgelehnt,
+  fordert Durchlauf 1 die Prüfung an (`ocr.refereeRequest`) und stellt neu zu.
+  Durchlauf 2 (Cache-Pfad, eigene 540 s) nimmt sie per Transaktion in Anspruch
+  (`claimedBy` = Event-ID, Tagesdeckel `ocrRefereeMaxPerDay`, Zähler
+  `cashback_referee_usage/{Tag}`), liest bis zu 4× mit `gemini-3.1-pro-preview`
+  und ersetzt die Lesung nur bei zwei übereinstimmenden, in sich stimmigen,
+  vollständigen Lesungen. Danach laufen ALLE Gates normal.
+- Schalter `cashback_config/v1.ocrReferee`: false | 'shadow' | true (Default aus).
+- **Eine Entscheidung heißt „nicht abgelehnt", nicht „ausgezahlt"**: sie zählt im
+  Gate 6w als `medium` (Feld-Gate über die Zeugen der Prüfung). Mit
+  `ocrFieldGate: 'shadow'` landet sie in der Prüfkonsole, mit `true` wird sie
+  automatisch freigegeben. NICHT auf `high` setzen — zwei Lesungen desselben
+  Modells sind korreliert, und sonst würden die schwächsten Erstlesungen am
+  wenigsten geprüft (Review 14.09.).
+- Ausgelassen (Regeln aus den Live-Daten): Markt auf allen Lesungen gleich
+  (Katalogfrage, z. B. Rossmann), Datum auf allen Lesungen gleich oder keins in
+  der Frist, not_a_receipt ohne Markt UND Datum.
+
+**Gemessen** (Live-Test an 13+6 echten Ablehnungen, nur lesend):
+- Alle 3 Netto-Bons mit Warenkorb-Rabatt/App-Gutschein entschieden — die OCR war
+  dort RICHTIG, nur `reconcile()` kannte keine Rabatte auf den ganzen Einkauf
+  (18 von 44 recon-`none`-Ablehnungen seit 01.09.).
+- Abgeschnittene/verdeckte/zerknitterte Fotos: kein Modell rettet sie; das Modell
+  meldet sie per `bonComplete: false` selbst → abgelehnt, wie gewollt.
+- ~10–65 s pro Bon, ~0,02–0,05 $ pro Lesung, ~3 von 30 Aufrufen 429.
+
+**Teure Fallen, nicht wieder hineinlaufen:**
+- `gemini-3.1-pro-preview` ignoriert `thinkingBudget` (Denken bis MAX_TOKENS,
+  ~195 s, kein Ergebnis) → `thinkingConfig: { thinkingLevel: 'LOW' }`. Nur unter
+  Location `global` erreichbar; 429 und 404 → Rückfall `gemini-2.5-pro`.
+  Google empfiehlt für Gemini 3 Temperatur 1.0 (niedriger → Schleifen).
+- Keinen Ablehngrund und kein Upload-Datum in den Prompt: „Datum lag vor dem
+  Upload" + Upload-Datum lädt ein, ein passendes Datum zu „finden"; „Summe passte
+  nicht" lädt zu einer erfundenen Rabattzeile ein. Außerdem prüft `plausibel()`
+  jede Lesung gegen die Erstlesungen (Endsumme bekannt, bei Rabatt nicht mehr
+  Artikel, bei bon_too_old nur ein schon gelesenes Datum).
+- Warenkorb-Rabatt in `reconcile()` nur mit Belegkette: Σ Artikel = gedruckte
+  Zwischensumme, Zwischensumme − benannte Rabattzeilen = Endbetrag (±2 ct),
+  Rabatt < 25 % und ≤ 20 €. Ohne diese Grenzen besteht eine Lesung, die jeden
+  Artikel doppelt führt und die Differenz als „Rabatt" ausweist.
+- `buildOcrField` ist eine Whitelist und der Final-Write ersetzt `ocr` komplett —
+  `refereeRequest`/`referee` MÜSSEN dort und in `ocrFromCache` stehen (sonst ist
+  die Schleifensperre nach dem ersten Write weg, wie bei `robust` am 02.09.).
+- Parallele Läufe (Reprocessing mit geleertem `ocr` + Sweeper) überschreiben das
+  `ocr`-Feld ganz: Früh-Persist und Anforderung laufen deshalb über
+  `writeOcrIfNoReferee` (Transaktion, bricht ab, wenn schon eine Prüfung
+  angefordert/abgelegt ist), und Schritt 6y2 liest vor dem Ledger nach, ob ein
+  anderer Lauf übernommen hat. Sonst: parallele bezahlte Prüfungen und im
+  schlimmsten Fall ein Storno gegen eine entschiedene Gutschrift.
+- Übersprungene Prüfungen (Schalter aus, Tagesdeckel, menschliche Entscheidung)
+  legen NICHTS ab — ein gespeichertes „skipped" hätte die Prüfung für immer
+  verbraucht. Kam KEINE Lesung zurück (429/Timeout), wird nichts abgelegt und
+  mit `referee_unavailable` geworfen (Infra-Code → nach 5 Versuchen `review`,
+  nie `rejected`). Das Ergebnis wird transaktional nur mit eigenem Anspruch
+  abgelegt (`persistRefereeResult`), sonst überschriebe die zuletzt fertige
+  Prüfung die andere.
+- `shadow`-Ergebnisse wirken nach dem Umschalten auf `true` NICHT nach (der Bon
+  gilt als geprüft). Nicht erst in `shadow` laufen lassen, wenn man die Wirkung
+  auf genau diese Bons will.
+
+**`processCashback` hat KEINEN PubSub-Retry** (`retryPolicy:
+RETRY_POLICY_DO_NOT_RETRY`, geprüft 14.09. per `gcloud functions describe`).
+Die Kommentare „werfen → PubSub-Retry" im catch-Block stimmen nicht: ein Wurf
+erhöht nur `attempts` und bleibt liegen. Die EINZIGE Wiederaufnahme ist
+`sweepStuckReceipts` (nur Status `ocr_pending`, ≥ 20 min seit Anlage/letztem
+Sweep, max. 5×, jedes Mal neue Event-ID). Wer „bei Fehler werfen, der Retry
+holt es" plant, muss prüfen, dass der Bon dabei in `ocr_pending` bleibt.
+
+**Rossmann (12487v299kf):** Der Alias stand seit Langem in `lib/merchant.js`, aber
+es gab kein `discounter`-Dokument → jeder Rossmann-Bon `unknown_merchant`.
+`eligibleMerchants` in `DEFAULT_CONFIG` wird NIRGENDS gelesen (tote Config, nicht
+als Wahrheit nehmen). Angelegt: `discounter/8bQNdFStWCnJKy9P1Gey` (DE, Logo
+`maerkte/rossmann.png`, Farbe `#EC0000` aus dem Logo). Nebenwirkung: jeder neue
+`discounter` erscheint sofort in Stöbern-Marktfilter, MarketSelector und
+Onboarding — ohne Produkte mit leerer Liste. Nachverarbeitet per
+`.rossmann-nachverarbeitung-1409.js` (199 Bons seit Juli, pro Nutzer sequenziell,
+Pipeline entscheidet): 16 gutgeschrieben, 16 Prüfung, 97 ohne Prämie wegen
+< 4 Artikeln (Drogerie-Bons sind kurz), 29 Tageslimit, 19 zu alt, 10 Summe,
+5 ohne Datum, 4 ohne Aktion, 3 Duplikat.
+
+**Praxistest in Produktion (19.09.2026, Schalter von Patrick auf true).** Drei
+echte, zuvor abgelehnte Bons neu zugestellt: zwei Netto-Bons mit Warenkorb-Rabatt
+wurden in 24 bzw. 33 s entschieden (3,95 € bzw. 2,00 € Rabatt erkannt, je 8 ct
+berechnet) und stehen jetzt in der Prüfkonsole; der abgeschnittene Screenshot
+blieb unentschieden und damit abgelehnt. Keine Auszahlung, kein Storno, Zähler
+`cashback_referee_usage/2026-09-19` = 3 Läufe, 0 Ausfälle. Wichtig für die
+Erwartung: **im Beobachtungs-Modus (`ocrFieldGate: 'shadow'`) macht die
+Zweitprüfung aus einer Ablehnung einen Warteschlangen-Eintrag, keine
+Auszahlung.** Gemessen am 19.09.: 98 Bons in der Prüfkonsole (7,90 €), davon
+würden mit `ocrFieldGate: true` 64 (5,12 €) automatisch freigegeben, 24 blieben
+wegen uneiniger Geldfelder, 10 haben keine Einzellesungen.
+
+**`ocrFieldGate` steht seit 19.09.2026 auf `true`** (Entscheidung Patrick). Zwei
+Dinge, die man dabei wissen muss:
+- **Weder der Schalter noch die Zweitprüfung wirken rückwirkend.** Beide greifen
+  nur im laufenden Verarbeitungsdurchlauf. Wer eine Warteschlange auflösen will,
+  muss die Bons ERNEUT ZUSTELLEN (`.nachlauf-1909.js`: Status auf `ocr_pending`,
+  Spiegel mit, publish, pro Nutzer sequenziell, mehrere Nutzer parallel).
+- Gemessen am 19.09. über 134 Bons (103 aus der Warteschlange + 31
+  Zweitprüfungs-Kandidaten): 60 freigegeben und gebucht (480 ct), 12 Tageslimit,
+  3 als Doppel erkannt, 33 blieben in der Warteschlange. Alle Geld-Invarianten
+  sauber (0 Doppelbuchungen, 0 Freigaben ohne Buchung, 0 Buchungen ohne
+  Freigabe, 0 Tageslimit-Verstöße, Spiegel überall gleich).
+- **Die Zweitprüfung entscheidet selten** — von 31 Kandidaten 3 entschieden
+  (1 davon mit Geld), 25 unentschieden, 3 vorher schon als Doppel erkannt. Das
+  deckt sich mit der Messung vom 14.09.: der Hebel liegt beim Warenkorb-Rabatt,
+  nicht am stärkeren Modell. Verbrauch an dem Tag: 33 Läufe (Deckel 40).
+- **Ein Rest bleibt strukturell hängen:** 10 der verbliebenen 33 Bons tragen
+  keine Einzellesungen (`ocr.robust.reads` fehlt, Stand vor dem Deploy vom
+  09.09.) — das Feld-Gate kann sie nie freigeben. Für sie hilft nur eine frische
+  Texterkennung (`ocr`-Feld löschen + republish) oder eine Entscheidung in der
+  Prüfkonsole.
+
+**Warteschlange auflösen: über den RESOLVER, nicht über erneutes Zustellen
+(19.09.2026).** Am selben Tag beide Wege gefahren und verglichen:
+- Erneutes Zustellen (`processCashback`) wendet das Feld-Gate an, setzt aber
+  KEIN `backfilled` → der Schutz gegen nachträgliches Abhaken greift nicht.
+- Der Resolver (`resolveCashbackReview`, auch der Weg der Prüfkonsole) rechnet
+  die Deckel neu, bucht, schreibt die Positionen MIT `backfilled: true`
+  (Stichprobe 19.09.: 104 von 104) und pusht. Damit bleibt ein heutiger
+  Einkaufszettel unberührt.
+Vorgehen, das sich bewährt hat: `.pruefe-bons-*.js` (unabhängige Zweitlesung,
+schreibt nichts) → Auffälligkeiten selbst ansehen → `.review-approve-*.js`
+(Duplikat- und Tageslimit-Logik wie die Pipeline, Freigabe über den Resolver,
+`SKIP_IDS` für von Hand zurückgestellte Fälle). Ergebnis 19.09.: 35 Freigaben,
+294 ct, 0 Doppelbuchungen, 0 Freigaben ohne Buchung, Warteschlange von 37 auf 2.
+
+**Zwei Fallen in der Zweitlesung selbst** (beide am 19.09. aufgetreten):
+- „manipuliert" trifft sonst jeden eBon und jedes Bildschirmfoto. Die Frage muss
+  ausdrücklich sagen: ein digitaler Bon oder ein sauberer Screenshot IST ein
+  Kassenbon, Manipulation heißt sichtbare Bearbeitungsspuren. Vorher: 4 von 37
+  falsch markiert, danach 0.
+- „datum_widerspricht" entsteht fast immer durch die Jahres-Fehllesung der
+  ZWEITLESUNG (2020/2024/2028 statt 2026) — Tag und Monat stimmen. Erst
+  vergleichen, ob nur das Jahr abweicht; die Pipeline korrigiert genau das
+  (`plausibilizeBonDate`).
+- Das alte `.pruefe-bons.js` misst das Bon-Alter gegen HEUTE. Für lange
+  gehaltene Bons ist das falsch — die Pipeline misst gegen den UPLOAD. In der
+  Kopie vom 19.09. korrigiert.
+
+**Beim erneuten Zustellen greift der Schutz gegen nachträgliches Abhaken NICHT
+(19.09.2026).** Die Regel vom 02.09. („nachgezogene Bon-Positionen dürfen keinen
+heutigen Einkaufszettel abhaken") hängt an `purchased_products.backfilled ===
+true` — und dieses Feld setzt AUSSCHLIESSLICH `resolveCashbackReview`. Der Weg
+über `processCashback` (Sweeper, jedes Reprocessing-Skript, der Nachlauf vom
+19.09.) setzt es nicht. Gemessen: bei 75 von 134 Bons war die Journey-/Zettel-
+Schließung scharf, 108 `receiptMatches` mit erlaubter Schließung; dass nichts
+passierte, lag daran, dass kein betroffener Nutzer einen offenen Zettel-Eintrag
+hatte. **Vor jedem Massen-Reprocessing also entweder über den Resolver gehen
+oder erst den Fix einbauen** (ClickUp-Task 19.09.). Merksatz: der Schutz hängt am
+AUFRUFER statt an der Tatsache — genau das Muster, das die Ortsregel vermeidet.
+
+**Weitere Merker aus dem Nachlauf (alle gemessen, 19.09.2026):**
+- `matchStatus: 'skipped_ineligible'` im receipt-matcher ist ein ENDZUSTAND: der
+  Trigger hängt an `onDocumentCreated`, und der spätere Merge-Write (Bon wird
+  doch freigegeben) ist ein Update — es feuert nichts mehr. 33 Artikel zweier
+  bezahlter Bons hängen dadurch dauerhaft.
+- `crowd_uploads.rewardCents` taugt NICHT für Geld-Auswertungen: 208 tatsächlich
+  gebuchte Freigaben tragen das Feld nicht. Immer das Ledger nehmen.
+- Budget-Abgleiche brauchen einen STABILEN Lesezeitpunkt (der Zähler läuft im
+  Betrieb weiter) — sonst sieht ein Fenster von 8 ct wie eine Lücke aus.
+- Die alte 3110-ct-Differenz auf `milchprodukt-fotos-september-2026` ist geklärt:
+  exakt der Verbrauch der Schwester-Aktion bis 05.09., also die manuelle
+  „ein Topf"-Angleichung. Steht jetzt in deren `budgetNote`. Regel: **jede
+  manuelle Budget-Korrektur dort vermerken** — `increment` hinterlässt keine Spur.
+- Fallen bei einem Massen-Lauf mehrere gehaltene Bons desselben Nutzers auf
+  denselben Bon-TAG, entscheidet sonst die Verarbeitungsreihenfolge, wer die
+  Prämie bekommt (3 Fälle am 19.09.). Das ist eine fachliche Entscheidung —
+  Kollisionen vorher ausweisen und bewusst wählen (höhere Endsumme o. Ä.).
+
+**Die Uhrzeit der Zweitprüfung wird aus den Erstlesungen übernommen**
+(`einheitlicheUhrzeit`, 19.09.). Sie ist der einzige Teil des
+kontenübergreifenden Doppel-Schlüssels (`transactionHash`), den keine Prüfung
+absichert: `plausibel()` schaut auf Endsumme, Artikelzahl und Datum, und im
+Zeugen-Paar gilt eine FEHLENDE Uhrzeit nicht als Widerspruch. Im Praxistest las
+eine von drei Prüf-Lesungen 06:21 statt 08:19 (sechs Erstlesungen einheitlich) —
+gerettet hat nur, dass zufällig das andere Paar gewann. Die Entscheidung wird
+deshalb NICHT verworfen (die Uhrzeit trägt kein Geld), nur der Schlüssel richtig
+gestellt.
+
+**Bildprüfung: ein an 429 gescheiterter Audit darf NICHT freigeben (19.09.2026).**
+`.crowd-review-*.js` übersprang bis dahin nur Einreichungen OHNE Verdikt; ein
+Verdikt `{echt: null}` (Infrastrukturfehler) rutschte als Freigabe durch. Jetzt:
+`skip` mit Grund `vision_audit_unvollstaendig`, die Einreichung bleibt offen für
+die nächste Runde. Gegenstück zur Regel „ein Infrastrukturfehler ist nie ein
+Urteil über Nutzerdaten" — er ist eben auch keine Freigabe. Praktisch: bei 429
+den Audit für die offenen Fälle einfach wiederholen (mit Pause), das löst die
+meisten.
+
+**EAN-Rettung (19.09.2026), mit Vorsicht.** Wie die Namens-Rettung vom 13.09.:
+vollständige Einreichungen ohne `ean` (Barcode-Foto liegt vor) werden per Vision
+nachgelesen → eigenes Feld `eanRescueOcr` (`.crowd-ean-rescue-1909.js`).
+Übernommen wird nur, was ZWEI unabhängige Lesungen gleich lesen UND die
+GTIN-Prüfziffer besteht. Grund für die Strenge: unter den EAN-losen Einreichungen
+ist viel lose Ware (Banane, Melone, Salat) — ein Modell, das nach einer Nummer
+gefragt wird, liefert dort gern eine vom Waage-Etikett, und händlerinterne GTINs
+(Präfix 02, 20–29) bestehen die Prüfziffer. Wurzel ist der Wizard: im
+Barcode-Schritt nimmt der Auslöser ein Foto an, auch wenn nichts dekodiert wurde
+(`app/product-submit/wizard.tsx`), das manuelle Eingabefeld erscheint nur auf dem
+Galerie-Weg — 163 sonst vollständige Einreichungen ohne EAN.
+**Behoben 26.09.2026:** Prüfkonsole und Morgenrunde lesen Name, EAN, Preis und
+Hersteller aus EINER Quelle (`review-console/src/werte.js`), gerettete Werte
+eingeschlossen und als „nachgelesen" gekennzeichnet. Ein geretteter Hersteller
+zählt weiter NICHT für die Doppel-Regel. Die Rettungs- und OCR-Felder darf der
+Client beim Anlegen nicht mehr mitschicken (`firestore.rules`, Sperrliste von
+47 Serverfeldern, Rules-Tests in beide Richtungen; live seit 26.09., keine
+App-Version im Feld schickt eines davon — geprüft bis 6.0.14 zurück). Offen,
+nur Anzeige, kein Geld: `campaignQuelle`, `campaignIdServer`,
+`campaignZeitQuelle`, `rewardPushGebuendelt`, `priceImageAt`, `rewardCheckNote`
+fehlen auf der Liste (Server berechnet die Aktion selbst, liest sie nicht).
+
+**Korrekturen an älteren Notizen (gemessen 19.09.2026):**
+- Der Foto-Trigger schreibt das Ergebnis inzwischen ans Dokument
+  (`rewardResult` / `rewardNotCreditedReason`); der Satz „Per-User-Deckel greift
+  still, der Trigger schreibt nichts ans Doc" stimmt nicht mehr. Seit 13.09. gibt
+  es keine freigegebene Einreichung ohne `rewardResult`.
+- `weeklyBonCap` gilt für Produktfotos NICHT (der Trigger liest es nicht, bewusst:
+  eine Foto-Freigabe soll dem Nutzer die Bon-Woche nicht wegnehmen). Einzige
+  Mengenbremse pro Kopf ist `maxPerUserCents` — und zwar JE AKTION.
+- Spiegel-Drift (Client überschreibt Server-Status): Rate stabil 0,6–0,7 % seit
+  dem 04.09., die „Verdreifachung" war ein Artefakt der Reparatur vom 03.09.
+  Am 19.09. wurden 28 Spiegel repariert. **Vorsicht bei Reparaturen:** der
+  GamificationProvider feiert jeden Übergang aus einem nicht-terminalen Zustand —
+  eine Reparatur lässt bei offener App Banner für Tage alte Bons aufpoppen.
+
+**Deploy aus einem Worktree: die gitignorierte `.env` fehlt dort.** Ohne sie fielen
+`CASHBACK_OCR_ENGINE`, DocAI-Einstellungen und `TREMENDOUS_CAMPAIGN_ID` still weg.
+Vor jedem Deploy aus einem Worktree `cloud-functions/<codebase>/.env` aus dem
+Haupt-Checkout kopieren und per `cmp` prüfen.
+
+## Erst einreichen, dann Konto (Entscheidung 25.09.2026, ab 6.0.20)
+
+Gäste (anonyme uid) reichen Bons und Produktfotos ein, BEVOR sie ein Konto
+haben. Gutschrift sofort auf die Gast-uid; Auszahlung nur mit Konto — der
+Server erzwingt das in `requestPayout` (403 `konto_erforderlich` /
+`email_fehlt`, 503 bei Infrastrukturfehler). Nicht erneut fragen, ob das Konto
+vorher kommen soll.
+
+- **Neues Konto** = Verknüpfung (`linkWithCredential`), uid bleibt, nichts zieht um.
+- **Bestehendes Konto** = uid wechselt. Einziger Weg: `inBestehendesKontoWechseln`
+  (`lib/services/kontoWechsel.ts`). Ohne Gast-Einreichungen exakt der alte Ablauf.
+  Mit Einreichungen: Mitnahme-Dialog → Besitznachweis (`GastUebernahme.vorbereiten`,
+  Geheimnis in SecureStore, nur der Hash geht an den Server) → offene Gast-Uploads
+  NOCH ALS GAST fertig hochladen → anmelden → Zielkonto merken → einlösen.
+  Scheitert der Nachweis, darf der Nutzer trotzdem in sein Konto — nie aussperren.
+- **Stufe 1 (live mit 6.0.20):** Server antwortet beim Einlösen immer `pausiert`
+  (`cashback_config/v1.gastUebernahmeAktiv = false`) und bindet nichts. Tickets
+  bleiben auf dem Gerät und werden bei Start/Vordergrund erneut eingelöst.
+- **Stufe 2 (offen, nur Server, kein App-Update):** Umbuchung Gast → Zielkonto
+  (Deckel des ZIELkontos, uid-Guards, `create()` in enqueueCashback, Nachlauf-
+  Scheduler), dann Schalter auf true. **Pflicht beim Aktivieren:** `gueltigBis`
+  aller Tickets zurücksetzen — sie liegen seit Stufe 1 beliebig lange, und die
+  Ablaufprüfung greift erst, wenn der Schalter an ist (lib/gastUebernahme.js).
+  **Ebenfalls Pflicht (Doppel-Schutz 04.10.2026):** beim Umbuchen eines Gast-
+  Bons ziehen `cashback_days/{Tag}.eintraege.{id}`, die Schlüssel in
+  `cashback_bon_schluessel` (Feld `uid`) und die Einträge in
+  `cashback_bon_tage` und `cashback_bon_summen` (Feld `u`) und den Eintrag in
+  `cashback_bon_person/{uid}` (Dokument je Person, seit 05.10.2026) mit um —
+  sonst vergleicht das Zielkonto gegen
+  nichts, und Schlüssel/Eintrag gelten als verwaist (das Gast-Ledger ist nach
+  der Umbuchung leer).
+- **Warteschlangen** führen Aufträge nur für die aktuelle uid oder eine vom Server
+  BESTÄTIGTE Zuordnung (`GastUebernahme.zielVon`) aus — nie bedingungslos
+  umschreiben. `docUid` behält die ursprüngliche Doc-ID der Foto-Einreichung.
+- **Tickets:** offene (mit Geheimnis) werden nie verdrängt; ein Lesefehler des
+  SecureStore sperrt das Schreiben (sonst überschriebe ein leerer Stand echte
+  Tickets); `pausiert` und Antworten ohne Fehlercode (z. B. HTML-403 bei
+  fehlender Aufrufberechtigung) verwerfen kein Ticket.
+- Umfragen bleiben wie sie sind (Vergütung nur registriert); Gäste mit
+  Einwilligung bekommen nach einer vergüteten Umfrage „Konto erstellen".
+
+## Produktentscheidung 26.09.2026: der Preis ist Pflicht
+
+Patrick, 26.09.: „Ja, Preis Pflicht". Zeigt das Preisfoto weder Preisschild,
+Waage-Etikett mit Preis noch Kassenbon (sondern nochmal die Packung, den Tisch,
+ein fremdes Preisschild), lehnt die Morgenrunde mit `preis_fehlt` ab (App-Text
+in `lib/utils/productSubmissionCopy.ts`). Genügt: Preis gelesen ODER auf dem
+Foto sichtbar. Abgelehnt wird nur ohne Gegenzeichen — sah der Lesedienst ein
+Preisschild/einen Kassenbon oder ist die Bildprüfung unsicher, bleibt der Fall
+liegen (`preis_unsicher`/`preis_unbeurteilt`). Aufnahmeort in einem anderen
+Land als der Markt → bleibt beim Menschen (`ort_auffaellig`). Bereits bezahlte
+Fälle ohne Preis werden NICHT zurückgefordert. Gemessen vor der Regel: 624 von
+1.973 Freigaben seit 01.09. ohne gelesenen Preis, hochgerechnet zeigte knapp
+jede fünfte gar keinen Preis (Morgenrunde: 30 von 284).
+
+**Neue Ablehngründe gehören NICHT in die Gesamt-Notbremse.** Die Bremse
+vergleicht die heutige Ablehnungsquote mit dem 30-Tage-Schnitt. Ein Grund, den
+es vorher nicht gab, verdoppelt die Quote dauerhaft — die Bremse hätte ab dem
+ersten Tag jede Ablehnung zurückgehalten, still und für immer. Neue Gründe
+bekommen eine eigene Bremse und fallen aus beiden Seiten der Quote heraus
+(`PREIS_GRUENDE` in `fotoRundeRegeln.js`).
+
+**Die übertragbare Lehre — ich hatte das selbst verursacht:** Patrick hatte am
+20.09. als Prüfpunkte „alles drin? barcode? preis?" genannt. In meinen
+Handrunden ließ ich fehlende Preise trotzdem durch und schrieb das am 24.09.
+als Regel in die Morgenrunde („Preisfoto darf ohne Preis sein") — ohne es ihm
+vorzulegen. Regel: **Eine Prüfregel, die eine Vorgabe von Patrick abschwächt
+oder weglässt, wird nie still festgeschrieben** — vorher fragen, und im Code
+die Quelle der Regel nennen (Entscheidung Patrick vom … / eigene Annahme).
+
+## Produktentscheidungen 02.10.2026: Dubletten einmal pro Woche, Kontosperre
+
+Patrick, 02.10.: „weder 24 Stunden noch 30 Tage, sondern einmal pro Woche",
+„Super-Vorschlag umsetzen", „Ja, dann sperr die Konten", „Nein, halb so wild"
+(keine Rückforderung). Umgesetzt in `claude/dubletten-woche` +
+`claude/reward-sperre` (gemergt 03.10.); Details und Grenzen in
+`cloud-functions/review-console/WISSEN-FOTORUNDE.md`. Nicht neu aufmachen:
+- **Gleiche Person + gleiches Produkt: höchstens einmal in 7 Tagen bezahlt**
+  (168 h rollierend, gegen die eigene jüngste Freigabe derselben EAN in jeder
+  Schreibweise, Zeitpunkt = Firestore-`createTime`). KEINE Ausnahme mehr für
+  anders gelesenen Preis, Hersteller oder Markt (Markt wählt der Nutzer frei).
+  Fremde Einreichungen sperren weiterhin nicht (20.09.). Am Dokument steht der
+  Code `doppelt_eingereicht`, weil der App-Text von `sperre_30_tage_gleicher_
+  nutzer` in allen ausgelieferten Versionen „ab dem nächsten Tag zählt es
+  wieder" verspricht.
+- **Barcode-Nummer gegen das Barcode-Foto:** weicht sie ab, bleibt die
+  Einreichung liegen, ein Mensch entscheidet (Konsole nur mit force + Notiz);
+  ein einmal angehaltener Fall wird nie automatisch aufgehoben. Ausnahme nur
+  am ersten Tag (Patrick 04.10.: „ja"): liest die zweite Lesung die
+  gespeicherte Nummer, war die erste eine Fehllesung → weiter.
+- **Eindeutige Barcode-Fälle korrigiert die Morgenrunde selbst** (Patrick
+  06.10.2026: „ja"). Tatsächliches Verfahren: das Modell liest das
+  Barcode-Foto zweimal gleich (Bildprüfung + zweite Lesung — zwei Aufrufe
+  DESSELBEN Modells, also NICHT unabhängig: auf Fotos ohne lesbare Ziffern
+  erfindet es gültige GTINs, gemessen 06.10.) UND gültige GTIN UND kein
+  Waagen-/Händlercode/Karton UND — Pflicht-Zeuge — der feste Strichcode-Leser
+  (`src/strichcode.js`, zxing-wasm 2.2.4, liest die Striche, nicht die
+  Ziffern) liest HEUTE auf dem Original-Foto die neue Nummer und NICHT die
+  gespeicherte. Liest er nichts, etwas anderes oder scheitert er → keine
+  Korrektur, ein Mensch entscheidet. Gemessen 06.10.: 96 von 127 echten
+  Barcode-Fotos gelesen (Median 86 ms), 5 Abweichungen zu OpenCV/Apple Vision;
+  von 9 geplanten Korrekturen bestätigt 6, 3 bleiben beim Menschen; bei
+  Fusilli/Vollkornbrot/Melitta/Farfalle las er die gespeicherte Nummer (das
+  Modell hatte erfunden). Eine gespeicherte Korrektur ohne Zeugen gilt nicht
+  (`eanKorrekturOf`). WASM IMMER aus dem Paket laden (sonst CDN),
+  Formatnamen mit Bindestrich (`'EAN-13'`). Dann gilt die
+  Foto-Nummer als EAN (`eanKorrektur`, nur Server; `ean` bleibt die
+  gespeicherte für Audit), alle weiteren Regeln rechnen mit ihr. Das gilt auch
+  für schon angehaltene `ean_abweichend`-Fälle, deren gespeicherte Lesungen das
+  erfüllen — Patricks „ja" hebt für GENAU diese Klasse „nie automatisch
+  aufheben" auf, solange die heutige Lesung nicht widerspricht.
+  `ean_unsicher` bleibt beim Menschen — auch ein alter `ean_unsicher` gegen
+  zwei gleiche spätere Lesungen; widersprechen sich die Lesungen über Tage,
+  wird der Halt `unsicher` und nie korrigiert. Ohne Bildprüfung am selben
+  Morgen keine Korrektur aus einem alten Halt. Die Wochen-Sperre läuft
+  zusätzlich über alle zugehörigen Nummern (gespeichert/korrigiert, eigene
+  und frühere Einreichungen), an JEDEM Tag; trifft sie dort, bleibt der Fall
+  liegen (`ean_alt_doppelt`), sonst käme ein schon bezahltes Produkt mit
+  einem fremden Strichcode-Foto durch. Eigene Notbremse (≥ 8 und > 10 % der
+  heute NEU geprüften Fälle → keine Korrektur; nur im scharfen Lauf Vermerk am
+  Befund: diese Fälle nie automatisch). Eigener Schalter
+  `cashback_config/v1.barcodeKorrektur` — NUR `true` wendet an, sonst nur
+  Vorschlag im Bericht (nach dem Ausrollen von Patrick einzuschalten). Eine
+  falsche Korrektur nimmt die Prüfkonsole einzeln zurück („Korrektur
+  verwerfen", `eanKorrekturVerworfen`, danach nie wieder korrigiert). Der
+  Trockenlauf speichert weder Korrektur noch Bremsvermerk. Befunde des
+  ALTEN Codes ohne Vermerk aus einem Lauf nach `2026-10-06_080038` werden
+  NIE automatisch korrigiert (er verschluckt Widersprüche und überschreibt
+  `unsicher`; gebremst `altcode_<lauf>`, gelbe Warnung) — trotzdem vor dem
+  nächsten 08:00-Lauf ausrollen. Eine verworfene Korrektur hält auch in der
+  Runde (Vermerk ist selbst Halte-Quelle); eine frühere andere Foto-Lesung
+  (etwa `gleich`) gegen heute zweimal F → `unsicher`; eine eigene Freigabe mit
+  bestätigt abweichender Foto-Nummer zählt mit dieser Nummer zu den
+  verwandten (`ean_alt_doppelt`, nur Halt). Die EAN einer
+  Einreichung IMMER über `werte.eanOf` lesen, nie `ean` allein — die App
+  zeigt in „Meine Einreichungen" weiter die gescannte `ean`
+  (`app/product-submit/index.tsx`), auch nach einer Korrektur (offen, braucht
+  einen App-Build). Lehre der
+  Prüfrunde: ein Schutz, der an einem Zustand hängt, wird aus dem
+  GESPEICHERTEN Zustand gerechnet, nie aus dem heutigen Ereignis — sonst
+  gilt er nur einen Lauf; und eine Vertrauensregel muss kennen, was der alte
+  Code bis zum Ausrollen noch schreibt. Prüfrunde 1 danach (06.10.): der Leser
+  dekodiert nur Baseline-JPEG (seit Prüfrunde 3: ein 0,42-MB-PNG trieb ihn
+  über den Kopf hinweg auf 872 MB) bis 64 MP, geprüft aus dem Dateikopf (sharp
+  `metadata()`) — ein weißes 400-MP-JPEG unter 8 MB trieb ihn auf 1,1 GB und
+  hätte die Runde jeden Morgen vor dem ersten Schreibvorgang beendet; ein
+  Bremsvermerk gilt aus JEDER Quelle; Schritt 7 prüft, dass die gerechnete
+  EAN beim Schreiben noch gilt (Verwerfen während des Laufs). Prüfrunde 2
+  (06.10.): die 64-MP-Grenze reicht nicht, der Speicher hängt an der
+  Kodierung (progressiv/CMYK/16-Bit-PNG bis 1,4 GB bei 64 MP unter 8 MB) —
+  `strichcode.dekodierBytes` schätzt ihn aus dem Kopf, dekodiert wird nur bis
+  320 MB (an allen Kodierungen nachgemessen); der Leser bestätigt nur, wenn
+  er F und KEINE weitere Nummer liest (zwei Codes auf dem Foto = nicht
+  eindeutig, Mensch); ein `unsicher` aus dem Rückfall gewinnt vor
+  `abweichend` in `eanFotoOcr`; Schritt 4c schreibt Befunde nur noch in einer
+  Transaktion an offene Einreichungen (`eanFotoOcr` einer Freigabe ist
+  Eingabe der Wochen-Sperre). Ausrollen in
+  dieser Reihenfolge: Rules → `hosting:md-receipt-admin` →
+  `functions:review-console` → erst dann der Schalter. **Rückweg NUR der
+  Schalter** (`barcodeKorrektur: false`): nach der ersten gespeicherten
+  Korrektur nie Code ohne `eanOf` mit Korrektur ausrollen (kein Rollback auf
+  fe89647e) — sonst steht eine korrigierte Freigabe wieder unter der alten
+  Nummer und dasselbe Produkt wird in der Woche doppelt bezahlt. Die Zweige
+  `claude/preisfoto-bildschirm`, `claude/bon-doppelzahlung` und
+  `claude/produktsuche-speicherung` müssen diesen Zweig vor jedem Deploy von
+  `review-console` oder `hosting:md-receipt-admin` aufnehmen. Details: `cloud-functions/review-console/WISSEN-FOTORUNDE.md`.
+- **Anderer Markt innerhalb der Woche zählt NICHT als neue Erfassung**
+  (Patrick 04.10.: „nein").
+- **Eindeutig falsche Barcode-Nummer korrigiert die Morgenrunde selbst**
+  (Patrick 06.10.: „ja"): Foto zweimal gleich gelesen + gültige GTIN + kein
+  Ladencode → Foto-Nummer gilt, alle Regeln laufen mit ihr weiter; das gilt
+  auch für schon angehaltene `ean_abweichend`-Fälle dieser Klasse.
+  `ean_unsicher` (zweite Lesung fehlt/weicht ab) bleibt beim Menschen.
+  Umgesetzt mit Prüfrunden (Absatz oben): korrigiert wird nur, wenn
+  zusätzlich der feste Strichcode-Leser die Nummer bestätigt. Ursache der
+  falschen Nummern: der Barcode-Schritt im Assistenten übernimmt die erste
+  Lesung der Android-Kamera ungeprüft (Untersuchung 06.10.2026).
+- **Foto-Abgleich (md5) gegen ALLE früheren Einreichungen**, Preisfoto
+  ausgenommen; eine Kopie bleibt immer freigabefähig. Die Gründe, mit denen die
+  Runde einen Fall liegen lässt, stehen in `review.rundeOffen` (nur Server).
+- **Kontosperre = `cashback_sperren/{uid}`** (server-only, kein Rules-Block,
+  finale deny-all). Leser: processCashback/syncLedgerForReceipt, resolveCash-
+  backReview, requestPayout/processPayout, onCrowdUploadApproved,
+  onPollResponseCreated, Morgenrunde, Konsole. Wirkung: keine neue Gutschrift,
+  keine Auszahlung, Produktfotos bleiben STUMM liegen (keine sichtbare
+  Ablehnung — sonst weicht die Person auf ein neues Konto aus). Gebuchtes
+  bleibt. Aufheben: `gesperrt: false`. Gesperrt (nach Deploy anzulegen):
+  7onx0TmhFzYG4EttySlO14F73ZB3, tU89tZHxvcOOPLHvOFXna0sZREv1.
+- **Umfrage-Lücke (gefunden 02.10.):** `poll_responses` darf jeder angemeldete
+  Nutzer mit beliebiger pollId anlegen; der live laufende survey-reward
+  (Stand 13.06.) zahlte auch für Entwürfe und abgelaufene Umfragen (~14 € je
+  Konto möglich, nie ausgenutzt). Fix: nur `status === 'active'` + 7d8e91b.
+  Regel: Eine Vergütung, die an einem client-wählbaren Verweis hängt (pollId,
+  campaignId …), prüft serverseitig, ob das Ziel gerade bezahlbar ist.
+- **Zwei Werkzeug-Fallen dieser Runde:** (1) `git add -A` in einem Worktree mit
+  symlinkten `node_modules` committet die Symlinks — `node_modules/` in
+  .gitignore trifft nur Verzeichnisse. Dort nur explizite Pfade adden.
+  (2) zsh wendet in `"$b:receipt…"` den Modifier `:r` auf `$b` an —
+  `git show "$b:pfad"` liefert dann Unsinn; `"${b}"':pfad'` schreiben.
+
+## Produktentscheidung 17.10.2026: Haushalts-Regel
+
+Patrick, 17.10.: „ja, bau die Haushalts-Regel"; 18.10.: „ja, erweitere auf 24
+Stunden" (nach Messung: trifft nur Haushalte). Dasselbe Produkt vom selben Ort
+(Gerätestandort ≤ 50 m, beide genauer als 100 m) binnen 24 Stunden wird nur
+einmal bezahlt — auch über verschiedene Konten. Anlass: zwei Konten eines
+Haushalts (gleiche angegebene Adresse, eigene Handys und E-Mails) reichten
+dieselben Produkte vom selben Tisch ein, 106 Doppelzahlungen. Kein Konto
+gesperrt (Familie, wie tU89 am 14.10.). Gilt in Morgenrunde und Prüfkonsole;
+Schalter `cashback_config/v1.haushaltRegel` — an, außer ausdrücklich `false`.
+Die Gründerentscheidung vom 20.09. („fremde Einreichungen sperren niemanden")
+gilt weiter für alles, was nicht am selben Ort zur selben Zeit entstand.
+Messung und Grenzen (wer länger als 24 h wartet, fällt heraus; trifft die Regel
+künftig Fremde, zeigt es der Tagesbericht — dann das Fenster verkürzen):
+`cloud-functions/review-console/WISSEN-FOTORUNDE.md`.
+
+## Entscheidungen Patrick 04.10.2026 (nicht erneut fragen)
+
+- **Bezahlte Umfragen:** Dass keine läuft, ist GEWOLLT — eine Umfrage geht erst
+  online, wenn ein Kunde sie bucht. Nicht mehr als offenen Punkt melden.
+- **Bons: nur Kassenbons.** Screenshots eines Kassenbons aus Händler-Apps
+  (Lidl Plus, Netto …) nach einem Ladeneinkauf zählen als Kassenbon.
+  **Online-Bestellungen zählen genau dann, wenn der Händler einer UNSERER
+  Märkte ist** (Collection `discounter`): dm- und Rossmann-Online ja, Amazon
+  nein; Picnic/Knuspr nur, wenn sie als Markt aufgenommen werden.
+  Jede Änderung an der Dubletten-Erkennung erst nach sauberer Betrugsanalyse
+  (ClickUp 12487v2dezk) — eine Lücke dort ist direkt Geld.
+- **Mindestversions-Sperre:** vorerst nicht einbauen.
+- **Testauszahlungen 30.05.–24.06.** (Tremendous-Sandbox, Konto p***@web.de)
+  waren Patrick selbst — kein Kundenfall.
+- **Waagen-/Händlercodes:** so lassen, ClickUp 12487v2akqg geschlossen.
+- **Weitere Kontosperren (04.10., Patrick „ja"):** ovyboWgxlAd0dqzesPX7mrE5OXr1,
+  YRgQNBgq4oU8wLTyoum1iY34HU82, GIBMutkVOUdgAFgQt0VzHI920zB3,
+  pUYkLM5tw4MaL9hiai0Bc0rOvxG2 — derselbe Verbund wie 7onx/tU89 (gleiche
+  FCM-Tokens/App-Installationen, Wechsel im Minutentakt, dieselbe Wohnung,
+  Konten nach Erreichen der 5-€-Grenze angelegt). Skript
+  `cashback-pipeline/.konto-sperre-0410.js`. Merker für künftige Fälle:
+  geteilte FCM-Tokens unter `users/{uid}/fcmTokens` und
+  `attribution.capturedAt` sind das stärkste Mehrkonten-Signal; IP-Städte und
+  App-Version sind nur Begleitumstände.
+- **Doppelzahlungen bei Kassenbons abstellen** (Patrick „ja, abstellen"),
+  danach Bildvergleich entschärfen, Lieferanschriften nie als Filiale
+  speichern — Zweig `claude/bon-doppelzahlung`.
+- **Bildschirmfotos als Preisbeleg** erkennen (Patrick „ja, bau das"): erst
+  eine Woche Beobachtung, dann Ablehnung mit `fotos_unpassend` — Zweig
+  `claude/preisfoto-bildschirm`.
+- **Produktdaten-Suche:** Funde dauerhaft mit Zeitstempel in
+  `external_products`, Auffrischung nach 2 Monaten beim erneuten Scan,
+  Kostenbremse; danach 20 Suchen/Stunde, mehrfach gescannte zuerst; Serper-
+  Guthaben kauft Patrick nach. **Shop-Bilder (dm, Rossmann …) dürfen angezeigt
+  werden** (Patrick „ja"). Übernahme in den Hauptkatalog/Suche/Einkaufszettel:
+  zurückgestellt. Zweig `claude/produktsuche-speicherung`.
+- **Kontolöschung:** nur das löschen, was den Login ermöglicht; alles andere
+  bleibt für Auswertungen. Heute löscht `konto-loeschung` (onUserDeleted)
+  zusätzlich das Profil-Dokument `users/{uid}` — Umsetzung offen, rechtliche
+  Seite (Datenschutzerklärung, Art. 17) vorher klären.
+- **Speicher:** RevealyIQ-Dienstkonten dürfen Bons und Produktfotos lesen
+  (gewollt). Ordner `bilder/` und die übrigen öffentlichen Buckets bleiben, wie
+  sie sind. Am Haupt-Bucket nur prüfen und berichten, nichts umbauen — auch
+  den „sicheren Weg" (Katalogbilder einzeln öffentlich, Rest nur mit Login)
+  vorerst lassen.
+- **Bewertungsbitte nach Auszahlung:** Zeitpunkt bleibt wie gebaut.
+- **Kamera iPhone Duo:** zurückgestellt (kein Testgerät), gesondert angehen.
+- **Lassen (vorerst):** BigQuery-Update, öffentliche Buttons/alte Bild-
+  Schnittstelle, Rotation des Admin-Schlüssels, Löschen der zwei alten
+  Media-Ingestor-Reste in us-central1.
+
+## Doppelzahlungen bei Bons, Bildprüfung, Online-Belege (gebaut 04.10.2026)
+
+Patrick 04.10.: „ja, abstellen". Zweig `claude/bon-doppelzahlung`, Analyse in
+ClickUp 12487v2dezk. Alles hängt an Schaltern in `cashback_config/v1`
+(Code-Default `false` = altes Verhalten, `'shadow'` = nur am Bon vermerken;
+Ausnahmen mit Default `true`: `doppelOnlineSeite` und `doppelBildAehnlich`,
+siehe unten — beide sichern nur Zahlwege ab, die ohne sie neu entstünden —,
+und seit der dritten Prüfrunde 06.10.2026 `doppelSumme`: der Doppelfall vom
+04.10. ist damit ab dem Deploy abgestellt, ohne dass jemand einen Schalter
+setzt; gemessen ohne zahlbaren Fehlalarm, 612 von 615 Paaren derselbe Bon).
+Die Konfiguration liest `processCashback` seit 06.10. STRIKT: ist
+`cashback_config/v1` nicht lesbar, gilt nicht mehr still `DEFAULT_CONFIG`
+(Doppel-Schutz und Aktions-Modus aus), sondern es wird wiederholt und nach
+den Versuchen `review` / `config_unavailable` (wie `ocr_unavailable`).
+
+- **Der Doppel-Schutz sitzt in `syncLedgerForReceipt`** (`lib/doppelBon.js`) —
+  der EINEN Buchungsstelle für Pipeline, Resolver, Prüfkonsole und Bon-Runde.
+  Die Vorprüfung in Schritt 5b (contentHash & Co.) bleibt, ist aber KEIN Schutz
+  gegen gleichzeitige Läufe (Kaufland 04.10.: zwei Gutschriften 0,28 s
+  auseinander) und keiner bei Resolver-Freigaben. Neue Buchungswege nie an
+  `syncLedgerForReceipt` vorbei bauen und `opts.bon` (identitaet) mitgeben.
+- **Regeln** (gemessen an 14.369 Bons, 0 Fehlalarme mit Geld): `doppelSumme`
+  (Person+Markt+Tag+Endsumme gegen BEZAHLTE Bons des Tages), `doppelKonten`
+  (Markt+Tag+Uhrzeit+Summe über alle Konten, nur mit Uhrzeit),
+  `doppelArtikel` (≥ 0,6 gleiche Artikel des kleineren Bons, beide ≥ 5
+  verschiedene Artikel, ohne Pfand/Rabatt), `doppelBestellnummer`,
+  `doppelDatum` (gleiche Person+Markt+Uhrzeit, anderer Tag ±8, gleiche Summe
+  oder Artikel ≥ 0,6 — fängt die Kopie mit geändertem Datum; ohne Uhrzeit
+  nicht tragfähig, Gewohnheitskäufe erreichen 0,6), `doppelKontenArtikel`
+  (anderes Konto, gleicher Markt+Tag, Artikel ≥ 0,6 — fängt verdeckte oder
+  geänderte Uhrzeit; 89.463 Paare, alle 21 ≥ 0,6 derselbe Bon). Prüfrunde 2
+  (Angriffe mit dem echten index.js nachgestellt): `doppelDatum` greift auch
+  OHNE gleiche Uhrzeit, wenn Summe UND Artikel ≥ 0,6 passen (Datum und Uhrzeit
+  geändert; 0 von 3.834 Paaren gleiche Person/Markt über Tage mit gleicher
+  Summe); `doppelOnlineSeite` (gleiche Person+Markt+Tag, beide Belege Online-
+  Bestellungen, mindestens einer ohne gedruckten Endbetrag — die Seiten EINER
+  mehrseitigen Rechnung; verschieden gelesene Bestellnummern heben sie auf);
+  `doppelKontenDatum` (gleicher Markt+Endsumme über alle Konten, anderer Tag
+  ±8, gleiche Uhrzeit ODER Artikel ≥ 0,6 — zweites Konto mit geändertem Datum;
+  577.206 Paare, 80 mit gleicher Summe, davon 0 mit gleicher Uhrzeit oder
+  Artikel ≥ 0,6). Prüfrunde 3: `doppelDatum` liest für dieselbe Person auch den
+  Summen-Index — bis **95 Tage** Abstand, gleiche Summe plus gleiche Uhrzeit oder
+  Artikel ≥ 0,6 (echte Doppelzahlung 02.10.: Netto 93,28 €, ein Foto als
+  „22.10." gelesen und in der Prüfung freigegeben, das andere bezahlt —
+  `bon_muqq8e4v91hjae`/`bon_muqrjuzcqpewrg`, 20 Tage, Artikelnamen verlesen; in
+  95 Tagen das EINZIGE Paar gleiche Person/Summe/Uhrzeit ≥ 9 Tage).
+  `doppelKontenDatum` jenseits von 8 Tagen nur über Artikel (gleiche Summe und
+  Uhrzeit trafen dort 2 echte Zufälle). Ohne Uhrzeit zählt bei `doppelDatum`
+  auch die gleiche Artikelsumme (nur die gedruckte Endsumme geändert, Pfand-
+  Toleranz 200 ct). Regeln derselben Person vergleichen über Märkte hinweg
+  (Händlername geändert): Artikel ≥ 0,6 oder Summe mit gleicher Uhrzeit, am
+  Treffer `andererMarkt` (0 von 6.575 Paaren). **Nachprüfung 05.10.2026:**
+  `doppelDatum` liest zusätzlich den Personen-Index (alle bezahlten Bons der
+  Person, 95 Tage, Schlüssel ohne Markt und ohne gedruckte Endsumme) — vorher
+  genügte jenseits von 8 Tagen eine geänderte Ziffer der Endsumme oder ein
+  anderes Wort im Kopf, und die Kopie wurde bezahlt. Bedingung wie im Fenster:
+  gleiche Uhrzeit → Summe ODER Artikel ≥ 0,6; ohne → (Summe ODER Artikelsumme)
+  UND Artikel ≥ 0,6, jeder Markt. 29.519 Paare gleiche Person, 1–95 Tage: nur
+  der echte Netto-Fall. Verworfen „Artikel ≥ 0,6 + Endsumme ±2 €": traf einen
+  echten REWE-Zweitkauf. Treffer mit `quelle: 'person'`. **Nachprüfung
+  06.10.2026:** als „Summe" zählt ohne Uhrzeit auch die gleiche Summe der
+  POSITIVEN Artikel (`positivSumme`, ohne Pfand/Leergut/Rabatt/Coupon) — eine
+  Kopie mit eingefügter oder geänderter Coupon-/Leergut-Zeile und angepasster
+  Endsumme ändert keinen Artikel (unter v1.5 ist die Couponzeile die
+  vorgesehene Lesart); Gegenprobe 5 Paare gleiche Positivsumme, alle Anteil 0.
+  Der Personen-Index trägt dafür `ps` und wie Tages-/Summen-Index Namens-
+  Hashes `n` + Rabatt-Vermerk `k`: über den Prompt-Wechsel v1.4 ↔ v1.5
+  (Coupon in den Preisen ↔ eigene Zeile) tragen dieselben Artikel andere
+  Preise, ohne Namen war ein Coupon-Bon ab Tag 9 wieder zahlbar. Darum
+  `.backfill-doppel-person.js` (schreibt die Namen mit) VOR dem Umschalten auf
+  `ocrPrompt: 'v1.5'`. `doppelOnlineSeite`
+  greift auch an einem anderen Tag im Fenster ±8 (Datum auf einer Seite
+  geändert; 0 Paare zweier Online-Belege desselben Markts in 1–8 Tagen).
+  **Nachprüfung 05.10.2026 (zweite Runde):** `doppelOnlineSeite` deckt auch
+  Bildschirmabschnitte EINES App-Kassenbons (beide `app_kassenbon`, gleicher
+  Markt, NUR selber Tag, einer ohne sichtbare Summe; zwei verschiedene
+  Uhrzeiten heben die Regel auf, bei Online-Seiten ebenso; Treffer mit
+  `app: true`). Echte Fälle Lidl 16.07. und 21.09. (zwei Scrollbilder, je ohne
+  Summe). Über Tage hinweg NICHT: 36 ehrliche Lidl-Paare derselben Person in
+  1–8 Tagen, App-Bons meist ohne Uhrzeit; am selben Tag 144 bezahlte Paare
+  gleiche Person/Markt, nur 1 ohne Uhrzeit — der echte Doppelbon 17.09.
+  **Code-Default von `doppelOnlineSeite` ist `true`**: die Artikelsumme bei
+  Belegen ohne Summe setzt `lib/belegart.js` OHNE Schalter ein — mit Schutz
+  `false` zahlte schon der Deploy jede Seite/jeden Abschnitt einzeln (D1/N3
+  im Nachprüf-Angriff). Rückweg: ausdrücklich `false`. **Korrektur 06.10.2026:
+  `app` und `ohneSumme` liefert nur Prompt v1.5.** Unter dem Standard-Prompt
+  v1.4 (`ocrPrompt` nicht `'v1.5'`) sieht die Regel keinen Abschnitt — v1.4
+  setzt die Artikelsumme selbst ein, ungekennzeichnet, und Scrollbilder bzw.
+  Rechnungsseiten werden wie vor dem Zweig einzeln bezahlt (Test
+  `nachpruefung0610`, Teil 6). Der Schutz kommt erst mit `ocrPrompt: 'v1.5'`.
+  **`doppelSeiteAbweichend` (06.10.2026, Code-Default `'shadow'`):** seite
+  träfe, nur Uhrzeit, Bestellnummer oder (App) der Bon-Tag ±1 weichen ab — mit
+  EINEM geänderten Feld je Abschnitt war sonst jeder einzeln bezahlt. Nicht
+  gemessen (zwei echte Einkäufe können so aussehen), darum ab dem Deploy nur
+  beobachtet (`doppelPruefung.treffer`, Log `doppel-treffer` mit
+  `regel: seiteAbweichend`, `abweichend`); `true` hält wie Regel bild nur in
+  der Prüfung fest (`reviewReason: seite_abweichend`, nie Ablehnung). Seit
+  der zweiten Nachprüfung 06.10. auch auf dem Prüfpfad (Bon geht wegen der
+  Lese-Sicherheit in die Prüfung → Grund `seite_abweichend` statt
+  `ocr_confidence_*`) und im Resolver (siehe Regel bild: „halten"). Ein nur
+  unsicher erkannter Markt (Tippfehler-Abgleich ohne lesbaren Namen,
+  Eigenmarken-Stufe; `receipts.merchant.sicher`) gilt für seite und
+  seiteAbweichend als gleicher Markt — ein App-Abschnitt ohne Kopf wurde sonst
+  „dm" und einzeln bezahlt. Dritte Prüfrunde 06.10.: auch bei GEMISCHTER Art
+  am selben Tag (eine Seite als Online-Bestellung, ein Teil als App-Bon, einer
+  ohne Summe; `abweichend: ['belegart']`) — seite selbst verlangt dieselbe Art.
+  Wie seite nur mit Prompt v1.5.
+  Nur vor der ERSTEN Gutschrift
+  geprüft — die Regel storniert nie. Grund-Codes sind die
+  vorhandenen `duplicate_content_self/_cross_user`, `duplicateOf.kind` sagt die
+  Regel. Treffer stehen in `receipts.doppelPruefung`.
+- **Daten:** `users/{uid}/cashback_days/{Tag}.eintraege.{receiptId}` (zählt nur,
+  wenn die ID in `receiptIds` steht ODER das Ledger den Bon als bezahlt führt —
+  wandert ein Bon mit einer neuen Datumslesung, bleibt sein Eintrag im alten
+  Tag stehen, sonst wäre ein Zweitfoto mit der alten Lesung frei),
+  `cashback_bon_schluessel/{tx_…|bo_…}`,
+  `cashback_bon_tage/{markt}_{tag}.eintraege.{receiptId} = {u, a}` und
+  `cashback_bon_summen/{markt}_{summe}.eintraege.{receiptId} = {u, t, z, a}`,
+  `cashback_bon_person/{uid}.eintraege.{receiptId} = {l: [{t, m, z, s, as, ps, a, n, k?}]}`
+  (höchstens 2 Lesungen je Bon, 80 Artikel- und 40 Namens-Hashes je Lesung,
+  300 Bons je Person und geschätzt höchstens 700 KB — `personAufraeumen`
+  wirft sonst die ältesten heraus,
+  bei JEDER Gutschrift geschrieben — auch ohne Schalter —, beim Storno
+  entfernt, Einträge älter als 95 Tage räumt die nächste Gutschrift)
+  (nur Artikel-Hashes, keine Namen; alle server-only, deny-all reicht; „der
+  erste gewinnt", beim Storno frei; Summen-Einträge älter als 95 Tage räumt die
+  nächste Gutschrift — gemessen höchstens 3 Einträge je Dokument). Den Tages-
+  Index schreibt die Buchung nur, solange `doppelKontenArtikel` läuft
+  (`'shadow'`/`true`) — nur dann greift seine Größenbremse. Die Gutschrift merkt sich ihre Belegungen
+  (`earn.schluessel`, `earn.tagesIndex`, `earn.summenIndex`). **Ob ein fremder Schlüssel oder
+  Index-Eintrag noch gilt, entscheidet das LEDGER seines Besitzers** (Earn −
+  Storno > 0), nie der Tageszähler — der wandert mit einer neuen Datumslesung,
+  und ein Schlüssel mit altem Tag galt dann als frei (Prüfrunde 04.10.: zweite
+  Zahlung derselben Bestellung). Eine erneute Zustellung ERGÄNZT Schlüssel und
+  Index um die neue Lesung, ersetzt nie: der Bon sperrt unter jeder Lesung.
+- **`enqueueCashback` legt Bons mit `create()` an, nie mit `set()`**
+  (Nachprüfung 05.10.2026): eine `clientUploadId`, die einem ANDEREN Konto
+  gehört, bekommt 409 `invalid_upload_id`. Vorher überschrieb sie dessen Bon —
+  auch einen bezahlten —, und danach war dieselbe Datei für Byte-, dHash- und
+  Inhaltsprüfung des Besitzers unsichtbar (zweite Gutschrift; live nie
+  ausgenutzt, 0 von 6.496 aktiven Earns). Die Doppel-Prüfung vergleicht
+  Bestand aus `receipts` nur, wenn `userId` passt (Log `doppel-bestand-fremder-bon`).
+- **Resolver-Freigabe kann `rejected` zurückgeben** (`creditedCents: 0`). Die
+  Bon-Runde zählt das als `doppelImResolver`, die Konsole meldet „Nicht
+  freigegeben – …". Wer einen neuen Aufrufer baut: `status` auswerten.
+- **Bildprüfung** (`bildFeinvergleich`, `lib/bildVergleich.js`): ein dHash-
+  Treffer sperrt nur noch, wenn der Feinvergleich DASSELBE Bild bestätigt
+  (SSIM ≥ 0,98 + gleiches Seitenverhältnis; genau die 6 echten unter 200
+  gemessenen Sperren), und nie gegen `rejected`/`no_reward`. Neuspeichern,
+  Helligkeit, Kontrast gelten als dasselbe Bild — die mittlere
+  Pixelabweichung ist nur Auskunft (als Kriterium erkannte sie 0 von 46
+  helleren und nur 19 von 54 neu gespeicherten Kopien). **Beschnitt erkennt der
+  Vergleich nicht** (SSIM ~0,5): solche Kopien fängt die Buchung — bei
+  geändertem Datum aber nur innerhalb von 95 Tagen (Personen-Index) und nicht in
+  den Fällen unter „Bekannte Lücken". Darum wirkt
+  der Schalter erst, wenn `doppelSumme`, `doppelArtikel` UND `doppelDatum`
+  `true` sind UND `doppelBestandIndexiert === true` — sonst wie `'shadow'`.
+  Letzteres setzt NUR `.backfill-doppel-person.js` nach grünem VERIFY
+  (Nachprüfung 05.10.2026: ohne Nachtrag kennt der Personen-Index nur
+  Gutschriften seit dem Deploy, und 95 Tage lang wäre die beschnittene Kopie
+  jedes älteren Bons mit geändertem Datum bezahlt worden; heute sperrt sie der
+  dHash). Nicht bestätigt/Fehler/Zeitlimit → Bon
+  wird gelesen, `capture.bildAehnlich` am Bon. Dieselbe DATEI nach einer
+  Ablehnung wegen eines Lesefehlers (no_bon_date, reconciliation_delta …) wird
+  einmal neu gelesen (`capture.neuversuchVon`), sonst bleibt die Byte-Sperre.
+  **Regel bild (Nachprüfung 05.10.2026, `doppelBildAehnlich`, Code-Default
+  `true`):** schon 1 % Beschnitt verfehlt die Seitenverhältnis-Grenze (|ln| ≤
+  0,01) — der Feinvergleich bestätigte 0 von 60 beschnittenen Kopien, die der
+  grobe dHash zu 59/60 sperrte. Eine solche Kopie mit einigen geänderten
+  Preisziffern (Endsumme mit) trifft keine Textregel (Angriffe N1/N2). Darum:
+  nennt `capture.bildAehnlich` (`kandidaten`; Stand 05.10. — heute bis 55,
+  jeder Markt, auch offene, siehe unten) einen BEZAHLTEN Bon
+  derselben Person (Ledger), gleicher Markt, Bon-Tag ±8 → Status `review`,
+  `reviewReason: bild_aehnlich_bezahlt` (nie Ablehnung, der Betrag bleibt am
+  Bon für die Freigabe). In der Buchung als LETZTE Regel — eine ablehnende
+  Regel (erneut fotografierter, bezahlter Bon) gewinnt. Geht der Bon ohnehin
+  wegen der Lese-Sicherheit in die Prüfung, ersetzt der Grund den der
+  Texterkennung (sonst gäbe die Bon-Runde, die nur `ocr_confidence_*`
+  entscheidet, die Kopie über den Resolver frei). Die Konsole verlinkt den
+  Kandidaten (Zeile „Doppel-Prüfung"). **Zweite Nachprüfung 06.10.2026:**
+  (1) zählt auch ein Kandidat, der noch NICHT entschieden ist (`ocr_pending`,
+  `review`) — vorher bekamen Kopie und Original Geld, wenn die Kopie zuerst
+  gebucht wurde oder das Original in der Prüfung lag (das Original trägt
+  keinen Vermerk, es ist älter). Die Kopie wartet dann auf das Original
+  (`receipts.bildWartet`, bleibt `ocr_pending`, der Kehrlauf stellt sie neu
+  zu; höchstens 4 Läufe ≈ 2 h), danach greift die normale Prüfung (Textregel
+  lehnt ab, bild gegen das bezahlte Original hält fest, Original abgelehnt →
+  bezahlt) bzw. Prüfung `bild_aehnlich_offen`. Warten statt sofort Prüfung,
+  weil der häufigste Fall ein Minuten später erneut fotografierter Bon ist
+  (35 dHash-Sperren mit < 3 min Abstand in 30 Tagen) — den lehnt nach dem
+  Original eine Textregel ohne Menschen ab. (2) Markt egal (umgeschriebener
+  oder unlesbarer Kopf umging die Regel; +~5 % Fälle: 21 von 459 Bild-Nahpaaren
+  derselben Person ±8 Tage lagen an verschiedenen Märkten). (3) `kandidaten`
+  = ALLE groben Treffer, die laufen oder Geld bekamen (`verglichen` = die bis
+  zu 3 fein verglichenen) — drei ältere ähnliche App-Bons verdrängten sonst
+  das Original. **Abschlussprüfung 06.10.2026:** bis dahin „neueste zuerst,
+  bis 20" — 20 frisch hochgeladene, ähnlich aussehende Lockvögel kurz vor der
+  Kopie (noch `ocr_pending`, also Kandidaten) schoben das bezahlte oder noch
+  offene Original hinaus, wurden abgelehnt, und die Kopie war bezahlt (mit dem
+  echten index.js nachgestellt, nur mit scharfem Feinvergleich). Jetzt fasst
+  die Liste alle groben Treffer der Bildprüfung (`BILD_MAX_KANDIDATEN` 55 ≥
+  `DHASH_DEDUP_LOOKBACK` 50 + `DHASH_EXAKT_FEIN` 5, Vertragstest
+  `abschluss0610`), beim Kürzen bezahlte vor offenen
+  (`lib/doppelBon bildKandidatenOrdnen` — offene lassen sich durch Hochladen
+  beliebig vermehren, bezahlte nicht), auch im Nachtrag bei gleichzeitigem
+  Hochladen (erst zusammenführen, dann ordnen). Die Buchung liest die
+  Kandidaten in EINEM `tx.getAll`. Grenze bleibt die Rückschau der
+  Bildprüfung: 50 beliebige Uploads zwischen Original und Kopie schieben das
+  Original aus den 50 jüngsten Bons (bestehend, auch ohne diesen Zweig). (4) **Resolver hält fest:** trifft
+  bei einer Freigabe (Bon-Runde, Mensch) eine Prüfregel (bild,
+  seiteAbweichend) wirksam, antwortet er 409 `halten`, setzt den Prüfgrund und
+  `doppelPruefung` und bucht nichts. **Eine Freigabe quittiert einzelne
+  Treffer, sie schaltet keine Regel ab** (vierte Prüfrunde 06.10.2026,
+  `lib/doppelBon quittierteTreffer`): bei `bild_aehnlich_bezahlt` und
+  `seite_abweichend` gilt jeder Treffer einer Prüfregel aus der Zeile
+  „Doppel-Prüfung", der dort wirksam und gegen einen ENTSCHIEDENEN Bon stand,
+  als „anderer Einkauf" (`modus: 'quittiert'`, bleibt sichtbar; bei
+  `bild_aehnlich_offen` — „erst den offenen entscheiden" — wird nur schon
+  Quittiertes weitergetragen) — aber nur,
+  wenn die Prüfkonsole den gesehenen Stand mitschickt (`doppelStand` =
+  `doppelPruefung.at`; Bon-Runde und Skripte schicken ihn nie). Ein noch
+  offener Kandidat und jeder neue Treffer halten weiter fest. Vorher schaltete
+  der Grund die ganze Regel ab: (a) ähnelte die Kopie einem bezahlten ANDEREN
+  Einkauf und dem offenen Original, gab der Mensch nach dem Vergleich mit dem
+  anderen Einkauf frei, die Kopie wurde gebucht und danach das Original
+  (zwei Gutschriften); (b) trafen bild UND seiteAbweichend, wechselte der Grund
+  bei jeder Freigabe, gebucht wurde nie. Offene Bild-Kandidaten stehen seither
+  VOR bezahlten — die Kopie wartet auf das Original statt sofort als
+  `bild_aehnlich_bezahlt` an einen Menschen zu gehen. **`bild_aehnlich_offen`
+  schaltet nichts ab** (dritte Prüfrunde 06.10.2026):
+  vorher buchte die Freigabe der Kopie, und das Original, das die Kopie nie
+  sieht, wurde danach auch bezahlt. Jetzt hält der Resolver erneut fest —
+  Original noch offen → wieder `bild_aehnlich_offen` (erst das Original
+  entscheiden), inzwischen bezahlt → `bild_aehnlich_bezahlt` mit frischem
+  Vermerk, abgelehnt → bucht. **Gleichzeitiges Hochladen** (vierte Prüfrunde):
+  die Bildprüfung sucht vor dem Anlegen, zwei gleichzeitige Uploads sahen sich
+  nicht (kein Vermerk, beide bezahlt; gemessen 78 Paare < 10 s in 21 Tagen,
+  keines mit nahem dHash). `enqueueCashback` sieht jetzt NACH dem Anlegen nach
+  (`gleichzeitigeBildKandidaten`) und trägt ältere Bons derselben Person mit
+  nahem dHash nach (`capture.bildAehnlich.gleichzeitig`) — nur ältere, so trägt
+  immer die jüngere den Vermerk und keine zwei warten aufeinander; in jedem
+  Modus des Feinvergleichs, solange `doppelBildAehnlich` an ist (+1 Lese- und
+  1 Abfragevorgang je Upload). Ein Original, das für immer `ocr_pending`
+  bleibt (Kehrlauf erschöpft), blockiert die Kopie, bis es nachverarbeitet
+  wird — gewollt, lieber warten als doppelt zahlen. Voraussetzung für `bildFeinvergleich: true`;
+  ausdrücklich `false`/`'shadow'` → Feinvergleich wie `'shadow'`. Erwartete
+  Prüffälle: Obergrenze ~26 Gruppen in 30 Tagen (Sperren September mit
+  bezahltem Kandidaten ≤ 8 Tage), 11 davon < 1 h nach dem Original (meist
+  derselbe Bon → Textregeln lehnen ab) — also etwa 15 im Monat, nicht
+  gemessen (die gesperrten Uploads wurden nie gelesen).
+- **Online-Belege (Prompt v1.5):** `belegart`, `bestellnummer`, `bonComplete`.
+  `lib/belegart.js` nimmt bei jeder Gemini-Lesung die Kundenanschrift aus dem
+  Kopf; `deriveStoreAddress` gibt bei Online-Merkmal null zurück — also keine
+  Filiale, keine `users.region`, keine `storeStreet`. Online-Rechnung ohne
+  Endbetrag (dm.de, Seite 1 von 3) → Artikelsumme als Endbetrag,
+  `summeAusArtikeln: true` (wie v1.4, das diese Rechnungen bezahlte).
+  **Ebenso ein App-Kassenbon ohne sichtbare Summe** (Nachprüfung 05.10.2026:
+  ein langer Lidl-Plus-Bon passt nicht auf einen Bildschirm; v1.4 setzte die
+  Artikelsumme ein und zahlte, v1.5 lieferte null und lehnte still als
+  reconciliation_delta ab, 1 von 10 App-Bons). Schalter
+  `appSummePflicht` (Default false = bezahlen wie bisher, `true` = Summe
+  Pflicht; Log `app-ohne-summe`). **Offene Entscheidung Patrick** (ob die
+  Summe Pflicht wird); als Pflicht braucht die App vorher einen eigenen Text
+  (der zu reconciliation_delta rät zum Fotografieren). Zwei Abschnitte
+  desselben App-Bons am selben Tag zahlt seit der Nachprüfung 05.10. die
+  Buchung nur einmal (Regel seite, s. o.).
+  `merchant` nur, wie er gedruckt ist — nie aus Eigenmarken geschlossen
+  (sonst las das Modell Picnic als „Edeka"). Die Eigenmarken-Stufe des
+  Markt-Resolvers gilt mit `eigenmarkeNurLadenbon === true` nur noch für
+  Ladenbons MIT Uhrzeit (Picnic/Knuspr haben nie eine); ein SCHON BEZAHLTER
+  Bon behält sie, sonst stornierte die erneute Zustellung. Neue
+  Online-Stichwörter nur mit Gegenprobe: „Onlineshop" stand auf einem
+  BILLA-Ladenbon und zählt deshalb nur ohne Uhrzeit.
+- **Prompt-Schalter `cashback_config/v1.ocrPrompt` (05.10.2026):** `'v1.4'` |
+  `'v1.5'`; fehlt oder ungültig → v1.4, der Deploy ändert die Texterkennung
+  also nicht. NICHT mit `ocrPromptVersion` verwechseln (Altfeld `'v1.0'`, liest
+  niemand). v1.4 ist byte-gleich zum Live-Stand vom 03.10. (SHA-256 in
+  `__tests__/promptVersion.test.js`) — v1.4-Texte nie ändern, neue Regeln nur
+  in einer neuen Version. Gespeicherte OCR behält ihre Version (kein
+  Neu-Lesen), ein Zwischenstand der anderen Version wird verworfen, die
+  Zweitprüfung liest mit der Version der Erstlesung. Coupon-Fix v1.5 (Regel
+  16): Rabatte auf den ganzen Einkauf als Item mit negativem Preis und
+  `category: 'Warenkorbrabatt'`, Artikel brutto; `reconcile` verlangt dafür
+  Belegkette + Grenzen (< 25 %, ≤ 20 €). v1.4 rechnete Coupons in
+  Artikelpreise ein. Die Grenzen treffen korrekt gelesene Bons (dm
+  „Partner-Rabatte" mit Gratisartikel 37 %; im Bestand 18 bezahlte von 320
+  Coupon-Bons in 14 Tagen) — **offene Entscheidung Patrick** vor dem
+  Umschalten. Picnic läuft auch unter v1.5 als EDEKA (Eigenmarken-Stufe),
+  solange `eigenmarkeNurLadenbon` nicht `true` ist.
+- **Ausrollen (Reihenfolge, Nachtrag 05.10.2026):** nach dem Deploy der
+  Pipeline `.backfill-doppel-person.js` laufen lassen (Trockenlauf →
+  `SCHREIBEN=1` → `VERIFY=1 SCHALTER=1`, setzt `doppelBestandIndexiert`), erst
+  dann darf `bildFeinvergleich` scharf werden. **(0) Pflicht vor jedem
+  Schritt: gemeinsamer Ausrollstand** (Abschlussprüfung 06.10.2026). Live
+  liefen `processCashback` und `reviewDecideReceipt` am 06.10. auf dem
+  Basisstand dieses Zweigs (7220a7c5, Quellpakete vom 03./04.10.), aber drei
+  weitere, nicht ausgerollte Zweige ändern dieselben Ziele:
+  `claude/barcode-korrektur` (review-console, `pruefen.html`,
+  `tagesbericht.html` — Entscheidung Patrick 06.10.),
+  `claude/preisfoto-bildschirm` (review-console, `pruefen.html`,
+  `tagesbericht.html`), `claude/produktsuche-speicherung` (review-console,
+  `tagesbericht.html`). Firebase ERSETZT Codebase bzw. Hosting-Site komplett
+  (Vorfall 23./24.09., „Verbotene Muster"): wird einer davon NACH diesem Zweig
+  aus seinem eigenen Stand ausgerollt, schickt die Konsole kein `doppelStand`
+  mehr — der Resolver hält dann jede Freigabe eines Bons mit `bild_aehnlich_*`,
+  `seite_abweichend` endlos fest, und `BON_URTEIL` fehlen die neuen Gründe;
+  wird dieser Zweig als zweiter ausgerollt, entfernt er still die
+  Barcode-Korrektur und die Bildschirmfoto-Erkennung der Morgenrunde. Darum:
+  alle vier Zweige zusammenführen und die Tests BEIDER Codebases grün haben
+  (`jest cloud-functions/cashback-pipeline cloud-functions/review-console
+  --selectProjects cf`, Exit 0), erst dann (1)–(4) aus diesem einen Stand —
+  oder streng nacheinander, jeder Zweig vorher auf den gerade ausgerollten
+  Stand gebracht. Prüfung vor JEDEM Deploy, für jeden aktiven Zweig:
+  `git log <ausrollstand>..<zweig> -- cloud-functions/review-console cloud-functions/cashback-pipeline receipt-admin-web`
+  muss leer sein (`git branch --list 'claude/*'` für die Liste), und der
+  Live-Stand wird gegen das Quellpaket geprüft, nicht angenommen:
+  `gcloud functions describe <fn> --region=<r> --gen2 --project=markendetektive-895f7 --format="value(buildConfig.source.storageSource.bucket,buildConfig.source.storageSource.object)"`
+  → Zip holen, entpacken, mit `cmp` gegen den Basisstand vergleichen
+  (`processCashback` europe-west3, `reviewDecideReceipt` europe-west1);
+  Hosting: die ausgelieferten Seiten
+  (`curl -s https://md-receipt-admin.web.app/pruefen.html`, ebenso
+  `tagesbericht.html`) gegen den Basisstand diffen. (1) `cloud-functions/cashback-pipeline/.env`
+  aus dem Haupt-Checkout in den Worktree kopieren, `cmp` prüfen — sonst fällt
+  die DocAI-Eskalation still weg; (2) `functions:cashback-pipeline` allein,
+  keine Doppel-Schalter setzen (was dann ohne Schalter wirkt: Tabelle „Ab dem
+  Deploy ohne Schalter" unten); per `gcloud functions describe … environmentVariables`
+  prüfen; (3) `functions:review-console` allein; (4) `hosting:md-receipt-admin`
+  (die alte `pruefen.html` meldete einen Doppel als „ohne Prämie"; neu: Zeile
+  „Doppel-Prüfung" im Bon und Kachel `doppelImResolver` im Tagesbericht; und
+  nur die neue schickt `doppelStand` — solange (3) oder (4) fehlen, hält jede
+  Freigabe eines Prüfgrund-Bons wieder fest, gebucht wird nichts); (5)
+  Schalter auf `'shadow'` und Treffer durchsehen —
+  `gcloud logging read 'jsonPayload.message="doppel-treffer"' --project=markendetektive-895f7 --freshness=7d`
+  (je Treffer Regel, Modus, `andererMarkt`, `abstand`) und
+  `jsonPayload.message="markt-ohne-namen"` für `marktNurMitName`; am Bon steht
+  derselbe Befund in `receipts.doppelPruefung.treffer`, in der Konsole als Zeile
+  „Doppel-Prüfung"; (6) auf `true`; `bildFeinvergleich` zuletzt.
+  `doppelSeiteAbweichend` beobachtet ab dem Deploy von selbst — erst nach
+  Durchsicht dieser Treffer (und mit `ocrPrompt: 'v1.5'`) auf `true`. **Die Regeln
+  über Konten kennen nur Gutschriften NACH dem Deploy** (Schlüssel und Indizes
+  entstehen erst dann; nur die Regeln derselben Person lesen den Bestand aus
+  `receipts` — die Erweiterung von `doppelDatum` über den Summen-Index nicht,
+  ihr Rückblick wächst ab dem Deploy auf 95 Tage). Deshalb `doppelKonten` und
+  `doppelBestellnummer` frühestens **8 Tage** nach dem Deploy,
+  `doppelKontenArtikel` frühestens **8 Tage nach dem Umschalten auf `'shadow'`**
+  (erst dann entsteht der Tages-Index), `doppelKontenDatum` frühestens **16 Tage**
+  nach dem Deploy auf `true` (Bon-Alter 7 Tage, beim Summen-Index plus 8 Tage
+  Fenster) — sonst lässt ein zu frühes Scharfschalten Kopien aus der Zeit davor
+  durch. Eine Kopie mit sichtbarer Uhrzeit fängt bis dahin die alte Vorprüfung
+  (transactionHash). Optional, ohne Deploy: für `cashback_bon_tage` und
+  `cashback_bon_summen` das Feld `eintraege` vom Einzelfeld-Index ausnehmen
+  (Firestore-Admin-REST-API, PATCH `…/fields/eintraege` mit
+  `indexConfig.indexes: []` — NIE über `firestore:indexes`); keine Abfrage nutzt
+  es, und es hebt die Grenze von 40.000 Indexeinträgen je Dokument auf.
+  `doppelOnlineSeite` hängt nur an Gutschriften derselben Person und ist per
+  Code-Default `true` (Nachprüfung 05.10.2026) — ebenso `doppelBildAehnlich`.
+  **Korrektur Abschlussprüfung 06.10.2026** (hier stand bis dahin: „`seite`
+  greift sofort" und „`doppelBildAehnlich` wirkt nur, wo der scharfe
+  Feinvergleich `capture.bildAehnlich` schrieb" — beides falsch): `seite`
+  sieht unter dem Standard-Prompt v1.4 nie einen Beleg ohne Summe (erst mit
+  `ocrPrompt: 'v1.5'`), und Regel bild wirkt ab dem Deploy über den Nachtrag
+  bei gleichzeitigem Hochladen, in jedem Modus des Feinvergleichs.
+- **Ab dem Deploy ohne Schalter** (Abschlussprüfung 06.10.2026, jeder Punkt
+  im Code nachgesehen) — damit nach dem Deploy niemand an der falschen Stelle
+  sucht oder den falschen Schalter dreht:
+  | Was | Wirkung ab Deploy | Rückweg |
+  |---|---|---|
+  | Regel `summe` | lehnt ab (`duplicate_content_self`), in Pipeline UND Resolver — also auch Bons, die heute in der Prüfung liegen und die Bon-Runde (07:45) freigibt | `doppelSumme: false` |
+  | Regel `bild` | nur über den Nachtrag bei GLEICHZEITIGEM Hochladen derselben Person: die jüngere wartet bis zu 4 Läufe (~1–2 h) auf die ältere, dann Textregel, `bild_aehnlich_*` oder Gutschrift; +1 Lese- und 1 Abfragevorgang je Upload | `doppelBildAehnlich: false` |
+  | `seite`, `seiteAbweichend` | unter v1.4 ohne Wirkung (keine `app`/`ohneSumme`-Felder); `seiteAbweichend` auch danach nur beobachtet | — |
+  | Bestandsschutz | kein automatischer Storno, keine automatische Betragskorrektur eines bezahlten Bons; nur ein Mensch storniert | — |
+  | Schritt 5b | lehnt einen schon bezahlten Bon nicht mehr ab | — |
+  | Konfiguration | `processCashback` liest streng: nicht lesbar → Wiederholung, dann `review` / `config_unavailable` | — |
+  | `enqueueCashback` | `create()` statt `set()`; fremde `clientUploadId` → 409 `invalid_upload_id` | — |
+  | Bild nicht lesbar | PDF/HEIC/abgeschnittene Datei (`capture.bildNichtLesbar`) → vor der ersten Gutschrift `review` / `bild_nicht_pruefbar` (gemessen 2 Fälle in 60 Tagen, beide 512-KiB-Abbrüche) | `bildNichtLesbarPruefen: false` |
+  | Online-Belege | Kundenanschrift aus dem Kopf entfernt — unter v1.4 nur, wenn ein Stichwort (Liefer-/Rechnungsadresse, Bestellnummer) im Kopf steht | — |
+  | Markt-Resolver | Stufe 1b (Umsatzsteuer-ID der Kette) immer; „kein Tippfehler-Abgleich bei Online-Bestellungen" erst mit v1.5 (braucht `belegart`) | — |
+  | Buchung | jede Gutschrift schreibt Schlüssel, Summen- und Personen-Index und `doppelPruefung` (Tages-Index nur mit `doppelKontenArtikel`) | — |
+  | Resolver | Freigabe kann `rejected` (`creditedCents: 0`) oder 409 `halten` zurückgeben | — |
+- **Markt-Resolver** (Prüfrunde 2): ohne gelesenen Händlernamen keine
+  Namensstufen (ein LEERER Name hatte Abstand 2 zu „dm" und wurde dm — unter
+  Prompt v1.5 lasen Lidl-Plus-Screenshots ohne Logo `merchant: null`), der
+  Tippfehler-Abgleich erst ab 3 Zeichen und nie bei Online-Bestellungen
+  („Denns Online-Shop" → Penny). **Prüfrunde 3:** für Online-Bestellungen gilt
+  das sofort (Patricks Regel); für LADENBONS hängt es am Schalter
+  `marktNurMitName` (Default `false` = wie vor Prüfrunde 2, also meist „dm"),
+  weil es ehrliche Bons unserer Märkte ablehnte und „Markt nicht dabei" zeigte
+  (REWE-eBon/-App, Lidl und Netto mit abgeschnittenem Logo; 4 bezahlte Fälle in
+  7 Tagen). Ausnahme: mit scharfem `eigenmarkeNurLadenbon` bleibt ein Beleg ohne
+  Uhrzeit streng (Picnic mit abgeschnittenem Kopf). Neu und immer aktiv:
+  Stufe 1b, die gedruckte Umsatzsteuer-ID der Kette im Bonkopf, nur ohne Namen
+  (`DE812706034` REWE, `DE132748925` Norma, `DE202748117` Penny — je ≥ 98 % ein
+  Markt). **Vor `marktNurMitName: true` mit Patrick klären**, was mit Lidl-/
+  Netto-Bons ohne Logo passiert (z. B. Kassen-Seriennummer `LDL-…`/`NTO-…`
+  als Schemafeld, oder Prüfung statt Ablehnung) — sonst lehnt `true` sie mit
+  falschem Text ab. Auswertung: Log `markt-ohne-namen` im Modus `'shadow'`. Prompt Regel 7: bei einem App-Kassenbon ist die
+  sichtbare Händler-App der Absender („Lidl Plus" → Lidl). Ein schon bezahlter
+  Bon behält den Markt, den der alte Resolver fand (`markt-bestandsschutz`).
+  Bei Ladenbons trifft der Tippfehler-Abgleich weiter kurze Wörter („Das" → dm,
+  „denns BioMarkt" → Penny, „Getränke Hoffmann" → Rossmann) — eigene Aufgabe,
+  vorher am Bestand messen.
+- **Bekannte Lücken des Doppel-Schutzes (Prüfrunde 3, bewusst offen):**
+  dieselbe Person, Textregeln allein (Korrektur Nachprüfung 05.10.2026 — die
+  Lücke gilt ab **1 Tag** Abstand, nicht erst ab 9): Datum geändert, Uhrzeit
+  geändert/verdeckt UND Endsumme UND mindestens ein Artikelpreis geändert →
+  weder Summe noch Artikelsumme passt; am SELBEN Tag ebenso, wenn ≥ 40 % der
+  Preise geändert sind (Artikelanteil < 0,6). Heute sperrt solche Kopien der
+  grobe dHash (außer bei starkem Beschnitt, ab ~10 % kommt er in 44 von 60
+  Fällen durch); mit scharfem Feinvergleich hält sie Regel bild in der Prüfung
+  — bis ±8 Tage um den Bon-Tag des Originals, darüber hinaus (seit der dritten
+  Prüfrunde 06.10.2026) nur mit Artikelanteil ≥ 0,8 (`BILD_FERN_ANTEIL`; das ist
+  KEINE Textregel, sie gilt nur zusammen mit dem Bildtreffer und hält nur in
+  der Prüfung). **Bleibt offen:** beschnittene + bearbeitete Kopie mit einem
+  Bon-Tag ≥ 9 Tage neben dem Original UND mehr als 2 von 10 geänderten
+  Preisen; und Regel bild steht nur an der JÜNGEREN Einreichung — wurde die
+  Kopie bezahlt, während das Original abgelehnt war, und wird das Original
+  später nachverarbeitet, sieht es die Kopie nicht (vor einer Nachverarbeitung
+  abgelehnter Bons prüfen, ob ein bezahlter Bon der Person `capture.bildAehnlich`
+  auf ihn zeigt). **Regel bild hängt ganz am groben dHash** (Abschlussprüfung
+  06.10.2026, mit dem echten index.js nachgestellt, alles schon vor diesem
+  Zweig so): eine bearbeitete Kopie mit weißem Rand ringsum (Abstand 8) oder
+  um 180° gedreht (Abstand 42; ob Gemini gedrehte Bons zuverlässig liest, ist
+  ungeprüft) wird nie verknüpft und bezahlt; ebenso, wenn zwischen Original
+  und Kopie 50 beliebige Uploads liegen (Rückschau = 50 jüngste Bons). Bewusst
+  NICHT gebaut: `.trim()` vor dem Hash bzw. kleinster Abstand über 4 Drehungen
+  — die gespeicherten Hashes aller Bestandsbons sind ohne Trim gerechnet
+  (exakte Wiederholungen alter Bons fielen aus dem Abgleich), und mehr grobe
+  Treffer SPERREN ohne scharfen Feinvergleich ehrliche Uploads; erst als
+  zusätzliches Feld neben dem alten Hash und gemessen. Geschlossen ist dagegen
+  der Weg über eine Datei ohne dHash (PDF, HEIC, abgeschnitten):
+  `bild_nicht_pruefbar`, siehe Tabelle oben — aber nur in EINE Richtung:
+  kommt zuerst das Original als PDF (ein Mensch gibt es als echten Einkauf
+  frei) und danach die bearbeitete Kopie als JPEG, findet die Kopie keinen
+  Bildpartner und wird bezahlt. Mögliche Wege, alle mit Folgen für ehrliche
+  Nutzer und darum Entscheidung Patrick: `storage.rules` für
+  `cashback-uploads` nur noch `image/jpeg` (die heutige App deklariert immer
+  `image/jpeg`; vorher prüfen, was ältere App-Versionen deklarierten — sonst
+  scheitern deren Uploads), oder bezahlte `bildNichtLesbar`-Bons der Person
+  als Regel-bild-Kandidaten führen (die folgenden ±8 Tage gingen dann an einen
+  Menschen; gemessen 2 nicht lesbare Bilder in 60 Tagen, 1 davon bezahlt). Gemessener Textregel-Kandidat,
+  der auch diese Bild-Umgehungen finge, NICHT gebaut (Entscheidung Patrick): „gleiche Person,
+  gleicher Markt, 1–95 Tage, Artikelanteil ≥ 0,8 ohne Summe" — 0 von 11.442
+  bezahlten Paaren, höchster ehrlicher Wert 0,75 (knapp), fängt nur Kopien
+  mit höchstens 2 von 10 geänderten Preisen;
+  Seiten einer Online-Rechnung mit geändertem Datum UND geänderter
+  Bestellnummer (seit 06.10. hält `doppelSeiteAbweichend: true` sie bis ±8 Tage
+  in der Prüfung); ANDERES Konto + geänderter Händlername (kein Index ohne Markt); anderes Konto
+  + geändertes Datum + geänderte Endsumme (bräuchte Artikelvergleich über die
+  Tages-Indizes der ±8 Tage außerhalb der Transaktion; gemessen 0 Fehlalarme
+  erst ab Anteil 0,7, niedrigster echter Doppelbon 0,71 — zu knapp für ohne
+  eigene Beobachtung); Datum > 95 Tage daneben; Bon in zwei Hälften mit kaum
+  gleichen Artikeln. Betrug über mehrere Konten (Verbünde) stoppt die
+  Kontosperre, nicht diese Regeln. Die Doppelzahlung vom 02.10.
+  (8 ct) ist bezahlt; eine Rückforderung ist nicht Teil dieses Baus.
+- **Eine gekürzte Kandidatenliste nie nach etwas ordnen, das ein Angreifer
+  billig herstellen kann** (Abschlussprüfung 06.10.2026, Regel bild): „neueste
+  zuerst, bis 20" ließ 20 frische Uploads das bezahlte Original verdrängen —
+  jeder Upload ist bis zum Lesen „offen" und damit Kandidat. Die Grenze so groß
+  wie die Quelle machen (alle Treffer der Bildprüfung) und beim Kürzen zuerst
+  behalten, was sich nicht vermehren lässt (bezahlte Bons, Tages-/Wochendeckel).
+  Bei jeder neuen Liste mit `slice` auf dem Geldpfad fragen: wer bestimmt, was
+  hinten herausfällt?
+- **Eine Schutzregel, die nur gegen BEZAHLTE Gegenstücke prüft, hängt an der
+  Verarbeitungsreihenfolge** (zweite Nachprüfung 06.10.2026, Regel bild): wird
+  die Kopie vor dem Original gebucht, ist das Gegenstück noch offen, und
+  ältere Belege tragen den Verweis nie — beide werden bezahlt. Bei jeder
+  einseitigen Verweis-Regel (neu → alt) fragen: was passiert, wenn das ALTE
+  noch nicht entschieden ist? Und: **eine Regel, die nur in der Buchung
+  prüft, ist für jeden Bon unsichtbar, der ohne Buchung in die Prüfung geht**
+  — dort entscheidet später ein automatischer Weg (Bon-Runde → Resolver).
+  Darum prüft der Resolver dieselben Regeln in der Buchungs-Transaktion.
+- **Kein Kommentar, keine Konstante beschreibt einen Schutz, den kein Test
+  auslöst** (Nachprüfung 06.10.2026): am 05.10. standen Positivsumme,
+  Größenbremse und Namens-Hashes im Personen-Index nur in Kommentaren, der
+  Code hatte sie nicht, und der Testlauf war rot — eine Bauzusammenfassung
+  meldete trotzdem „getestet". Halbfertiges entweder verdrahten (mit Test,
+  der am alten Stand scheitert) oder samt Kommentar entfernen; vor „fertig"
+  `jest … --selectProjects cf` mit Exit 0.
+- **Behoben 05.10.2026 (Altfehler):** die Vorprüfung in Schritt 5b hing nicht
+  an `alreadyCredited`. Lag eine zweite Kopie desselben Bons in einem lebenden
+  Status (bezahlt, in Prüfung, wartend), stornierte eine erneute Zustellung des
+  bezahlten Originals dessen Gutschrift (`reprocess_to_rejected`). Jetzt: ein
+  bezahlter Bon wird von 5b nie abgelehnt (Log `vorpruefung-doppel-schon-bezahlt`),
+  die Kopie lehnt ihr eigener Lauf ab. Siehe Regel „Bestandsschutz" unten.
+
+## Ausrollstand 06.10.2026, abends (Patrick: „alles ausrollen", „ja")
+
+Ausgerollt aus `feat/rnfirebase-migration` (Stand `a673955f`, alle vier
+Zweige vom 04.–06.10. zusammengeführt, 3.943 Tests + 66 Rules-Tests grün):
+Firestore-Rules (Sperrliste `eanKorrektur`/`eanKorrekturVerworfen`),
+`hosting:md-receipt-admin`, `functions:review-console` (zweimal, zuletzt mit
+der Notbremse-Sperre), `functions:cashback-pipeline`, `functions:nutrition-scraper`,
+`functions:external-misses-processor`, `functions:external-product-lookup`
+(neu: Trigger `onNutritionScrapeFuerExterne`). Index `status`+`rang` auf
+`external_lookup_misses` angelegt (REST). Daten: `.backfill-doppel-person.js`
+(6.783 Einträge, VERIFY grün, `doppelBestandIndexiert: true`), Nachpflege
+Produktsuche (19.060 Ränge, 21.105 Produkte mit `storedAt`/`fetchedAt`, 665
+Namen repariert), `_meta/produktsuche` = `{ shopBilder: true }` (übrige Werte
+Standard: 1 Suche je Lauf, 120 am Tag — Tempo 3/450 erst nach Tagesbericht
+und Stichprobe). Schalter: `barcodeKorrektur: true` (Patrick 06.10.: „ja");
+`preisBildschirmRegel`/`preisBelegRegel` fehlen = Beobachtung; Doppelbon-
+Schalter unverändert (Standard), `ocrPrompt` unverändert (v1.4).
+NICHT ausgerollt: `nutrition-backfill` (zurückgestellt, functions.config()),
+die App-Korrektur des Barcode-Scanners (`claude/barcode-scanner-fix`, kommt
+mit dem nächsten App-Build; vorher einmal auf einem echten Android-Gerät den
+Barcode-Schritt durchklicken).
+Offen danach: Doppelbon-Schalter nach der Anleitung im Abschnitt
+„Ausrollen (Reihenfolge, Nachtrag 05.10.2026)" schrittweise auf 'shadow'/true;
+Preisfoto-Regeln nach einer Woche Beobachtung; Lieferanschrift-Bereinigung
+(`.bereinige-lieferanschrift-0410.js`) wartet auf Patricks Freigabe.
+
+## Produktentscheidung 20.09.2026: lose Ware wird angenommen
+
+Frische/lose Ware (Kräuterbund, Obst, Frischetheke) trägt keinen echten
+Produkt-Barcode, sondern nur den Code der Ladenwaage — der gilt nur in diesem
+Markt, und zwei verschiedene Produkte können denselben tragen.
+
+**Entscheidung Patrick: trotzdem annehmen und vergüten.** Niemand soll fürs
+Mitmachen bestraft werden. Diese Datensätze werden aufgenommen und für
+Preisvergleiche genutzt.
+
+Was daraus folgt (offen, ClickUp 12487v2akqg): solche Codes am Dokument
+kennzeichnen und die Doppel-Prüfung bei ihnen zusätzlich nach Markt trennen —
+sonst sperrt ein fremdes Produkt aus einem anderen Laden eine korrekte
+Einreichung. Nicht ablehnen, nur sauber einsortieren.
+
+## Produktfoto-Runde 20.09.2026 — vier Regeln, die je eine Runde gekostet hätten
+
+**Ein Ops-Skript im Worktree lädt die Regel AUS DEMSELBEN Worktree.**
+`.crowd-review-*.js` holt die Doppel-Regel über `path.join(__dirname, '..',
+'review-console', 'src', 'duplicatePolicy.js')` — das löst auf die Worktree-Kopie
+auf, nicht auf den Haupt-Checkout. Am 20.09. hatte Patrick die Regel um 13:22
+geändert (`ffda2c3`: fremde Einreichungen sperren niemanden mehr, gegen den
+eigenen Account nur noch 24 h statt 30 Tage). Der Worktree trug die Fassung vom
+14.09. — der fertig geprüfte Lauf hätte **8 von 14 Ablehnungen** gegen eine
+Entscheidung geschrieben, die wenige Stunden alt war, und eine Ablehnung ist
+terminal. **Vor jeder Entscheidungsrunde prüfen, ob die geladene Regeldatei dem
+Haupt-Checkout entspricht** (`git log -1 -- cloud-functions/review-console/src/
+duplicatePolicy.js` dort gegen den Worktree, oder schlicht `git cherry-pick`).
+Gefunden hat das nur die adversarielle Prüfrunde, nicht der Lauf selbst.
+
+**Die Ablehntexte der Ops-Skripte erreichen die Nutzer NICHT.** `noteFor()`
+schreibt nach `reviewNote` — und `lib/utils/productSubmissionCopy.ts` sagt im
+Kopfkommentar ausdrücklich, dass dieses Feld nie angezeigt wird. Was der Nutzer
+liest, steht in `REASON_COPY`, gekeyt auf den Grund-Code. Gemessen am 20.09.:
+**140 von 447 Ablehnungen (31 %) trugen einen Code ohne Eintrag** (73×
+`unvollstaendig`, 36+26× die beiden Sperr-Gründe, dazu `bild_defekt`) und
+zeigten deshalb den Standardtext „alle Ansichten scharf, EAN und Preis gut
+lesbar" — bei Sperren sachlich falsch, denn deren Fotos waren in Ordnung.
+Regel: **jeder neue Grund-Code braucht im selben Commit einen `REASON_COPY`-
+Eintrag.** Nachgezogen für alle sechs offenen Codes.
+
+**Fail-closed braucht Symmetrie.** Die Doppel-Regel wertet einen fehlenden
+Vergleichswert als „gleich" — wer also keinen Preis hat, wird gesperrt. Wenn
+man fehlende Preise beim KANDIDATEN nachliest, muss die REFERENZ dieselbe
+Chance bekommen, sonst entscheidet, auf welcher Seite die OCR zufällig
+versagte. Am 20.09. hingen 4 von 9 Sperren nur an einer Referenz ohne Preis;
+nach der Nachlesung blieben alle vier gesperrt (1,49/1,79/0,99/1,29 € beidseits
+identisch) — jetzt aber belegt statt angenommen.
+
+**Ein geretteter PREIS darf eine Sperre lösen, ein geretteter HERSTELLER
+nicht.** Beim K-Classic Gouda las die eine Seite „Kaufland Stiftung & Co."
+(Markeninhaber), die andere „DMK Deutsches Milchkontor" (Produzent) — beides
+steht auf derselben Packung. Als „andere Daten" gewertet hätte das eine echte
+Dublette (identischer Preis, gleicher Markt, 10 Tage) freigegeben. Preis vom
+Schild ist eindeutig, eine Firmenangabe ist es nicht.
+
+**Sieben Dateien sind nicht sieben Ansichten — und dieselbe Datei ist nicht
+immer ein Mangel.** Zwei Fälle am selben Tag, beide nur durch den Bild-Audit
+unterscheidbar: (a) ein Petersilienbund mit sieben EIGENEN Aufnahmen derselben
+Vorderansicht (sieben verschiedene md5 → die Bild-Dedup ist blind, die
+Vollständigkeitsregel zählt nur Dateien) — keine der verlangten Angaben ist zu
+sehen, abgelehnt; (b) ein geriebener Gouda, bei dem `zutaten`, `naehrwerte` und
+`hersteller` byteidentisch sind — das eine Rückseitenfoto trägt Zutatenliste,
+Nährwerttabelle UND die Kontaktangabe, der Datensatz ist vollständig,
+freigegeben. Eine Byte-Prüfung entscheidet hier in beide Richtungen falsch.
+
+**Preis- und Hersteller-Rettung (`.crowd-preis-rescue-2009.js`)** — dritter Fall
+der Klasse nach Name (13.09.) und EAN (19.09.). Ursache ist derselbe
+Spar-Reflex, der bei der Bon-OCR schon dokumentiert ist: `crowd-upload-namer`
+liest Name, Preis und Hersteller in EINEM Aufruf mit
+`thinkingConfig: { thinkingBudget: 0 }` und 512 Token. Von 102 offenen
+Einreichungen fehlten 4 Namen, 23 Preise, 16 Herstellerangaben; mit Denken
+nachgelesen kamen 4 Namen, 8 Preise und 16 Herstellerangaben dazu. Gegenprobe
+zur Erwartung: bei **18 der 32 Fälle war schlicht kein Preis im Bild** — das
+„Preis"-Foto zeigt zu 40 % nochmal das Produkt (deckt sich mit der Messung des
+Namers vom 06.09.). Grenzen wie bei der EAN-Rettung: zwei übereinstimmende
+Lesungen, eigenes Feld (`priceRescueOcr`/`manufacturerRescueOcr`), nie in
+`priceOcr`/`manufacturerOcr`.
+
+**Ergebnis der Runde:** 102 offen → 96 freigegeben (1316 ct, alle gebucht),
+6 abgelehnt (1 Barcode-Foto zeigt den Boden, 3 lose Ware ohne Produkt-Barcode,
+1 siebenmal dieselbe Ansicht, 1 Eigen-Doppel binnen einer Minute), 0 ohne
+Buchung, 0 ohne Grund am Dokument, Warteschlange leer.
+
+## Morgenrunde Produktfotos (seit 24.09.2026)
+
+**Stand 26.09.2026, 14:40 UTC:** wieder scharf (`fotoWorker: true`) mit
+Preis-Pflicht. Vorher live geprüft: Trockenlauf der ausgerollten Runde über 55
+offene Fälle (44 frei, 10 `preis_fehlt`, 1 `preis_unsicher`), jede der 10
+Ablehnungen von zwei unabhängigen Prüfern am Foto bestätigt.
+
+Täglich 08:00 prüft und entscheidet `fotoRundeTaeglich` (Codebase
+review-console) alle offenen Produktfoto-Einreichungen — Freigaben UND
+Ablehnungen automatisch (Entscheidung Patrick 24.09.), Bericht mit Warnungen
+in `ops_tagesberichte`. Die Nachricht an die Nutzer schickt NICHT die Runde,
+sondern der Sammler in crowd-upload-reward (eine pro Person) — die Runde darf
+deshalb keinen Push-Merker (`rewardPushSentAt`) setzen. Dashboard:
+md-receipt-admin.web.app/tagesbericht.html; Meldung im eigenen Claude-Chat +
+ClickUp (geplante Aufgabe `morgenrunde-bericht`). Scharf nur mit
+`cashback_config/v1.fotoWorker === true`. **Alles Weitere — Regeln, Notbremse,
+Vorfälle — steht in `cloud-functions/review-console/WISSEN-FOTORUNDE.md`.**
+Handrunden mit den `.crowd-*-DDMM.js`-Skripten sind damit überholt; wer doch
+von Hand prüft, nutzt dieselben Regeln (Datei `review-console/src/fotoRundeRegeln.js`).
+
+**Bons in `review` entscheidet seit 24.09. die Bon-Runde um 07:45**
+(`bonRundeTaeglich`, Regeln `review-console/src/bonRegeln.js`, Schalter
+`cashback_config/v1.bonWorker`). Sie ersetzt die Handrunden
+`.pruefe-bons-*.js` + `.review-approve-*.js` und entscheidet ausschließlich über
+den Resolver. Zwei Regeln aus ihrer Prüfrunde, die für JEDE Bon-Nacharbeit
+gelten: (1) eine Zweitlesung, die Datum oder Endsumme NICHT liest, bestätigt
+nichts — „nicht lesbar" als „kein Widerspruch" zu werten gibt jeden Bon frei;
+(2) vor einer Freigabe das Budget der wirksamen Aktion prüfen — der Resolver
+schließt einen Bon bei leerem Budget ENDGÜLTIG ohne Prämie ab.
+Details in `WISSEN-FOTORUNDE.md` („Bon-Runde").
+
+## Bons nachverarbeiten / Review auflösen — Regeln (Money-Ops 02.09.2026)
+
+Am 02.09. wurden 163 Review-Bons (seit Juli gehalten, „meistens innerhalb eines
+Tages" versprochen) und 120 Bons ohne Aktion nachverarbeitet. Zwei adversarielle
+Review-Runden (29 Funde) haben Fallen gezeigt, die für JEDE Nacharbeit gelten:
+
+- **Das Tageslimit kennt nur das JÜNGSTE vergütete Bon-Datum**
+  (`cashback_last_bon_date`, nur vorwärts). Wer ÄLTERE Bons nachverarbeitet
+  (Republish, Reprocessing, Review-Freigabe), umgeht es → zwei Gutschriften für
+  dasselbe Bon-Datum. Regel: bei Nacharbeit die Same-Date-Frage SELBST
+  entscheiden — Ledger frisch lesen (earn−reverse>0 → receipts.bonDate),
+  pro User SEQUENZIELL (publish → auf finalen Status pollen → nächster Bon),
+  eigener Bon ausgeschlossen. Lauf B (`.repair-campaign.js`) vor Lauf A
+  (`.review-approve.js`); A prüft per Gate, dass B final ist.
+  **Root-Fix seit 05.09.2026:** das Tageslimit ist ein echter Zähler —
+  `users/{uid}/cashback_days/{YYYY-MM-DD}` = `{ bonDate, receiptIds[] }`
+  (server-only, kein Rules-Block nötig). `syncLedgerForReceipt` liest das
+  Tages-Doc in der Transaktion (Cap = `receiptIds` ohne eigenen Bon ≥
+  `config.dailyCap`), schreibt beim Earn den Bon hinein (+ `bonDate` am Ledger-
+  Earn) und entfernt ihn beim Reverse aus ALLEN Kandidaten-Tagen (Ledger-Earns,
+  Aufrufer-Datum, `opts.extraDays` = gespeichertes receipts.bonDate — die OCR
+  kann zwischen Earn und Reverse ein anderes Datum lesen). Pre-Check 6y liest
+  dasselbe Doc, ist aber nicht autoritativ. Übergangs-Fallback: bei
+  `dailyCap === 1` UND `config.dailyCapLegacyFallback !== false` zählt das alte
+  Vorwärts-Feld mit (Earns aus dem Fenster Backfill↔Deploy); der Reverse
+  löscht das Feld, wenn es auf den stornierten Bon zeigt. Nach Backfill 2 +
+  VERIFY grün wird `dailyCapLegacyFallback: false` gesetzt (Sunset, kein
+  Deploy). Liest eine neue OCR-Lesung ein anderes Datum, hängt der Noop-Zweig
+  den Bon in den neuen Tag um. Backfill `.backfill-cashback-days.js` ist
+  TRANSAKTIONAL pro User (setzt die aktive Menge je Tag, entfernt stale IDs,
+  löscht leere Docs, datiert Legacy-Earns; VERIFY=1 → exit 1 bei fehlend ODER
+  stale). Reihenfolge: Config `dailyCap=1` → Backfill → Deploy → Backfill
+  erneut → VERIFY → Fallback-Sunset. 27 historische Tage mit 2 vergüteten Bons
+  = die alte Lücke; 16 aktive Earns ohne auflösbares Receipt/Datum (alte
+  Test-Resets) zählen an keinem Tag. `cashback_last_bon_date` bleibt für den
+  Client-Softcheck.
+  `cashback_config/v1.dailyCap` ist jetzt semantisch ein Zähler — von 3 auf 1
+  gesetzt, damit das gelebte Verhalten bleibt; 3 würde ab sofort 3 Bons/Tag
+  vergüten (kein Deploy nötig). **Seit 24.09.2026 steht er auf 3 (Entscheidung
+  Patrick, `dailyCapNote` am Dokument)** — Pipeline, Resolver und Bon-Runde
+  lesen denselben Wert.
+- **Der OCR-Cache-Pfad muss `ocr.robust` mitführen** (index.js Cache-Zweig).
+  Ohne ihn ist das Review-Gate 6w bei jedem Retry/Reprocessing blind
+  (conf=null → keine Prüfung) und der Final-Write löscht robust am Doc.
+- **Gates, die einen Status VON approved WEG bewegen, müssen an
+  `alreadyCredited` hängen** (6w: `!alreadyCredited && reviewDecision !==
+  'approve'`). Sonst storniert eine PubSub-Redelivery über
+  `syncLedgerForReceipt(status='review')` eine echte Gutschrift — dieselbe
+  Klasse wie die Selbststornos vom 19./26.08.
+  **Seit 05.10.2026 in der Buchung erzwungen (Bestandsschutz):**
+  processCashback ruft `syncLedgerForReceipt` mit `opts.bestandsschutz`
+  (immer, außer `reviewDecision` reject/no_reward am Bon). Die Transaktion
+  storniert dann nie einen aktiven Earn, schreibt nichts und meldet
+  `bestandGeschuetzt`; der Lauf setzt den Bon auf `approved` mit dem aktiven
+  Betrag zurück (Log `bestandsschutz-gutschrift`, mit `waereStatus/waereGrund`).
+  Grund: das vorab gelesene `alreadyCredited` ist bei parallelen Läufen mit
+  anderer Event-ID veraltet, und neben 5b hatten weitere Gates dieselbe Lücke
+  (Zukunftsdatum nach Freigabe durch einen Menschen → `review`, nachträglich
+  verkürzte Aktionsfrist → `bon_too_old`, verkürzter Aktionszeitraum →
+  `no_active_campaign`; alle mit Tests in `__tests__/bestandsschutz.test.js`).
+  **Auch der Betrag (Nachprüfung 05.10.2026):** eine erneute Zustellung
+  rechnet einen bezahlten Bon OHNE Deckel neu (alreadyCredited überspringt
+  Kopf-, Wochen-, Tageslimit, Budget). `amount_correction` buchte so nach oben
+  über `maxPerUserCents` und ein leeres Budget hinaus und war nach unten
+  (Aktion geändert) ein Teil-Storno ohne Menschen. Mit `bestandsschutz` bleibt
+  der Betrag (`betragGeschuetzt`, Log `bestandsschutz-betrag`); Korrekturen
+  nur über Resolver oder Mensch (`__tests__/nachpruefung0510.test.js`).
+  **Die bezahlte LESUNG bleibt am Bon (Nachprüfung 06.10.2026):** bis dahin
+  schrieb Schritt 7 unter Bestandsschutz die Felder der verworfenen Lesung an
+  den Bon (contentHash, transactionHash, itemsHash, Datum, Summe, Markt,
+  Positionen) — 5b sucht Kopien nur über diese Felder, und ein neues Foto
+  desselben Bons wurde ein zweites Mal bezahlt (nachgestellt: Datum als zu alt
+  oder Markt unlesbar gelesen). Jetzt schreiben Bon und Spiegel nur Status und
+  Betrag, keine Positionen, keine Region; die verworfene Lesung steht als
+  `neulesungVerworfen` am Bon (`ocr` kann sie tragen — frühe Ablage bzw.
+  Nachverarbeitung hat es ersetzt), und `identitaetAusBon` liest dann die
+  Felder des Bons statt `ocr`. Regel: **wer eine Entscheidung verwirft,
+  verwirft auch die Lesung, die zu ihr führte** — sonst verliert der bezahlte
+  Bon seine Kennung. Noch offen (wie vor dem Zweig): eine ANGENOMMENE
+  Neulesung mit anderem Inhalt ersetzt die 5b-Felder ebenfalls; dagegen
+  helfen nur die Doppel-Schalter (Tageseinträge sperren unter beiden Lesungen).
+  Einen bezahlten Bon storniert nur ein Mensch: Resolver reject/no_reward oder
+  `reviewDecision` am Bon setzen und neu zustellen. Neue Gates brauchen damit
+  keinen eigenen `alreadyCredited`-Guard fürs Geld — wohl aber für die
+  Anzeige, wenn sie vor der Buchung etwas Sichtbares tun.
+- **Ledger-Precheck ist fail-CLOSED** (`ledger_precheck_failed` → Retry, nach
+  MAX_PROCESS_ATTEMPTS `review`, nie `rejected`). Infrastrukturfehler sind
+  keine Aussage über den Bon.
+- **`resolveCashbackReview`** hat dieselben Caps wie die Pipeline, lädt die
+  Config STRIKT (kein Fallback auf campaignsEnabled:false), reversed bei
+  reject/no_reward einen evtl. vorhandenen Earn, schreibt purchased_products
+  mit `backfilled:true` und pusht. Decisions: `approve` |
+  `reject[&reason=duplicate_content_self|_cross_user&duplicateOf=…&priorStatus=…]`
+  | `no_reward&reason=daily_cap_reached|weekly_cap_reached|per_user_cap_reached`.
+  `cents<=0` → 409 (nie still „Budget erschöpft").
+- **Nachgezogene purchased_products dürfen keinen HEUTIGEN Zettel abhaken:**
+  `receipt-matcher` onPurchasedProductMatch setzt `noClose` bei
+  `backfilled===true` oder Bon älter als 14 Tage (Matching + Alias-Lernen
+  laufen weiter, nur der Cart-/Journey-Side-Effect entfällt).
+- **Cross-User-Dedup greift nur bei gleicher Bon-Uhrzeit** (transactionHash).
+  Gleicher Markt+Tag+Summe aus zwei Accounts binnen Minuten (OCR liest die Zeit
+  verschieden) rutscht durch → bei Freigaben skippen und manuell sichten.
+- **Skripte für Geld-Läufe:** Fail-fast bei jedem Nicht-200, Ergebnisdatei
+  nach JEDEM Bon, IDs VOR dem ersten Write merken (und mergen, nie
+  überschreiben), Publish mit Retry, Key nur aus ENV und nie loggen, DRY_RUN
+  zuerst. Vor dem Lauf zwei Skeptiker-Runden gegen die AKTUELLEN Dateien —
+  Runde 1 fand 14, Runde 2 (nach Fixes) 15 Punkte, davon 15 am neuen Stand
+  widerlegt. Ohne diese Runden wären u.a. Journey-Abschlüsse aus Juli-Bons und
+  der Review-Gate-Selbststorno live gegangen.
+
+## Ein Schalter, der nichts abschaltet — Opt-outs brauchen einen LESER (08.09.2026)
+
+Schwester der Regel darunter („Ein Status-Feld ist kein Mechanismus"), diesmal
+in der anderen Richtung: dort fehlte der Trigger zu einem Versprechen, hier
+fehlte der LESER zu einer Verweigerung.
+
+**Vorfall (86cbfdq5j):** Der Schalter unter `/notification-settings` schrieb
+seit Mai 2026 `users/{uid}.pushNotificationsEnabled: false`. Dieses Feld wurde
+im gesamten Projekt **nirgends gelesen** — die einzigen Treffer waren die zwei
+Schreibstellen. `getUserTokens` in `cashback-pipeline/lib/push.js` holte stur
+alle Token. Wer Push abbestellte, bekam Push. Dazu drei weitere Defekte am
+selben Schalter: `disable()` hing an `if (this.pushToken)` und war damit
+meistens ein kompletter Nichtstuer; es räumte das Badge nicht; und `isEnabled`
+war allein aus der iOS-Systemberechtigung abgeleitet, sprang beim nächsten
+Wechsel in den Vordergrund also wieder auf AN.
+
+**Regeln:**
+- **Jede Verweigerung (Opt-out, Stummschaltung, Sperre) braucht im selben
+  Commit die Stelle, die sie LIEST.** Prüffrage analog zur Geld-Regel: *Wer
+  genau fragt dieses Feld ab, bevor gehandelt wird?* Gibt es die Stelle nicht,
+  gehört der Schalter aus der Oberfläche — ein Versprechen, das niemand
+  einlöst, ist schlimmer als ein fehlendes.
+- **Die Prüfung gehört an den Ort, an dem Empfänger entstehen**, nicht an jeden
+  Aufrufer. In `push.js` steht sie deshalb in `getUserTokens`; jeder künftige
+  Sendeweg erbt sie.
+- **Fail-open bei fehlendem Wert.** 283.728 von 283.756 Konten trugen das Feld
+  gar nicht. Hätte „nicht gesetzt" als „aus" gegolten, hätte der Deploy alle
+  Nachrichten der App lautlos abgeschaltet. Nur ein ausdrückliches `false`
+  zählt; ein Lesefehler ebenfalls nicht (Infrastruktur ist keine Aussage über
+  den Willen des Nutzers — dieselbe Linie wie beim Aktionsgebiet).
+- **Berechtigung ≠ Wunsch.** Systemberechtigung („dürfen wir?") und
+  Nutzerentscheidung („will er?") sind zwei Zustände. In ein Boolean gequetscht
+  gewinnt immer der, der zuletzt geschrieben hat — hier die OS-Abfrage im
+  AppState-Listener. Getrennt führen, für die Anzeige und-verknüpfen:
+  `lib/services/pushPreference.ts` (Wunsch, lokal + gespiegelt) neben
+  `permissionStatus` (System) im `PushNotificationProvider`.
+- **Ein Token-Schreibvorgang darf eine Abbestellung nicht aufheben.**
+  `savePushToken` setzte `pushNotificationsEnabled: true` mit — damit hätte
+  jede Token-Registrierung den Opt-out stillschweigend zurückgenommen. Die
+  Einstellung schreibt NUR die Stelle, die den Nutzer gefragt hat.
+- **Offline-Absicherung für Präferenz-Writes:** Firestore-Promises lösen
+  offline nie auf und scheitern auch nicht (Projektregel) — ein `catch` fängt
+  den Fall also nicht. Deshalb Merker VOR dem Schreiben setzen, nach der
+  Bestätigung löschen, beim nächsten Start nachholen (`nachholenFallsOffen`).
+  Sonst bestellt jemand im Funkloch ab und bekommt dauerhaft weiter Nachrichten.
+
+**`aps.badge` ist ein SETZ-Feld, kein Zähler.** `cashback-pipeline` schickte
+hart `badge: 1` mit; die einzige Räum-Methode der App (`setBadgeCount`) hatte
+repo-weit KEINEN Aufrufer. Die rote Eins blieb damit für immer am App-Symbol —
+Wegwischen der Mitteilung, App-Neustart, Geräte-Neustart und Ausloggen ändern
+den Wert NICHT, weil er persistenter Gerätezustand ist und nicht an den
+Einträgen in der Mitteilungszentrale hängt. Kostete eine 1★-Rezension
+(07.09.2026, „wie bekomme ich die rote eins weg?"). Regel: Wer einen
+Badge-Wert sendet, liefert im selben Commit die Stelle, die ihn auf 0 setzt —
+Mount **und** AppState `'active'` im `PushNotificationProvider` decken beide
+Wege ab (Tap aus dem Hintergrund, Start aus dem beendeten Zustand). Ein fester
+Wert ohne Informationsgehalt (immer 1) gehört gar nicht erst gesendet.
+Bestehende Badges räumt nur eine stille Zustellung nach
+(`cashback-pipeline/.badge-reset.js`, `apns-push-type: background` +
+`content-available: 1` + `badge: 0`) — die geht an echte Geräte und braucht
+ausdrückliche Freigabe.
+
+## Testen und tsc scheitern am falschen Node — und an `tools/company-os` (08.09.2026)
+
+Zwei Umgebungsfallen, die zusammen eine halbe Stunde und fast eine
+Fehldiagnose gekostet haben:
+
+- **`jest` und `tsc` brauchen den nvm-Node 22.22.2 plus mehr Heap.** Der
+  Standard-Node dieser Shell (`~/.local/bin/node`, v22.23.1) läuft dem
+  Speicher davon. jest meldet dann **„18 failed, 11 passed"** mit
+  `ChildProcessWorker._onExit` — das sieht wie 18 kaputte Suiten aus und ist
+  ein OOM. tsc **stürzt intern ab** (`TypeError: Cannot read properties of
+  undefined (reading 'kind')`) und gibt dabei **0 Fehler** aus — wer nur
+  `grep -c "error TS"` liest, hält das für ein grünes Gate. Richtig:
+  ```bash
+  PATH="$HOME/.nvm/versions/node/v22.22.2/bin:$PATH"     NODE_OPTIONS=--max-old-space-size=6144 npx jest
+  ```
+  Immer den Exit-Code mitprüfen, nie nur die Fehlerzahl.
+- **`tools/company-os` (4,3 GB, untracked) ist in `tsconfig.include`
+  (`**/*.ts`) und im jest-Dateilauf.** Ein gezielter Testlauf
+  (`npx jest <pfad>`) kippt daran auch mit 8 GB, und tsc stürzt an den
+  vendorten Paperclip-Quellen ab. Ausweg ohne Konfigurationsänderung: einen
+  Worktree am Basis-Commit anlegen (`git worktree add --detach /tmp/md-base
+  HEAD`, `node_modules` symlinken), die geänderten Dateien hineinkopieren und
+  dort messen — der Worktree kennt keine untracked Dateien. Das ist zugleich
+  der einzige ehrliche tsc-Vergleich, weil beide Seiten denselben
+  Dateibestand haben.
+- **tsc-Baseline am 08.09.2026: 342 Fehler** (gemessen im Worktree, ohne
+  `tools/company-os`). Die im Abschnitt oben genannten 361 stammen vom
+  26.07.2026 und passen nicht mehr.
+- **Das cf-Projekt setzt `resetMocks: true`** (`jest.config.js`): eine einmal im
+  `describe` angelegte `jest.fn(impl)` verliert vor JEDEM Test ihre
+  Implementierung und gibt still `undefined` zurück. Zwei Tests der
+  2-aus-3-Prüfung waren dadurch vom 11. bis 15.10. rot, ohne dass es auffiel.
+  Attrappen mit Implementierung im `beforeEach` oder im Test selbst anlegen —
+  und vor „fertig“ den GANZEN Codebase-Ordner laufen lassen, nicht nur die
+  geänderte Testdatei.
 
 ## Ein Status-Feld ist KEIN Mechanismus — Geld-Versprechen brauchen einen Trigger
 
@@ -2498,6 +4343,276 @@ nur geloggt — ein still ausbleibender Betrag ist genau das Muster, das zu
 Bon-Einreichungen. Eine Nachzahlung für UNSER Versäumnis darf dem Nutzer
 nicht seine aktuelle Woche oder seinen Monat wegnehmen.
 
+## Regionale Aktionen — PLZ-Präfixe, EINE Regel für alle drei Verdien-Wege (06.09.2026)
+
+Eine Aktion kann auf ein Gebiet beschränkt werden. Feld am Kampagnen-Dokument
+(`cashback_campaigns/{id}`), alle Teile optional:
+```
+targeting: {
+  zipPrefixes: ['0','1'],      // PLZ-PRÄFIX, beliebig fein: '3' = Gebiet 3,
+                               // '30' = Raum Hannover, '30159' = eine PLZ
+  countries: ['DE'],           // optional, zusätzlich
+  onUnknown: 'allow' | 'deny', // Standard allow
+}
+```
+Fehlt `targeting` (oder ist leer), gilt die Aktion überall — Bestandskampagnen
+ändern ihr Verhalten nicht.
+
+- **Modul:** `cloud-functions/cashback-pipeline/lib/targeting.js` (+ 21 Tests).
+  **Kopie** in `cloud-functions/crowd-upload-reward/src/targeting.js` — Codebases
+  teilen keinen Code; bei Änderungen BEIDE nachziehen (Drift wie bei `extractEans`).
+- **Woher die Region kommt** (Reihenfolge = Verlässlichkeit): `bon`
+  (receipts.store.zip, 84 % der Bons) → `bonfoto` (crowd_uploads.priceReceipt.zip,
+  wenn das Preisbild ein Kassenbon ist) → `profil` (users/{uid}.region, aus den
+  eigenen Bons abgeleitet) → `ort` (Ortsname über eine aus Bons gelernte Tabelle).
+  Datenlage 06.09.: Profile haben zu 4 % eine Ortsangabe und zu 0 % eine PLZ —
+  deshalb ist die aus Bons abgeleitete Nutzer-Region die einzige Quelle, mit der
+  sich Produktfotos und Umfragen überhaupt regional steuern lassen.
+- **`users/{uid}.region`** schreibt die Bon-Pipeline bei jedem Bon mit Filial-PLZ
+  fort (fire-and-forget, `{zip, city, country, source:'bon', receiptId, at}`).
+- **Bons:** Der Server korrigiert die Wahl der App. Die App wählt die Aktion,
+  bevor die Filialadresse bekannt ist (die steht erst nach der OCR fest) — passt
+  sie nicht zum Gebiet, nimmt `pickCampaignForRegion` die nächstbeste passende
+  Aktion (engstes Gebiet zuerst, dann früheres Ende). Gibt es keine:
+  `rejectReason = 'ausserhalb_aktionsgebiet'` statt `no_active_campaign`. Die
+  Entscheidung steht als `receipts.targeting` am Doc, der Mirror trägt
+  `campaignRegionSwitched`.
+- **Produktfotos:** `crowd-upload-reward` prüft vor der Buchung; passt das Gebiet
+  nicht, wird NICHT gebucht und `rewardSkipped/rewardSkippedReason:
+  'ausserhalb_aktionsgebiet'` + `rewardRegion` ans Doc geschrieben. Fehler beim
+  Prüfen sind fail-open (ein Infrastrukturfehler ist keine Aussage über die
+  Einreichung).
+- **Umfragen:** noch nicht angeschlossen — `survey-reward` läuft auf einem Stand
+  von Juni (der Fix 7d8e91b vom 28.06. ist nie deployt worden). Erst deployen,
+  dann targeting einhängen.
+- **Unbekannte Region ist standardmäßig erlaubt.** Wer einen Bon ohne lesbare
+  Anschrift einreicht, hat nichts falsch gemacht; `onUnknown:'deny'` ist die
+  bewusste Ausnahme für Aktionen, die ein Gebiet strikt einhalten müssen.
+
+## Standortpflicht im Reward-Programm + Ortsrangfolge (24.09.2026, ab 6.0.20)
+
+Gründerentscheidung, endgültig: Wer am Reward-Programm teilnimmt (Bons,
+Produktfotos, vergütete Umfragen), MUSS die Standortfreigabe erteilt haben,
+auch auf iOS. Die Kopplung ist geklärt, nicht neu aufmachen. Das Datenschema
+bleibt unverändert: nur Logik innerhalb bestehender Felder und Werte.
+
+- **Rangfolge des geltenden Orts:** 1) Filialadresse vom Kassenbon auf dem
+  Preisfoto (`priceReceipt`), 2) GPS, 3) Ortsangabe, 4) IP. Die Stufen 3
+  und 4 gelten nur, wenn GPS bei ERTEILTER Freigabe technisch scheitert.
+- **App (`lib/services/standortPflicht.ts`, `useStandortPflicht`):** Die
+  Sperre steht am ZIEL (Bon-Scanner, Foto-Assistent, Umfrage-Sheet), nicht
+  am Einstieg. So deckt sie jeden Pfad ab, auch Deep-Links, und wird bei
+  jedem Wechsel in den Vordergrund neu geprüft. Der Freitext-Ort im
+  Assistenten erscheint nur noch bei fehlendem Fix, nie als Ersatz für die
+  Freigabe. Die Sperre ersetzt den Inhalt und ist nie ein zweites Modal.
+- **Server (`crowd-upload-reward/src/locationGate.js`, Kopie in
+  review-console):** `STANDORTPFLICHT_AB_BUILD = { android: 1244, ios: 1270 }`.
+  Ältere Builds bieten „Ort eintippen“ noch an und werden weiter vergütet.
+  Stufe 4 zahlt auch bei gescheiterter IP-Abfrage (`source: 'fallback'`),
+  weil das ein Infrastrukturfehler ist.
+- **Bedeutungswechsel ab Deploy 24.09.2026:** `rewardLocationRule:
+  'ort_aus_kassenbon'` steht jetzt an JEDER Einreichung mit vollständigem
+  Bon-Kopf, auch wenn GPS vorliegt. Bis dahin stand der Wert nur, wenn der
+  Bon die letzte verbliebene Quelle war. Wer auswertet, trennt nach
+  Deploy-Datum; GPS gegen Bon unterscheidet man über `capture.gps` und
+  `priceReceipt`.
+- **Ortsschätzer ploc-v2:** `receipt_address` ist Rang 1, aber NUR mit
+  aufgelöster PLZ-Koordinate (sonst wäre keine Widerspruchsprüfung gegen
+  GPS möglich). Der Update-Trigger `onCrowdUploadBonAdresse` (retry) ist
+  nötig, weil der Namer `priceReceipt` erst Sekunden NACH der Anlage
+  schreibt. Einziger Leser von `probableLocation` ist review-console
+  (`ort.js`). Deshalb muss review-console VOR crowd-upload-location live
+  sein, sonst fallen die Bon-Orte von der Karte.
+- **Die IP steht trotzdem an fast jedem Dokument** (`journeyLocation`,
+  `journey.location`). Das ist ein Rohsignal und wird nirgends als Ort
+  angezeigt. Wer „überall IP“ sieht, schaut auf Rohdaten.
+
+## Der Ortsschätzer entscheidet — nicht ein zweites Modul (07.09.2026)
+
+**`probableLocation` ist die Autorität für „welcher Ort gilt".** Geschrieben von
+`cloud-functions/crowd-upload-location/src/scorer.js` (seit August 2026, an 1.202
+von 1.619 Einreichungen), mit Quelle, Konfidenz, Granularität, den
+mitbewertenden Signalen und `usableFor` als Missbrauchsschutz.
+
+Beim Bau des Prüfwerkzeugs wurde diese Rangfolge versehentlich ein zweites Mal
+aufgestellt — zwei Entscheider über dieselbe Frage, die im Betrieb auseinander
+laufen. Korrigiert: `cloud-functions/review-console/src/ort.js` liest
+`probableLocation` und steuert nur bei, was dort fehlt:
+- **Koordinaten zu Ortsnamen** — `granularity: 'city'` trägt einen Ortsnamen,
+  aber in 224 von 234 Fällen keine Koordinate.
+- **Bons** — für `receipts` gibt es kein `probableLocation`; dort ist die
+  Filialadresse vom Bonkopf die Quelle.
+- **Auffälligkeiten** (siehe unten).
+
+Wer eine neue Ortsfrage beantworten will: erst prüfen, ob `scorer.js` sie schon
+beantwortet. `granularity` sagt WAS behauptet wird (point/store/city/country),
+`confidence` WIE SICHER, `usableFor` WOFÜR der Wert taugt.
+
+**Auffälligkeiten benennen, nicht stillschweigend zeichnen** (`auffaelligkeiten()`):
+Aufnahmeort außerhalb DACH (2 Fälle), Standardstandort eines Entwickler-
+Simulators (1 — San Francisco, exakt der iOS-Default), Genauigkeit gröber als
+ein Kilometer (10). Anlass: eine Einreichung stand mit ± 4 m in Belgien bei
+einem deutschen Markt. Der Punkt war richtig — das Werkzeug sagte nur nicht,
+dass daran etwas bemerkenswert ist. Im Prüfwerkzeug über der Ortsangabe, auf
+der Karte rot und als eigener Filter.
+
+**Was NICHT auf die Karte kommt:** die IP-Ortung (Median 60 km daneben), der aus
+früheren Bons abgeleitete Wohnort (`user_profile_region`, 144 Fälle — sagt
+nichts über DIESE Einreichung; das wäre derselbe Fehler wie die IP-Ortung, nur
+subtiler) und die reine Landesangabe (`market_country`, 515). Statt einer
+Sammelzahl „ohne Ort" steht in der Seitenleiste, WARUM ein Fall fehlt.
+
+## Welcher Ort gilt? — Rangfolge, an den eigenen Daten gemessen (07.09.2026)
+
+Frage des Users: „Ort: GPS — was bringt mir das? Welchen Ort nehmen wir jetzt?"
+Antwort als Rangfolge, jede Stufe mit Messwert. Umgesetzt in
+`cloud-functions/review-console/src/ort.js`; die Zahlen stammen aus 1.613
+Produktfoto-Einreichungen und 6.478 Bons.
+
+| Rang | Quelle | Feld | Verfügbar | Genauigkeit |
+|---|---|---|---|---|
+| 1 | **Gerätestandort zur Aufnahme** | `capture.gps` | 458 Fotos, 0 Bons | 246× < 20 m, 433 von 458 < 100 m |
+| 2 | **Filialadresse vom Kassenbon** | `store` (Bons), `priceReceipt` (Fotos) | 5.419 Bons, 286 Fotos | Median 2,0 km, p90 7,8 km |
+| 3 | **Angabe des Nutzers** | `capture.confirmedPlace.city` | 132 Fotos | stadtgenau, meint oft den Wohnort |
+| — | **IP-Ortung** | `journeyLocation` | 1.397 Fotos, 6.387 Bons | **als Ort verworfen** |
+
+Begründungen, die man nicht neu diskutieren muss:
+
+- **Rang 2 vor Rang 3**, obwohl die Nutzerangabe „direkter" wirkt: bei 25
+  Einreichungen mit beidem stimmten nur 9 überein, und die Abweichungen sind
+  Wohnort gegen Einkaufsort (Kotzenbüll/Tönning) oder Schreibweisen
+  (Nettersheim/Nettersheim-Zingsheim). Der Bon sagt, wo gekauft wurde; die
+  Angabe sagt, wo jemand wohnt.
+- **Die IP-Ortung ist als Ort unbrauchbar** — gegen 440 echte GPS-Fixes
+  gemessen: Median 59,8 km, p90 293 km, Extremwert 9.628 km. Sie erscheint auf
+  keiner Karte und in keiner Ortsangabe. Für „welches Land" bleibt sie gültig
+  (siehe den älteren Abschnitt zur IP-Ortung).
+- **Der Marktname ist kein Ort.** Er steht an 1.613 von 1.613 Einreichungen und
+  benennt die Kette, nicht die Filiale.
+- **Die Genauigkeit wird immer mit angezeigt** („± 16 m", „± 2 km"), und
+  widersprechende Quellen stehen als Zusatz daneben — eine Ortsangabe ohne
+  Angabe ihrer Herkunft ist beim Prüfen wertlos.
+
+**Postleitzahl → Koordinate:** `cloud-functions/review-console/data/plz.json`,
+13.314 Einträge für DE und AT aus GeoNames (Herkunft und Neuerzeugung stehen in
+`data/QUELLE.md`). Deckt 5.383 von 5.419 real vorkommenden Bon-Postleitzahlen ab.
+Ergänzt wird sie zur Laufzeit aus den **eigenen Bon-Adressen**: das öffentliche
+Verzeichnis führt nur Hauptgemeinden, kennt also weder Schleusingen noch
+Kotzenbüll — die Kassenbons kennen beide (`ortsverzeichnisAusBons`).
+
+**Kein Präfix-Abgleich bei Ortsnamen.** Der Versuch kostete beim Bauen zwei
+Fehltreffer: „Kotzenbüll" (Schleswig-Holstein) landete auf „Kotzen"
+(Brandenburg, 300 km), „Neustadt" auf einem beliebigen von zwanzig. Ein falscher
+Punkt auf einer Karte, nach der jemand entscheidet, ist schlimmer als gar keiner
+— lieber ein Fall ohne Ort als einer am falschen Ort.
+
+## Karte — md-receipt-admin.web.app/karte.html (seit 07.09.2026)
+
+Alle Produktfotos und Bons als Punkte, Filter nach Art, Zeitraum, Ortsquelle,
+Markt und Zustand; drei Darstellungen (gruppiert, einzeln, Dichte je Ort).
+Backend: Callable `reviewMapPoints` (review-console) liefert 6.066 Punkte in
+rund 4 Sekunden als **Array-Tupel statt Objekten** — als Objektliste wären es
+900 KB, so sind es 684 KB. Gefiltert wird im Browser: einmal laden, danach ist
+jeder Filterwechsel sofort und kostet keinen Firestore-Read.
+
+Ohne verwertbaren Ort und deshalb nicht auf der Karte: 935 von 1.614 Fotos und
+1.091 von 6.478 Bons. Das sind Altfälle (Fotos vor der Ortspflicht, Bons vor
+OCR v1.4 ohne Filialadresse) — die Zahl steht in der Seitenleiste, damit
+niemand die Karte für vollständig hält.
+
+## Review-Konsole (Web-Back-Office) — md-receipt-admin.web.app (seit 05.09.2026)
+
+Produktfotos (`crowd_uploads`) und Bons (`receipts`) sichten, filtern, suchen,
+freigeben — einzeln und Batch. Design: `docs/REVIEW_CONSOLE_DESIGN.md`.
+- **Eine Site, ein Login:** Hosting-Site `md-receipt-admin` (`receipt-admin-web/`),
+  Seiten `pruefen.html` (DAS Prüf-Werkzeug) und `index.html` (Bon-Matching),
+  gemeinsame `admin-common.js`. `produktfotos.html`/`bons.html` sind seit dem
+  Rework nur noch Weiterleitungen — die alten Tabellen sind weg, nicht
+  wiederbeleben. Firebase-Auth E-Mail/Passwort + Custom-Claim `admin:true`.
+  Kein Build-Schritt. Deploy: `firebase deploy --only hosting:md-receipt-admin`.
+- **Prüf-Werkzeug `pruefen.html` (Rework 07.09.2026, User: „Die Performance ist
+  schrecklich, ich sehe die Fotos nicht"):** ein Fall füllt den Bildschirm, alle
+  7 Fotos sofort sichtbar, Entscheidung per Taste (F freigeben, A ablehnen +
+  Ziffer für den Grund, O ohne Prämie bei Bons, → später, ← zurück), Klick aufs
+  Bild = Vollbild mit dem ORIGINAL. Warteschlange links, ältester zuerst.
+  Rücknahme (`decision: 'reopen'`) gibt es NUR aus `rejected` zurück nach
+  `pending` — eine Freigabe hat schon gebucht und wird nie per Klick
+  zurückgenommen; das Werkzeug bietet Undo darum bewusst nur bei Ablehnungen.
+  Callables dafür: `reviewQueue` (schlanke Liste + Vorprüfungs-Urteil je Zeile)
+  und `reviewCases` (bis 6 Fälle komplett MIT fertigen Bild-URLs). Die nächsten
+  drei Fälle werden immer vorgeladen, dadurch ist der Wechsel sofort.
+- **Keine Entscheidung über einen Fall, den man nicht sieht.** `S.zeigt` hält die
+  ID des Falls, der WIRKLICH gerendert ist; `decidePhoto`/`decideReceipt`
+  steigen aus, wenn sie nicht passt. Drei Wege führten vorher an dieser Regel
+  vorbei: die Entscheidungsleiste wurde vor dem Laden sichtbar geschaltet
+  (bei „Lade Fall …" war F scharf), `advance()` lief ohne `await` (zweimal F
+  entschied über den nächsten, ungesehenen Fall), und `keydown` prüfte keine
+  Modifikatoren (Cmd+F löste eine Freigabe aus). Bei jedem neuen Bedienelement
+  auf dem Geldpfad: erst der Zustand, dann die Sichtbarkeit.
+- **Der Bon-Resolver antwortet mit `creditedCents`, nicht `cents`** — und er
+  rechnet die Deckel beim Freigeben NEU. Ein Bon, der Tage in der Prüfung lag,
+  kommt mit `status: 'no_reward'` und 0 Cent zurück. Wer nur auf `ok: true`
+  schaut, meldet „Freigegeben ✓" für eine Freigabe ohne Geld — dieselbe Klasse
+  wie „144 freigegeben, 0 Cent". Immer den Betrag UND den Status auswerten.
+- **GeoNames führt Großkunden-Postleitzahlen mit dem FIRMENNAMEN im Ortsfeld.**
+  Ungefiltert wurde aus einem Gerätestandort „Finanzamt Köln-Porz, 51139" statt
+  „Köln" — bei 150 von 463 Standorten. `data/plz.json` markiert solche Einträge
+  (fünftes Feld = 1, 1.641 Stück); die Rückwärts-Suche überspringt sie, ihre
+  Koordinate bleibt für Bon-Adressen nutzbar. Beim Neuerzeugen der Tabelle das
+  Muster in `data/QUELLE.md` mitziehen — und KEIN `\b` ans Musterende setzen,
+  sonst rutscht „Universität" durch (ä ist in Python ein Wortzeichen).
+- **Warnschwellen an der Wirklichkeit messen.** Die Auffälligkeit „Standort zu
+  ungenau" stand zuerst bei einem Kilometer und erzeugte damit zehn von zwölf
+  Warnungen für Fälle, an denen nichts zu beanstanden war (bei 2 km stimmt der
+  Ortsname). Jetzt fünf Kilometer → zwei Warnungen, beide echt. Eine Warnung,
+  die zu oft kommt, wird überlesen.
+- **Zwei Fallen, die die Abnahme gefunden hat (07.09.2026):**
+  (1) Ein Schalter für „Freigabe trotz Sperre", der den FALL ÜBERLEBT, legt nach
+  dem ersten Fehlschlag die ganze Sitzung lahm — der Server verlangt zu `force`
+  eine Notiz, und ohne Rücksetzen scheiterte danach jede weitere Freigabe. Ein
+  Zustand auf dem Geldpfad gehört an den Fall, nie ans Werkzeug; und eine
+  Aufforderung, die garantiert scheitert, darf gar nicht erst dastehen.
+  (2) `precheckOf` liest `_policy` — wer ihm flache Objekte ohne dieses Feld
+  gibt, bekommt „alles unauffällig" zurück. So meldete die Warteschlange 83
+  gesperrte Fälle als 0, während dasselbe Urteil im geöffneten Fall korrekt
+  stand. Beim Bauen verkürzter Listen IMMER `_policy` mitgeben.
+- **Bilder NIE im Browser über `getDownloadURL` holen** (das war die alte
+  Konsole): 7 rules-geprüfte Abrufe je Fall, und die Originale sind ~5 MB —
+  34 MB pro Fall. Serverseitig zwei URLs liefern: die Kachel über die im Projekt
+  installierte Extension `invertase/image-processing-api`
+  (`https://us-central1-…cloudfunctions.net/ext-image-processing-api-handler/process
+  ?operations=<URL-kodiertes JSON>`, Operationen input(type gcs)/resize/output)
+  → ~90 KB je Bild, `cache-control: public, max-age=31536000`, zweiter Abruf
+  0,15 s; das Original nur für die Lupe, per Storage-Download-Token
+  (`metadata.firebaseStorageDownloadTokens`, kein signBlob nötig). Gemessen:
+  516 KB statt 34 MB je Fall.
+- **Backend `cloud-functions/review-console`** (europe-west1, onCall, admin-only,
+  Admin-SDK — Firestore-Rules bleiben zu): `reviewListUploads`, `reviewGetUpload`,
+  `reviewDecideUploads` (Batch ≤100, Transaktion je Doc, Ergebnis je ID),
+  `reviewListReceipts`, `reviewGetReceipt`, `reviewDecideReceipt` (ruft
+  `resolveCashbackReview` server-seitig mit `NUTRITION_SCRAPER_TRIGGER_KEY`).
+  Listen: EINE Gleichheits-Query serverseitig, Rest im Speicher — bewusst
+  kein Composite-Index. Storage-Rules: Lesen für `admin:true`.
+- **Geld bucht die Konsole NIE selbst:** Foto-Freigabe = Status-Flip
+  `pending→approved`, den `crowd-upload-reward` bucht; Bon-Entscheidungen laufen
+  über den bestehenden Resolver (Caps, Ledger-Reverse).
+- **Doppel-Regel** (`src/duplicatePolicy.js`, Produktentscheidung 05.09.): Referenz
+  = jüngste FREIGEGEBENE Einreichung derselben EAN; innerhalb 30 Tagen nur mit
+  anderen Daten (Preis, Hersteller, Markt) freigabefähig, sonst Sperre
+  (`sperre_30_tage_gleicher_nutzer` / `_anderer_nutzer`); ältere offene → hold.
+  Fehlende Vergleichswerte = gleich (fail-closed). Bei JEDER Freigabe frisch
+  berechnet; `force` + Notiz übersteuert (am Doc `review.forced`).
+  Vergleichsdaten liefert `crowd-upload-namer` (`priceOcr`, `manufacturerOcr`).
+- **Neu erstellte Callables brauchen `allUsers` als `roles/run.invoker`** — der
+  CLI-Deploy setzte das bei den drei Bon-Callables nicht (HTML-403 statt
+  JSON-PERMISSION_DENIED = Cloud-Run-IAM, nicht unser Auth-Check). Fix:
+  `gcloud run services add-iam-policy-binding <fn> --member=allUsers --role=roles/run.invoker`.
+- **E2E ohne Admin-Passwort:** Functions-Emulator mit Mini-Config
+  (`--config firebase.emu.json` mit nur dieser Codebase; `--only functions:<codebase>`
+  filtert NICHT) + selbstgebautem JWT (`alg: none`, Claim `admin:true`) gegen die
+  Prod-Firestore — nur Lese-Aufrufe. Custom-Token-Minting scheitert lokal an
+  fehlendem `signBlob`.
+
 ## Cashback-Pipeline — Architektur-Map + Learnings (Task 86ca0wbg7)
 
 Flow: `enqueueCashback` (https.onRequest; billige Pre-OCR-Dedups: Byte-Hash
@@ -2532,7 +4647,9 @@ Docs/Collections:
   `cashback_lifetime_cents`; Counter `cashback_monthly`/`cashback_campaign_weekly`/
   `cashback_campaign_totals`.
 - `cashback_campaigns/{slug}` = Aktionen. Feld `maxAgeDays` (Bon-Alter-Limit,
-  global Default `MAX_BON_AGE_DAYS=9999`), `budgetRemainingCents`/`budgetTotalCents`,
+  global Default `MAX_BON_AGE_DAYS=7` — Entscheidung 05.09.2026, endgültig; der
+  Mirror trägt IMMER die angewandte Grenze in `maxAgeDays`, damit die App die
+  Zahl zeigt), `budgetRemainingCents`/`budgetTotalCents`,
   `cashbackPerBonCents`/`tiers`/`weeklyBonCap`/`maxPerUserCents`.
 
 Gotchas:
@@ -2544,6 +4661,115 @@ Gotchas:
 - **Pfand zählt NICHT** als eligible: `isPfandItem()` in lib/ocr.js
   (`category==='Pfand'` ODER name~pfand/leergut) → in `countEligibleItems`
   + beide per-Item-`eligible`-Flags. Reconciliation UNBERÜHRT.
+- **Verhungerte Bons (03.09.2026):** ~1 Bon pro 5 Tage bleibt in `ocr_pending`
+  mit `attempts=0` und `updatedAt===createdAt` — processCashback hat die
+  PubSub-Nachricht nie gesehen, obwohl enqueue den Publish als Erfolg meldete
+  (9 Fälle, bis 41 Tage alt, in der App ewig „wird geprüft"). Ursache im
+  Eventarc/PubSub-Pfad nicht belegbar (keine Logs). Abhilfe: `sweepStuckReceipts`
+  (onSchedule alle 15 min) republiziert `ocr_pending` älter als 20 min, max.
+  5× pro Bon (`sweptAt`/`sweepCount`). Doppelzustellung ist Noop (OCR-Cache,
+  Ledger-Idempotenz, alreadyCredited). Normale Verarbeitung: p50 ≈ 40 s,
+  p90 ≈ 2 min; Ausreißer bis ~17 min sind Eskalation/Cold-Start, kein Stau.
+  Zweiter Befund derselben Runde: die App überschreibt den Mirror mit
+  `upload_failed`/`uploading`, NACHDEM der Server final war (10 Fälle in
+  45 Tagen; Queue-Retry nach Timeout, obwohl enqueue durch war) → Nutzer sieht
+  „Upload fehlgeschlagen" für einen vergüteten Bon. Reparatur per
+  `.fix-stale-mirrors.js`; Root-Fix (bonUploadQueue darf den Mirror nur
+  schreiben, wenn dort kein Server-Status steht) ist offen.
+- **Bild-Wiederverwendung trifft nur die JÜNGERE Einreichung (13.09.2026):**
+  Bis dahin markierte die md5-Regel beide Seiten einer Gruppe — bei einem
+  Nutzer, der denselben Artikel zweimal einreichte, fiel damit auch der
+  legitime Erst-Datensatz durch. Richtig ist: pro Bildgruppe (Storage-Pfad
+  oder md5, nur Identitäts-Slots) nach `createdAt` sortieren, die älteste
+  behält ihre Chance, alle jüngeren gelten als Wiederverwendung. Wirkung in
+  der Runde 13.09.: aus 16 Ablehnungen „bilder_wiederverwendet" wurden 7
+  Freigaben plus 9 Ablehnungen unter dem fachlich richtigen Grund
+  (30-Tage-Doppel-Regel, gleicher Nutzer).
+- **Lauf-internen Status auch bei Ablehnung nachziehen:** Wer eine Runde
+  chronologisch entscheidet, muss abgelehnte Einreichungen im Speicher auf
+  `rejected` setzen — sonst sieht das jüngere Geschwister sie weiter als
+  „noch offen" und bleibt grundlos auf `doppelt_eingereicht` hängen (9 Fälle
+  am 13.09.). Die Konsole hat das Problem nicht, weil sie in der Transaktion
+  den echten Stand liest.
+- **Namens-OCR kann versagen, ohne dass die Einreichung schlecht ist
+  (13.09.2026):** 23 vollständige Einreichungen trugen `productNameOcrAt`
+  (der Namer lief), aber keinen Namen — bei 21 davon las ein zweiter
+  Gemini-Lauf auf dasselbe Vorderseiten-Foto den Namen problemlos, und keine
+  der EANs stand im Katalog (es waren also genau die Lücken-Datensätze, für
+  die die Aktion zahlt). Vor einer Ablehnung wegen `kein_produktname` deshalb
+  einen Rettungs-Lauf fahren (`.crowd-name-rescue-1309.js`, schreibt in ein
+  EIGENES Feld `productNameRescueOcr`, damit die Messung der Namer-Qualität
+  nicht verfälscht wird).
+- **md5-Bilddedup NUR auf den Identitäts-Fotos (09.09.2026):** Die Regel
+  „dieselben Fotos = wiederverwendet = ablehnen" darf `preis` NICHT mitzählen.
+  Befund der Runde 09.09.: zwei ECHTE Sorten (K-Classic Minis Edelschimmel /
+  Kümmel, eigene EANs, derselbe Markt, dieselbe Minute) teilten ausschließlich
+  das Preisschild — ein gemeinsames Regal-/Aktionsschild ist plausibel. Mit
+  `preis` in der Prüfmenge lehnt die Regel beide korrekten Einreichungen ab
+  (und trifft dabei auch das Original, weil beide Seiten markiert werden).
+  Prüfmenge deshalb: front, rueckseite, hersteller, ean, naehrwerte, zutaten.
+  Die Review-Konsole hat den md5-Check bisher gar nicht — er lebt nur im
+  Ops-Skript `.crowd-review-0909.js`; beim Übernehmen in die Konsole diese
+  Einschränkung mitnehmen.
+- **Ops-Freigaberunden ab 09.09. laufen mit den KONSOLEN-Regeln:**
+  `.crowd-review-0909.js` importiert `review-console/src/duplicatePolicy.js`
+  (Vollständigkeit + 30-Tage-Doppel-Regel) und schreibt dieselben Felder wie
+  `reviewDecideUploads` (status, review.precheck, reviewedAt, reviewedBy,
+  holdReasons, rejectReason, reviewNote mit den Konsolen-Texten). Nicht wieder
+  die alten Skript-Regeln (.crowd-approve.js/.crowd-reject.js) verwenden — sonst
+  entscheiden Konsole und Skript verschieden. Zusätzlich zur Konsole: md5-Check
+  (siehe oben) und der Gemini-Vision-Audit; **ohne Vision-Verdict wird nicht
+  freigegeben** (frische Uploads laufen noch durch die Namer-OCR und bleiben
+  offen für die nächste Runde).
+- **Eine Doppel-Regel MUSS eine Kopie übrig lassen (10.09.2026).** Schwester der
+  Regel „Ein Status-Feld ist kein Mechanismus": dort fehlte der Trigger, hier
+  entschied die Regel gegen ALLE. `crowd_uploads` enthielt 3 Gruppen (7 Docs,
+  3 Nutzer), in denen jede Kopie abgelehnt war — eine als
+  `bilder_wiederverwendet`, die übrigen als `doppelt_eingereicht`. Damit ging
+  auch die erste, völlig korrekte Einreichung leer aus; niemand bekam für diese
+  Produkte etwas. Ursache: der md5-Vergleich in `.crowd-review-0909.js`
+  (`md5Map`) markiert BEIDE Seiten eines Treffers, also auch die Referenz.
+  **Prüffrage bei jeder Sperr-/Doppel-/Dedup-Regel: Kann eine Gruppe entstehen,
+  in der am Ende KEINE Einreichung freigabefähig ist?** Wenn ja, ist die Regel
+  falsch. Konkret: die älteste Kopie einer byteidentischen Gruppe nie markieren
+  (sie IST die Referenz), rein pendente Gruppen halten statt sperren, und für
+  die jüngeren `doppelt_eingereicht` statt `bilder_wiederverwendet` verwenden.
+  Die Konsolen-Regel macht das richtig (`duplicatePolicy.js`: ältere offene
+  Kopie → `hold`, Sperre nur gegen `approved`) — beim Nachziehen des md5-Checks
+  in `precheckOf` (ClickUp 86cbfvwtm) darf diese Eigenschaft nicht verloren
+  gehen. Reparatur: `.crowd-doppel-original-0910.js` (je Gruppe die älteste
+  Kopie `rejected → approved`, Buchung macht der Trigger; 12+15+12 ct im Ledger
+  verifiziert). Gegenprobe danach: 0 EANs ohne eine zahlbare Einreichung.
+  Nebenbefund aus derselben Runde: der Ablehnungstext unterstellte „dieselben
+  Fotos für eine andere Einreichung verwendet" — tatsächlich hatte die App
+  dieselbe Einreichung mehrfach abgeschickt. Ein Sperr-Text darf nie ein
+  Verhalten behaupten, das die Daten nicht belegen (`reviewNote` ist intern,
+  war hier also nicht sichtbar — die App-Texte in
+  `lib/utils/productSubmissionCopy.ts` sind es).
+- **Budget 0 ist keine Ablehnung, sondern ein stiller Nicht-Vorgang — auch bei
+  Produktfotos (10.09.2026).** Eine der drei Nachfreigaben hing an
+  `mai-juni-2026CloneClone` mit `budgetRemainingCents: 0` (Übertrag in den
+  Nachfolger am 03.09.). Eine Freigabe wäre in `campaign_budget_exhausted`
+  gelaufen und hätte NICHTS gebucht — exakt die 38 Fälle vom 03.09. Regel: vor
+  einer Nachfreigabe das Budget der ZUGEORDNETEN Aktion prüfen und genau den
+  nie ausgezahlten Betrag zurücklegen (nach der Buchung steht die Aktion wieder
+  auf 0, netto verschiebt sich kein Budget) — ODER die Einreichung bewusst dem
+  Nachfolger zuordnen. Niemals blind auf `approved` setzen und hoffen.
+- **Produktfoto-Freigabe, Ortsangabe (03.09.2026):** Android 6.0.15 überspringt
+  den Orts-Schritt bei erteilter Berechtigung (18b8cb6) und hat KEINEN Fallback,
+  wenn der GPS-Fix ausbleibt → Einreichung ohne Ort, `locationGate` würde
+  `no_location` → approved ohne Cent. 55 solche Uploads stehen pending mit
+  `holdReasons: ort_fehlt_gps_unavailable_app_uebersprang_schritt`. Der
+  Gate-Fix (`gpsStatus unavailable/timeout` → vergüten mit Grund
+  `gps_fix_fehlt_schritt_uebersprungen`) ist am 03.09. mit Freigabe von Patrick
+  deployt; die 55 sind freigegeben. Wizard-Fallback: ClickUp 86cbe02xm.
+  Falle dabei: wer Kampagnen-Budget „in einen Topf" überträgt (Rest → 0),
+  muss VORHER alle noch offenen Freigaben der alten Kampagne buchen — sonst
+  läuft der Trigger ins Budget 0 und bucht still nichts (38 Fälle am 03.09.,
+  Nachbuchung per `.crowd-retrigger-0903.js`). Tracking-Task: 86cbe02vk.
+  Per-User-Deckel greift still: der Trigger schreibt bei „Deckel/Budget" NICHTS
+  ans Doc (nur Log) — 41 Freigaben am 03.09. ohne Buchung waren korrekt
+  (6 Nutzer am 5-€-Cap), sind aber nur per Ledger-Abgleich erkennbar.
 - **Retry app-level (KEIN PubSub-Dead-Letter):** `MAX_PROCESS_ATTEMPTS=5`;
   transient → NICHT voreilig „rejected" (Mirror bleibt in-progress), nur
   `attempts`/`lastError` + throw; nach Max → `max_retries_exceeded`.
@@ -2551,7 +4777,12 @@ Gotchas:
   nutzt sie → kein erneuter Gemini-Call.
 - **Test-Reset eines Users:** NUR `receipts` löschen reicht NICHT (→ Doppel-
   Gutschrift, Geister-Historie, Budget-Leck). Sauber = `receipts`(des Users) +
-  `cashback_status` + `purchased_products` + `cashback_ledger` löschen +
+  `cashback_status` + `purchased_products` + `cashback_ledger` + `cashback_days`
+  (Tageszähler samt `eintraege` — sonst bleibt der Tag für den User gesperrt) +
+  `cashback_bon_schluessel` mit `uid` des Users und seine Einträge in
+  `cashback_bon_tage` und `cashback_bon_summen` sowie `cashback_bon_person/{uid}`
+  (Doppel-Schutz seit 04.10.2026; sperren ohne Ledger nichts
+  mehr, sind aber Altlast) löschen +
   User-Cashback-Felder zurücksetzen + `budgetRemainingCents` je Kampagne um den
   vom User verbrauchten Betrag (Ledger `earn`−`reverse` je `campaignId`) zurückgeben.
 - **App-Reject-Texte ohne Hardcode:** Pipeline schreibt angewandte `maxAgeDays`
@@ -2605,11 +4836,227 @@ in der App — Metro/TestFlight/App-Version beeinflussen die Erkennung NICHT.
   hängen + low → User-Tap/Review.
 - **Modell:** `gemini-3.5-flash` primär, `gemini-2.5-pro` Eskalation. An echten
   Bons: 3.5-flash 30/42 reconcile-clean vs 2.5-flash 18/42; pro ~33% teurer.
+- **„Billig zuerst" (Phase-0 ohne Denken) ist ENDGÜLTIG No-Go (2× gemessen,
+  08/2026):** Runde 1 (60 Juli-Bons): 2 falsch akzeptiert; Runde 2 (100 frische
+  Bons, Kurz-Bon-Schranke ≤25 Artikel): 4 falsch akzeptiert (davon 3 KURZE Bons
+  — die Schranke hilft nicht) bei nur 50,5 % Phase-0-Ausbeute. Regel war
+  „falsch akzeptiert muss 0 sein". Thinking-Budget 0/1024 wird vom Modell
+  zudem geclampt. Die Konsens-Lesungen brauchen das Denken — hier NICHT sparen.
+  Der stattdessen gebaute Spar-Hebel ist der **Eskalations-Deckel**
+  (`opts.escalationGate` in ocr_robust.js + Gate-Closure in index.js): kappt
+  Enhance/Pro/DocAI für Bons, die laut ≥2 unabhängigen Basis-Lesungen sicher
+  an Policy-Gates scheitern (deutlich zu alt mit +14-Tage-Marge / Markt auf
+  allen Lesungen unbekannt). Kill-Switch `CASHBACK_OCR_ESCALATION_CAP=false`.
+  Entscheidung trifft weiter NUR der Gate-Block; gedeckelte Ergebnisse tragen
+  confidence low/none → Review-Gate fängt Drift (nie Auto-Payout).
 - **Bildqualität ist der eigentliche Engpass** (Knicke durch Ziffern), nicht das
   Modell-Reasoning. 2×-Upscale+Kontrast+Schärfen hebt harte Bons messbar
   (1/6→5/6) — noch NICHT in der Pipeline (bräuchte `sharp`).
 - **Testen:** ein NEU fotografierter Bon läuft frisch; exakt dasselbe Bild-File
   trifft per Dedup (`receipts` contentHash) das alte gecachte Ergebnis.
+
+## `thinkingBudget` bei gemini-3.5-flash nicht mehr nutzen — `thinkingLevel` (24.09.2026)
+
+Vertex lehnt seit dem 22.09.2026 ~13 Uhr UTC einen TEIL der Anfragen mit
+`thinkingConfig: { thinkingBudget: 0 }` ab: 400 „Thinking budget is not
+supported for this model" (gemessen 4 von 15 Anfragen mit denselben Bildern —
+eine schrittweise ausgerollte Modellversion, bei uns hatte sich nichts
+geändert). Der Produktfoto-Namer (`crowd-upload-namer`) speicherte jeden Fehler
+als „kein Name, kein Preis, kein Hersteller", ohne zweiten Versuch: 47
+Einreichungen mit einwandfrei lesbaren Fotos, in der Konsole „(ohne Name)",
+und die Morgenrunde lehnte bei uneiniger Nachlesung mit `kein_produktname` ab.
+Regeln:
+- Denken über `thinkingConfig: { thinkingLevel: 'LOW' }` steuern (Namer und
+  Morgenrunde tun das; 15/15 Anfragen ok). Denk-Token zählen zu
+  `maxOutputTokens` — 512 ist dafür zu knapp.
+- Ein KI-Aufruf, dessen Ergebnis dauerhaft am Dokument landet, braucht
+  Wiederholung bei 429/5xx/Netz/abgeschnittenem JSON und bei endgültigem
+  Scheitern einen Fehler-VERMERK (`productNameOcrFehler`) — nie „leer" als
+  Ergebnis speichern. Sonst sieht ein technischer Fehler aus wie „nicht lesbar".
+- Seit 24.09. ebenfalls auf `thinkingLevel: 'LOW'` umgestellt (vorsorglich,
+  sie zeigten den Fehler noch nicht): `receipt-matcher/matcher.js`,
+  `ai-product-comparison/src/{comparator,assessor,manufacturer}.js`. Im Repo
+  steht kein `thinkingBudget: 0` mehr — nicht wieder einführen.
+- Diagnose-Rezept: `gcloud logging read '"Thinking budget"'` über alle Dienste;
+  eine Stunden-Zeitreihe der Fehler gegen die Erfolge zeigt, ab wann Google
+  umgestellt hat.
+
+## Hängende Bons: jede Gemini-Lesung braucht ein Zeitlimit, kein Lauf darf seinen Anspruch überleben (03.10.2026)
+
+Vom 28.09. bis 02.10. beantwortete Vertex einzelne Anfragen minutenlang nicht.
+Die Basis-Lesungen der Bon-OCR hatten kein eigenes Zeitlimit; ohne
+`timeoutMs` wartet `@google/genai` bis zum festen 300-s-Limit von Node-fetch
+(„fetch failed"). Zwei Hänger sprengten die 540 s (304 Läufe). Cloud Run beendet
+dann nur die Anfrage, nicht den Code: Läufe schrieben bis 37 min später —
+nachdem der Lauf-Anspruch (10 min) verfallen war und der Kehrlauf den Bon schon
+neu zugestellt hatte. Regeln (umgesetzt in `cashback-pipeline`, Zweig
+`claude/bon-zeitlimit`):
+- **Jede Lesung der OCR-Leiter bekommt `timeoutMs`** (dort Promise.race +
+  AbortSignal). NICHT abgedeckt, beide heute aus: die DocAI-Eskalation und die
+  Rückfall-Engine cv-hybrid — wer eine davon einschaltet, gibt ihr vorher ein
+  Zeitlimit und prüft die Restzeit des Laufs.
+  Wert an der Arbeit messen, nicht raten: erfolgreiche Lesungen über 170 s waren
+  alle Warteschlange (erzeugte Token ÷ 221 Token/s < 150 s).
+- **Ein Abbruch durch das eigene Zeitlimit ist kein Urteil** — er darf weder den
+  Bon ablehnen noch die Zahl der Lesungen senken, auf der entschieden wird
+  (Ersatzversuch statt verbrauchtem Platz).
+- **Ein Lauf hat ein Zeitbudget und setzt sonst fort**, statt in den Plattform-
+  Abbruch zu laufen: Zwischenstand am Dokument, Anspruch in derselben
+  Transaktion abgeben, neu zustellen. Nach der Laufzeitgrenze (480 s) schreibt
+  ein Lauf keine Entscheidung mehr.
+- **Eine Obergrenze hängt nie an dem Zustand, der verworfen werden kann.** Die
+  Grenze von 8 Läufen stand zuerst im Zwischenstand selbst; wurde der beim Laden
+  verworfen, begann der Zähler neu → simuliert 30 Läufe, 135 bezahlte Aufrufe,
+  kein Ende (Gegenprüfung 03.10.). Jetzt zählt der Bon selbst
+  (`ocrFortsetzungen`, in derselben Transaktion), gelöscht nur zusammen mit dem
+  Zwischenstand. Ein Zeitabbruch der Eskalation verbraucht dagegen weiter seinen
+  Platz — dort fängt das 150-s-Limit die Denk-Ausreißer (geminiModelle.js).
+- Wer Function-Timeout, OCR-Budget oder Laufzeitgrenze ändert, zieht
+  `LAUF_MAX_MS` (`lib/laufAnspruch.js`) mit — der Anspruch muss länger leben als
+  jeder Lauf, der noch schreiben kann.
+- **Was ein späterer Leser am Bon erwartet, gehört in den Zwischenstand**
+  (15.10.2026). Der Zeugenbericht (Haiku-Geldfelder, Mistral-Ergebnis) lebte nur
+  im Speicher des ersten Laufs und war nach jeder Fortsetzung weg — an allen 21
+  Prüffällen seit 11.10., also genau an den Bons, für die die Bon-Runde ihn
+  braucht. Seit 7d985396 geht er mit (`ocrZwischenstand.zeuge`); in der
+  Fortsetzung entscheidet er nichts.
+
+## Bon-Lesung: Mistral-Zeuge scharf (seit 10.10.2026, Patrick: „sofort scharf schalten“)
+
+Schalter `cashback_config/v1.mistralZeuge`: `true` = scharf, `'shadow'` =
+Parallelbetrieb (Zeuge erst nach der Entscheidung, ändert nichts), fehlt = aus.
+**Rückweg ohne Deploy: auf `'shadow'` setzen** — die Leiter läuft dann bitgenau
+wie vor dem 10.10. (Test „ohne Zeuge“ in `__tests__/mistralZeugeScharf.test.js`).
+Code-Rückweg: Cloud-Run-Revision `processcashback-00080-dox`.
+
+Scharf: EINE Gemini-Lesung (statt zwei gleichzeitig); besteht sie die
+Summenprobe, liest Mistral OCR (`lib/mistralZeuge.js`, ~0,44 ct, 25 s Limit).
+Gilt nur, wenn ALLES passt: Summe exakt, Tag/Monat gleich (Jahr zählt nicht —
+Mistral liest „26“ oft als 2020/2023), Uhrzeit ±2 min, Markt-Resolver sagt bei
+beiden gleich „unser Markt ja/nein“ (Mistral ohne Eigenmarken-Stufe), Prämie
+bleibt bei ±1 Artikel gleich (±2 bei Pfand-Toleranz). Dann `robust.method =
+'zeuge-agreement'`, Bewertung `high`; sonst läuft die Leiter wie bisher weiter.
+Bericht je Bon in `ocr.robust.zeuge` (keine Artikelnamen). Online-Bestellungen
+gehen nie an Mistral.
+
+Gemessen im Parallelbetrieb 09./10.10. (445 Bons): 86 % bestätigt, 0 mit
+anderem Geldergebnis, Gemini-Lesungen etwa halbiert (~13 → ~7 ct je Bon).
+Bekannte Schwächen: Mistral-Artikelpreise nur zu 35 % ganz richtig (Preise der
+bestätigten Bons stammen aus EINER Gemini-Lesung — mehr Preisfehler in den
+Produktdaten), 3 % Zeitüberschreitungen. Offen bei Patrick: Datenschutzvertrag
+(DPA) und Zero Data Retention bei Mistral, Schlüssel rotieren (neue Version von
+Secret `MISTRAL_API_KEY` wirkt erst nach Redeploy), Datenschutzerklärung (Anwalt).
+
+**Haiku 5.5 als erste Lesung (seit 10.10.2026, Commit 1893e2d1, Patrick „ja auf jeden fall“):**
+Schalter `cashback_config/v1.haikuLeser`: `'shadow'` = Haiku liest nach der Entscheidung
+(`receipts.zeugeHaiku`), `true` = Haiku ist die erste Lesung (nur zusammen mit
+`mistralZeuge === true`); nicht bestätigt → Haiku-Lesung verworfen, Gemini-Leiter
+unverändert. Rückweg: `'shadow'`. Läuft über Vertex (Model Garden, Projekt freigeschaltet
+10.10.), Endpunkt `global`, `:rawPredict`, Leseanleitung = Gemini-Prompt der Version.
+Lesetest 150 Bons: Geld 99 %, alle Preise 88 %, ~0,23 ct je Lesung; mit Mistral 77 %
+bestätigt, 0 Geldfehler. Bildtyp aus den Bytes bestimmen (die App-Angabe stimmt nicht
+immer), über 4,9 MB direkt Gemini.
+
+**Ausbau 11./12.10.2026 (Patrick: „alles umsetzen, was Sinn macht“, „mach 1, 2 und 3“):**
+- `zweiAusDrei` (true seit 12.10.): bestätigt Mistral die Haiku-Lesung nicht, EINE Gemini-Lesung;
+  stimmt sie mit Mistral oder Haiku überein (gleiche Regel; an der Prämiengrenze reicht gleiche
+  Artikelzählung von Haiku und Gemini), gilt die Gemini-Lesung (`method 'zwei-aus-drei'`).
+  Parallelmessung vorher: 18/18 richtig. Messskript: Session-Scratch `zwei-aus-drei-messung.js`.
+- `kassenQr` (an, `false` = aus, `lib/kassenQr.js`): Steuer-QR-Code (DE TSE „V0“, AT RKSV) als
+  kostenloser Zeuge vor Mistral; Zeiten im DE-Code sind UTC → Europe/Berlin. Test 14/14 richtig;
+  ~9 % der Bons tragen ihn (Kaufland ~50 %, ALDI Nord ~1/3; Lidl/REWE/EDEKA/Penny/dm nicht).
+- Belegnummer (Beobachtung): Haiku liest `tseTransaktion`/`kassenSeriennummer` mit, QR liefert sie
+  direkt; `receipts.belegNummer.schluessel` = Markt|Kasse|Transaktion, Treffer früherer Bons in
+  `doppelBelegSchatten` — entscheidet NICHTS, erst nach Auswertung als Doppel-Regel erwägen.
+- Haiku: Bildseiten > 7900 px werden für Haiku verkleinert, Zeitlimit 45 s. Mistral-Uhrzeit:
+  nie die Handy-Statusleiste (App-Screenshots).
+- Jahreskorrektur (`lib/bonDatum.js`): Tag+Monat höchstens 7 Tage vor Upload → laufendes Jahr.
+- **Kosten genau zuordnen:** Abrechnungs-Export `revealyiq.billing_export.gcp_billing_export_v1_*`
+  (Labels `funktion`/`zweck`). Gemini = Vertex AI, vom Guthaben gedeckt; Claude Haiku =
+  Marketplace, echtes Geld; Mistral außerhalb Google.
+- **Schwere Bons mit Denkstufe LOW + v1.6 billiger lesen: NEIN (Test 13.10.2026).** 60 Bons der
+  vollen Leiter neu gelesen: 6,3 ct je Bon, aber 2 von 50 als `high` eingestufte Lesungen
+  nachweislich falsch (Datum nach dem Upload; Kaufland-Summe 20,64 statt gedruckt 26,64 €).
+  Zwei LOW-Lesungen sind korreliert — dieselbe Lehre wie „Billig zuerst“. Ursache der Summe:
+  bei Kaufland stehen „Coupon“/„Gutschein“ UNTER „Summe“ als Zahlungsmittel; Regel 16
+  (v1.5/v1.6) zog sie als Warenkorbrabatt ab. Vor einem Umschalten auf `ocrPrompt` v1.5/v1.6
+  Regel 16 ergänzen: Zeilen NACH dem gedruckten Endbetrag sind nie Rabatt.
+- **Grobe Bildsperre trifft echte Einkäufe (13.10.2026, ClickUp 12487v2f1m0):** 116 von 178
+  dHash-Sperren in 30 Tagen kamen > 1 Tag nach dem „Original“, meist App-Screenshots
+  (Lidl/Netto/Kaufland). Vom 13.10. 06:33 bis 15.10. 09:39 UTC standen `doppelArtikel`,
+  `doppelDatum`, `bildFeinvergleich` auf `'shadow'`, seither wieder `true`. Die vier Regeln
+  über Konten (`doppelKonten`, `doppelBestellnummer`, `doppelKontenArtikel`,
+  `doppelKontenDatum`) stehen seit 15.10. 10:06 UTC auf `'shadow'` (Patrick „ja, a machen“);
+  Treffer frühestens ab 22./23.10. durchsehen, dann `true`. Einzelfall von Hand nachreichen: Bon wie
+  enqueueCashback anlegen (`create()`, App-Hash = SHA-256 über den BASE64-Text der Datei,
+  `manuellAngelegt` vermerken), Spiegel auf `ocr_pending`, auf `cashback-ocr-jobs` zustellen.
+- **Bon-Runde: knappe Artikelzahl frei, wenn Haiku genau gleich zählte** (15.10.2026,
+  Patrick „ja, b machen“, 5f9ecae2): Haikus erste Lesung muss aufgehen, dieselbe Endsumme
+  lesen und dieselbe Zahl anrechenbarer Artikel zählen. Vorher 17 Fälle von Hand, alle 11
+  entschiedenen freigegeben. Details: `review-console/WISSEN-FOTORUNDE.md` (Bon-Runde).
+
+## Gemini läuft über VERTEX AI, nicht AI Studio (Incident 19.08.2026)
+
+**Was passiert ist:** Der AI-Studio-Monatsdeckel („monthly spending cap",
+Stufen-Limit des Rechnungskontos, ~219 €) wurde erreicht → **ALLE Gemini-Keys
+des Kontos** (eigener Key UND alter crapsnap-Key) lieferten 429
+RESOURCE_EXHAUSTED. Der Deckel gilt KONTOWEIT (StuByteFlexCo) und ist **nicht
+manuell anhebbar** (Google stuft nur automatisch hoch). Key-Rotation/Rollback
+ist bei diesem Fehler ZWECKLOS — erst per Direkt-Curl beweisen, WELCHER Scope
+gesperrt ist, bevor man Keys tauscht.
+
+**Fix (deployt 19.08.):** Alle 5 Gemini-Codebases (cashback-pipeline,
+receipt-matcher, ai-product-comparison, crowd-upload-namer, image-cleanup)
+nutzen `new GoogleGenAI({ vertexai: true, project, location })` — läuft übers
+GCP-Projekt-Billing (Startup-Guthaben), kennt den AI-Studio-Deckel nicht.
+Rückschalter: `GEMINI_USE_VERTEX=false` in der jeweiligen `.env` → alter
+Key-Pfad (Secret GEMINI_API_KEY bleibt gebunden).
+
+**Vertex-Modell-Verfügbarkeit ist PRO LOCATION verschieden (19.08. geprüft):**
+- `gemini-3.5-flash`, `gemini-2.5-flash-image`, `gemini-embedding-001` (via
+  SDK `embedContent`; REST nur `:predict`): NUR `global`.
+- `gemini-2.5-pro` (Robust-OCR-Eskalation): NICHT unter `global`, nur regional
+  → `GEMINI_VERTEX_LOCATION_PRO`, Default `europe-west4` (Client-Factory in
+  lib/ocr.js ist modell-bewusst). Bei neuen Modellen IMMER erst curl-Test
+  gegen die Ziel-Location, 404 heißt „woanders publiziert".
+- `gemini-3-pro-image-preview` (image-cleanup Retry-Stufe B): auf Vertex
+  NIRGENDS → schlägt unter Vertex fehl (Item endet 'failed'); Nachbearbeitung
+  via retry-failures.js mit GEMINI_USE_VERTEX=false wenn der Cap frei ist.
+- Embeddings sind zwischen AI Studio und Vertex **byte-identisch** (Kosinus
+  1.0000 gegen Bestandsvektoren verifiziert) → Vektor-Index kompatibel.
+
+**Stand 01.10.2026 — Liste oben ist teils überholt, neu gemessen (curl je
+Standort):** `gemini-3.5-flash` antwortet jetzt unter `global`, `eu` und
+`europe-west3` (nicht europe-west4/-west1), `gemini-2.5-pro` auch unter
+`global`, `gemini-3.1-pro-preview` nur `global`. **gemini-2.5-pro/-flash werden
+auf Vertex am 20.10.2026 abgeschaltet**; eine GA-Pro-Variante gibt es nicht,
+3.6/3.7/3.8-flash sind Kurzläufer (45 Tage Abschaltfrist) — nie als Standard.
+Die Bon-OCR eskaliert seitdem auf `gemini-3.5-flash` HIGH über `eu` (nach
+Fehlversuch LOW), der Rückfall der Zweitprüfung ebenso; Messung an 38 echten
+Bons und Begründung in `cloud-functions/cashback-pipeline/lib/geminiModelle.js`.
+Regeln: (1) Standortwahl NUR über `geminiModelle.js`, keine Modell-Regex mehr in
+einzelnen Clients. (2) Gemini 3 auf hoher Denkstufe denkt auf langen,
+zerknitterten Bons in ~12–16 % der Lesungen bis MAX_TOKENS (32.768 Token,
+~2 min, ~0,33 $, keine Antwort) — jede Gemini-3-Lesung mit Denkstufe braucht
+ein Zeitlimit und einen Ausweg (niedrigere Stufe), sonst bleibt auf genau den
+schwersten Bons gar keine Lesung. (3) Ein bei 512 KiB abgeschnittener Upload
+wird von Gemini 3 mit 400 abgelehnt; nur 2.5-pro las ihn (1 von 786 Bons).
+
+**Der eigentliche Bug (gefixt 19.08.):** ocr_robust.js verschluckte geworfene
+Lese-Versuche (`catch { continue; }` ohne Log). Bei Totalausfall lieferte
+Phase 4 den `isReceipt:false`-Stub → Nutzer sah fälschlich „kein Kassenbon".
+**Es gab bis dahin NIE eine echte not_a_receipt-Ablehnung** — alle 53 waren
+verschluckte Infrastrukturfehler (Marker: `ocr.robust.attempts == 0` = OCR
+lief nie). Jetzt: leere reads → Error `code:'ocr_unavailable'` → index.js
+behandelt transient (Retry), nach MAX_PROCESS_ATTEMPTS → Status **'review'**
+(reviewReason 'ocr_unavailable'), NIE 'rejected'. Regel: ein Infrastruktur-
+fehler darf nie als inhaltliche Aussage über User-Daten enden. Reprocessing
+abgelehnter Bons: `ocr`-Feld LÖSCHEN (sonst re-used der Retry den kaputten
+Cache), seit 03.10.2026 ebenso `ocrZwischenstand` + `ocrFortsetzungen`
+(sonst erbt der Bon die alte Laufgrenze) und `attempts` (sonst landet er
+beim ersten Infrastrukturfehler sofort wieder in 'review'), Status auf
+'ocr_pending', Message mit `{cashbackId, uid}` (BEIDE Pflicht) auf Topic
+`cashback-ocr-jobs` republishen. Muster: `.repair-429.js`.
 
 ## Sim-Testing: NUR wenn's wirklich nötig ist (User-Vorgabe 2026-06-12)
 
@@ -2699,10 +5146,33 @@ Token-Cache + 503-Retry). Vollständige Analyse-Methodik + Referenz-Abfragen:
 
 Play stand 07/2026 bei **3,44★** (545 Bewertungen, davon 146× 1★), iOS bei
 4,02★ — obwohl die App gut ist: die zufriedene Mehrheit wurde nie gefragt.
+**Stand 04.10.2026 (Play Console, von Patrick gezeigt): 4,448★ bei 833
+Bewertungen** — seit dem Auto-Prompt (26.07.) also ~+300 Bewertungen und
++1 Stern. Store-Wertungen NIE aus dieser Notiz zitieren, sondern vorher den
+aktuellen Stand holen (Play Console bzw. ASC); am 03.10. habe ich Patrick
+fälschlich die Juli-Zahl als aktuellen Stand genannt.
 Aktueller Stand: Auto-Prompt = **nativer Dialog direkt**, ausgelöst nach dem
 ersten Erfolg + Walk-Through (`lib/services/firstCaseService.ts`, ClickUp
 86cav7gqm) sowie beim Level-Up ≥3 (`ratingPrompt.ts`).
 
+- **PRODUKTENTSCHEIDUNG (02./03.09.2026, endgültig): Der Dialog nach dem
+  ersten Fall bleibt — auch wenn er beim Neu-Nutzer über den Walkthrough-Demo-
+  Tap binnen 1–2 Minuten kommt. KEIN Reife-Gate (Sessions/Tage/Scans) bauen,
+  nicht mehr als Bug flaggen** (ClickUp 86cbc0kyq wurde dafür rejected).
+  Datenlage (Stand 03.09.): App-Store-Text-Rezensionen vorher/nachher (1.5.–
+  25.7. vs. 26.7.–2.9.) Ø 1,5 → 3,5, 0 → 3 Fünf-Sterne bei je n=6; Trichter
+  `ratingFunnelEvents` seit 1.8.: 18.148 Dialog-Anfragen, 52 % binnen 5 min
+  nach Kontoerstellung, 90 % auf Level ≤ 2, genau EINE Beschwerde (Play, 31.8.).
+  Harte Store-Regeln (3/365, keine Vorfrage, kein Incentive) sind eingehalten;
+  nur die Empfehlung „erst nach Engagement" nicht — das ist kein Ablehnungs-
+  grund. Der Play-Gesamttrend ist per API NICHT abrufbar (nur Console).
+  Was davon unabhängig offen bleibt (S, optional): drei kontextfreie Pfade
+  prompten ~3 s nach App-Öffnen ohne Feier (Resume mit offener Sequenz, Level-
+  Up-Flag beim Kaltstart, 30-Tage-Re-Feier ohne Produktseite) — das ist der
+  Pfad, der zur „3 Sekunden"-Rezension passt; und das Telemetrie-Label
+  (GamificationProvider ruft markCelebrated VOR getCelebrationContext → alles
+  wird `veteran_case`). Beides darf man schließen, ohne den Erst-Fall-Dialog
+  anzutasten.
 - **NIEMALS eine Vorfrage vor dem nativen Dialog** („Gefällt dir die App?" →
   Weiche). Google verbietet das **wörtlich** in den In-App-Review-Guidelines
   („shouldn't ask the user any questions before or while presenting the rating
@@ -2746,6 +5216,69 @@ präsentiert, MUSS zusätzlich `isSurveyVisible()` aus
 `lib/services/sheetPresence.ts` prüfen (sonst Zwei-Modal-Deadlock bzw. still
 verschluckter System-Dialog).
 
+## Push: Link, Berechtigung, Deploy — drei Fallen aus dem 17.09.2026
+
+**1. Ein Deep-Link hat zwei Seiten — nie nur eine prüfen.** Vom 19.08. bis
+17.09. schickte `sendCashbackReady` `markendetektivern://cashback/pending/<id>`,
+der App-Resolver entfernte nur `markendetektive://` (ohne „rn"). Jeder Tap
+landete auf der Startseite, obwohl der Tap-Fix 86cb7gfc9 „fertig" war. Regel:
+Server-Link und Resolver hängen an einem Vertragstest
+(`lib/services/__tests__/pushDeepLinkVertrag.test.ts` lädt
+`cashback-pipeline/lib/pushLinks.js`). Links als Pfad (`/cashback/pending/<id>`)
+schicken, nicht als Schema. Und Kaltstart-Taps vormerken, bis die erste Route
+steht: `app/index.tsx` ersetzt sonst per `replace('/(tabs)')` das Ziel.
+Android meldet jeden Tap doppelt (expo-notifications + RNFB) → Duplikatsperre
+in `pushDeepLinks.ts` nicht entfernen.
+
+**2. expo-notifications `denied` heißt auf Android 13+ NICHT „abgelehnt".**
+`getPermissionsWithPromiseImplApi33` prüft `!areNotificationsEnabled()` vor
+„undetermined" — eine nie angefragte Berechtigung kommt als `denied`. Bis 6.0.17
+wurde deshalb kein Android-13+-Nutzer je gefragt (7.362 Konten). Immer
+`canAskAgain` mitlesen (`pushPermissionStatus.ts`). RNFB `hasPermission` kennt
+auf Android nur 1/0. Und nach `harteBerechtigungAnfragen` NIE einen zweiten Weg
+laufen lassen, der selbst fragt (`pushNotificationService.initialize`) —
+Android zeigt den Dialog sonst sofort erneut, und die zweite Ablehnung ist
+endgültig.
+
+**3. Vor einem Functions-Deploy den DEPLOYTEN Stand vergleichen, nicht nur den
+Working Tree.** Am 17.09. lief die cashback-pipeline auf `e1c2030`
+(Zweitprüfung 86cbfvwge, Branch `claude/quirky-morse-a8d24d`, nicht gemergt).
+Ein Deploy aus `feat/rnfirebase-migration` hätte die Zweitprüfung still aus der
+Produktion entfernt. Prüfung ohne Risiko:
+```bash
+gcloud functions describe processCashback --region=europe-west3 --gen2 --project=markendetektive-895f7 \
+  --format="value(buildConfig.source.storageSource.bucket,buildConfig.source.storageSource.object)"
+# Zip holen (gcloud storage cp), entpacken, index.js + lib/ gegen den Deploy-Stand diffen
+```
+Weicht es ab: aus einem Worktree auf dem deployten Commit + eigener Änderung
+deployen (`.env` hineinkopieren — sie ist nicht im Git) oder erst mergen.
+
+**4. Eine Nebenwirkung (Push, Mail) hängt am Ergebnis der Transaktion, nie an
+einem vorab gelesenen Zustand (24.09.2026).** Bis dahin prüfte der Bon-Push
+`!alreadyCredited` — gelesen VOR der Ledger-Transaktion. Zwei gleichzeitige
+Läufe sahen beide „noch nicht gebucht", einer buchte, beide schickten
+„Ka-ching!". Und Pub/Sub stellt dieselbe Nachricht wirklich doppelt zu, mit
+DERSELBEN Event-ID und parallel (seit 08.09. sechsmal, fünfmal überlappend):
+las der zweite Lauf die OCR anders, stornierte er die schon gemeldete
+Gutschrift. Mit dem Live-Code nachgestellt, in Produktion bis dahin ohne
+Schaden. Regeln:
+- Die Buchungsfunktion sagt, ob SIE gebucht hat (`syncLedgerForReceipt` →
+  `frischGebucht`); nur darauf reagieren. Zusätzlich ein Merker am Dokument in
+  einer Transaktion (`gutschriftPushAt`, bei Fotos `rewardPushSentAt`).
+- Wer einen Bon verarbeitet oder entscheidet, meldet sich in einer Transaktion
+  am Dokument an (`lib/laufAnspruch.js`): gleiche Event-ID parallel → nichts
+  tun; Konsole entscheidet nicht, solange ein Lauf rechnet; Pipeline rechnet
+  nicht, solange die Konsole entscheidet; der Kehrlauf legt keinen Bon neu auf,
+  an dem gerade ein Lauf rechnet.
+- Eine Statusprüfung („nur `review` ist auflösbar") außerhalb einer
+  Transaktion schützt vor nichts, sobald zwei Menschen oder ein Mensch und ein
+  Skript gleichzeitig klicken.
+- Ein Trigger, der bei Lesefehlern wirft, „damit erneut zugestellt wird",
+  braucht `retry: true` — sonst ist der Wurf ein stilles Verwerfen
+  (crowd-upload-reward lief bis 24.09. mit RETRY_POLICY_DO_NOT_RETRY). Und eine
+  Wiederholung wertet das ALTE Ereignis aus: den aktuellen Status in der
+  Buchungs-Transaktion mitlesen.
+
 ## Meta-Regel: Support-Sessions — antworten, NICHT selbst fixen
 
 Sessions, in denen der User App-/Support-Anfragen (Kontaktformular,
@@ -2775,3 +5308,96 @@ tun ("fix das", "mach das", "setz das um"). Dann normal umsetzen.
 Datenkorrekturen am Kundenkonto (Kulanz-Gutschrift, Level-Freigabe
 o.ä.) sind KEIN Dev-Work in diesem Sinne — die gehören zum
 Beantworten dazu, brauchen aber weiterhin das Okay des Users.
+
+## R8 ist seit 6.0.19 an — und die Pauschalregeln waren die Ursache (20.09.2026)
+
+Play meldete für 6.0.17 „DEX-Codeoptimierung: Verschleierung 2 %" (Grenzwert 25 %,
+Frist Februar 2027). Ursache war eine fehlende Zeile: `android.enableProguardInReleaseBuilds`
+stand nirgends, also lief jeder Release mit `minifyEnabled false`. Jetzt gesetzt in
+`android/gradle.properties`; gemessen an `mapping.txt`: **59,1 % der 44.678 Klassen umbenannt**.
+
+**Die wichtigste Erkenntnis ist die umgekehrte Richtung:** Die zehn Pauschalregeln
+`-keep class <paket>.** { *; }`, die in `proguard-rules.pro` standen, hätten 24.369 Klassen
+(37 % des DEX) von der Umbenennung ausgenommen — `com.google.android.gms.**` allein 22 %.
+Alle zehn waren überflüssig, weil die Bibliotheken ihre Regeln selbst mitliefern
+(`consumerProguardFiles` bzw. `proguard.txt` im AAR). **Vor jeder neuen Keep-Regel erst
+prüfen, ob die Bibliothek sie schon mitbringt:**
+```bash
+grep -n consumerProguardFiles node_modules/<lib>/android/build.gradle
+unzip -p ~/.gradle/caches/modules-2/files-2.1/<gruppe>/<artefakt>/*/*/<x>.aar proguard.txt
+```
+Nie wieder eine Pauschalregel über einen großen Paketbaum zurückholen — sie arbeitet direkt
+gegen die Play-Kennzahl.
+
+**Zwei Mechanismen, die man NICHT nachbauen muss** (beide am Artefakt belegt):
+aapt2 erzeugt Keep-Regeln für jede im Manifest per `android:name` deklarierte Komponente,
+und die AGP-Standarddatei hält `native <methods>`, Enums, Parcelable-CREATOR und
+`@JavascriptInterface`. **Aber:** Klassennamen in `android:value` sind NICHT gedeckt —
+deshalb braucht `RNHeadlessAppLoader` eine eigene Regel. Bei neuen Bibliotheken prüfen:
+```bash
+grep -oE 'android:value="[a-z][a-zA-Z0-9_.$]*\.[A-Z][a-zA-Z0-9_.$]*"' \
+  android/app/build/intermediates/merged_manifest/release/*/AndroidManifest.xml
+```
+
+**Vier Fälle, die still gebrochen wären** (Details je Regel in `proguard-rules.pro`):
+Hermes-Intl (libhermes.so sucht 5 Klassen per JNI über den Namen, kein Java-Code
+referenziert sie → R8 **löscht** sie → jedes `toLocaleString('de-DE')` bricht);
+`ExpoModulesPackageList` (nur per `Class.forName`, alle Aufrufer fangen die Exception ab
+→ App startet ohne ein einziges natives Expo-Modul, ohne Fehlermeldung);
+expo-notifications-Parcelables (Klassenname steht im Parcel → Tap auf eine beim Update
+offene Nachricht stürzt in `NotificationForwarderActivity.onCreate` ab);
+`FirebaseAnalytics.setConsent` (UMP reicht die Einwilligung per Reflection dorthin weiter
+→ ohne Schutz erhebt die App weiter Analytics, obwohl der Nutzer abgelehnt hat).
+Gemeinsames Muster: **kein Absturz im Debug, kein Aufrufer im Code, kein Test schlägt an.**
+
+**Prüfschritt, der sich gelohnt hat — R8 EINMAL LOKAL laufen lassen**, bevor ein EAS-Build
+startet. Das ist die bewusste Ausnahme von „keine lokalen Release-Builds": es geht nicht um
+ein Artefakt, sondern um die Diagnosedateien, die es sonst nirgends gibt.
+```bash
+cd android && JAVA_HOME=/usr/local/opt/openjdk@17 ANDROID_HOME=$HOME/Library/Android/sdk \
+  ./gradlew :app:minifyReleaseWithR8 --console=plain --no-daemon   # ~11 min
+```
+Danach in `android/app/build/outputs/mapping/release/`: `missing_rules.txt` (existiert nur bei
+Fehlern — AGP 8.13 macht aus fehlenden Klassen einen **Fehler**, der Build stirbt),
+`configuration.txt` (vollständig gemergte Regelmenge — damit ist jede Annahme über fremde
+Regeln prüfbar statt geglaubt), `usage.txt` (alles, was R8 **entfernt** hat),
+`mapping.txt` (Verschleierungsquote direkt messbar). `android/app/build/` ist in `.easignore`,
+die Reste stören den EAS-Upload also nicht.
+
+**`shrinkResources` bleibt AUS.** Zweite, unabhängige Fehlerquelle (Ressourcen, die nur per
+`getIdentifier()` angesprochen werden). Wenn das mal kommt, dann als eigener Release.
+
+### Reflexion unter R8: der eine Test, der entscheidet (Nachtrag 20.09.2026)
+
+**R8 schreibt Reflexions-Zeichenketten MIT UM, wenn der Klassenbezug statisch im
+Code steht.** `ReactActivityDelegate::class.java.getDeclaredField("mReactDelegate")`
+funktioniert deshalb weiter — R8 benennt das Feld um *und* ersetzt das Literal;
+im DEX von Build 1242 kommt „mReactDelegate" 0-mal vor. **Nicht** umschreiben kann
+R8, wenn die Klasse erst zur Laufzeit feststeht: `fragment.getClass().getMethod(…)`,
+`classLoader.loadClass("…")`. Dort bleibt das Literal stehen, das Ziel wird
+umbenannt, der Zugriff scheitert — und praktisch immer lautlos, weil solche Stellen
+ihre Ausnahme abfangen.
+
+**Der Test dauert zwei Befehle und beendet jede Diskussion:**
+```bash
+strings classes*.dex | grep -F "<literal>"     # Literal noch da?
+grep "<name>" mapping.txt                       # Ziel umbenannt?
+```
+Beides ja = echter Bruch. Literal weg = R8 hat es mitgezogen, nichts zu tun.
+**Nie eine Keep-Regel aus einer Quelltext-Fundstelle allein ableiten** — das
+produzierte in dieser Runde einen Fehlalarm („Startabsturz auf jedem Gerät"), der
+sich am installierten Release-Build in 30 Sekunden widerlegen ließ.
+
+**Gefunden hat dieser Test drei echte Fälle** (alle in `proguard-rules.pro` 6c/5):
+`ScreenFragment.getScreen()` (Reanimated → Tab-Übergänge tot),
+`FirebaseRemoteConfig` (Analytics löscht den Rollout-Zustand),
+`Screen.getActivityState()` (überlebte nur zufällig).
+
+**Nicht verwechseln:** Der `NoSuchFieldException: No field mIsFinished` im logcat
+kommt **nicht** von R8 — RN 0.79.7 hat `MessageQueueThreadImpl` auf Kotlin
+umgestellt, das Feld heißt dort `isFinished`. Reanimated sucht den alten Java-Namen,
+der Fehler steht auch in 6.0.18 im Log. Keine Keep-Regel dafür bauen, sie träfe ins Leere.
+
+**Abnahme eines R8-Releases gehört auf ein echtes Gerät**, nicht in den Debug-Build:
+AAB → `bundletool build-apks --mode=universal` → `adb install` → starten, durchklicken,
+`logcat` auf `FATAL` und `[Reanimated]` prüfen. Nur dort zeigen sich Verschleierungsfehler.

@@ -51,6 +51,49 @@ Resolver findet URLs, Scraper probiert durch (1. Treffer wins).
 curl "https://...cloudfunctions.net/scrapeEan?key=<TRIGGER>&ean=4002334113001&productName=Erdbeere%20Joghurt"
 ```
 
+Zusätzliche Parameter (seit 04.10.2026, `src/anfrage.js`):
+`ohneOpenFoodFacts` (openfoodfacts-Seiten überspringen — die API ist
+kostenlos), `nurDomains` (nur diese Domains, für Händler-interne 8-stellige
+Codes), `bevorzugteUrl` (zuerst diese Seite ohne Serper-Suche),
+`auffrischen` (neuer gültiger Preis ersetzt den alten).
+
+Antworten: `200 ok` (Fund geschrieben), `200 all_failed` / `200 no_urls`
+(inhaltlich nichts gefunden), `503` mit `extract_unavailable`,
+`search_unavailable`, `fetch_unavailable` oder `zeitlimit` — ein Ausfall ist
+nie „nichts gefunden“. `fetch_unavailable` heißt auch: KEIN belegter
+Kandidat (Serper-Treffer, bevorzugte Seite) antwortete, alle scheiterten an
+403/429/5xx/Zeitlimit — auch ein gescheitertes Apify-Rendern (leerer
+Datensatz, run-failed) zählt so. Die Rückfall-Adresse von Codecheck, die für
+jede EAN angehängt wird, zählt dabei nicht als Antwort (sie liefert für jede
+unbekannte EAN eine Suchseite; Prüfrunde 2). Fällt die KI aus, beginnt
+scrapeEan keinen weiteren Kandidaten mehr (503 `extract_unavailable`) —
+jede weitere Seite bräuchte sie, und bei hängender KI riss schon der zweite
+Kandidat den Abbruch des Prozessors nach 240 s.
+`altdatenWiderlegt: true`: die bevorzugte Seite (gespeicherte Quellseite)
+trägt eine andere GTIN, zeigt die EAN nicht oder mehrere Produkte — die dort
+vor dem 04.10.2026 ungeprüft gelesenen Daten wurden entfernt.
+
+Vor JEDEM KI-Aufruf prüft `src/seitenDaten.js`, ob die Seite zu der EAN
+gehört: die EAN als JSON-LD-Kennung oder im sichtbaren Text (nicht nur in
+Skript-Daten, Meta-Keywords, einer Adresse oder einem Suchfeld) und keine
+Seite mit mehreren Produkten. Dieselbe Regel gilt für ALLE Daten (Zutaten,
+Nährwerte, Preis, Hersteller), nicht nur für den Namen. Für 8-stellige Codes
+(EAN-8/RCN-8, Prüfrunde 3) gilt sie strenger: im JSON-LD nur echte GTIN-Felder
+(nicht `sku`/`mpn`/`productID` ohne `gtin:`-/`ean:`-Präfix), im Text nur mit
+„EAN"/„GTIN"/„Barcode" direkt davor — achtstellige Nummern sind oft PZN,
+Artikel- oder Shopnummern. Name und Bild kommen
+ohne KI aus JSON-LD/og-Tags und nur mit Beleg (`eanBeleg`); von der
+KI-Antwort werden nur die Datenfelder des Prompts übernommen. Die Suche
+endet beim ersten vollen Treffer (Zutaten/Nährwerte oder Name mit
+Preis/Hersteller). Jede KI-Antwort steht als Logzeile
+`{"evt":"produktsuche_kosten",…}` im Log, jeder Lauf als
+`{"evt":"produktsuche_lauf",…}` — beide mit `auftrag`
+(`produktsuche` | `katalog` | `einzelseite`), auch bei einem 500.
+
+Unbelegter Altbestand (Dokumente ohne `fetchedAt`, vor dem 04.10.2026 ohne
+EAN-Prüfung gelesen) wird vom ersten belegten Fund ERSETZT, nicht feldweise
+ergänzt (`src/zusammenfuehren.js`); ab dann gilt feldweise.
+
 ### 3. `scrapeBatch` — Batch-Run
 
 Iteriert produkte/markenProdukte ohne `nutritionSource`. Bis zu
@@ -64,6 +107,11 @@ Params:
 - `collection`: `produkte` oder `markenProdukte`
 - `limit`: max # zu verarbeiten (default 50)
 - `dryRun`: `1` → keine Writes / Resolver-Calls
+
+Scheiterten alle belegten Kandidaten (Serper-Treffer) an Abruffehlern, schreibt
+scrapeBatch keinen Fehlversuch-Marker (sonst nach drei Läufen für immer
+übersprungen) — dieselbe Regel wie scrapeEan, die Rückfall-Adressen von
+Codecheck/OpenFoodFacts zählen dabei nicht als Antwort (Prüfrunde 3).
 
 ## Setup (User-Side)
 
@@ -212,15 +260,32 @@ Doc-ID = EAN (z.B. `4002334113001`):
   "nutr_Eiwei_val": 4.2, "..._unit": "g",
   "nutr_Salz_val": 0.15, "..._unit": "g",
   "nutr_serving_size": 100, "nutr_serving_unit": "g",
+  "productName": "Elvital Shampoo, Color Glanz",
+  "shopBildUrl": "https://produkte.globus.de/media/…jpg",
+  "eanBeleg": "jsonld_gtin" | "seitentext",
+  "attr_preis": 3.79, "priceShop": "globus", "priceCurrency": "EUR",
+  "priceFetchedAt": Timestamp,
+  "fetchedAt": Timestamp,
   "scrapedAt": Timestamp,
   "scrapedSource": "scraper",
   "scrapedUrl": "https://www.codecheck.info/...",
   "confidence": 0.85,
-  "model": "claude-haiku-4-5",
+  "model": "gemini-3.5-flash",
   "tokensIn": 4200,
-  "tokensOut": 180
+  "tokensOut": 180,
+  "schemaVersion": 4
 }
 ```
+
+- `fetchedAt`: letzter Lauf, in dem eine Seite wirklich abgerufen und
+  ausgelesen wurde (auch wenn sich nichts änderte). Grundlage der
+  2-Monats-Auffrischung.
+- `scrapedAt`: zuletzt ein Feld geändert (Bedeutung wie bisher;
+  nutrition-backfill nutzt es als Datenstand).
+- Geschrieben wird feldweise in einer Transaktion (`src/zusammenfuehren.js`):
+  ein leerer Wert ersetzt nie einen vorhandenen, `productPath` bleibt, der
+  Preis wandert als Block. Preise nur in Euro aus DE/AT-Shops
+  (`domains.preisLandErlaubt`).
 
 ## Was später noch zu tun ist (out of Sprint 3 Skeleton)
 

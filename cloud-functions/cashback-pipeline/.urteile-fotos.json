@@ -1,0 +1,5338 @@
+[
+ {
+  "id": "l68kdTCy2VifEsiw4dTd",
+  "userId": "oDkGm8abbvdfJhoC4PfLB4M9R312",
+  "ean": "4068706375101",
+  "name": "Asia Green Garden Edamame with Shell",
+  "markt": "Aldi Nord",
+  "createdAt": 1788516117371,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": false,
+   "produktname": "Asia Green Garden Edamame with Shell",
+   "grund": "Echtes Produkt zuhause fotografiert, Vorderseite und Rückseite passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "jY426HzQfTBGi3HHbcQB",
+  "userId": "KXpu9frBlXMEGjBsBAqc9kL6F1b2",
+  "ean": "4337256487924",
+  "name": "ja! Ultra Power Spülmittelkonzentrat",
+  "markt": "REWE",
+  "createdAt": 1788517434806,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "ja! Ultra Power Spülmittelkonzentrat",
+   "grund": "Alle Fotos zeigen dasselbe echte Produkt im Supermarkt."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "35UQyN6ZwrDkttPj37lA",
+  "userId": "ndDQ4tcA7vNWYmRNmhWLtYb3TTy1",
+  "ean": "4000540023169",
+  "name": "Kölln Knusper Honig-Nuss Hafer-Müsli",
+  "markt": "REWE",
+  "createdAt": 1788519122004,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Kölln Knusper Honig-Nuss Hafer-Müsli",
+   "grund": "Echtes Produkt zuhause fotografiert, Barcode und Packung passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "spo4a9FBgs5ZAd8tGFEb",
+  "userId": "REN3sPCXw8YF4vNxJdYr1nuTA8i1",
+  "ean": "4311501465639",
+  "name": "Gut & Günstig Rahm-Spinat",
+  "markt": "EDEKA",
+  "createdAt": 1788527374145,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Gut & Günstig Rahm-Spinat",
+   "grund": "Echtes Produkt zuhause fotografiert, Kassenbon zeigt G&G Rahmspinat."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "ADLBjncvoQXg030dZob6",
+  "userId": "REN3sPCXw8YF4vNxJdYr1nuTA8i1",
+  "ean": "4311501660829",
+  "name": "Gut & Günstig Ananas Stücke in eigenem Saft",
+  "markt": "EDEKA",
+  "createdAt": 1788527454084,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Gut & Günstig Ananas Stücke in eigenem Saft",
+   "grund": "Echtes Produkt zuhause fotografiert, Barcode passt und Kassenbon zeigt den Kauf."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "kl0Uz2midPPVTZuyChyR",
+  "userId": "REN3sPCXw8YF4vNxJdYr1nuTA8i1",
+  "ean": "4311501006658",
+  "name": "Gut & Günstig Zimt gemahlen",
+  "markt": "EDEKA",
+  "createdAt": 1788527736355,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Gut & Günstig Zimt gemahlen",
+   "grund": "Echtes Produkt, Vorderseite und Barcode passen zusammen, Kassenbon belegt den Kauf."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "HYfHMPVYqXp9fkPgTI24",
+  "userId": "REN3sPCXw8YF4vNxJdYr1nuTA8i1",
+  "ean": "8721800405346",
+  "name": "Leerdammer Original Mild-Nussig",
+  "markt": "EDEKA",
+  "createdAt": 1788527793522,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Leerdammer Original Mild-Nussig",
+   "grund": "Echtes Produkt, Barcode passt und Kassenbon belegt den Kauf."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "lzcRmOkMFf2jAROxvtIM",
+  "userId": "UStxkrS6iCaMhKE1mMqoQXATNTB2",
+  "ean": "4063367321276",
+  "name": "K-Classic American Style Erdnusscreme Creamy",
+  "markt": "Kaufland",
+  "createdAt": 1788530614212,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "K-Classic American Style Erdnusscreme Creamy",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "klkGAbuUDiWI3ShbVdnu",
+  "userId": "UStxkrS6iCaMhKE1mMqoQXATNTB2",
+  "ean": "4008100169395",
+  "name": "Oro di Parma Tomaten Passata Rustica Tradizionale",
+  "markt": "Kaufland",
+  "createdAt": 1788530767405,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Oro di Parma Tomaten Passata Rustica Tradizionale",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "QR6MQamSgrmWy7NZkhyo",
+  "userId": "UStxkrS6iCaMhKE1mMqoQXATNTB2",
+  "ean": "4063367251863",
+  "name": "K-Classic Delikatess Leberwurst fein",
+  "markt": "Kaufland",
+  "createdAt": 1788531030655,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "K-Classic Delikatess Leberwurst fein",
+   "grund": "Echtes Produkt im Laden fotografiert, Barcode und Vorderseite stimmen überein."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "f79Z5lteUveCgxfZ0IRr",
+  "userId": "UStxkrS6iCaMhKE1mMqoQXATNTB2",
+  "ean": "4063367225338",
+  "name": "K-Classic Delikatess Scharfe Snack-Salami",
+  "markt": "Kaufland",
+  "createdAt": 1788531072419,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "K-Classic Delikatess Scharfe Snack-Salami",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "QGdQockusiDuu6CuX0yJ",
+  "userId": "UStxkrS6iCaMhKE1mMqoQXATNTB2",
+  "ean": "8711327608207",
+  "name": "Magnum Mini Classic",
+  "markt": "Kaufland",
+  "createdAt": 1788531131826,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Magnum Mini Classic",
+   "grund": "Echtes Produkt im Laden fotografiert, alle Bilder passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "CPvEVZRPBBBgzx9vvgi2",
+  "userId": "XwrXD6dEUnbUBLm4go8UaA73UKR2",
+  "ean": "4311501744406",
+  "name": "Vescovino Secco Frizzante Rosato",
+  "markt": "EDEKA",
+  "createdAt": 1788533780505,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Vescovino Secco Frizzante Rosato",
+   "grund": "Echtes Produkt zuhause fotografiert, Kassenbon zeigt passenden Eintrag Vesco.Frizz.O."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "YzmRk9HgayzCcZ3jjjbB",
+  "userId": "WWQJvtG1e9euDtal4tNl4BVxb6m1",
+  "ean": "4316268672917",
+  "name": "Genuss Welt Lasagne Bolognese",
+  "markt": "Netto Markendiscount",
+  "createdAt": 1788533929475,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Genuss Welt Lasagne Bolognese",
+   "grund": "Echtes Produkt zuhause fotografiert, Kassenbon zeigt Genusswelt Lasagne 1kg."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "PGprxeijwlpz2YQyrIqZ",
+  "userId": "WWQJvtG1e9euDtal4tNl4BVxb6m1",
+  "ean": "4316268650410",
+  "name": "Carat Suppengrün schonend gefriergetrocknet",
+  "markt": "Netto Markendiscount",
+  "createdAt": 1788534102623,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": false,
+   "produktname": "Carat Suppengrün schonend gefriergetrocknet",
+   "grund": "Echtes Produkt zuhause fotografiert mit passendem Kassenbon."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "82Q5ZDuhNXdehrqqXYzZ",
+  "userId": "WWQJvtG1e9euDtal4tNl4BVxb6m1",
+  "ean": "4311596490202",
+  "name": "Booster Absolute Zero Energy Drink",
+  "markt": "Netto Markendiscount",
+  "createdAt": 1788534328362,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Booster Absolute Zero Energy Drink",
+   "grund": "Echtes Produkt zuhause fotografiert, Kassenbon zeigt Booster Zero."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "FPWfu9wgZeEu0xqIpqdC",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4084200772901",
+  "name": "Garnier Hautklar Tägliches Waschgel",
+  "markt": "dm",
+  "createdAt": 1788535216093,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Garnier Hautklar Tägliches Waschgel",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "sdiKRw0V3R6f8KjRNLim",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "3600551204956",
+  "name": "Mixa Anti-Unreinheiten Dreifach Korrigierende Creme",
+  "markt": "dm",
+  "createdAt": 1788535450891,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Mixa Anti-Unreinheiten Dreifach Korrigierende Creme",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "oDbPBZSaeOUjKky1CbGP",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "9640523525249",
+  "name": "L'Oréal Paris Age Perfect Zelleneuernde Revitalisierende Creme Tag",
+  "markt": "dm",
+  "createdAt": 1788535604257,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "L'Oréal Paris Age Perfect Zell-Renaissance Tag",
+   "grund": "Echtes Produkt im Laden fotografiert, Barcode und Preis passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "FTSX1rfjMthuOJD3Hbdw",
+  "userId": "wzVqMULr6bVXWrSYuKNLyxQsGgN2",
+  "ean": "8008698013175",
+  "name": "Schär Gluten-Free Mehrkorn-Brötchen",
+  "markt": "Aldi Nord",
+  "createdAt": 1788535647419,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": false,
+   "produktname": "Schär Mehrkorn-Brötchen",
+   "grund": "Echtes Produkt zuhause fotografiert, Kassenbon zeigt glutenfreie Brote."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "93Qaqw99KzUoR6omQA9x",
+  "userId": "wzVqMULr6bVXWrSYuKNLyxQsGgN2",
+  "ean": null,
+  "name": "Goldähren Glutenfreies Brot Dunkel",
+  "markt": "Aldi Nord",
+  "createdAt": 1788535760870,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [
+   "ean_fehlt"
+  ],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "ablehnen"
+ },
+ {
+  "id": "tApisOyTBcKC0nVsG6ht",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "8008343700511",
+  "name": "Rummo Bio Integrale Mezzi Rigatoni No 51",
+  "markt": "dm",
+  "createdAt": 1788535847621,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Rummo Bio Integrale Mezzi Rigatoni No 51",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Barcode und Preisschild passen perfekt."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "ggeKzrJdt9drPdglLUa9",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4066447948271",
+  "name": "dmBio Erdnussmus",
+  "markt": "dm",
+  "createdAt": 1788535987879,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "dmBio Erdnussmus",
+   "grund": "Echtes Produkt im dm-Regal fotografiert, Barcode und Preis passen perfekt."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "awRluJRHC3xiQFsku3lQ",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4066447948257",
+  "name": "dmBio Erdnussmus Crunchy",
+  "markt": "dm",
+  "createdAt": 1788536128320,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "dmBio Erdnussmus Crunchy",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, alle Bilder passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "aqPYhzovZZo5M700P9H0",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "9012519283356",
+  "name": "KoRo Bio Tahini weiß",
+  "markt": "dm",
+  "createdAt": 1788536201276,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "KoRo Bio Tahini weiß",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "OrzNoxB4Bke2XrsMGEAi",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4260335836354",
+  "name": "KoRo Bio Erdnussmus",
+  "markt": "dm",
+  "createdAt": 1788536232663,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "KoRo Bio Erdnussmus",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "uiT441ZRhKyJEziJJB8s",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4006040007999",
+  "name": "bionella Nuss-Nougat Creme",
+  "markt": "dm",
+  "createdAt": 1788536291822,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "bionella",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "u6yBBONksXZaEqWtAA2J",
+  "userId": "GVaBDee9YZazSkkXA9fOOiBoSEk1",
+  "ean": "4311501032121",
+  "name": "Gut & Günstig Anti Kalk Enthärter-Pulver",
+  "markt": "EDEKA",
+  "createdAt": 1788537754122,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [
+   "sichtpruefung_fehlgeschlagen"
+  ],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "fehler": "{\"error\":{\"code\":400,\"message\":\"Failed to decode image data. Please make sure the image is valid.\",\"status\":\"INVALID_ARG"
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "YVyXHSMKE0BqVOqkKjE2",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4000417670014",
+  "name": "Ritter Sport Voll-Nuss",
+  "markt": "EDEKA",
+  "createdAt": 1788538261108,
+  "campaignId": null,
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Ritter Sport Voll-Nuss",
+   "grund": "Alle Bilder zeigen dieselbe Ritter Sport Voll-Nuss Tafel im Verkaufsregal."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "YVyN6kuMXxX1q3KNXhRn",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4104420056343",
+  "name": "Alnatura Dinkel Zwieback ungesüßt",
+  "markt": "EDEKA",
+  "createdAt": 1788538439642,
+  "campaignId": null,
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Alnatura Dinkel Zwieback ungesüßt",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Barcode und Preisschild stimmen überein."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "9GFLOyTV73tBxhwfRMdn",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4101530002505",
+  "name": "Berchtesgadener Land Haltbare Bio Alpenmilch 3,5%",
+  "markt": "EDEKA",
+  "createdAt": 1788538554701,
+  "campaignId": null,
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Berchtesgadener Land Haltbare Bio Alpenmilch 3,5% Fett",
+   "grund": "Alle Bilder zeigen dasselbe echte Produkt im Ladenregal mit passendem Preisschild."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "KdcYALkMOQJRYK0UAUkc",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4104060031526",
+  "name": "Andechser Natur Bio Ziegenmilch Haltbar 3,0% Fett",
+  "markt": "EDEKA",
+  "createdAt": 1788538594440,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": "SqE8gAY6xUg5OKAWY3bq",
+   "sameUser": false,
+   "updatedFields": [
+    "market"
+   ]
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Andechser Natur Bio Ziegenmilch Haltbar",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Barcode und Vorderseite stimmen überein."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "ISImjEi2WJO2bAxgUJRX",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4104060031533",
+  "name": "Andechser Natur Haltbare Bio Ziegenmilch 1,5% Fett",
+  "markt": "EDEKA",
+  "createdAt": 1788538620414,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Andechser Natur Haltbare Bio Ziegenmilch 1,5% Fett",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Barcode und Vorderseite passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "V1vspXgOwNLZ3w9KEN18",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "8000500164976",
+  "name": "Tic Tac Fresh Orange",
+  "markt": "EDEKA",
+  "createdAt": 1788538788297,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Tic Tac Fresh Orange",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "QuDmbZN7sM5xMLA7fclW",
+  "userId": "94aCKn9in8d9rHLCjUG3jf73giB2",
+  "ean": "4045317044770",
+  "name": "Bärenmarke Haltbare Milch 1,5%",
+  "markt": "LiDL",
+  "createdAt": 1788539814898,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [
+   "preisbeleg_mehrfach_genutzt"
+  ],
+  "fehlend": [],
+  "kaputt": [],
+  "recycling": [
+   {
+    "step": "preis",
+    "auchIn": [
+     "11LxYssp2NVEadUgbUAC",
+     "BqjKEmJi3Fwjy6VaVY1F",
+     "FnCOFRqSiEsGH1Da3I28"
+    ]
+   }
+  ],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "yHwTrrDYRcwvmSmQvdIo",
+  "userId": "94aCKn9in8d9rHLCjUG3jf73giB2",
+  "ean": "42256717",
+  "name": "Freeway Bitter Lemon Original",
+  "markt": "LiDL",
+  "createdAt": 1788539903304,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [
+   "preisbeleg_mehrfach_genutzt"
+  ],
+  "fehlend": [],
+  "kaputt": [],
+  "recycling": [
+   {
+    "step": "preis",
+    "auchIn": [
+     "11LxYssp2NVEadUgbUAC",
+     "BqjKEmJi3Fwjy6VaVY1F",
+     "FnCOFRqSiEsGH1Da3I28"
+    ]
+   }
+  ],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "11LxYssp2NVEadUgbUAC",
+  "userId": "94aCKn9in8d9rHLCjUG3jf73giB2",
+  "ean": "20995737",
+  "name": "Milbona Butterkäse in Scheiben 45% Fett i.Tr.",
+  "markt": "LiDL",
+  "createdAt": 1788539987100,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [
+   "preisbeleg_mehrfach_genutzt"
+  ],
+  "fehlend": [],
+  "kaputt": [],
+  "recycling": [
+   {
+    "step": "preis",
+    "auchIn": [
+     "BqjKEmJi3Fwjy6VaVY1F",
+     "FnCOFRqSiEsGH1Da3I28",
+     "Gf6uEUa5dWziE8WP94t6"
+    ]
+   }
+  ],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "P2A4RoUfK7ighelqFRLA",
+  "userId": "94aCKn9in8d9rHLCjUG3jf73giB2",
+  "ean": "4056489587446",
+  "name": "Dulano Cervelat Wurst",
+  "markt": "LiDL",
+  "createdAt": 1788540018811,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [
+   "preisbeleg_mehrfach_genutzt"
+  ],
+  "fehlend": [],
+  "kaputt": [],
+  "recycling": [
+   {
+    "step": "preis",
+    "auchIn": [
+     "11LxYssp2NVEadUgbUAC",
+     "BqjKEmJi3Fwjy6VaVY1F",
+     "FnCOFRqSiEsGH1Da3I28"
+    ]
+   }
+  ],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "Gf6uEUa5dWziE8WP94t6",
+  "userId": "94aCKn9in8d9rHLCjUG3jf73giB2",
+  "ean": "4056489928645",
+  "name": "Dulano Salami Geflügel",
+  "markt": "LiDL",
+  "createdAt": 1788540056056,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [
+   "preisbeleg_mehrfach_genutzt"
+  ],
+  "fehlend": [],
+  "kaputt": [],
+  "recycling": [
+   {
+    "step": "preis",
+    "auchIn": [
+     "11LxYssp2NVEadUgbUAC",
+     "BqjKEmJi3Fwjy6VaVY1F",
+     "FnCOFRqSiEsGH1Da3I28"
+    ]
+   }
+  ],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "FnCOFRqSiEsGH1Da3I28",
+  "userId": "94aCKn9in8d9rHLCjUG3jf73giB2",
+  "ean": "4056489751663",
+  "name": "Dulano Teewurst Fein",
+  "markt": "LiDL",
+  "createdAt": 1788540130666,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [
+   "preisbeleg_mehrfach_genutzt"
+  ],
+  "fehlend": [],
+  "kaputt": [],
+  "recycling": [
+   {
+    "step": "preis",
+    "auchIn": [
+     "11LxYssp2NVEadUgbUAC",
+     "BqjKEmJi3Fwjy6VaVY1F",
+     "Gf6uEUa5dWziE8WP94t6"
+    ]
+   }
+  ],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "BqjKEmJi3Fwjy6VaVY1F",
+  "userId": "94aCKn9in8d9rHLCjUG3jf73giB2",
+  "ean": "4335619235236",
+  "name": "chef select Cremiger Fleischsalat",
+  "markt": "LiDL",
+  "createdAt": 1788540198088,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [
+   "preisbeleg_mehrfach_genutzt"
+  ],
+  "fehlend": [],
+  "kaputt": [],
+  "recycling": [
+   {
+    "step": "preis",
+    "auchIn": [
+     "11LxYssp2NVEadUgbUAC",
+     "FnCOFRqSiEsGH1Da3I28",
+     "Gf6uEUa5dWziE8WP94t6"
+    ]
+   }
+  ],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "H7SX1GR0pfEaNP8IXLfy",
+  "userId": "94aCKn9in8d9rHLCjUG3jf73giB2",
+  "ean": "4335619327542",
+  "name": "Milbona Schlagsahne wärmebehandelt 30% Fett",
+  "markt": "LiDL",
+  "createdAt": 1788540298583,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [
+   "preisbeleg_mehrfach_genutzt"
+  ],
+  "fehlend": [],
+  "kaputt": [],
+  "recycling": [
+   {
+    "step": "preis",
+    "auchIn": [
+     "11LxYssp2NVEadUgbUAC",
+     "BqjKEmJi3Fwjy6VaVY1F",
+     "FnCOFRqSiEsGH1Da3I28"
+    ]
+   }
+  ],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "gQ6ZNVvMZWQkMOMcYPs3",
+  "userId": "94aCKn9in8d9rHLCjUG3jf73giB2",
+  "ean": "4056489857082",
+  "name": "Milbona Fettarmer Joghurt Mild 1,5% Fett",
+  "markt": "LiDL",
+  "createdAt": 1788540397044,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [
+   "preisbeleg_mehrfach_genutzt"
+  ],
+  "fehlend": [],
+  "kaputt": [],
+  "recycling": [
+   {
+    "step": "preis",
+    "auchIn": [
+     "11LxYssp2NVEadUgbUAC",
+     "BqjKEmJi3Fwjy6VaVY1F",
+     "FnCOFRqSiEsGH1Da3I28"
+    ]
+   }
+  ],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "VMRIETpshxl0NpN22V1b",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4036300146335",
+  "name": "MILRAM Müritzer Herzhaft",
+  "markt": "LiDL",
+  "createdAt": 1788540580169,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Milram Müritzer Herzhaft XXL Pack",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "2rcRIGo7zKdZV8BrucYc",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4002221037946",
+  "name": "Meßmer Türkischer Apfel-Feige",
+  "markt": "LiDL",
+  "createdAt": 1788540655510,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Meßmer Türkischer Apfel-Feige",
+   "grund": "Echtes Produkt im Laden fotografiert, Barcode gehört zum Apfel-Feige Tee."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "BsTvv7yFQRXDPTRs3Tm0",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "8000500466629",
+  "name": "Ferrero Die Besten",
+  "markt": "LiDL",
+  "createdAt": 1788541124664,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Ferrero Die Besten",
+   "grund": "Alle Fotos zeigen das echte Produkt im Ladenregal inklusive passendem Preisschild."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "ip2M19ziS1fiFtNpOLmU",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "20609535",
+  "name": "Nautica Eismeergarnelen",
+  "markt": "LiDL",
+  "createdAt": 1788541238573,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Nautica Eismeergarnelen",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "Ls6pLYidejuNPkDIwaxJ",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "20169268",
+  "name": "Nautica Party-Garnelen ohne Schale, gekocht",
+  "markt": "LiDL",
+  "createdAt": 1788541272470,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Nautica Party-Garnelen",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "ViVBTHojnVJgkL2L61FR",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4056489706922",
+  "name": "Chef Select To Go! Big Burrito Chicken BBQ",
+  "markt": "LiDL",
+  "createdAt": 1788541334780,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Chef Select To Go! Big Burrito Chicken BBQ",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "UzhjZ2cHq2jddTFRRho1",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "20481940",
+  "name": "Fin Carré Dunkle Ganze Mandel",
+  "markt": "LiDL",
+  "createdAt": 1788541383923,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Fin Carré Dunkle Ganze Mandel",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "aXvxGxH25sXAYhHC6oP3",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "20005795",
+  "name": "Fin Carré Edelrahm-Ganze-Mandel",
+  "markt": "LiDL",
+  "createdAt": 1788541432638,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Fin Carré Edelrahm-Ganze-Mandel",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "J3b7wujwXOoZQJEgn3VI",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "20884604",
+  "name": "Fin Carré Honig-Salz-Mandel Schokolade",
+  "markt": "LiDL",
+  "createdAt": 1788541469495,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Fin Carré Honig-Salz-Mandel",
+   "grund": "Alle Bilder zeigen dasselbe echte Produkt im Ladenregal."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "j865IY4R9BI8K5bGafwA",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "20884611",
+  "name": "Fin Carré Weisse Ganze Nuss",
+  "markt": "LiDL",
+  "createdAt": 1788541516489,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Fin Carré Weisse Ganze Nuss",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Vorderseite und Barcode stimmen überein."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "NFxqbFMMXDi6Nyr81FaH",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "20481957",
+  "name": "Fin Carré Weisse Kokos & Flakes",
+  "markt": "LiDL",
+  "createdAt": 1788541556056,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Fin Carré Weisse Kokos & Flakes",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "HYl7iiJuGcM2M2hFRkAH",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "20095291",
+  "name": "J.D. Gross Edelbitter 70% Cacao",
+  "markt": "LiDL",
+  "createdAt": 1788541631368,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "J.D. Gross Edelbitter 70% Cacao",
+   "grund": "Echtes Produkt im Laden fotografiert, Barcode-Foto ist leider stark verwackelt."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "toMLud2eGtvKyha6eTnF",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4056489108870",
+  "name": "Coshida feine Pastete mit Rind",
+  "markt": "LiDL",
+  "createdAt": 1788541756805,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Coshida feine Pastete mit Rind",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "JCAtSZUknSl3eBiXaMmI",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4056489617655",
+  "name": "Coshida Junior zartes Ragout reich an Geflügel",
+  "markt": "LiDL",
+  "createdAt": 1788541799936,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Coshida zartes Ragout Junior reich an Geflügel",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "z1aMa71uRhoHPM8rYQUM",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4056489108863",
+  "name": "Coshida feine Pastete mit Ente & Huhn",
+  "markt": "LiDL",
+  "createdAt": 1788541830606,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Coshida feine Pastete mit Ente & Huhn",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "3AHEKNe8anbschrqb1Xi",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4056489593010",
+  "name": "Coshida feine Pastete mit MSC-Seelachs",
+  "markt": "LiDL",
+  "createdAt": 1788541872086,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Coshida feine Pastete mit MSC-Seelachs",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "HN6jDbm6NGfrtbrsQS9w",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4335619197053",
+  "name": "Coshida Pastete mit Kalb",
+  "markt": "LiDL",
+  "createdAt": 1788541916045,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Coshida Pastete mit Kalb",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "KwaPRSLRCdzASkGRrdyL",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4335619197046",
+  "name": "Coshida Pastete mit Wild",
+  "markt": "LiDL",
+  "createdAt": 1788541962136,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Coshida Pastete mit Wild",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Rückseite passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "30r9PyewZqZRE3qeEE2O",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4335619197077",
+  "name": "Coshida Pastete mit Geflügel Senior",
+  "markt": "LiDL",
+  "createdAt": 1788542006236,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Coshida Pastete mit Geflügel Senior",
+   "grund": "Alle Bilder zeigen das echte Produkt im Ladenregal."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "hZ9Ik1pwA8B9WMKDFqKL",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4056489617686",
+  "name": "Orlando Herzhaftes Ragout mit Kalb & Leber",
+  "markt": "LiDL",
+  "createdAt": 1788542056824,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Orlando Herzhaftes Ragout mit Kalb & Leber",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "hDHiQWCSoDRCZ9dyrkoi",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4056489617709",
+  "name": "Orlando Schlemmerkern Pastete mit Rind & Gemüse",
+  "markt": "LiDL",
+  "createdAt": 1788542099645,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Orlando Schlemmerkern Pastete mit Rind & Gemüse",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode stimmen überein."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "vS9jCjmYv4vvyXzFpNJo",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4056489617693",
+  "name": "Orlando Schlemmerkern Pastete mit Huhn, Karotten & Nudeln",
+  "markt": "LiDL",
+  "createdAt": 1788542143014,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Orlando Schlemmerkern Pastete mit Huhn, Karotten & Nudeln",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode stimmen überein."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "A8Ortnun3xHAtZWR0XX4",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4056489171904",
+  "name": "Orlando Feine Pastete mit Kalb",
+  "markt": "LiDL",
+  "createdAt": 1788542183706,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Orlando Feine Pastete mit Kalb",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "ZXCaX8zQEMjm6hIULhbj",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4056489171881",
+  "name": "Orlando Feine Pastete mit Rind",
+  "markt": "LiDL",
+  "createdAt": 1788542228064,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Orlando Feine Pastete mit Rind",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "PxNAYE09mCFNuyAz5BOq",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4056489571094",
+  "name": "Orlando Gourmet Feine Pastete mit Kalb & Truthahn",
+  "markt": "LiDL",
+  "createdAt": 1788542279567,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Orlando Gourmet Feine Pastete mit Kalb & Truthahn",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "O4tL12bqZ4z4X3k78oWe",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4056489531852",
+  "name": "Orlando Gourmet Feine Pastete mit Geflügel & Gemüse",
+  "markt": "LiDL",
+  "createdAt": 1788542323394,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Orlando Gourmet Feine Pastete mit Geflügel & Gemüse",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "TvAUHRrcORjtvLONHRg1",
+  "userId": "cH0mepkjqxfTXce9Jz7IhCZQ5zx1",
+  "ean": "4021274760335",
+  "name": "K-Bio Organic Himbeeren gefriergetrocknet",
+  "markt": "Kaufland",
+  "createdAt": 1788544729635,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "K-Bio Organic Himbeeren gefriergetrocknet",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "DSMAs4guTP5gIUESwYEb",
+  "userId": "qbnPYmbZybSYxbvf5UG8Di5iUbP2",
+  "ean": "5410126176940",
+  "name": "Lotus Biscoff Crunchy",
+  "markt": "Aldi Nord",
+  "createdAt": 1788545826936,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": false,
+   "produktname": "Lotus Biscoff Crunchy",
+   "grund": "Echtes Produkt zuhause fotografiert, drittes Bild zeigt den Glasboden statt Preis."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "RkYZ2FhNfafFTKQlUbSc",
+  "userId": "6HIpQMi2SPMJvA01QjE8S7AY4Zk1",
+  "ean": "4066447104318",
+  "name": "DM Bio Weizenmehl Type 550",
+  "markt": "dm",
+  "createdAt": 1788548498623,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "dm Bio Weizenmehl Type 550",
+   "grund": "Echtes Produkt zuhause fotografiert mit passendem Barcode und Kassenbon auf Smartphone."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "zOQIBc3qD4ZCjZT1zykm",
+  "userId": "Cy6DAtim6zTuJeh0ga22KYD491N2",
+  "ean": "4061458044622",
+  "name": "Milsani Allgäuer Art Schmelzkäsescheiben",
+  "markt": "Aldi Süd",
+  "createdAt": 1788550045126,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": false,
+   "produktname": "Milsani Allgäuer Art Schmelzkäsescheiben",
+   "grund": "Echtes Produkt zuhause fotografiert mit passendem Kassenbon."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "KRgsUjnZOMHoaQ2RLX0P",
+  "userId": "Cy6DAtim6zTuJeh0ga22KYD491N2",
+  "ean": "4047247060967",
+  "name": "Milsani mit Chester Schmelzkäsescheiben",
+  "markt": "Aldi Süd",
+  "createdAt": 1788550494558,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Milsani mit Chester Schmelzkäsescheiben",
+   "grund": "Echtes Produkt zuhause fotografiert mit passendem Kassenbon von Aldi Süd."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "PmrZqLn0n1Aj0rys48gQ",
+  "userId": "Cy6DAtim6zTuJeh0ga22KYD491N2",
+  "ean": "4061407211136",
+  "name": "Milsani Toast Schmelzkäsescheiben 35% Fett i. Tr.",
+  "markt": "Aldi Süd",
+  "createdAt": 1788551071527,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": false,
+   "produktname": "Milsani Toast Schmelzkäsescheiben",
+   "grund": "Echtes Produkt zuhause fotografiert, Kassenbon listet Schmelzscheiben auf."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "8WZfxtiKYNtrRJaovnPV",
+  "userId": "Cy6DAtim6zTuJeh0ga22KYD491N2",
+  "ean": "4047247571005",
+  "name": "Landbeck Tiroler Chiliwurzerl",
+  "markt": "Aldi Süd",
+  "createdAt": 1788551286358,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Landbeck Tiroler Chiliwurzerl",
+   "grund": "Echtes Produkt, Vorderseite und Barcode passen zusammen, Kassenbon belegt den Kauf."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "OYe9z0sujAAjpLLvV1j5",
+  "userId": "Cy6DAtim6zTuJeh0ga22KYD491N2",
+  "ean": "4061459034844",
+  "name": "Cucina Pesto alla Genovese",
+  "markt": "Aldi Süd",
+  "createdAt": 1788551702227,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Cucina Pesto alla Genovese",
+   "grund": "Echtes Produkt zuhause fotografiert, Kassenbon zeigt Pesto-Kauf bei Aldi Süd."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "ZzJp2XzAynK7Yiit6yXq",
+  "userId": "Cy6DAtim6zTuJeh0ga22KYD491N2",
+  "ean": "4061458163903",
+  "name": "Lyttos Hirtenkäse nach griechischer Art",
+  "markt": "Aldi Süd",
+  "createdAt": 1788551915079,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [
+   "sperre_30_tage_anderer_nutzer"
+  ],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "locked",
+   "reason": "sperre_30_tage_anderer_nutzer",
+   "priorId": "TnF1GrTO2bd6hYb2xX6K",
+   "sameUser": false,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "ablehnen"
+ },
+ {
+  "id": "u52XrA43Kb5zmVWoM1WM",
+  "userId": "Cy6DAtim6zTuJeh0ga22KYD491N2",
+  "ean": "4061461121105",
+  "name": "Le Gusto Fix für Salatsauce Paprika-Kräuter",
+  "markt": "Aldi Süd",
+  "createdAt": 1788552083463,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Le Gusto Fix für Salatsauce Paprika-Kräuter",
+   "grund": "Echtes Produkt, Vorderseite und Rückseite stimmen überein, Kassenbon ist vorhanden."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "fs9NkWffgjRL6fvzwiI9",
+  "userId": "Cy6DAtim6zTuJeh0ga22KYD491N2",
+  "ean": "4061459246261",
+  "name": "Asia Green Garden Instantnudeln Rindfleischgeschmack",
+  "markt": "Aldi Süd",
+  "createdAt": 1788552400244,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": false,
+   "produktname": "Asia Green Garden Instantnudeln Rindfleischgeschmack",
+   "grund": "Echtes Produkt zuhause fotografiert, Kassenbon zeigt Instant Nudeln."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "NQdzY3I8katjpWba1JKr",
+  "userId": "KlMmYt7ZxXPGN4IkE7L7qGRJG3e2",
+  "ean": "4311501704844",
+  "name": "Gut & Günstig Shrimps in Cocktail-Sauce",
+  "markt": "EDEKA",
+  "createdAt": 1788585711751,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Gut & Günstig Shrimps in Cocktail-Sauce",
+   "grund": "Echtes Produkt im Laden fotografiert, Barcode und Preisschild stimmen überein."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "LJv4t3gIgX9UEWIvOX5S",
+  "userId": "KlMmYt7ZxXPGN4IkE7L7qGRJG3e2",
+  "ean": "40436012",
+  "name": "Loose Hausmacher mit Kümmel",
+  "markt": "EDEKA",
+  "createdAt": 1788585817757,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Loose Hausmacher mit Kümmel",
+   "grund": "Das Produkt ist echt, im Laden fotografiert und die Bilder passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "sg7CxGpbTLv9EWNedaV1",
+  "userId": "KlMmYt7ZxXPGN4IkE7L7qGRJG3e2",
+  "ean": "4006237640336",
+  "name": "Oryza Risotto Reis",
+  "markt": "EDEKA",
+  "createdAt": 1788586910651,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Oryza Risotto Reis",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "lg4SEp8IBzmt1vOLif2s",
+  "userId": "HWl4gZjrIocaGmgm2J5Mo4tWKGC3",
+  "ean": "23267909",
+  "name": "Grill Party Grillkäse Kräuter",
+  "markt": "Penny",
+  "createdAt": 1788588631386,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Grill Party Grillkäse Kräuter",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "EOxbphPlYssynGM30P2l",
+  "userId": "WWQJvtG1e9euDtal4tNl4BVxb6m1",
+  "ean": "4316268488211",
+  "name": "Ice Fantasy Sandwich Fürst Pückler Art",
+  "markt": "Netto Markendiscount",
+  "createdAt": 1788588712694,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": false,
+   "produktname": "Ice Fantasy Sandwich Fürst Pückler Art",
+   "grund": "Echtes Produkt zuhause fotografiert, Kassenbon von Netto liegt vor."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "6s9KK0QhfdfW8w3sI2Sf",
+  "userId": "HWl4gZjrIocaGmgm2J5Mo4tWKGC3",
+  "ean": "28021339",
+  "name": "Grill Party Cremiger Grillkäse Kräuter",
+  "markt": "Penny",
+  "createdAt": 1788588754394,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Grill Party Cremiger Grillkäse Kräuter",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "XHQ5DuD6T8JpsPqvLEBE",
+  "userId": "WWQJvtG1e9euDtal4tNl4BVxb6m1",
+  "ean": "4311532295144",
+  "name": "Markttag Tafeltrauben rot kernlos",
+  "markt": "Netto Markendiscount",
+  "createdAt": 1788588925191,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [
+   "sperre_30_tage_gleicher_nutzer"
+  ],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "locked",
+   "reason": "sperre_30_tage_gleicher_nutzer",
+   "priorId": "36RfY9RLSyFQ6jhOlrLl",
+   "sameUser": true,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "ablehnen"
+ },
+ {
+  "id": "8jRrLJqKXfQRJRNgkQ7J",
+  "userId": "WWQJvtG1e9euDtal4tNl4BVxb6m1",
+  "ean": "4000177038000",
+  "name": "Capri-Sun Game On Energy Drink Red Berry",
+  "markt": "Netto Markendiscount",
+  "createdAt": 1788589268738,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [
+   "sperre_30_tage_gleicher_nutzer"
+  ],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "locked",
+   "reason": "sperre_30_tage_gleicher_nutzer",
+   "priorId": "yDA02pGtqnal6PvL8jtd",
+   "sameUser": true,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "ablehnen"
+ },
+ {
+  "id": "5OZ1fxhQU2zl9lIK1cD9",
+  "userId": "WWQJvtG1e9euDtal4tNl4BVxb6m1",
+  "ean": "4000177038017",
+  "name": "Capri-Sun Game On Energy Drink Mango Peach",
+  "markt": "Netto Markendiscount",
+  "createdAt": 1788589327892,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [
+   "sperre_30_tage_gleicher_nutzer"
+  ],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "locked",
+   "reason": "sperre_30_tage_gleicher_nutzer",
+   "priorId": "WzV6Arz32ZLwYxhNPOnt",
+   "sameUser": true,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "ablehnen"
+ },
+ {
+  "id": "wCb3vfj39tHE123rhRyG",
+  "userId": "msYf6pUQKRgyltCp41Tr9pKdQno2",
+  "ean": "4061459714517",
+  "name": "Rewe Bio Gewürzgurken",
+  "markt": "Aldi Süd",
+  "createdAt": 1788592466673,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Biogewürzgurken",
+   "grund": "Echtes Produkt zuhause fotografiert, alle Bilder zeigen dasselbe Gurkenglas."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "NhTNoGAejIUyUz4OYJsS",
+  "userId": "BTxp2sO0jKXuTqZoRIbFaRqCTv02",
+  "ean": "26452845",
+  "name": "Frischkäse",
+  "markt": "Penny",
+  "createdAt": 1788599748179,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [
+   "sperre_30_tage_anderer_nutzer"
+  ],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "locked",
+   "reason": "sperre_30_tage_anderer_nutzer",
+   "priorId": "S69lAPytGj7sJofgsnJD",
+   "sameUser": false,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "ablehnen"
+ },
+ {
+  "id": "ZXycbzwvIFK68wlEx0ct",
+  "userId": "gx1eAEYafDYzQ4TeA58Y9vWiNHn2",
+  "ean": "4019300170296",
+  "name": "Exquisa milder skyr",
+  "markt": "Billa",
+  "createdAt": 1788600002880,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [
+   "preisbeleg_mehrfach_genutzt"
+  ],
+  "fehlend": [],
+  "kaputt": [],
+  "recycling": [
+   {
+    "step": "preis",
+    "auchIn": [
+     "7ZHc0ZYSpiXm1aqAwMCk",
+     "TjuZUzRFxaQI2Kj8ed6Q",
+     "dYhQGvPAv4E6pCj1447z"
+    ]
+   }
+  ],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "7ZHc0ZYSpiXm1aqAwMCk",
+  "userId": "gx1eAEYafDYzQ4TeA58Y9vWiNHn2",
+  "ean": "9010440010300",
+  "name": "Bi no Sekt",
+  "markt": "Billa",
+  "createdAt": 1788600084434,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [
+   "preisbeleg_mehrfach_genutzt"
+  ],
+  "fehlend": [],
+  "kaputt": [],
+  "recycling": [
+   {
+    "step": "preis",
+    "auchIn": [
+     "TjuZUzRFxaQI2Kj8ed6Q",
+     "ZXycbzwvIFK68wlEx0ct",
+     "dYhQGvPAv4E6pCj1447z"
+    ]
+   }
+  ],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "TjuZUzRFxaQI2Kj8ed6Q",
+  "userId": "gx1eAEYafDYzQ4TeA58Y9vWiNHn2",
+  "ean": "5201043106338",
+  "name": "The chefs way iliada",
+  "markt": "Billa",
+  "createdAt": 1788600163230,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [
+   "preisbeleg_mehrfach_genutzt"
+  ],
+  "fehlend": [],
+  "kaputt": [],
+  "recycling": [
+   {
+    "step": "preis",
+    "auchIn": [
+     "7ZHc0ZYSpiXm1aqAwMCk",
+     "ZXycbzwvIFK68wlEx0ct",
+     "dYhQGvPAv4E6pCj1447z"
+    ]
+   }
+  ],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "dYhQGvPAv4E6pCj1447z",
+  "userId": "gx1eAEYafDYzQ4TeA58Y9vWiNHn2",
+  "ean": "4008366001736",
+  "name": "Frosta Indian Style Chicken",
+  "markt": "Billa",
+  "createdAt": 1788600222694,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [
+   "preisbeleg_mehrfach_genutzt"
+  ],
+  "fehlend": [],
+  "kaputt": [],
+  "recycling": [
+   {
+    "step": "preis",
+    "auchIn": [
+     "7ZHc0ZYSpiXm1aqAwMCk",
+     "TjuZUzRFxaQI2Kj8ed6Q",
+     "ZXycbzwvIFK68wlEx0ct"
+    ]
+   }
+  ],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "OkYeT0qR0VPfdKSXX8SC",
+  "userId": "6qgxG1LoWGdy8WA6V67nuiN0pWH2",
+  "ean": "4056489939351",
+  "name": "Formil Vollwaschmittel Konzentrat",
+  "markt": "LiDL",
+  "createdAt": 1788600749787,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Formil Vollwaschmittel",
+   "grund": "Echtes Produkt im Laden fotografiert, Barcode und Preis passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "VlEL28lTpEqsCxt05qd4",
+  "userId": "hCwYIoeNK2N49AOZnDKHdO2sBze2",
+  "ean": "4311501743089",
+  "name": "Gut & Günstig Schlemmerfilet à la Bordelaise",
+  "markt": "EDEKA",
+  "createdAt": 1788601118230,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": false,
+   "produktname": "Gut & Günstig Schlemmerfilet à la Bordelaise",
+   "grund": "Echtes Produkt zuhause fotografiert, kein Preisbild aus dem Laden vorhanden."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "ooTtPUDFXyTey8u2EIgM",
+  "userId": "hCwYIoeNK2N49AOZnDKHdO2sBze2",
+  "ean": "40804781",
+  "name": "Kühne Apfelrotkohl servierfertig",
+  "markt": "EDEKA",
+  "createdAt": 1788601196657,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Kühne Apfel Rotkohl",
+   "grund": "Echtes Produkt zuhause fotografiert, alle Bilder zeigen dasselbe Glas Rotkohl."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "U2meyZrFLYlWat71Ge94",
+  "userId": "hCwYIoeNK2N49AOZnDKHdO2sBze2",
+  "ean": "4020500922103",
+  "name": "Appel Zarte Filets vom Hering Tomate & Curry",
+  "markt": "EDEKA",
+  "createdAt": 1788601262723,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Appel Zarte Filets vom Hering Tomate & Curry",
+   "grund": "Echtes Produkt zuhause fotografiert, Vorderseite und Barcode passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "icibj6gLcG7Y0h6uqmXU",
+  "userId": "hCwYIoeNK2N49AOZnDKHdO2sBze2",
+  "ean": "4006922001503",
+  "name": "Hawesta extra zarte Heringsfilets Paprika-Creme",
+  "markt": "EDEKA",
+  "createdAt": 1788601302140,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": false,
+   "produktname": "Hawesta extra zarte Heringsfilets Paprika-Creme",
+   "grund": "Echtes Produkt zuhause fotografiert, Vorderseite und Barcode passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "664KclkNozQlYJ2UN4L9",
+  "userId": "hCwYIoeNK2N49AOZnDKHdO2sBze2",
+  "ean": "4311501675250",
+  "name": "Gut & Günstig Unsere Feinen Thunfisch Filets in eigenem Saft & Aufguss",
+  "markt": "EDEKA",
+  "createdAt": 1788601380385,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": false,
+   "produktname": "Gut & Günstig Unsere feinen Thunfisch Filets in eigenem Saft & Aufguss",
+   "grund": "Echtes Produkt zuhause fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "F3HG7fzt3Q6czDqd6QhL",
+  "userId": "WQwmA6EmKRf4dRxTuwcDnafAg8Z2",
+  "ean": "4000412010266",
+  "name": "Grafschafter Goldsaft Zuckerrübensirup",
+  "markt": "EDEKA",
+  "createdAt": 1788605820807,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [
+   "ohne_ort_keine_verguetung"
+  ],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": false,
+   "grund": "no_location"
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Grafschafter Goldsaft",
+   "grund": "Echtes Produkt zuhause fotografiert, Barcode passt zum Becher."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "1sKhl9gHaumjsJ70AR1i",
+  "userId": "hCwYIoeNK2N49AOZnDKHdO2sBze2",
+  "ean": "4056489235699",
+  "name": "Milbona Hirtenkäse nach griechischer Art",
+  "markt": "LiDL",
+  "createdAt": 1788606163344,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": false,
+   "produktname": "Milbona Hirtenkäse",
+   "grund": "Echtes Produkt zuhause fotografiert, Vorder- und Rückseite passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "oaEr96eiJSTnzGqc1xDM",
+  "userId": "hCwYIoeNK2N49AOZnDKHdO2sBze2",
+  "ean": "4337256776004",
+  "name": "Turmbräu Original Premium Pils",
+  "markt": "LiDL",
+  "createdAt": 1788606225402,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Turmbräu Original Premium Pils",
+   "grund": "Echtes Produkt zuhause fotografiert, Vorderseite und Barcode passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "nYRRERQHSROHFCVjVA2i",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "22386953",
+  "name": "Naturgut Bio Edelbitter 85%",
+  "markt": "Penny",
+  "createdAt": 1788610550635,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Naturgut Bio Edel-Bitter 85% Kakao",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "DyfkbBeJnuxYkvcNxaNb",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4002359015229",
+  "name": "Ben's Original Süss-Sauer Extra Ananas",
+  "markt": "Penny",
+  "createdAt": 1788610611024,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Ben's Original Süss-Sauer Extra Ananas",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Barcode gehört zum selben Artikel."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "36g2YWWQaAr48wim6lsB",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4002359015168",
+  "name": "Ben's Original Cremiges Curry",
+  "markt": "Penny",
+  "createdAt": 1788610649270,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Ben's Original Cremiges Curry",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "xOav34AWFfLBEpgQ0DZH",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "40084060",
+  "name": "Ferrero Yogurette",
+  "markt": "Penny",
+  "createdAt": 1788610704173,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Yogurette",
+   "grund": "Echtes Produkt im Laden fotografiert, Barcode gehört zur Yogurette-Packung."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "gqEhl7UmI9ilHSq39N73",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "21393662",
+  "name": "Choco'la Gefüllte Schokolade",
+  "markt": "Penny",
+  "createdAt": 1788610757417,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Choco'la Vollmilch Joghurt",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Barcode und Vorderseite passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "vJE5STLiNb8Cx7EfJ54K",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "21393631",
+  "name": "Choco'la Vollmilch Nougat",
+  "markt": "Penny",
+  "createdAt": 1788610777349,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Choco'la Vollmilch Nougat",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "dImxZ1QYX9CDNWkqLU1W",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "26037738",
+  "name": "gustoria Cevapcici mit Balkangemüse und Reis",
+  "markt": "Penny",
+  "createdAt": 1788610834155,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Gustoria Cevapcici mit Balkangemüse und Reis",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "lz5gIzuBSYhTc0gmvvea",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "8712566332175",
+  "name": "Knorr Suppenliebe Frühlingssuppe",
+  "markt": "Penny",
+  "createdAt": 1788610892775,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Knorr Suppenliebe Frühlingssuppe",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "QL50j0qXMViv4ZiG10DY",
+  "userId": "AtqKtuhG97UK9U9qEoMZmusPVgz1",
+  "ean": "4044627332652",
+  "name": "Probio Kardamom",
+  "markt": "Billa",
+  "createdAt": 1788610985737,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Probio Kardamom in der Schale gemahlen",
+   "grund": "Echtes Produkt, Barcode passt zum Artikel und Kassenbon belegt den Kauf."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "cF4p3N9przKCWhRnUDJ1",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "8712566332090",
+  "name": "Knorr Suppenliebe Buchstaben Suppe",
+  "markt": "Penny",
+  "createdAt": 1788611074504,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Knorr Suppenliebe Buchstaben Suppe",
+   "grund": "Alle Fotos zeigen das echte Produkt im Verkaufsregal."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "Gzqbj18vg5rpi7vDo2Qh",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "3838975566507",
+  "name": "Argeta Aufstrich Huhn",
+  "markt": "Penny",
+  "createdAt": 1788611106317,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Argeta Huhn",
+   "grund": "Echtes Produkt im Laden fotografiert, Barcode und Vorderseite passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "rOZnYwz6XHypqK3IPv0V",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4260106719527",
+  "name": "Rapsgold Reines Rapsöl",
+  "markt": "Penny",
+  "createdAt": 1788611380388,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Rapsgold Reines Rapsöl",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "eTTnPA8puslfIb3aHfsn",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "22952059",
+  "name": "Naturgut Bio Apfelessig Naturtrüb",
+  "markt": "Penny",
+  "createdAt": 1788611414437,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Naturgut Bio Apfelessig",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "5iujxGBJYWy6dFPxxaeG",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "25788860",
+  "name": "Bravo Käsebällchen",
+  "markt": "Penny",
+  "createdAt": 1788611489796,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Bravo Käsebällchen",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "X7osqDuYHvUe01j4kEf2",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4004980404007",
+  "name": "ültje Erdnüsse pikant gewürzt",
+  "markt": "Penny",
+  "createdAt": 1788611942113,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "ültje Erdnüsse pikant gewürzt",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Barcode und Preis passen perfekt."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "KeekJNmNlpc3AEAZD5Pg",
+  "userId": "WWQJvtG1e9euDtal4tNl4BVxb6m1",
+  "ean": "3048620026472",
+  "name": "San Benedetto Passione Italiana Orange",
+  "markt": "Norma",
+  "createdAt": 1788612712454,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "San Benedetto Passione Italiana Orange",
+   "grund": "Echtes Produkt zuhause fotografiert, Kassenbon zeigt den passenden Artikel."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "No1JJbrJNTwzIn3fOqWb",
+  "userId": "WWQJvtG1e9euDtal4tNl4BVxb6m1",
+  "ean": "20320768",
+  "name": "Excellent Buffet Partysalat mit Gemüse und Sahne",
+  "markt": "Norma",
+  "createdAt": 1788612876484,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Excellent Buffet Partysalat",
+   "grund": "Echtes Produkt zuhause fotografiert, Kassenbon von Norma liegt bei."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "ODPsu94Xalqi8zgjApff",
+  "userId": "WWQJvtG1e9euDtal4tNl4BVxb6m1",
+  "ean": "4070455170135",
+  "name": "Trolli Sour Apple Trio",
+  "markt": "Norma",
+  "createdAt": 1788612942427,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Trolli Sour Apple Trio",
+   "grund": "Echtes Produkt zuhause fotografiert mit passendem Kassenbon."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "Ah4y7bQyjI99WExgfFcB",
+  "userId": "WWQJvtG1e9euDtal4tNl4BVxb6m1",
+  "ean": "20342784",
+  "name": "Fürstenklasse Mohn Streuselkuchen mit Butterstreusel",
+  "markt": "Norma",
+  "createdAt": 1788613056820,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": false,
+   "produktname": "Mohn Streuselkuchen mit Butterstreusel",
+   "grund": "Echtes Produkt zuhause fotografiert, Kassenbon zeigt den passenden Streuselkuchen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "YZGnFiDdjyLLzqqHI2Wl",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4337256742764",
+  "name": "ja! Stapelchips Paprika",
+  "markt": "REWE",
+  "createdAt": 1788613195534,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "ja! Paprika Stapelchips",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "doxmBWwfhwrGSMu7tVag",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4018077620003",
+  "name": "Lorenz Clubs Cracker",
+  "markt": "REWE",
+  "createdAt": 1788613240698,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Lorenz Clubs Cracker",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Barcode und Preisetikett stimmen überein."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "HdXNVrlhcrkhuV3cPBKn",
+  "userId": "Dnor6YitPZalllas2dA0Y0mpll42",
+  "ean": "4000522108853",
+  "name": "Pom-Bär Crizzlies BBQ Style",
+  "markt": "REWE",
+  "createdAt": 1788613281350,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Pom-Bär Crizzlies BBQ Style",
+   "grund": "Echtes Produkt im Ladenregal fotografiert, Barcode und Preis passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "sUVAs9nGGkdlB8ji9usQ",
+  "userId": "CK8a9rSnWdPVZ4tidONLgjNr4m33",
+  "ean": "20272371",
+  "name": "Belbake Dinkelmehl Vollkorn",
+  "markt": "LiDL",
+  "createdAt": 1788614437886,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": false,
+   "produktname": "Belbake Dinkelmehl Vollkorn",
+   "grund": "Echtes Produkt zuhause fotografiert, Kassenbon zeigt Dinkelvollkornmehl."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "ZfFM8tephZvk1wk26Ozb",
+  "userId": "5X0fDuAXC0ThbWGwLalsikYNoOE2",
+  "ean": "4061458057813",
+  "name": "Farmer naturals Cashewkerne naturbelassen",
+  "markt": "Aldi Süd",
+  "createdAt": 1788616392922,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Farmer naturals Cashewkerne naturbelassen",
+   "grund": "Echtes Produkt, Barcode passt zur Vorderseite, Kassenbon belegt den Kauf."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "XzEcFMlIMOkOs5QFIzyg",
+  "userId": "5X0fDuAXC0ThbWGwLalsikYNoOE2",
+  "ean": "4061458021746",
+  "name": "Choceur Kaffee Sahne",
+  "markt": "Aldi Süd",
+  "createdAt": 1788616729788,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Choceur Kaffee Sahne",
+   "grund": "Echtes Produkt, Barcode passt zur Verpackung und Preisschild zeigt Choceur."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "XBukTnaIWXEZbvaXcaeJ",
+  "userId": "5X0fDuAXC0ThbWGwLalsikYNoOE2",
+  "ean": "4061458017008",
+  "name": "Choceur Milch Mäuse",
+  "markt": "Aldi Süd",
+  "createdAt": 1788616819680,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Milch Mäuse",
+   "grund": "Echtes Produkt, Barcode und Preisetikett passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "Bxnm2w3UBVyPq3XVI8CV",
+  "userId": "ToXSGSYx4IgdnxtBeFEu8oyQIN93",
+  "ean": "4311501115770",
+  "name": "EDEKA Bio Frische Weide-Vollmilch 3,8% Fett",
+  "markt": "EDEKA",
+  "createdAt": 1788617058403,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Edeka Bio Frische Weide-Vollmilch 3,8% Fett",
+   "grund": "Echtes Produkt im Einkaufskorb fotografiert, Barcode und Preisschild passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "RC5s9Fyxmu6Z6DfX2yEY",
+  "userId": "ToXSGSYx4IgdnxtBeFEu8oyQIN93",
+  "ean": "4008871208064",
+  "name": "Toppits Gefrierbeutel",
+  "markt": "EDEKA",
+  "createdAt": 1788617204575,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Toppits Gefrierbeutel 30x3L",
+   "grund": "Echtes Produkt im Einkaufskorb fotografiert, Barcode und Preis passen zum Artikel."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "Ynl1zxlwsSWdTS9sAaRV",
+  "userId": "RR3ubsQEFsXJVp948lSyaG9qlb83",
+  "ean": "20816384",
+  "name": "Lidl Zartes Gebäck mit 55% fruchtiger Füllung und 17% Schokolade",
+  "markt": "LiDL",
+  "createdAt": 1788618254138,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": false,
+   "produktname": "Zartes Gebäck mit 55% fruchtiger Füllung",
+   "grund": "Echtes Produkt zuhause fotografiert, Vorderseite fehlt jedoch (nur Rückseite abgebildet)."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "C6pX4Wx4pUv295XcE6VP",
+  "userId": "gyizmXKkT3gwOukVobsWGw03MLL2",
+  "ean": "9001414009208",
+  "name": "Kotányi Paprika edelsüß spezial",
+  "markt": "Billa",
+  "createdAt": 1788618520625,
+  "campaignId": "produkt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Kotányi Paprika edelsüß spezial",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "OCBCIsA9fxR581Jlnr2b",
+  "userId": "D7t2Jcij4pSk7080fp8EfsUGlRB2",
+  "ean": "26091747",
+  "name": "Bravo Chips Paprika",
+  "markt": "Penny",
+  "createdAt": 1788623789638,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Bravo Chips Paprika",
+   "grund": "Echtes Produkt zuhause fotografiert, Barcode und Vorderseite passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "06xP02LscW71hS8O0ZeX",
+  "userId": "0nWolE3Y2tfzBeC5lAiDasLqxD22",
+  "ean": "4316268615563",
+  "name": "Karli Kugelblitz Choco Drink",
+  "markt": "Netto Markendiscount",
+  "createdAt": 1788625726432,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Karli Kugelblitz Choco Drink",
+   "grund": "Echtes Produkt im Laden fotografiert, alle Bilder passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "GAwKe51LodvrPT5ZASuq",
+  "userId": "Cy6DAtim6zTuJeh0ga22KYD491N2",
+  "ean": "4335619081925",
+  "name": "Milbona Haltbare Vollmilch 3,5%",
+  "markt": "LiDL",
+  "createdAt": 1788641546343,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Milbona Haltbare Vollmilch 3,5% Fett",
+   "grund": "Echtes Produkt, Vorderseite und Barcode passen zusammen, Kassenbon belegt den Kauf."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "WxsUbfJkb7V5hYFBIi4I",
+  "userId": "xj2pB94FbaUiZ29hjh3FUokYqWE2",
+  "ean": "4025500312336",
+  "name": "J*ST FOOD Trinkmahlzeit Coffee",
+  "markt": "Billa",
+  "createdAt": 1788641608810,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [
+   "fotos_unpassend"
+  ],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": false,
+   "gleichesProdukt": true,
+   "imLaden": false,
+   "produktname": "J*ST FOOD Trinkmahlzeit Coffee",
+   "grund": "Das Frontbild ist ein freigestelltes Produktbild aus dem Internet."
+  },
+  "urteil": "ablehnen"
+ },
+ {
+  "id": "bWoJyOGod1NTx5Cvr170",
+  "userId": "Cy6DAtim6zTuJeh0ga22KYD491N2",
+  "ean": "4056489108269",
+  "name": "Milbona Deutsche Markenbutter",
+  "markt": "LiDL",
+  "createdAt": 1788641797431,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [
+   "sperre_30_tage_anderer_nutzer"
+  ],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "locked",
+   "reason": "sperre_30_tage_anderer_nutzer",
+   "priorId": "kjJrB9zNu4Yhmg7VjOVa",
+   "sameUser": false,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "ablehnen"
+ },
+ {
+  "id": "HwhVfzk1lAwV9skNoMup",
+  "userId": "xj2pB94FbaUiZ29hjh3FUokYqWE2",
+  "ean": "9008269000039",
+  "name": "Ja! Natürlich Bio Eier L",
+  "markt": "Billa",
+  "createdAt": 1788641895917,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Ja! Natürlich 6 große Bio Eier",
+   "grund": "Echtes Produkt zuhause fotografiert, Barcode und Vorderseite passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "bpSIOw96Uwg8PRoOxJTg",
+  "userId": "Cy6DAtim6zTuJeh0ga22KYD491N2",
+  "ean": "7335029112841",
+  "name": "Cien Cremeseife Milch & Honig",
+  "markt": "LiDL",
+  "createdAt": 1788641989082,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [
+   "preisbeleg_mehrfach_genutzt"
+  ],
+  "fehlend": [],
+  "kaputt": [],
+  "recycling": [
+   {
+    "step": "front",
+    "auchIn": [
+     "aE1LekKqrAY0YUmBpeSs"
+    ]
+   },
+   {
+    "step": "rueckseite",
+    "auchIn": [
+     "aE1LekKqrAY0YUmBpeSs"
+    ]
+   },
+   {
+    "step": "hersteller",
+    "auchIn": [
+     "aE1LekKqrAY0YUmBpeSs"
+    ]
+   },
+   {
+    "step": "ean",
+    "auchIn": [
+     "aE1LekKqrAY0YUmBpeSs"
+    ]
+   },
+   {
+    "step": "naehrwerte",
+    "auchIn": [
+     "aE1LekKqrAY0YUmBpeSs"
+    ]
+   },
+   {
+    "step": "zutaten",
+    "auchIn": [
+     "aE1LekKqrAY0YUmBpeSs"
+    ]
+   },
+   {
+    "step": "preis",
+    "auchIn": [
+     "aE1LekKqrAY0YUmBpeSs"
+    ]
+   }
+  ],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "aE1LekKqrAY0YUmBpeSs",
+  "userId": "Cy6DAtim6zTuJeh0ga22KYD491N2",
+  "ean": "7335029112841",
+  "name": "Cien Cremeseife Milch & Honig",
+  "markt": "LiDL",
+  "createdAt": 1788641997137,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [
+   "doppelt_eingereicht"
+  ],
+  "hinweise": [
+   "aeltere_offene_einreichung",
+   "preisbeleg_mehrfach_genutzt"
+  ],
+  "fehlend": [],
+  "kaputt": [],
+  "recycling": [
+   {
+    "step": "front",
+    "auchIn": [
+     "bpSIOw96Uwg8PRoOxJTg"
+    ]
+   },
+   {
+    "step": "rueckseite",
+    "auchIn": [
+     "bpSIOw96Uwg8PRoOxJTg"
+    ]
+   },
+   {
+    "step": "hersteller",
+    "auchIn": [
+     "bpSIOw96Uwg8PRoOxJTg"
+    ]
+   },
+   {
+    "step": "ean",
+    "auchIn": [
+     "bpSIOw96Uwg8PRoOxJTg"
+    ]
+   },
+   {
+    "step": "naehrwerte",
+    "auchIn": [
+     "bpSIOw96Uwg8PRoOxJTg"
+    ]
+   },
+   {
+    "step": "zutaten",
+    "auchIn": [
+     "bpSIOw96Uwg8PRoOxJTg"
+    ]
+   },
+   {
+    "step": "preis",
+    "auchIn": [
+     "bpSIOw96Uwg8PRoOxJTg"
+    ]
+   }
+  ],
+  "dup": {
+   "verdict": "hold",
+   "reason": "doppelt_eingereicht",
+   "priorId": "bpSIOw96Uwg8PRoOxJTg",
+   "sameUser": true,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "ablehnen"
+ },
+ {
+  "id": "bgpghPd3D7Z3gDPrHGPU",
+  "userId": "Cy6DAtim6zTuJeh0ga22KYD491N2",
+  "ean": "4056489145004",
+  "name": "Kania heller Wein-Branntwein-Essig",
+  "markt": "LiDL",
+  "createdAt": 1788642247741,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Kania heller Wein-Branntwein-Essig",
+   "grund": "Echtes Produkt, Barcode passt zur Flasche und Kassenbon zeigt Essig hell."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "H9dqWLU0TZtsQqVXxkBj",
+  "userId": "xj2pB94FbaUiZ29hjh3FUokYqWE2",
+  "ean": "4070308068121",
+  "name": "REWE frei von Kaiser-Brötchen",
+  "markt": "Billa",
+  "createdAt": 1788642310277,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "REWE frei von Kaiser-Brötchen",
+   "grund": "Echtes Produkt, Barcode stimmt überein und Kassenbon zeigt den passenden Artikel."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "6YQRMLEtH8Bw2TBjFbMy",
+  "userId": "xj2pB94FbaUiZ29hjh3FUokYqWE2",
+  "ean": "7622300315733",
+  "name": "Philadelphia Original Doppelrahmstufe",
+  "markt": "Billa",
+  "createdAt": 1788642480646,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Philadelphia Original",
+   "grund": "Echtes Produkt zuhause fotografiert, Barcode und Vorderseite passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "ysF3yTjDH65TpA90rsTE",
+  "userId": "xj2pB94FbaUiZ29hjh3FUokYqWE2",
+  "ean": "9010437045049",
+  "name": "BILLA Bio Haferdrink glutenfrei",
+  "markt": "Billa",
+  "createdAt": 1788642673523,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Billa Bio Haferdrink glutenfrei",
+   "grund": "Echtes Produkt zuhause fotografiert, Barcode und Preis-Screenshot passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "maW7rmQQDqXUJyhFcEpH",
+  "userId": "uJ3Mvzc83uRfV0v8pnWJr5uLk7S2",
+  "ean": "4335619151215",
+  "name": "Milbona High Protein Quark-Creme Pfirsich-Maracuja",
+  "markt": "LiDL",
+  "createdAt": 1788697982478,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Milbona High Protein Quark-Creme Pfirsich-Maracuja",
+   "grund": "Echtes Produkt zuhause fotografiert, alle Bilder zeigen denselben Becher."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "XQBtbPPm8mM6mvUW09HC",
+  "userId": "uJ3Mvzc83uRfV0v8pnWJr5uLk7S2",
+  "ean": "4335619224872",
+  "name": "Ein gutes Stück Heimat Bio Skyr",
+  "markt": "LiDL",
+  "createdAt": 1788698089773,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Ein gutes Stück Heimat Bio Skyr",
+   "grund": "Echtes Produkt zuhause fotografiert, alle Bilder zeigen denselben Skyr-Becher."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "jt77gYbN4AcprswJ8CHL",
+  "userId": "uJ3Mvzc83uRfV0v8pnWJr5uLk7S2",
+  "ean": "20917906",
+  "name": "Joghurt mild",
+  "markt": "LiDL",
+  "createdAt": 1788698251651,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": "qq5mpwczLAbmBVdUrPVt",
+   "sameUser": false,
+   "updatedFields": [
+    "market"
+   ]
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Milbona Joghurt mild 3,5% Fett",
+   "grund": "Echtes Produkt zuhause fotografiert, alle Bilder zeigen denselben Joghurtbecher."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "eqCMbEMYHLgH7EUHvdPd",
+  "userId": "qxF6uXw58tfEBgpDFiy6SDeMC5B3",
+  "ean": "4103520002823",
+  "name": "Mandeln blanchieren & gehobelt",
+  "markt": "Kaufland",
+  "createdAt": 1788711593911,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": false,
+   "produktname": "K-Classic Mandeln blanchiert & gehobelt",
+   "grund": "Echtes Produkt zuhause fotografiert, aber das Preis-Bild zeigt keinen Preis."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "V0GQxPv2hoIaunFigip4",
+  "userId": "qxF6uXw58tfEBgpDFiy6SDeMC5B3",
+  "ean": "4337185520679",
+  "name": "H- Vollmilch laktosefrei",
+  "markt": "Kaufland",
+  "createdAt": 1788711752942,
+  "campaignId": null,
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": false,
+   "produktname": "K-free Laktosefrei H-Vollmilch 3,5% Fett",
+   "grund": "Echtes Produkt zuhause fotografiert, aber das Preis-Bild zeigt keinen Preis."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "ZVxkN5HEsCvnRCTxhwk8",
+  "userId": "qxF6uXw58tfEBgpDFiy6SDeMC5B3",
+  "ean": "8035330513960",
+  "name": "Kokosraspeln bio",
+  "markt": "Kaufland",
+  "createdAt": 1788711845236,
+  "campaignId": null,
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "K-Bio Kokosraspel",
+   "grund": "Echtes Produkt zuhause fotografiert, das Preis-Bild zeigt nur den Tisch."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "ytZFPXqwuu0jj4ifcqTn",
+  "userId": "UStxkrS6iCaMhKE1mMqoQXATNTB2",
+  "ean": "8700216929905",
+  "name": "Lenor Weichspüler Luftfrisch Wildblumenfeld",
+  "markt": "dm",
+  "createdAt": 1788766424478,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Lenor Weichspüler Luftfrisch Wildblumenfeld",
+   "grund": "Alle Fotos zeigen dasselbe echte Produkt im Ladenregal."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "9jhS5RZLz46YtNd7U1FS",
+  "userId": "jx1HCmNUAtau9peGVNLWt6PxEoF3",
+  "ean": "4056489884255",
+  "name": "Milbona Frische Alpenmilch 3,8%",
+  "markt": "LiDL",
+  "createdAt": 1788769291664,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Milbona Frische Alpenmilch",
+   "grund": "Echtes Produkt im Laden fotografiert, Vorderseite und Barcode passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "6FqgOE5YEq8KR9DdC0Fg",
+  "userId": "jx1HCmNUAtau9peGVNLWt6PxEoF3",
+  "ean": "4335619399549",
+  "name": "Milbona Strudel Typ Vanille trifft Sahne",
+  "markt": "LiDL",
+  "createdAt": 1788770433890,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [
+   "preisbeleg_mehrfach_genutzt"
+  ],
+  "fehlend": [],
+  "kaputt": [],
+  "recycling": [
+   {
+    "step": "preis",
+    "auchIn": [
+     "nF6dTW1cJKQtJ8T3lks0"
+    ]
+   }
+  ],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "nF6dTW1cJKQtJ8T3lks0",
+  "userId": "jx1HCmNUAtau9peGVNLWt6PxEoF3",
+  "ean": "8335912399532",
+  "name": "Milbona Schoko trifft Sahne Strudel",
+  "markt": "LiDL",
+  "createdAt": 1788770509098,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [
+   "preisbeleg_mehrfach_genutzt"
+  ],
+  "fehlend": [],
+  "kaputt": [],
+  "recycling": [
+   {
+    "step": "preis",
+    "auchIn": [
+     "6FqgOE5YEq8KR9DdC0Fg"
+    ]
+   }
+  ],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "88a2NbBjjs6CtX1DB9M2",
+  "userId": "REN3sPCXw8YF4vNxJdYr1nuTA8i1",
+  "ean": "4316268174657",
+  "name": "Captains Tea Grüner Tee Natur",
+  "markt": "Netto Markendiscount",
+  "createdAt": 1788773474347,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": "s4cVD2PQPnDE6TDWk1Cf",
+   "sameUser": true,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Captains Tea Grüner Tee Natur",
+   "grund": "Echtes Produkt zuhause fotografiert, Kassenbon zeigt den passenden Tee-Eintrag."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "PXq3OIKmDEaOgRLCHoyY",
+  "userId": "REN3sPCXw8YF4vNxJdYr1nuTA8i1",
+  "ean": "4316268586825",
+  "name": "Korn Mühle Extra Zarte Haferflocken aus vollem Korn",
+  "markt": "Netto Markendiscount",
+  "createdAt": 1788773562449,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Korn Mühle Extra Zarte Haferflocken",
+   "grund": "Echtes Produkt zuhause fotografiert, Kassenbon zeigt den passenden Artikel."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "yIRmEhJpJFSNDExPR1Vp",
+  "userId": "hCwYIoeNK2N49AOZnDKHdO2sBze2",
+  "ean": "40508016",
+  "name": "Rotkäppchen Camembert mild & cremig",
+  "markt": "REWE",
+  "createdAt": 1788773623329,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [
+   "sperre_30_tage_anderer_nutzer"
+  ],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "locked",
+   "reason": "sperre_30_tage_anderer_nutzer",
+   "priorId": "VUmjSdGXI1L1IeBdH7yR",
+   "sameUser": false,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "urteil": "ablehnen"
+ },
+ {
+  "id": "9rJEycrHBmBft4AiFzuv",
+  "userId": "hCwYIoeNK2N49AOZnDKHdO2sBze2",
+  "ean": "4008871216229",
+  "name": "Swirl Fixierband Reißfest & Dicht",
+  "markt": "REWE",
+  "createdAt": 1788773699983,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Swirl Fixierband 10L",
+   "grund": "Echtes Produkt zuhause fotografiert, alle Bilder zeigen denselben Artikel."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "wjEi9tyl19TN0MIX85aZ",
+  "userId": "hCwYIoeNK2N49AOZnDKHdO2sBze2",
+  "ean": "4260177786794",
+  "name": "Pahmeyer Kartoffel-Auflauf Original",
+  "markt": "REWE",
+  "createdAt": 1788773732846,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": false,
+   "produktname": "Pahmeyer Kartoffel-Auflauf Original",
+   "grund": "Echtes Produkt zuhause fotografiert, Vorderseite und Barcode passen zusammen."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "z7ZpvdLDCZxYDRSX7qUz",
+  "userId": "hCwYIoeNK2N49AOZnDKHdO2sBze2",
+  "ean": "4260177785872",
+  "name": "Pahmeyer Süßkartoffel-Rösti",
+  "markt": "REWE",
+  "createdAt": 1788773784034,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": true,
+   "grund": null
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": false,
+   "produktname": "Pahmeyer Süßkartoffel-Rösti",
+   "grund": "Echtes Produkt zuhause fotografiert, kein Preisbild aus dem Laden vorhanden."
+  },
+  "urteil": "freigeben"
+ },
+ {
+  "id": "ETtaIEVrRl979VOsAQmg",
+  "userId": "I4dIA0ceTZgW4Y2mIzmNxqRXatg2",
+  "ean": "351570114568",
+  "name": "Gut & Günstig Emmentaler 45% Fett i. Tr.",
+  "markt": "EDEKA",
+  "createdAt": 1788774404303,
+  "campaignId": "milchprodukt-fotos-september-2026",
+  "gruende": [],
+  "hinweise": [
+   "ohne_ort_keine_verguetung"
+  ],
+  "fehlend": [],
+  "kaputt": [],
+  "dup": {
+   "verdict": "ok",
+   "reason": null,
+   "priorId": null,
+   "sameUser": null,
+   "updatedFields": []
+  },
+  "ort": {
+   "ok": false,
+   "grund": "no_location"
+  },
+  "vision": {
+   "echtesProdukt": true,
+   "gleichesProdukt": true,
+   "imLaden": true,
+   "produktname": "Gut & Günstig Emmentaler 45% Fett i. Tr.",
+   "grund": "Echtes Produkt im Laden fotografiert, Barcode und Preis passen perfekt zusammen."
+  },
+  "urteil": "freigeben"
+ }
+]

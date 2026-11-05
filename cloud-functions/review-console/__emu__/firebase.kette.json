@@ -1,0 +1,14 @@
+{
+  "functions": [ { "source": "..", "codebase": "review-console", "runtime": "nodejs22", "ignore": ["node_modules", ".git", "__emu__", "__tests__"] } ],
+  "emulators": {
+    "firestore": { "port": 8572 },
+    "auth": { "port": 9572 },
+    "functions": { "port": 5572 },
+    "tasks": { "port": 9672 },
+    "eventarc": { "port": 9772 },
+    "hub": { "port": 4472 },
+    "logging": { "port": 4572 },
+    "ui": { "enabled": false },
+    "singleProjectMode": true
+  }
+}

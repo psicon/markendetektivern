@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MarkenDetektive — Karte</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css" />
+    <style>
+      :root{
+        --bg:#0e1113; --panel:#171c1f; --panel2:#1e2528; --line:#2b3438; --line2:#3a4549;
+        --fg:#e9eff1; --fg2:#9fadb2; --fg3:#6f7d82;
+        --bon:#0d8575; --foto:#5b4f9c; --acc:#3ba0e8; --warn:#e0a520;
+      }
+      *{box-sizing:border-box}
+      html,body{height:100%;margin:0}
+      body{background:var(--bg);color:var(--fg);font:14.5px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow:hidden}
+      button{font:inherit;cursor:pointer;border:1px solid var(--line2);border-radius:9px;padding:6px 12px;background:var(--panel2);color:var(--fg)}
+      button:hover{border-color:var(--fg3)}
+      button.on{background:var(--acc);border-color:var(--acc);color:#06121c;font-weight:700}
+      select,input{font:inherit;background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:9px;padding:6px 10px}
+
+      #app{display:none;grid-template-rows:52px 1fr;height:100vh}
+      #app.on{display:grid}
+      header{display:flex;align-items:center;gap:14px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line);z-index:1000}
+      header h1{font-size:14px;font-weight:800;margin:0;white-space:nowrap}
+      header a{color:var(--fg3);font-size:12.5px;text-decoration:none}
+      header a:hover{color:var(--fg)}
+      .grow{flex:1}
+
+      main{display:grid;grid-template-columns:274px 1fr;min-height:0}
+      aside{background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;padding:14px;z-index:900}
+      .grp{margin-bottom:18px}
+      .grp h3{margin:0 0 8px;font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--fg3)}
+      .row{display:flex;gap:6px;flex-wrap:wrap}
+      .row button{flex:1;min-width:0;padding:6px 8px;font-size:12.5px}
+      .swatch{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:baseline}
+
+      /* Kennzahlen — was gerade sichtbar ist */
+      .zahl{display:flex;justify-content:space-between;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+      .zahl b{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.4px}
+      .zahl span{color:var(--fg3);font-size:12px}
+      .hint{font-size:11.5px;color:var(--fg3);line-height:1.5;margin-top:8px}
+
+      #map{width:100%;height:100%;background:#0b0e10}
+      .leaflet-container{background:#0b0e10;font:inherit}
+      .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--panel2);color:var(--fg);border:1px solid var(--line2);box-shadow:0 8px 24px rgba(0,0,0,.5)}
+      .leaflet-popup-content{margin:11px 13px;font-size:13px;line-height:1.5}
+      .leaflet-popup-content b{font-size:14px}
+      .leaflet-popup-content .kv{color:var(--fg3)}
+      .leaflet-popup-close-button{color:var(--fg2)!important}
+      .leaflet-bar a{background:var(--panel2);color:var(--fg);border-color:var(--line2)}
+      .leaflet-bar a:hover{background:var(--panel)}
+      /* Kacheln entsättigen, damit die eigenen Punkte tragen */
+      .leaflet-tile-pane{filter:grayscale(1) invert(1) brightness(.86) contrast(1.05) hue-rotate(180deg)}
+      .marker-cluster{background:rgba(59,160,232,.25);border:1px solid rgba(59,160,232,.6)}
+      .marker-cluster div{background:rgba(59,160,232,.85);color:#06121c;font-weight:800;font-family:inherit}
+
+      #lade{position:absolute;inset:52px 0 0 274px;display:flex;align-items:center;justify-content:center;background:var(--bg);color:var(--fg3);z-index:800}
+      #lade.weg{display:none}
+      #login{display:flex;flex-direction:column;align-items:center;gap:14px;padding:90px 20px}
+      #login input{width:290px}
+      .hidden{display:none!important}
+    </style>
+  </head>
+  <body>
+    <div id="login">
+      <h1 style="margin:0;font-size:19px">Karte</h1>
+      <p style="color:var(--fg3);margin:0">Admin-Login</p>
+      <input id="loginEmail" type="email" placeholder="E-Mail" autocomplete="username" />
+      <input id="loginPw" type="password" placeholder="Passwort" autocomplete="current-password" />
+      <button id="loginBtn" style="background:var(--acc);border-color:var(--acc);color:#06121c;font-weight:700;padding:9px 18px">Anmelden</button>
+      <div id="loginMsg" style="color:var(--fg3)"></div>
+    </div>
+
+    <div id="app">
+      <header>
+        <h1>Karte</h1>
+        <div class="grow"></div>
+        <span id="stand" style="font-size:12px;color:var(--fg3)"></span>
+        <a href="pruefen.html">Prüfen</a>
+        <a href="tagesbericht.html">Tagesbericht</a>
+        <a href="index.html">Bon-Matching</a>
+        <button id="logoutBtn" style="padding:6px 12px;font-size:13px">Abmelden</button>
+      </header>
+
+      <main>
+        <aside>
+          <div class="grp">
+            <h3>Sichtbar</h3>
+            <div class="zahl"><span><span class="swatch" style="background:var(--foto)"></span>Produktfotos</span><b id="nFotos">–</b></div>
+            <div class="zahl"><span><span class="swatch" style="background:var(--bon)"></span>Kassenbons</span><b id="nBons">–</b></div>
+            <div class="zahl"><span>Orte</span><b id="nOrte">–</b></div>
+            <div class="zahl"><span><span class="swatch" style="background:#e2604a"></span>auffällig</span><b id="nAuff">–</b></div>
+            <div class="hint" id="ohneOrt"></div>
+          </div>
+
+          <div class="grp">
+            <h3>Art</h3>
+            <div class="row">
+              <button data-f="typ" data-v="alle" class="on">Beides</button>
+              <button data-f="typ" data-v="0">Fotos</button>
+              <button data-f="typ" data-v="1">Bons</button>
+            </div>
+          </div>
+
+          <div class="grp">
+            <h3>Zeitraum</h3>
+            <div class="row">
+              <button data-f="zeit" data-v="7">7 Tage</button>
+              <button data-f="zeit" data-v="30">30 Tage</button>
+              <button data-f="zeit" data-v="90">90 Tage</button>
+              <button data-f="zeit" data-v="alle" class="on">Alles</button>
+            </div>
+          </div>
+
+          <div class="grp">
+            <h3>Woher der Ort stammt</h3>
+            <div class="row">
+              <button data-f="quelle" data-v="alle" class="on">Alle</button>
+              <button data-f="quelle" data-v="0">Gerät</button>
+              <button data-f="quelle" data-v="1">Bon</button>
+              <button data-f="quelle" data-v="2">Angabe</button>
+            </div>
+            <div class="hint">
+              <b>Gerät</b> — Standort zur Aufnahme, 452 von 464 besser als 200 m.<br />
+              <b>Bon</b> — Postleitzahl der Filiale, im Median 2 km genau.<br />
+              <b>Angabe</b> — vom Nutzer genannter Ort, stadtgenau.<br />
+              Die IP-Ortung erscheint hier bewusst nicht: sie liegt im Mittel
+              60 km daneben und taugt nur für die Frage, welches Land.
+            </div>
+          </div>
+
+          <div class="grp">
+            <h3>Auffällig</h3>
+            <div class="row">
+              <button data-f="auff" data-v="alle" class="on">Alle</button>
+              <button data-f="auff" data-v="ja">nur auffällige</button>
+            </div>
+            <div class="hint">
+              Aufnahmeort außerhalb DACH, Standardstandort eines
+              Entwickler-Simulators, oder gröber als ein Kilometer.
+            </div>
+          </div>
+
+          <div class="grp">
+            <h3>Markt</h3>
+            <select id="fMarkt" style="width:100%"><option value="alle">alle Märkte</option></select>
+          </div>
+
+          <div class="grp">
+            <h3>Zustand</h3>
+            <select id="fStatus" style="width:100%">
+              <option value="alle">alle</option>
+              <option value="offen">wartet auf Prüfung</option>
+              <option value="approved">angenommen</option>
+              <option value="rejected">abgelehnt</option>
+            </select>
+          </div>
+
+          <div class="grp">
+            <h3>Darstellung</h3>
+            <div class="row">
+              <button data-f="modus" data-v="cluster" class="on">Gruppiert</button>
+              <button data-f="modus" data-v="punkte">Einzeln</button>
+              <button data-f="modus" data-v="hitze">Dichte</button>
+            </div>
+          </div>
+        </aside>
+
+        <div style="position:relative;min-width:0">
+          <div id="map"></div>
+          <div id="lade">Lade Karte …</div>
+        </div>
+      </main>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
+    <script type="module">
+      import { $, call, esc, euro, fmtDate, initAdmin } from './admin-common.js';
+
+      // Punkt = [typ, lat, lon, zeit, quelle, markt, land, plz, ort, status, id]
+      const T = 0, LAT = 1, LON = 2, ZEIT = 3, QUELLE = 4, MARKT = 5, PLZ = 7, ORT = 8, STATUS = 9, ID = 10, AUFF = 11;
+      const QUELLE_DE = ['Gerätestandort', 'Filialadresse vom Bon', 'Angabe des Nutzers'];
+      // Gemessen an den eigenen Daten: 452 von 464 Gerätestandorten sind besser
+      // als 200 m; die Postleitzahl trifft die Filiale im Median auf 2,0 km.
+      const GENAU_DE = ['meist besser als 200 m', 'im Median 2 km genau', 'stadtgenau'];
+
+      const S = { punkte: [], filter: { typ: 'alle', zeit: 'alle', quelle: 'alle', modus: 'cluster', markt: 'alle', status: 'alle', auff: 'alle' } };
+      let karte, ebene;
+
+      function baueKarte() {
+        karte = L.map('map', { zoomControl: true, preferCanvas: true }).setView([51.2, 10.4], 6);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 18,
+          attribution: '© OpenStreetMap',
+        }).addTo(karte);
+      }
+
+      const passt = (p) => {
+        const f = S.filter;
+        if (f.typ !== 'alle' && p[T] !== Number(f.typ)) return false;
+        if (f.quelle !== 'alle' && p[QUELLE] !== Number(f.quelle)) return false;
+        if (f.markt !== 'alle' && p[MARKT] !== f.markt) return false;
+        if (f.auff === 'ja' && !(p[AUFF] && p[AUFF].length)) return false;
+        if (f.zeit !== 'alle') {
+          const grenze = Date.now() - Number(f.zeit) * 86400000;
+          if (!p[ZEIT] || p[ZEIT] < grenze) return false;
+        }
+        if (f.status !== 'alle') {
+          const s = p[STATUS];
+          if (f.status === 'offen' && !(s === 'pending' || s === 'review' || s === 'ocr_pending')) return false;
+          if (f.status === 'approved' && s !== 'approved') return false;
+          if (f.status === 'rejected' && s !== 'rejected') return false;
+        }
+        return true;
+      };
+
+      function zeichne() {
+        if (ebene) { karte.removeLayer(ebene); ebene = null; }
+        const sichtbar = S.punkte.filter(passt);
+
+        const fotos = sichtbar.filter((p) => p[T] === 0).length;
+        $('nFotos').textContent = fotos.toLocaleString('de-DE');
+        $('nBons').textContent = (sichtbar.length - fotos).toLocaleString('de-DE');
+        $('nOrte').textContent = new Set(sichtbar.map((p) => p[ORT]).filter(Boolean)).size.toLocaleString('de-DE');
+        $('nAuff').textContent = sichtbar.filter((p) => p[AUFF] && p[AUFF].length).length.toLocaleString('de-DE');
+
+        if (S.filter.modus === 'hitze') {
+          // Dichte ohne Zusatz-Bibliothek: ein Kreis je Ort, Fläche nach Menge.
+          const proOrt = new Map();
+          sichtbar.forEach((p) => {
+            const k = `${p[LAT]},${p[LON]}`;
+            if (!proOrt.has(k)) proOrt.set(k, { lat: p[LAT], lon: p[LON], n: 0, ort: p[ORT] });
+            proOrt.get(k).n++;
+          });
+          ebene = L.layerGroup();
+          for (const o of proOrt.values()) {
+            L.circleMarker([o.lat, o.lon], {
+              radius: Math.min(38, 4 + Math.sqrt(o.n) * 2.6),
+              color: 'rgba(59,160,232,.9)', weight: 1,
+              fillColor: 'rgba(59,160,232,.45)', fillOpacity: 0.55,
+            }).bindPopup(`<b>${esc(o.ort || 'Ort unbekannt')}</b><br>${o.n.toLocaleString('de-DE')} Einreichungen`).addTo(ebene);
+          }
+          ebene.addTo(karte);
+          return;
+        }
+
+        const marker = sichtbar.map((p) => {
+          const auffaellig = p[AUFF] && p[AUFF].length;
+          const farbe = auffaellig ? '#e2604a' : p[T] === 0 ? '#5b4f9c' : '#0d8575';
+          return L.circleMarker([p[LAT], p[LON]], {
+            radius: auffaellig ? 7 : 5, color: farbe, weight: auffaellig ? 2.5 : 1.5,
+            fillColor: farbe, fillOpacity: auffaellig ? 0.9 : 0.75,
+          }).bindPopup(
+            `<b>${p[T] === 0 ? 'Produktfoto' : 'Kassenbon'}</b> · ${esc(p[MARKT] || 'Markt unbekannt')}<br>` +
+            `<span class="kv">Ort</span> ${esc(p[ORT] || '—')}${p[PLZ] ? ` (${esc(p[PLZ])})` : ''}<br>` +
+            `<span class="kv">Quelle</span> ${esc(QUELLE_DE[p[QUELLE]] ?? '—')}, ${esc(GENAU_DE[p[QUELLE]] ?? '')}<br>` +
+            `<span class="kv">Eingereicht</span> ${fmtDate(p[ZEIT])} · ${esc(p[STATUS])}<br>` +
+            ((p[AUFF] || []).map((t) => `<span style="color:#e2604a">⚠ ${esc(t)}</span><br>`).join('')) +
+            `<a href="pruefen.html?id=${encodeURIComponent(p[ID])}${p[T] === 1 ? '&tab=receipts' : ''}" style="color:#3ba0e8">im Prüfen öffnen</a>`,
+          );
+        });
+
+        if (S.filter.modus === 'cluster' && marker.length > 400) {
+          ebene = L.markerClusterGroup({ chunkedLoading: true, maxClusterRadius: 46, spiderfyOnMaxZoom: true });
+          marker.forEach((m) => ebene.addLayer(m));
+        } else {
+          ebene = L.layerGroup(marker);
+        }
+        ebene.addTo(karte);
+      }
+
+      async function laden(frisch) {
+        const r = await call('reviewMapPoints')(frisch ? { frisch: true } : {});
+        S.punkte = r.data.punkte || [];
+        const o = r.data.ohneOrt || {};
+        const g = r.data.gesamt || {};
+        // Warum ein Fall keinen Punkt hat — mit der Trennung, auf die es
+        // ankommt: bei Fotos sind es NICHT überwiegend Altfälle. Von den
+        // Einreichungen seit dem 15.08. fehlt gut zwei Fünfteln der Ort, weil
+        // weder Standort noch Kassenbon dabei waren. Das ist ein laufendes
+        // Thema und darf nicht als erledigte Vergangenheit dastehen.
+        const zeilen = [];
+        if (o.nurLand) zeilen.push(`${o.nurLand} kennen nur das Land des Marktes`);
+        if (o.garNichts) zeilen.push(`${o.garNichts} tragen gar keine Ortsangabe`);
+        if (o.wohnort) zeilen.push(`${o.wohnort} kennen nur den Wohnort — der sagt nichts über den Einkaufsort`);
+        if (o.ortNichtAufloesbar) zeilen.push(`${o.ortNichtAufloesbar} nennen einen Ort, der sich nicht auflösen ließ`);
+        const aktuellOhne = o.fotosAktuellOhne ?? 0;
+        const aktuell = o.fotosAktuell ?? 0;
+        const anteil = aktuell ? Math.round((aktuellOhne / aktuell) * 100) : 0;
+        $('ohneOrt').innerHTML =
+          `<b>Nicht auf der Karte:</b> ${(o.fotos ?? 0)} von ${(g.fotos ?? 0)} Fotos, ` +
+          `${(o.bons ?? 0)} von ${(g.bons ?? 0)} Bons.` +
+          (aktuell ? `<br><b style="color:var(--warn)">${aktuellOhne} davon sind aktuelle Fotos</b> (${anteil} % der Einreichungen seit dem 15.08., seit der Ortsschätzer läuft) — also kein reiner Altbestand.` : '') +
+          (zeilen.length ? `<br>Im Einzelnen: ${zeilen.join(', ')}.` : '') +
+          `<br>Alle diese Einreichungen sind gültig; es fehlt nur die Angabe für einen Punkt.`;
+
+        const maerkte = [...new Set(S.punkte.map((p) => p[MARKT]).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
+        $('fMarkt').innerHTML = '<option value="alle">alle Märkte</option>' +
+          maerkte.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+
+        $('lade').classList.add('weg');
+        const alter = r.data.ausCache ? Math.round((Date.now() - r.data.stand) / 60000) : 0;
+        $('stand').innerHTML = r.data.ausCache && alter >= 1
+          ? `Stand vor ${alter} min · <a href="#" id="neuLaden" style="color:var(--acc)">neu laden</a>`
+          : 'Stand: gerade eben';
+        const neu = $('neuLaden');
+        if (neu) neu.onclick = (e) => { e.preventDefault(); $('lade').classList.remove('weg'); $('lade').textContent = 'Lade neu …'; laden(true); };
+        zeichne();
+        // Auf die eigenen Daten zoomen, nicht auf ein Standard-Rechteck.
+        const mit = S.punkte.filter((p) => Number.isFinite(p[LAT]));
+        if (mit.length) karte.fitBounds(L.latLngBounds(mit.map((p) => [p[LAT], p[LON]])), { padding: [40, 40] });
+      }
+
+      document.querySelectorAll('[data-f]').forEach((b) => {
+        b.onclick = () => {
+          const f = b.dataset.f;
+          S.filter[f] = b.dataset.v;
+          document.querySelectorAll(`[data-f="${f}"]`).forEach((x) => x.classList.toggle('on', x === b));
+          zeichne();
+        };
+      });
+      $('fMarkt').onchange = () => { S.filter.markt = $('fMarkt').value; zeichne(); };
+      $('fStatus').onchange = () => { S.filter.status = $('fStatus').value; zeichne(); };
+
+      initAdmin(() => {
+        $('app').classList.add('on');
+        baueKarte();
+        laden().catch((e) => {
+          $('lade').innerHTML = `<div style="text-align:center">Karte nicht ladbar: ${esc(e.message)}<br>
+            <button id="nochmal" style="margin-top:12px;border-color:var(--acc);color:var(--acc)">Erneut versuchen</button></div>`;
+          $('nochmal').onclick = () => { $('lade').textContent = 'Lade Karte …'; laden(true).catch(() => {}); };
+        });
+      });
+    </script>
+  </body>
+</html>

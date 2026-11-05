@@ -30,6 +30,7 @@ const {
   query,
   where,
   serverTimestamp,
+  arrayRemove,
 } = require('firebase/firestore');
 const fs = require('fs');
 const path = require('path');
@@ -57,6 +58,10 @@ beforeAll(async () => {
     await setDoc(doc(db, 'poll_responses/resp-mallory'), { userId: MALLORY, pollId: 'poll1' });
     await setDoc(doc(db, 'receipts/r1'), { userId: ALICE, status: 'approved' });
     await setDoc(doc(db, 'cashback_payouts/pay1'), { userId: ALICE, amountCents: 100 });
+    await setDoc(doc(db, `cashback_sperren/${MALLORY}`), { gesperrt: true, grund: 'test', quelle: 'test' });
+    await setDoc(doc(db, '_meta/produktsuche'), { aktiv: true, tagesDeckel: 120 });
+    await setDoc(doc(db, '_meta/produktsuche_tage/tage/2026-10-04'), { bearbeitet: 5 });
+    await setDoc(doc(db, '_meta/openFoodRateLimit'), { rateLimitUntilMs: 0 });
     await setDoc(doc(db, 'gamification/actions'), { search_product: { points: 1 } });
     await setDoc(doc(db, 'aggregates/leaderboard_v1'), { top: [] });
     await setDoc(doc(db, 'leaderboards/' + ALICE), { displayName: 'Alice', stats: {} });
@@ -91,6 +96,16 @@ beforeAll(async () => {
     });
     await setDoc(doc(db, 'shared_lists/list_expand'), {
       ownerId: ALICE, memberIds: [ALICE], name: 'L',
+    });
+    // arrayRemove (26.09.2026): MALLORY ist hier „inzwischen beigetreten".
+    await setDoc(doc(db, 'shared_lists/list_leave_ar'), {
+      ownerId: ALICE, memberIds: [ALICE, BOB, MALLORY], name: 'L',
+    });
+    await setDoc(doc(db, 'shared_lists/list_remove_ar'), {
+      ownerId: ALICE, memberIds: [ALICE, BOB, MALLORY], name: 'L',
+    });
+    await setDoc(doc(db, 'shared_lists/list_remove_ar_bad'), {
+      ownerId: ALICE, memberIds: [ALICE, BOB, MALLORY], name: 'L',
     });
   });
 });
@@ -159,6 +174,43 @@ describe('Geld-Pfad: Guthaben & Ledger sind server-only', () => {
   });
 });
 
+// Kontosperre (Entscheidung Patrick 02.10.2026): cashback_sperren/{uid} ist
+// server-only — kein Block in firestore.rules, das finale deny-all greift.
+// Der Betroffene darf die eigene Sperre weder sehen (sonst weicht er auf ein
+// neues Konto aus) noch löschen; niemand darf sich selbst oder andere sperren.
+describe('Kontosperre: cashback_sperren ist server-only', () => {
+  test('ANGRIFF: eigene Sperre lesen, löschen oder aufheben scheitert', async () => {
+    await assertFails(getDoc(doc(mallory(), `cashback_sperren/${MALLORY}`)));
+    await assertFails(deleteDoc(doc(mallory(), `cashback_sperren/${MALLORY}`)));
+    await assertFails(setDoc(doc(mallory(), `cashback_sperren/${MALLORY}`), { gesperrt: false }));
+    await assertFails(updateDoc(doc(mallory(), `cashback_sperren/${MALLORY}`), { gesperrt: false }));
+  });
+  test('ANGRIFF: fremde Sperren lesen/anlegen und die Sammlung abfragen scheitert', async () => {
+    await assertFails(getDoc(doc(alice(), `cashback_sperren/${MALLORY}`)));
+    await assertFails(setDoc(doc(mallory(), `cashback_sperren/${ALICE}`), { gesperrt: true }));
+    await assertFails(getDocs(collection(alice(), 'cashback_sperren')));
+    await assertFails(getDoc(doc(unauth(), `cashback_sperren/${MALLORY}`)));
+  });
+});
+
+// Produktsuche (04.10.2026): _meta/produktsuche steuert, wie viele bezahlte
+// Suchen (Serper, KI, Apify) am Tag laufen; _meta/produktsuche_tage/tage/*
+// zählt sie. Server-only — kein Block in firestore.rules, das finale deny-all
+// greift. Wer den Schalter schreiben könnte, könnte Geld ausgeben lassen.
+describe('Produktsuche: _meta ist server-only', () => {
+  test('ANGRIFF: Schalter hochdrehen oder lesen scheitert, auch angemeldet', async () => {
+    await assertFails(setDoc(doc(mallory(), '_meta/produktsuche'), { aktiv: true, tagesDeckel: 5000, proLauf: 20 }));
+    await assertFails(updateDoc(doc(mallory(), '_meta/produktsuche'), { serperMindestGuthaben: 0 }));
+    await assertFails(getDoc(doc(alice(), '_meta/produktsuche')));
+    await assertFails(getDoc(doc(unauth(), '_meta/produktsuche')));
+  });
+  test('ANGRIFF: Tageszähler lesen/fälschen scheitert', async () => {
+    await assertFails(setDoc(doc(mallory(), '_meta/produktsuche_tage/tage/2026-10-04'), { bearbeitet: 0 }));
+    await assertFails(getDocs(collection(alice(), '_meta/produktsuche_tage/tage')));
+    await assertFails(getDoc(doc(alice(), '_meta/openFoodRateLimit')));
+  });
+});
+
 // ─── 2. UMFRAGEN (zweiter Geld-Mint-Pfad) ────────────────────────────
 
 describe('Umfragen: polls read-only, Antworten nur als man selbst', () => {
@@ -210,10 +262,17 @@ describe('Bestenliste: nur eigenes Doc schreiben, Lesen nur eingeloggt', () => {
 // ─── 4. KATALOG ──────────────────────────────────────────────────────
 
 describe('Katalog: öffentlich lesbar, nie client-schreibbar', () => {
-  test('produkte lesbar ohne Auth (Boot-Race-sicher)', async () => {
-    await assertSucceeds(getDoc(doc(unauth(), 'produkte/p1')));
+  test('übriger Katalog lesbar ohne Auth (Boot-Race-sicher)', async () => {
     await assertSucceeds(getDoc(doc(unauth(), 'scraped_products/s1')));
     await assertSucceeds(getDoc(doc(unauth(), 'aggregates/leaderboard_v1')));
+  });
+  // Live seit 01.09.2026 (Schutz gegen das Abgreifen der Datenbank), am 26.09.
+  // ins Repo übernommen: diese vier nur mit Anmeldung, anonym genügt.
+  test('produkte, markenProdukte, hersteller, hersteller_new: nur angemeldet lesbar', async () => {
+    for (const pfad of ['produkte/p1', 'markenProdukte/m1', 'hersteller/h1', 'hersteller_new/h1']) {
+      await assertSucceeds(getDoc(doc(alice(), pfad)));
+      await assertFails(getDoc(doc(unauth(), pfad)));
+    }
   });
   test('ANGRIFF: Katalog-Defacement scheitert (vorher update: if true!)', async () => {
     await assertFails(updateDoc(doc(unauth(), 'produkte/p1'), { preis: 0 }));
@@ -268,6 +327,23 @@ describe('User-Subcollections: Owner ja, Fremde/Unauth nie', () => {
     await assertSucceeds(getDoc(doc(alice(), `users/${ALICE}/someFutureSub/x1`)));
     await assertFails(getDoc(doc(mallory(), `users/${ALICE}/someFutureSub/x1`)));
     await assertFails(setDoc(doc(alice(), `users/${ALICE}/someFutureSub/x2`), { a: 1 }));
+  });
+  test('push_events (86cb22c0m): Owner create-only mit Shape, ID = pushId', async () => {
+    // Legitimer Open-Event (exakt die Client-Shape aus fcmDeepLinks.ts)
+    await assertSucceeds(setDoc(doc(alice(), `users/${ALICE}/push_events/p_abc123`), {
+      pushId: 'p_abc123', kind: 'cashback_ready', deepLink: 'markendetektivern://x',
+      openedAt: serverTimestamp(),
+    }));
+    // ANGRIFF/Drift: falsche Shape, ID ≠ pushId, fremder User, mutieren
+    await assertFails(setDoc(doc(alice(), `users/${ALICE}/push_events/p_noshape`), { foo: 1 }));
+    await assertFails(setDoc(doc(alice(), `users/${ALICE}/push_events/p_other`), {
+      pushId: 'p_MISMATCH', openedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(mallory(), `users/${ALICE}/push_events/p_evil`), {
+      pushId: 'p_evil', openedAt: serverTimestamp(),
+    }));
+    await assertFails(updateDoc(doc(alice(), `users/${ALICE}/push_events/p_abc123`), { kind: 'x' }));
+    await assertFails(deleteDoc(doc(alice(), `users/${ALICE}/push_events/p_abc123`)));
   });
 });
 
@@ -334,6 +410,152 @@ describe('Ratings, Feedback, Telemetrie, Push-Tokens', () => {
   test('crowd_uploads: eigenes create+read ok, update nie', async () => {
     await assertSucceeds(setDoc(doc(alice(), 'crowd_uploads/cu1'), { userId: ALICE }));
     await assertFails(updateDoc(doc(alice(), 'crowd_uploads/cu1'), { status: 'approved' }));
+  });
+  test('crowd_uploads: der deterministische Slot-Schlüssel lässt nur den ERSTEN durch', async () => {
+    // Trägt die Idempotenz von `submitProduct` (lib/services/productSubmit.ts,
+    // productSubmissionDocId): ein Produkt-Slot einer Wizard-Sitzung ist EIN
+    // Dokument. Der zweite Schreibvorgang auf denselben Pfad ist ein `update`
+    // und muss scheitern — sonst hängt „der erste gewinnt" allein an der
+    // Disziplin des Clients, und genau die hat am 10.09.2026 gefehlt
+    // (3 Nutzer, 7 byteidentische Einreichungen, jede davon abgelehnt).
+    const slot = `crowd_uploads/${ALICE}_94ea55c3fd9caddfbce6bd1c_3`;
+    await assertSucceeds(setDoc(doc(alice(), slot), { userId: ALICE }));
+    await assertFails(setDoc(doc(alice(), slot), { userId: ALICE }));
+    // Ein anderer Slot derselben Sitzung bleibt frei — echte zweite Produkte
+    // dürfen nicht mitgesperrt werden.
+    await assertSucceeds(setDoc(doc(alice(), `crowd_uploads/${ALICE}_94ea55c3fd9caddfbce6bd1c_4`), { userId: ALICE }));
+    // Fremdes Konto kann den Slot weder besetzen noch lesen.
+    await assertFails(setDoc(doc(mallory(), slot), { userId: MALLORY }));
+    await assertFails(getDoc(doc(mallory(), slot)));
+  });
+
+  // Genau die Nutzlast von `submitProduct` (lib/services/productSubmit.ts)
+  // inklusive `collectContext` — mit ALLEN optionalen Teilen, damit eine
+  // Sperrliste, die versehentlich ein App-Feld trifft, hier auffällt.
+  const appAnlage = () => ({
+    userId: ALICE,
+    sessionId: '94ea55c3fd9caddfbce6bd1c',
+    productIndex: 1,
+    marketId: 'm1',
+    marketName: 'Aldi Süd',
+    marketLand: 'DE',
+    productName: null,
+    ean: '4061458000000',
+    campaignId: 'produkt-fotos-oktober-2026',
+    campaignResolve: 'live',
+    images: { front: 'crowduploads/a/front_x.jpg', ean: 'crowduploads/a/ean_x.jpg' },
+    stepCount: 2,
+    status: 'pending',
+    clientVersion: { app: '6.0.20', build: '1247', platform: 'android' },
+    favoriteMarket: { id: 'm1', name: 'Aldi Süd' },
+    userLocation: { address: null, city: 'Köln', bundesland: 'NRW' },
+    journeyLocation: { lat: 50.95, lon: 6.95, city: 'Köln', geohash5: '50.95_6.95', source: 'ip' },
+    journeyId: 'j1',
+    capture: {
+      capturedAt: new Date(),
+      gpsStatus: 'ok',
+      gps: { lat: 50.9412, lon: 6.9583, accuracyM: 12, fixAt: new Date() },
+      confirmedPlace: { city: 'Köln' },
+    },
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  test('crowd_uploads: die echte App-Anlage geht durch (alle optionalen Felder)', async () => {
+    await assertSucceeds(setDoc(doc(alice(), 'crowd_uploads/app_voll'), appAnlage()));
+    // Altbestand/Tests ohne status bleiben erlaubt — ohne status greift
+    // weder Runde noch Vergütung.
+    await assertSucceeds(setDoc(doc(alice(), 'crowd_uploads/app_ohne_status'), { userId: ALICE }));
+  });
+
+  test('ANGRIFF: Server-Felder beim Anlegen mitschicken scheitert', async () => {
+    const faelle = {
+      priceRescueOcr: { priceCents: 229, currency: 'EUR', priceImageKind: 'preisschild' },
+      eanRescueOcr: '4061458000001',
+      productNameRescueOcr: 'Erfundener Name',
+      manufacturerRescueOcr: { name: 'DMK' },
+      rescueQuelle: 'erfunden',
+      productNameOcr: 'Erfundener Name',
+      productNameOcrAt: new Date(),
+      priceOcr: { priceCents: 229, source: 'preisschild' },
+      manufacturerOcr: { name: 'DMK', source: 'hersteller' },
+      priceReceipt: { zip: '50667', complete: true },
+      productNameOcrBildDefekt: [],
+      namerNachlesenAb: new Date(),
+      namerLauf: { eventId: 'x' },
+      review: { precheck: { verdict: 'ok' } },
+      reviewedBy: 'admin',
+      rewardResult: 'credited',
+      rewardCents: 500,
+      rewardPushSentAt: new Date(),
+      probableLocation: { source: 'gps' },
+      exifGps: { lat: 1, lon: 2 },
+      // 02.10.2026: wer „Foto-Nummer stimmt" vorgibt, umginge die Prüfung der Konsole.
+      eanFotoOcr: { ean: '4061458000001', befund: 'gleich' },
+      // 06.10.2026: die korrigierte EAN gilt vor `ean` — vorbelegt wäre sie eine EAN ohne Abgleich.
+      eanKorrektur: { ean: '4061458000001', vorher: '4000417025005', aus: 'heute' },
+      // 06.10.2026 (Prüfrunde): schaltete die Korrektur der eigenen Einreichung ab.
+      eanKorrekturVerworfen: { by: 'alice', notiz: 'x' },
+    };
+    for (const [feld, wert] of Object.entries(faelle)) {
+      await assertFails(setDoc(doc(alice(), `crowd_uploads/angriff_${feld}`), { ...appAnlage(), [feld]: wert }));
+    }
+  });
+
+  // Die VOLLSTÄNDIGE Sperrliste, unabhängig von der Regel abgeschrieben (gleiche
+  // Reihenfolge wie crowdUploadServerFelder()). Fällt dort ein Name heraus,
+  // scheitert dieser Test — die Regel prüft nur Schlüssel, der Wert ist egal.
+  // Darunter die Felder, die den Nachlauf des Namers steuern
+  // (namerNachlesenVersuch, productNameOcrFehlerErst).
+  const SERVER_FELDER = [
+    'productNameOcr', 'productNameOcrAt', 'productNameOcrFehler',
+    'productNameOcrConfidence', 'priceOcr', 'manufacturerOcr',
+    'priceImageKind', 'priceReceipt',
+    'productNameOcrBildDefekt', 'productNameOcrFehlerErst',
+    'productNameOcrNachgelesenAt', 'namerNachlesenAb',
+    'namerNachlesenVersuch', 'namerLauf',
+    'productNameRescueOcr', 'productNameRescueAlternative', 'eanRescueOcr',
+    'priceRescueOcr', 'manufacturerRescueOcr', 'rescueAt', 'rescueQuelle',
+    'productNameRescueAt', 'productNameRescueQuelle',
+    'eanRescueAt', 'eanRescueQuelle',
+    'eanFotoOcr', 'eanKorrektur', 'eanKorrekturVerworfen',
+    'review', 'reviewedBy', 'reviewedAt', 'reviewNote', 'holdReasons',
+    'rejectReason', 'loseWare', 'frischwareOhneAngaben',
+    'rewardResult', 'rewardCents', 'rewardNotCreditedReason',
+    'rewardCheckedAt', 'rewardSkipped', 'rewardSkippedReason',
+    'rewardRegion', 'rewardLocationRule', 'rewardPushSentAt',
+    'probableLocation', 'probableLocationAt', 'exifGps',
+    'journeyLocationMatch', 'userLocationBackfilled',
+  ];
+
+  test('ANGRIFF: JEDES Feld der Sperrliste beim Anlegen scheitert (50 Felder)', async () => {
+    expect(SERVER_FELDER).toHaveLength(50);
+    expect(new Set(SERVER_FELDER).size).toBe(SERVER_FELDER.length);
+    for (const feld of SERVER_FELDER) {
+      await assertFails(setDoc(doc(alice(), `crowd_uploads/liste_${feld}`), { ...appAnlage(), [feld]: 'x' }));
+    }
+  });
+
+  test('ANGRIFF: Halte-Grund der Morgenrunde (review.rundeOffen) beim Anlegen vorbelegen scheitert — auch ohne andere review-Felder', async () => {
+    // Prüfrunde 2 (02.10.2026): die Prüfkonsole hält Fälle mit sperrenden
+    // Befunden in review.rundeOffen an; wer ihn leer vorbelegt, gäbe vor, es
+    // gebe nichts zu beanstanden. Ändern kann der Client das Dokument nie.
+    await assertFails(setDoc(doc(alice(), 'crowd_uploads/angriff_rundeOffen'), {
+      ...appAnlage(), review: { rundeOffen: { grund: null, sperrend: [], lauf: '2099-01-01_000000' } },
+    }));
+    await assertSucceeds(setDoc(doc(alice(), 'crowd_uploads/ohne_rundeOffen'), appAnlage()));
+    await assertFails(updateDoc(doc(alice(), 'crowd_uploads/ohne_rundeOffen'), { 'review.rundeOffen': { sperrend: [] } }));
+  });
+
+  test('Gegenprobe: die App-Anlage trägt keines der gesperrten Felder', () => {
+    const app = Object.keys(appAnlage());
+    expect(app.filter((k) => SERVER_FELDER.includes(k))).toEqual([]);
+  });
+
+  test('ANGRIFF: Anlage mit einem anderen status als pending scheitert', async () => {
+    for (const status of ['approved', 'rejected', 'Pending', null]) {
+      await assertFails(setDoc(doc(alice(), `crowd_uploads/status_${String(status)}`), { ...appAnlage(), status }));
+    }
   });
   test('ratingFunnelEvents: eigenes schreiben ok, Spoof/Unauth/Read/Delete nie', async () => {
     const own = `ratingFunnelEvents/${ALICE}_6.0.12_requested`;
@@ -484,6 +706,42 @@ describe('Stufe 5: shared_lists — Mitgliederschutz + Item-Zugriff', () => {
   test('Owner darf umbenennen', async () => {
     await assertSucceeds(
       updateDoc(doc(alice(), 'shared_lists/list_rename'), { name: 'Neuer Name' }),
+    );
+  });
+
+  // leaveList/removeMember schreiben seit 26.09.2026 arrayRemove statt eines
+  // gelesenen, evtl. veralteten Arrays — sonst verschwanden Neu-Beigetretene.
+  const mitglieder = async (id) => {
+    let ids;
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      ids = (await getDoc(doc(ctx.firestore(), `shared_lists/${id}`))).data().memberIds;
+    });
+    return ids;
+  };
+  test('Mitglied verlässt per arrayRemove — Neu-Beigetretene bleiben', async () => {
+    await assertSucceeds(
+      updateDoc(doc(bob(), 'shared_lists/list_leave_ar'), {
+        memberIds: arrayRemove(BOB),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    expect(await mitglieder('list_leave_ar')).toEqual([ALICE, MALLORY]);
+  });
+  test('Owner entfernt per arrayRemove genau dieses Mitglied', async () => {
+    await assertSucceeds(
+      updateDoc(doc(alice(), 'shared_lists/list_remove_ar'), {
+        memberIds: arrayRemove(BOB),
+        updatedAt: serverTimestamp(),
+      }),
+    );
+    expect(await mitglieder('list_remove_ar')).toEqual([ALICE, MALLORY]);
+  });
+  test('Nicht-Owner darf per arrayRemove KEIN anderes Mitglied entfernen', async () => {
+    await assertFails(
+      updateDoc(doc(bob(), 'shared_lists/list_remove_ar_bad'), {
+        memberIds: arrayRemove(MALLORY),
+        updatedAt: serverTimestamp(),
+      }),
     );
   });
 

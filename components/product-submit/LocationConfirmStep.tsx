@@ -3,8 +3,6 @@ import * as Location from 'expo-location';
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  Linking,
-  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -15,37 +13,23 @@ import {
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import type { CaptureContext } from '@/lib/services/captureContext';
+import { pruefeStandortPflicht } from '@/lib/services/standortPflicht';
 
 /**
- * Fragt im Wizard, WO die Einreichung entsteht — direkt nach der Marktwahl.
+ * Fragt im Wizard nach dem Ort, wenn beim Einreichen kein GPS-Fix vorliegt.
  *
- * ═══ Warum genau hier ═══
+ * ═══ Wann dieser Schritt kommt (seit 6.0.20) ═══
  *
- * Der Wizard hat mit „In welchem Markt bist du?" bereits einen
- * verpflichtenden ersten Schritt VOR dem ersten Foto. Dieser Schritt
- * vervollständigt ihn: bisher wurde nur die KETTE erfasst, nicht der ORT.
- * Damit entsteht keine neue Hürde, sondern die Antwort auf eine Frage, die
- * die App ohnehin schon stellt.
+ * Die Standortfreigabe ist Teilnahmebedingung des Reward-Programms; ohne
+ * sie zeigt der Wizard nur den Sperrhinweis (`useStandortPflicht`). Dieser
+ * Schritt ist deshalb KEIN Ersatz für die Freigabe mehr, sondern nur der
+ * Ausweg, wenn sie steht, das Gerät aber keinen Fix bekommt (Filiale,
+ * Keller). Rangfolge des geltenden Orts: Bon-Adresse → GPS → diese
+ * Ortsangabe → IP-Ortung (serverseitig).
  *
- * Die Reihenfolge ist der Kern: Eine Pflicht NACH sieben Fotos wäre die
- * schlechteste denkbare Stelle — dort ginge fertige Arbeit verloren und
- * der Ärger träfe genau die Leute, die den Aufwand schon betrieben haben.
- * Vor dem ersten Foto kostet dieselbe Pflicht niemanden etwas.
- *
- * ═══ Der iOS-Dialog wird geschützt ═══
- *
- * Der System-Dialog erscheint EINMAL im Leben der App; ein „Nein" ist
- * danach nur noch über die Einstellungen umkehrbar. Deshalb erklärt dieser
- * Schritt zuerst in der App, wofür gefragt wird, und löst den Dialog erst
- * aus, wenn jemand hier zustimmt. So wird der eine Versuch nur bei Leuten
- * verbraucht, die ohnehin einverstanden sind.
- *
- * ═══ Zwei gleichwertige Wege ═══
- *
- * Die Ortseingabe ist der vollwertige zweite Weg, nicht ein Trostpreis:
- * Sie braucht keine Berechtigung, erreicht damit auch alle, die GPS
- * ablehnen, und liefert eine Angabe auf Stadtebene. Wie sicher das ist,
- * entscheidet nicht dieser Screen, sondern die serverseitige Bewertung.
+ * Wird die Freigabe zwischendurch entzogen, meldet der Schritt das über
+ * `onFreigabeFehlt` — der Wizard zeigt dann wieder den Sperrhinweis statt
+ * der Freitexteingabe.
  *
  * ═══ Ton ═══
  *
@@ -59,35 +43,50 @@ interface Props {
   marketName: string;
   onConfirm: (place: ConfirmedPlace) => void;
   onBack: () => void;
+  /**
+   * Optionaler Hinweis, warum der Schritt (erneut) kommt — z.B. wenn der
+   * stille GPS-Fix beim Einreichen scheiterte (Submit-Gate im Wizard).
+   */
+  hinweis?: string | null;
+  /** Freigabe fehlt inzwischen → der Wizard übernimmt mit dem Sperrhinweis. */
+  onFreigabeFehlt: () => void;
 }
+
+/** Innen kann ein frischer Fix 30–60 s dauern — so lange wartet niemand. */
+const FIX_ZEITLIMIT_MS = 12000;
 
 type Status = 'frage' | 'ermittelt' | 'gefunden' | 'eingabe';
 
-export function LocationConfirmStep({ marketName, onConfirm, onBack }: Props) {
+export function LocationConfirmStep({ marketName, onConfirm, onBack, hinweis, onFreigabeFehlt }: Props) {
   const { theme } = useTokens();
   const [status, setStatus] = useState<Status>('frage');
   const [ort, setOrt] = useState('');
   const [gefunden, setGefunden] = useState<ConfirmedPlace | null>(null);
-  const [dauerhaftAbgelehnt, setDauerhaftAbgelehnt] = useState(false);
 
   /**
-   * Löst den System-Dialog aus — und NUR hier. Ein Ablehnen ist kein
-   * Fehlerfall: der Schritt wechselt dann in die Ortseingabe, damit
-   * niemand in einer Sackgasse steht.
+   * Zweiter GPS-Versuch mit Zeitlimit. Bleibt der Fix wieder aus, geht es
+   * in die Ortseingabe — die Freigabe steht ja, nur das Signal fehlt.
    */
   const standortVerwenden = useCallback(async () => {
     setStatus('ermittelt');
+    let zeitlimit: ReturnType<typeof setTimeout> | undefined;
     try {
-      const p = await Location.requestForegroundPermissionsAsync();
-      if (!p.granted) {
-        setDauerhaftAbgelehnt(!p.canAskAgain);
-        setStatus('eingabe');
+      // Freigabe UND Ortungsdienste — auf Android lassen sich die Dienste
+      // über die Schnelleinstellungen abschalten, ohne dass die App den
+      // Vordergrund verlässt.
+      if ((await pruefeStandortPflicht()) !== 'erfuellt') {
+        setStatus('frage');
+        onFreigabeFehlt();
         return;
       }
 
-      const pos = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
+      const pos = await Promise.race([
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+        new Promise<never>((_, reject) => {
+          zeitlimit = setTimeout(() => reject(new Error('fix_zeitlimit')), FIX_ZEITLIMIT_MS);
+        }),
+      ]);
+      clearTimeout(zeitlimit);
 
       // Ortsnamen nachschlagen, damit der Nutzer BESTÄTIGEN kann, was wir
       // ermittelt haben. Eine rohe Koordinate kann niemand prüfen — und
@@ -118,9 +117,10 @@ export function LocationConfirmStep({ marketName, onConfirm, onBack }: Props) {
       });
       setStatus('gefunden');
     } catch {
+      clearTimeout(zeitlimit);
       setStatus('eingabe');
     }
-  }, []);
+  }, [onFreigabeFehlt]);
 
   const T = {
     titel: { fontFamily: fontFamilyVariants.heading, fontWeight: fontWeight.bold as any, fontSize: 20, color: theme.text, letterSpacing: -0.2 },
@@ -209,7 +209,13 @@ export function LocationConfirmStep({ marketName, onConfirm, onBack }: Props) {
 
       {status === 'frage' && (
         <Karte>
-          <Haupttaste label="Meinen Standort verwenden" icon="crosshairs-gps" onPress={standortVerwenden} />
+          {hinweis ? (
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
+              <MaterialCommunityIcons name="map-marker-question-outline" size={18} color={theme.primary} style={{ marginTop: 1 }} />
+              <Text style={[T.text, { flex: 1 }]}>{hinweis}</Text>
+            </View>
+          ) : null}
+          <Haupttaste label="Standort erneut ermitteln" icon="crosshairs-gps" onPress={standortVerwenden} />
           <Nebentaste label="Ort eintippen" onPress={() => setStatus('eingabe')} />
           <Text style={T.klein}>
             Der Standort wird nur zu dieser Einreichung gespeichert — nicht im Hintergrund
@@ -279,21 +285,11 @@ export function LocationConfirmStep({ marketName, onConfirm, onBack }: Props) {
             icon="arrow-right"
             onPress={() => ort.trim() && onConfirm({ city: ort.trim() })}
           />
-          {/* Genau EINE Zeile zu den Einstellungen — auf iOS zeigt das System
-              den Dialog nach einer Ablehnung nicht mehr an, ein erneuter
-              Aufruf liefe ins Leere und wirkte wie ein Defekt. */}
-          {dauerhaftAbgelehnt ? (
-            <Pressable onPress={() => Linking.openSettings()}>
-              <Text style={[T.klein, { color: theme.primary }]}>
-                {Platform.OS === 'ios' ? 'Standort in den Einstellungen erlauben' : 'Standortfreigabe in den Einstellungen'}
-              </Text>
-            </Pressable>
-          ) : null}
         </Karte>
       )}
 
       <Pressable onPress={onBack} style={{ alignItems: 'center', paddingVertical: 10 }}>
-        <Text style={T.klein}>Markt ändern</Text>
+        <Text style={T.klein}>Zurück zur Übersicht</Text>
       </Pressable>
     </ScrollView>
   );

@@ -43,20 +43,25 @@ service cloud.firestore {
     // Client-Writes laufen für ALLE diese Collections über Cloud
     // Functions/Pipelines (Admin-SDK). `update: if true` auf produkte/
     // markenProdukte (jeder konnte den Katalog ändern!) ist entfernt.
+    // Produkte, Markenprodukte und Hersteller lesen nur Angemeldete (auch
+    // anonym) — seit 01.09.2026 live als Schutz gegen das Abgreifen der
+    // Datenbank (siehe scripts/canary), damals aber nie eingecheckt. Am
+    // 26.09. aus dem Live-Stand übernommen, damit ein Rules-Deploy ihn nicht
+    // still wieder entfernt.
     match /produkte/{document} {
-      allow read: if true;
+      allow read: if request.auth != null;
       allow write: if false;
     }
     match /markenProdukte/{document} {
-      allow read: if true;
+      allow read: if request.auth != null;
       allow write: if false;
     }
     match /hersteller/{document} {
-      allow read: if true;
+      allow read: if request.auth != null;
       allow write: if false;
     }
     match /hersteller_new/{document} {
-      allow read: if true;
+      allow read: if request.auth != null;
       allow write: if false;
     }
     match /handelsmarken/{document} {
@@ -139,11 +144,64 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Felder, die ausschließlich Server-Prozesse an crowd_uploads schreiben
+    // (Namer, Morgenrunde, Rettungs-Skripte, Prüfkonsole, Vergütung, Orts-
+    // bewertung). Die App schreibt keines davon (grep lib/app/components,
+    // auch in der Git-Historie von productSubmit.ts). Die Morgenrunde und die
+    // Prüfkonsole vertrauen ihnen: ein beim Anlegen mitgeschickter
+    // `priceRescueOcr` löste die 24-h-Eigensperre, eine `eanRescueOcr` umginge
+    // die Prüfziffer, `productNameOcrAt` ließe den Namer die Einreichung
+    // überspringen, `priceReceipt` bestimmte Aktionsgebiet und Ortsquelle.
+    // Sperrliste statt Whitelist: neue App-Felder (Kontext, Version) bleiben
+    // ohne Regel-Deploy möglich, alte Clients werden nicht ausgesperrt.
+    function crowdUploadServerFelder() {
+      return [
+        // Namer (crowd-upload-namer)
+        'productNameOcr', 'productNameOcrAt', 'productNameOcrFehler',
+        'productNameOcrConfidence', 'priceOcr', 'manufacturerOcr',
+        'priceImageKind', 'priceReceipt',
+        'productNameOcrBildDefekt', 'productNameOcrFehlerErst',
+        'productNameOcrNachgelesenAt', 'namerNachlesenAb',
+        'namerNachlesenVersuch', 'namerLauf',
+        // Nachlesen (Morgenrunde + Ops-Skripte, inkl. Alt-Marker je Feld)
+        'productNameRescueOcr', 'productNameRescueAlternative', 'eanRescueOcr',
+        'priceRescueOcr', 'manufacturerRescueOcr', 'rescueAt', 'rescueQuelle',
+        'productNameRescueAt', 'productNameRescueQuelle',
+        'eanRescueAt', 'eanRescueQuelle',
+        // Nummer vom Barcode-Foto (Morgenrunde, 02.10.2026) — die Prüfkonsole
+        // hält bei Abweichung an; ein mitgeschickter Wert gäbe „stimmt" vor.
+        // `eanKorrektur` (06.10.2026): die korrigierte EAN gilt in Runde und
+        // Konsole VOR `ean` — mitgeschickt wäre sie eine selbst gewählte EAN
+        // ohne jeden Abgleich. `eanKorrekturVerworfen`: ein Mensch hat die
+        // Korrektur in der Prüfkonsole zurückgenommen — mitgeschickt schaltete
+        // die Korrektur für diese Einreichung ab.
+        'eanFotoOcr', 'eanKorrektur', 'eanKorrekturVerworfen',
+        // Prüfung (Morgenrunde + Prüfkonsole). `review` umfasst auch
+        // `review.rundeOffen` (Halte-Grund der Morgenrunde, 02.10.2026) — die
+        // Prüfkonsole hält damit an; ein mitgeschickter leerer Eintrag gäbe vor,
+        // es gebe nichts zu beanstanden.
+        'review', 'reviewedBy', 'reviewedAt', 'reviewNote', 'holdReasons',
+        'rejectReason', 'loseWare', 'frischwareOhneAngaben',
+        // Vergütung (crowd-upload-reward)
+        'rewardResult', 'rewardCents', 'rewardNotCreditedReason',
+        'rewardCheckedAt', 'rewardSkipped', 'rewardSkippedReason',
+        'rewardRegion', 'rewardLocationRule', 'rewardPushSentAt',
+        // Ortsbewertung (crowd-upload-location)
+        'probableLocation', 'probableLocationAt', 'exifGps',
+        'journeyLocationMatch', 'userLocationBackfilled'
+      ];
+    }
+
     // Produkt-Foto Crowd-Uploads — User legt eigene Pending-Einträge an
-    // + liest sie; Review/Vergütung läuft serverseitig.
+    // + liest sie; Review/Vergütung läuft serverseitig. `status` schreibt die
+    // App seit dem ersten Stand (e323ff1) immer als 'pending'; jeder andere
+    // Wert wäre eine selbst erteilte Freigabe.
     match /crowd_uploads/{uploadId} {
       allow create: if signedIn()
-                     && request.resource.data.userId == request.auth.uid;
+                     && request.resource.data.userId == request.auth.uid
+                     && !request.resource.data.keys().hasAny(crowdUploadServerFelder())
+                     && (!('status' in request.resource.data)
+                         || request.resource.data.status == 'pending');
       allow read: if signedIn() && resource.data.userId == request.auth.uid;
       allow update, delete: if false;
     }
@@ -315,6 +373,18 @@ service cloud.firestore {
           && request.resource.data.points >= 0
           && request.resource.data.points <= 10000
           && request.resource.data.timestamp is timestamp;
+        allow update, delete: if false;
+      }
+      // Push-Open-Events (86cb22c0m): Client protokolliert den Tap auf eine
+      // Push-Benachrichtigung. Doc-ID = pushId (idempotent, nur create) —
+      // Auswertung joint serverseitig gegen push_log/{pushId} (admin-only).
+      match /push_events/{pushId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && request.resource.data.keys().hasAll(['pushId', 'openedAt'])
+          && request.resource.data.pushId is string
+          && request.resource.data.pushId == pushId
+          && request.resource.data.openedAt is timestamp;
         allow update, delete: if false;
       }
       // GELD-Ledger + OCR-Artikel-Trail: NUR Cloud Functions schreiben.

@@ -8,7 +8,7 @@
  */
 
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { Camera, CameraType, CameraView, scanFromURLAsync, useCameraPermissions } from 'expo-camera';
+import { Camera, CameraType, CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { Image as ExpoImage } from 'expo-image';
@@ -33,41 +33,55 @@ import {
   BonScanner,
   DEFAULT_SCANNER_TUNING,
   isBonScannerAvailable,
-  scanBarcodeFromImage,
   type BonScannerHandle,
   type BonScannerQuality,
   type ScannerTuning,
 } from 'bon-edge-detector';
 
+import { EanEingabe } from '@/components/product-submit/EanEingabe';
 import {
   LocationConfirmStep,
   type ConfirmedPlace,
 } from '@/components/product-submit/LocationConfirmStep';
 import { MarketSelector } from '@/components/ui/MarketSelector';
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
+import { useBildschirmAktiv } from '@/hooks/useBildschirmAktiv';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useEanSchritt } from '@/hooks/useEanSchritt';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import {
   PRODUCT_PHOTO_STEPS,
   getActiveProductCampaign,
+  resolveProductCampaignForSubmit,
   newImageBatchId,
   newSessionId,
   sanitizeForFilename,
   type ActiveProductCampaign,
   type ProductPhotoStep,
 } from '@/lib/services/productSubmit';
+import { BILDSCHIRM_WEG, aufnahmeMitGrenze } from '@/lib/services/kameraAufnahme';
+import { PRODUKT_BARCODE_TYPEN } from '@/lib/services/barcodeFoto';
 import { isOnline } from '@/lib/services/network';
-import {
-  clientVersion,
-  erfasseCaptureContext,
-  standortStatus,
-} from '@/lib/services/captureContext';
+import { StandortPflichtHinweis } from '@/components/rewards/StandortPflichtHinweis';
+import { useStandortPflicht } from '@/hooks/useStandortPflicht';
+import { clientVersion, erfasseCaptureContext } from '@/lib/services/captureContext';
 import { enqueueProductUpload } from '@/lib/services/uploadQueue';
+import { zeigeAufnahmeFehler } from '@/lib/services/ui/aufnahmeFehler';
 import { showInfoToast } from '@/lib/services/ui/toast';
 
 const PURPLE = '#5b4f9c';
 const SCREEN_W = Dimensions.get('window').width;
+
+// Zeitgrenze für takePictureAsync (expo-camera: auf Android alle Schritte,
+// auf iOS der EAN-Schritt samt Auto-Auslöser). Projektregel: kein Spinner
+// ohne Grenze an einem nativen await. Großzügig, damit langsame Geräte mit
+// Nachbearbeitung kein gutes Foto verlieren.
+const EXPO_AUFNAHME_LIMIT_MS = 30_000;
+
+// Barcode-Typen des EAN-Schritts als stabile Referenz (statt eines neuen
+// Objekts je Render).
+const EAN_SCANNER_SETTINGS = { barcodeTypes: [...PRODUKT_BARCODE_TYPEN] };
 
 // Readability tuning for PRODUCT LABELS (not receipts). The shipped defaults
 // only accept tall, receipt-shaped documents (docMaxWHRatio 0.85) and demand
@@ -85,9 +99,8 @@ const LABEL_TUNING: ScannerTuning = {
   minReadableHeight: 0.44,
 };
 
-// `place` liegt bewusst direkt hinter `market`: beides beantwortet dieselbe
-// Frage („wo bist du"), und beides steht VOR dem ersten Foto. Eine
-// Ortsabfrage nach der Aufnahme würde fertige Arbeit gefährden.
+// `place` kommt nur noch aus dem Einreich-Gate (Freigabe steht, GPS-Fix blieb
+// aus). Die Freigabe selbst sichert die Standort-Sperre vor jeder Phase.
 type Phase = 'market' | 'place' | 'intro' | 'capture' | 'review';
 
 export default function ProductWizardScreen() {
@@ -96,10 +109,12 @@ export default function ProductWizardScreen() {
   const { theme } = useTokens();
   const scheme = useColorScheme();
   const { user } = useAuth();
+  // Nach dem await einer Aufnahme: Screen noch da und vorn? Sonst weder State
+  // noch Hinweis über einer fremden Seite (Push-Ziel geöffnet, Wizard zu).
+  const bildschirm = useBildschirmAktiv();
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
   const docScannerRef = useRef<BonScannerHandle>(null);
-  const barcodeHandledRef = useRef(false);
   const chipsScrollRef = useRef<ScrollView>(null);
   const chipXRef = useRef<number[]>([]);
 
@@ -113,29 +128,46 @@ export default function ProductWizardScreen() {
   const [photos, setPhotos] = useState<Partial<Record<ProductPhotoStep, string>>>({});
   /** Wann das erste Foto dieser Einreichung entstand (siehe onCaptured). */
   const firstCaptureAtRef = useRef<number | null>(null);
+  // Sperre gegen den Doppeltipp: Ref, damit sie sofort greift (State wirkt erst
+  // nach dem nächsten Render), plus ein State für den sichtbaren Zustand am
+  // Knopf — ein stummer, sekundenlang wirkungsloser Knopf lädt zum zweiten
+  // Tippen geradezu ein.
+  const submitLaeuftRef = useRef(false);
+  /**
+   * Welche Produkt-Slots dieser Sitzung sind schon eingereiht?
+   *
+   * Die Lauf-Sperre allein genügt nicht: sie fällt im `finally`, WÄHREND der
+   * Erfolgs-Dialog noch steht (`Alert.alert` blockiert nicht), und die Fotos
+   * liegen unverändert im State — derselbe Satz war danach erneut absendbar.
+   * Dieser Merker überlebt das Dialog-Fenster und fällt erst, wenn „Weiteres
+   * Produkt" einen neuen Slot beginnt.
+   */
+  const eingereichteSlotsRef = useRef<Set<number>>(new Set());
+  /**
+   * Ein Zustand statt zweier Booleans (CLAUDE.md): `idle` → `laeuft` →
+   * `fertig`. `fertig` ist der Dialog-Zeitraum, in dem der Knopf gesperrt
+   * bleiben MUSS.
+   */
+  const [submitZustand, setSubmitZustand] = useState<'idle' | 'laeuft' | 'fertig'>('idle');
   /** Der im `place`-Schritt bestätigte Ort — gilt für die ganze Sitzung. */
   const [confirmedPlace, setConfirmedPlace] = useState<ConfirmedPlace | null>(null);
+  // Submit-Gate (Orts-Audit 05.09.2026): scheitert der stille GPS-Fix beim
+  // Einreichen UND liegt kein bestätigter Ort vor, geht es in den Orts-
+  // Schritt statt still ohne Ort raus — vorher landeten 54 Android-
+  // Einreichungen ohne jede Ortsangabe (gpsStatus unavailable/timeout).
+  const [ortHinweis, setOrtHinweis] = useState<string | null>(null);
+  const submitNachOrtRef = useRef(false);
   /**
-   * Ob die Standortfreigabe steht. `null` = noch nicht geprüft.
-   *
-   * Ist sie erteilt, wird der Ort beim Einreichen ohnehin still erfasst —
-   * dann ist die Nachfrage im Wizard reine Reibung und entfällt. Der
-   * Schritt bleibt aber für die Fälle, in denen sie fehlt: Ohne laufende
-   * Aktion ist die Produkt-Einreichung NICHT consent-gegatet (auch anonym
-   * möglich, siehe product-submit/index.tsx), und eine Berechtigung kann
-   * jederzeit in den Einstellungen entzogen werden.
+   * Standortpflicht des Reward-Programms (6.0.20, `lib/services/standortPflicht.ts`).
+   * Ohne Freigabe zeigt der Wizard nur den Sperrhinweis — der Freitext-Ort
+   * ist KEIN Ersatz für die Freigabe mehr, sondern nur noch der Ausweg, wenn
+   * bei erteilter Freigabe der GPS-Fix ausbleibt (Filiale, Keller).
+   * Der Stand wird bei jedem Vordergrund-Wechsel neu gelesen: iOS „Einmal
+   * erlauben" verfällt, eine Freigabe kann jederzeit entzogen werden.
    */
-  const [standortFrei, setStandortFrei] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    let lebt = true;
-    void standortStatus().then((s) => {
-      if (lebt) setStandortFrei(s === 'granted_precise' || s === 'granted_coarse');
-    });
-    return () => {
-      lebt = false;
-    };
-  }, []);
+  const pflicht = useStandortPflicht();
+  /** Einreichung wartet auf die Freigabe und läuft danach von selbst weiter. */
+  const submitNachFreigabeRef = useRef(false);
   const [stepIdx, setStepIdx] = useState(0);
   const [capturing, setCapturing] = useState(false);
   // expo-camera MUSS bereit sein, bevor takePictureAsync aufgerufen wird —
@@ -143,17 +175,13 @@ export default function ProductWizardScreen() {
   // zurück (Foto des vorherigen Produkts). Das war die Ursache der
   // vertauschten Produktfotos (crowd_uploads-Kontamination, 2026-07-03):
   // der Wizard löste bei rapiden Einreichungen aus, bevor die Kamera streamte.
-  // Der Cashback-Scanner gated genau so — nur der Wizard tat es bisher nicht.
+  // Referenz für dieses Muster; der expo-Ersatzweg des Bon-Scanners
+  // (app/cashback/capture.tsx) gated seit 28.09.2026 genauso.
   const [cameraReady, setCameraReady] = useState(false);
   const [flashOn, setFlashOn] = useState(false);
   const [campaign, setCampaign] = useState<ActiveProductCampaign | null>(null);
   const [quality, setQuality] = useState<BonScannerQuality>('none');
   const [eanCode, setEanCode] = useState<string | null>(null);
-  // Galerie-EAN: iOS kann Strichcodes NICHT aus einem Standbild lesen
-  // (expo-camera scanFromURLAsync = QR-only). Schlägt die Auto-Erkennung fehl,
-  // hält dieser State das gewählte Bild + öffnet ein Zahlenfeld für die EAN.
-  const [eanEntryUri, setEanEntryUri] = useState<string | null>(null);
-  const [eanEntryValue, setEanEntryValue] = useState('');
   // True when the capture screen was opened to RE-shoot one photo from the
   // review grid — capturing then returns straight to review (no advancing),
   // and the top-left button reads "Abbrechen".
@@ -199,7 +227,11 @@ export default function ProductWizardScreen() {
 
   // Deterministic camera-stack handoff state.
   const nativeAvailable = isBonScannerAvailable;
-  const wantBarcode = phase === 'capture' && step.mode === 'barcode';
+  // Auch an die Standort-Sperre gebunden: blendet sie sich im EAN-Schritt ein,
+  // fällt wantBarcode ab, der Übergabe-Effekt setzt expoActive zurück, und nach
+  // der Freigabe wartet die expo-Kamera wieder auf das Stoppen der NEUEN
+  // nativen Session — sonst liefen beide AVCaptureSessions gleichzeitig an.
+  const wantBarcode = pflicht.stand === 'erfuellt' && phase === 'capture' && step.mode === 'barcode';
   // Native scanner runs for every non-barcode step; its session is stopped the
   // moment we move to the EAN step.
   const bonActive = phase === 'capture' && nativeAvailable && !wantBarcode;
@@ -212,20 +244,16 @@ export default function ProductWizardScreen() {
   // der hat seine eigene Bereitschaft, expo-cameraReady bleibt dort ungenutzt.
   const expoNotReady = showExpoCam && !cameraReady;
 
-  // Re-arm the barcode scanner + reset the live hint whenever the step
-  // changes (so re-entering the EAN step can scan again).
-  useEffect(() => {
-    barcodeHandledRef.current = false;
-    setQuality('none');
-  }, [stepIdx]);
-
   // Kamera-Bereitschaft zurücksetzen, sobald die expo-CameraView abgebaut
-  // wird (iOS: nativ↔expo-Handoff pro EAN-Step; auch beim Verlassen der
-  // Capture-Phase). Die neu gemountete Kamera muss onCameraReady erneut
-  // feuern, bevor wieder ausgelöst werden darf — sonst Stale-Frame.
+  // wird (iOS: nativ↔expo-Handoff pro EAN-Step; beim Verlassen der
+  // Capture-Phase; beim Sperrhinweis der Standortpflicht). Die neu gemountete
+  // Kamera muss onCameraReady erneut feuern, bevor wieder ausgelöst werden
+  // darf — sonst Stale-Frame. An der TATSÄCHLICHEN Mount-Bedingung hängen,
+  // nicht nur an showExpoCam: auf Android ist das immer true.
+  const expoCamGemountet = pflicht.stand === 'erfuellt' && phase === 'capture' && showExpoCam;
   useEffect(() => {
-    if (!showExpoCam) setCameraReady(false);
-  }, [showExpoCam]);
+    if (!expoCamGemountet) setCameraReady(false);
+  }, [expoCamGemountet]);
 
   // Keep the active step's pill scrolled into view (centered) so the user
   // always sees where they are in the strip.
@@ -311,10 +339,19 @@ export default function ProductWizardScreen() {
 
   // Jump to a specific step (from a thumbnail/pill tap) during the normal
   // capture flow. If it's already captured, an overwrite hint shows inline.
-  const goToStep = useCallback((i: number) => {
-    setStepIdx(i);
-    setPhase('capture');
-  }, []);
+  // Während einer Aufnahme gesperrt: das Bild geht an den Schritt, in dem
+  // ausgelöst wurde, entsteht aber erst, wenn die Kamera wirklich auslöst —
+  // nach einem Kamerawechsel (EAN → nativer Scanner) bis zu Sekunden später.
+  // Wer dazwischen die Pill wechselt und das neue Etikett hinhält, bekäme
+  // dessen Foto im alten Fach.
+  const goToStep = useCallback(
+    (i: number) => {
+      if (capturing) return;
+      setStepIdx(i);
+      setPhase('capture');
+    },
+    [capturing],
+  );
 
   // Store the captured uri for the current step. In edit-from-review mode we
   // go straight back to review; otherwise advance to the next missing step
@@ -344,24 +381,66 @@ export default function ProductWizardScreen() {
     [step, stepIdx, photos, editingFromReview],
   );
 
-  const shootCamera = useCallback(async () => {
-    if (!cameraRef.current) return;
+  // Ein Foto mit expo-camera. `null` = kein Bild (Fehlerhinweis schon gezeigt,
+  // oder der Screen ist weg). Ohne Capturing-State — den setzt der Aufrufer.
+  const fotoAufnehmen = useCallback(async (): Promise<string | null> => {
+    if (!cameraRef.current) return null;
     // HART: nie auslösen, bevor CameraX bereit ist (Stale-Frame-Schutz).
     // Ohne diese Zeile liefert takePictureAsync den letzten Frame der
     // vorherigen Kamera-Session zurück → vertauschte Produktfotos.
-    if (!cameraReady) return;
-    setCapturing(true);
+    if (!cameraReady) return null;
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.7, skipProcessing: false });
+      // Zeitgrenze → BonScannerFehler('timeout_bild'). Ein Foto, das danach
+      // noch kommt, fällt ins Leere; das Fach steht über onCaptured aus DIESEM
+      // Render fest (Schritt zum Tippzeitpunkt). Screen inzwischen weg →
+      // BILDSCHIRM_WEG: kein State, kein Hinweis.
+      const photo = await aufnahmeMitGrenze(
+        cameraRef.current.takePictureAsync({ quality: 0.7, skipProcessing: false }),
+        EXPO_AUFNAHME_LIMIT_MS,
+        bildschirm.aktiv,
+      );
+      if (photo === BILDSCHIRM_WEG) return null;
       if (!photo?.uri) throw new Error('no-uri');
-      onCaptured(photo.uri);
-    } catch {
-      Alert.alert('Aufnahme fehlgeschlagen', 'Bitte versuch es noch einmal.');
-    } finally {
-      setCapturing(false);
+      return photo.uri;
+    } catch (e) {
+      if (bildschirm.aktiv()) zeigeAufnahmeFehler(e);
+      return null;
     }
-  }, [onCaptured, cameraReady]);
+  }, [cameraReady, bildschirm]);
+
+  const shootCamera = useCallback(async () => {
+    if (!cameraRef.current || !cameraReady) return;
+    setCapturing(true);
+    try {
+      const uri = await fotoAufnehmen();
+      if (uri) onCaptured(uri);
+    } finally {
+      if (bildschirm.gemountet()) setCapturing(false);
+    }
+  }, [onCaptured, cameraReady, fotoAufnehmen, bildschirm]);
+
+  // EAN-Schritt: Live-Lesung bestätigen, Foto, Nummer übernehmen oder erfragen
+  // (hooks/useEanSchritt.ts — Android-Fehllesungen, 06.10.2026).
+  const ean = useEanSchritt({
+    aktiv: phase === 'capture' && step.mode === 'barcode' && showExpoCam && cameraReady && !capturing,
+    kameraBereit: cameraReady,
+    fotoAufnehmen,
+    onCaptured,
+    setEanCode,
+    setCapturing,
+    bildschirm,
+  });
+
+  // Re-arm the barcode scanner + reset the live hint whenever the step
+  // changes (so re-entering the EAN step can scan again). Auch beim
+  // Phasenwechsel: eine Neuaufnahme aus der Übersicht kehrt mit demselben
+  // stepIdx zurück — ohne Reset bliebe der Auto-Scan dort gesperrt.
+  const eanNeuStarten = ean.neuStarten;
+  useEffect(() => {
+    eanNeuStarten();
+    setQuality('none');
+  }, [stepIdx, phase, eanNeuStarten]);
 
   // Shutter dispatches by capture mode: document → native doc scanner
   // (flat OCR-friendly crop), else the plain camera.
@@ -372,41 +451,44 @@ export default function ProductWizardScreen() {
       setCapturing(true);
       try {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+        // Endet spätestens an der Zeitgrenze des Scanners (sofort bei
+        // nicht laufender oder unterbrochener Kamera); ein verspätetes Bild
+        // wird dort verworfen und landet nie im nächsten Schritt.
         const res = await docScannerRef.current.capture();
+        // Screen inzwischen verlassen: Bild verwerfen.
+        if (!bildschirm.aktiv()) return;
         if (res?.uri) onCaptured(res.uri);
-      } catch {
-        Alert.alert('Aufnahme fehlgeschlagen', 'Bitte versuch es noch einmal.');
+      } catch (e) {
+        if (!bildschirm.aktiv()) return;
+        zeigeAufnahmeFehler(e);
       } finally {
-        setCapturing(false);
+        if (bildschirm.gemountet()) setCapturing(false);
       }
+    } else if (step.mode === 'barcode') {
+      // Selbst ausgelöst im EAN-Schritt: Nummer vom Foto lesen bzw. erfragen —
+      // ohne Nummer lehnte der Server oft mit `ean_fehlt` ab.
+      await ean.erfassen('ausloeser');
     } else {
       await shootCamera();
     }
-  }, [capturing, useNativeCam, onCaptured, shootCamera]);
+  }, [capturing, useNativeCam, onCaptured, shootCamera, ean.erfassen, step.mode, bildschirm]);
 
-  // EAN/barcode auto-capture: on the first valid scan of the EAN step,
-  // store the code + grab the frame (the code rides into the filename).
+  // EAN/barcode auto-capture: erst wenn die Live-Lesung BESTÄTIGT ist
+  // (mehrere gleiche Lesungen, gültige Prüfziffer — lib/utils/barcodeBestaetigung.ts).
+  // Vorher übernahm der Assistent die erste Lesung; auf Android waren damit
+  // 5,9 % der Nummern falsch (06.10.2026).
   const handleBarcode = useCallback(
-    async (e: { data?: string }) => {
-      if (step.key !== 'ean' || barcodeHandledRef.current || capturing) return;
-      // Kamera noch nicht bereit → Scan NICHT konsumieren (Ref nicht setzen),
-      // damit der nächste Frame ihn erneut liefern kann, sobald bereit.
-      if (!cameraReady) return;
-      const code = (e?.data || '').trim();
-      if (!code) return;
-      barcodeHandledRef.current = true;
-      setEanCode(code);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      await shootCamera();
+    (e: { data?: string }) => {
+      if (step.key !== 'ean' || capturing) return;
+      ean.lesung(e?.data);
     },
-    [step.key, capturing, cameraReady, shootCamera],
+    [step.key, capturing, ean.lesung],
   );
 
   // Bild aus der Galerie wählen — Alternative zur Live-Aufnahme (war in der
   // alten App möglich). VOLLE Qualität, keine Kompression (CLAUDE.md: die
   // Server-Analyse braucht scharfe Labels für OCR/EAN). Für den EAN-Schritt
-  // wird der Barcode aus dem gewählten Bild gelesen (scanFromURLAsync); ist
-  // keiner lesbar, bleibt der Live-Scan die Option.
+  // wird der Barcode aus dem gewählten Bild gelesen (useEanSchritt).
   const pickFromGallery = useCallback(async () => {
     if (capturing) return;
     try {
@@ -426,63 +508,37 @@ export default function ProductWizardScreen() {
       });
       if (result.canceled || !result.assets?.[0]?.uri) return;
       const uri = result.assets[0].uri;
-      // EAN-Schritt: Barcode aus dem gewählten Bild lesen. Klappt auf Android
-      // (ML Kit); auf iOS liest scanFromURLAsync NUR QR-Codes → 1D-EAN wird nie
-      // erkannt. Schlägt die Auto-Erkennung fehl, öffnen wir das EAN-Zahlenfeld
-      // (statt einer Sackgasse) und übernehmen das Bild nach der Eingabe.
+      // EAN-Schritt: Barcode aus dem gewählten Bild lesen (Android ML Kit,
+      // iOS Apple Vision — `leseBarcodesAusFoto`). Nicht eindeutig oder nicht
+      // lesbar → EAN-Eingabe (statt einer Sackgasse), Bild nach der Eingabe.
       if (step.mode === 'barcode') {
-        setCapturing(true);
-        let code = '';
-        try {
-          // 1) Native Apple Vision (iOS) — liest 1D-EAN aus dem Standbild.
-          //    Im aktuellen Dev-Binary evtl. noch nicht vorhanden → null.
-          code = (await scanBarcodeFromImage(uri)) || '';
-          // 2) Fallback expo-camera (Android = ML Kit ✓; iOS = QR-only).
-          if (!code) {
-            const scans = await scanFromURLAsync(uri, ['ean13', 'ean8', 'upc_a', 'upc_e']);
-            code = (scans?.[0]?.data || '').trim();
-          }
-        } catch {
-          code = '';
-        } finally {
-          setCapturing(false);
-        }
-        if (!code) {
-          setEanEntryValue('');
-          setEanEntryUri(uri); // öffnet das Eingabe-Overlay
-          return;
-        }
-        setEanCode(code);
-        barcodeHandledRef.current = true;
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        await ean.galerieBild(uri);
+        return;
       }
       onCaptured(uri);
     } catch {
       Alert.alert('Galerie-Auswahl fehlgeschlagen', 'Bitte versuch es noch einmal.');
     }
-  }, [capturing, step.mode, onCaptured]);
-
-  // Manuell eingegebene EAN übernehmen (Fallback, wenn der Code nicht aus dem
-  // Galeriebild gelesen werden konnte). Akzeptiert 8–14 Ziffern (EAN-8/13,
-  // UPC-A/E). Das gewählte Bild wird als EAN-Foto übernommen.
-  const confirmManualEan = useCallback(() => {
-    const digits = eanEntryValue.replace(/\D/g, '');
-    if (digits.length < 8 || digits.length > 14) {
-      Alert.alert('Ungültige EAN', 'Bitte gib die 8–13-stellige Nummer unter dem Strichcode ein.');
-      return;
-    }
-    const uri = eanEntryUri;
-    setEanCode(digits);
-    barcodeHandledRef.current = true;
-    setEanEntryUri(null);
-    setEanEntryValue('');
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    if (uri) onCaptured(uri);
-  }, [eanEntryValue, eanEntryUri, onCaptured]);
+  }, [capturing, step.mode, onCaptured, ean.galerieBild]);
 
   // ─── Submit ───────────────────────────────────────────────────────
   const doSubmit = useCallback(async () => {
     if (!user?.uid || !allCaptured) return;
+    // Wiedereintritts-Schutz: zwischen Tippen und Einreihen liegen bis zu vier
+    // Sekunden (Standort + Aktion), in denen der Knopf weiter reagiert. Ein
+    // zweiter Tipp erzeugte sonst einen ZWEITEN Auftrag mit denselben Fotos —
+    // also zwei Einreichungen, zwei Freigaben, zwei Buchungen. Ref statt State,
+    // damit die Sperre sofort greift und nicht erst nach dem nächsten Render.
+    if (submitLaeuftRef.current) return;
+    // Dieser Slot ist bereits eingereiht — ein weiterer Tipp (etwa über den
+    // noch offenen Erfolgs-Dialog) darf keine zweite Einreichung erzeugen.
+    if (eingereichteSlotsRef.current.has(productIndex)) return;
+    // Ein alter Merker aus einer überholten Prüfung darf später nicht
+    // ungefragt einreichen — er wird unten bei Bedarf neu gesetzt.
+    submitNachFreigabeRef.current = false;
+    submitLaeuftRef.current = true;
+    setSubmitZustand('laeuft');
+    try {
     // Hand the captured set to the background upload queue. Enqueue is
     // near-instant (copies images to a persistent dir + writes the queue,
     // no network), so we never block on a foreground "uploading" screen.
@@ -509,10 +565,35 @@ export default function ProductWizardScreen() {
     // läuft erst, wenn die Warteschlange flusht — unter Umständen Tage
     // später und an einem anderen Ort. Blockiert nie länger als ein paar
     // Sekunden und wirft nie.
-    const capture = await erfasseCaptureContext({
-      capturedAt: firstCaptureAtRef.current ?? Date.now(),
-      confirmedPlace,
-    });
+    // Standort UND Aktion parallel: beide sind zeitlich gedeckelt, nacheinander
+    // würde die Wartezeit sich verdoppeln. Die Aktion wird bewusst JETZT frisch
+    // aufgelöst statt beim Öffnen des Wizards — ein einziger fehlgeschlagener
+    // Versuch beim Mounten vergiftete sonst die ganze Sitzung, weil „konnte
+    // nicht nachsehen" von „es läuft keine Aktion" nicht zu unterscheiden war
+    // (86cbet2nw: 58 unvergütete Einreichungen aus Juli und August).
+    // Freigabe direkt vor dem Einreichen frisch prüfen: über die
+    // Android-Schnelleinstellungen lassen sich die Ortungsdienste abschalten,
+    // ohne dass die App den Vordergrund verlässt (kein AppState-Wechsel).
+    if ((await pflicht.pruefen()) !== 'erfuellt') {
+      submitNachFreigabeRef.current = true;
+      return;
+    }
+    const [capture, aktion] = await Promise.all([
+      erfasseCaptureContext({
+        capturedAt: firstCaptureAtRef.current ?? Date.now(),
+        confirmedPlace,
+      }),
+      resolveProductCampaignForSubmit(campaign),
+    ]);
+
+    // Kein GPS und kein bestätigter Ort, obwohl die Freigabe steht (oben
+    // geprüft): nur der Fix blieb aus → einmal den Ort erfragen.
+    if (!capture.gps && !confirmedPlace) {
+      submitNachOrtRef.current = true;
+      setOrtHinweis('Dein Standort ließ sich gerade nicht ermitteln — bitte kurz den Ort angeben, dann geht es direkt weiter.');
+      setPhase('place');
+      return;
+    }
 
     try {
       await enqueueProductUpload({
@@ -524,7 +605,8 @@ export default function ProductWizardScreen() {
         marketLand,
         productName: productName.trim() || null,
         ean: eanCode,
-        campaignId: campaign?.campaignId ?? null,
+        campaignId: aktion.campaign?.campaignId ?? null,
+        campaignResolve: aktion.state,
         steps,
         capture,
         clientVersion: clientVersion(),
@@ -534,6 +616,9 @@ export default function ProductWizardScreen() {
       showInfoToast('Konnte nicht vorgemerkt werden — bitte nochmal.', 'error');
       return;
     }
+    // Erst JETZT gilt der Slot als eingereicht — nicht vorher: der Rückweg über
+    // den Orts-Schritt ruft doSubmit bewusst noch einmal auf.
+    eingereichteSlotsRef.current.add(productIndex);
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     const online = isOnline();
@@ -569,6 +654,9 @@ export default function ProductWizardScreen() {
           setEanCode(null);
           setProductIndex((n) => n + 1);
           setStepIdx(0);
+          // Neuer Slot, neuer Anlauf — der neue Index steht nicht im Merker.
+          setSubmitZustand('idle');
+          submitNachFreigabeRef.current = false;
           // Ohne diesen Reset trüge das ZWEITE Produkt die Aufnahmezeit des
           // ersten — bei mehreren Einreichungen hintereinander wäre die
           // Zeitangabe damit systematisch zu früh.
@@ -579,12 +667,37 @@ export default function ProductWizardScreen() {
         },
       },
     ]);
+    } finally {
+      // Läuft auf JEDEM Weg hier heraus — auch beim Rückweg über den
+      // Orts-Schritt, der doSubmit gleich erneut aufruft. Ohne das bliebe der
+      // Knopf danach für immer gesperrt.
+      submitLaeuftRef.current = false;
+      // Nach einem erfolgreichen Einreihen bleibt der Knopf gesperrt, solange
+      // dieser Slot der aktuelle ist; sonst zurück auf Anfang (Abbruch über den
+      // Orts-Schritt, Fehler beim Einreihen).
+      setSubmitZustand(eingereichteSlotsRef.current.has(productIndex) ? 'fertig' : 'idle');
+    }
     // `confirmedPlace` MUSS in den Abhängigkeiten stehen: ohne ihn hielte
     // doSubmit die Closure eines früheren Renders fest und schriebe den
     // Ort, der beim letzten Deps-Wechsel galt — bei einem korrigierten Ort
     // also den alten. Genau diese Klasse von Fehler ist unsichtbar, weil
     // das Feld gefüllt aussieht.
-  }, [user?.uid, allCaptured, photos, sessionId, productIndex, marketId, marketName, marketLand, productName, eanCode, campaign?.campaignId, confirmedPlace]);
+  }, [user?.uid, allCaptured, photos, sessionId, productIndex, marketId, marketName, marketLand, productName, eanCode, campaign, confirmedPlace, pflicht.pruefen]);
+
+  // Orts-Schritt aus dem Submit-Gate abgeschlossen → Einreichung fortsetzen.
+  useEffect(() => {
+    if (!submitNachOrtRef.current || !confirmedPlace) return;
+    submitNachOrtRef.current = false;
+    void doSubmit();
+  }, [confirmedPlace, doSubmit]);
+
+  // Freigabe aus dem Submit-Gate erteilt → Einreichung fortsetzen. Der Merker
+  // fällt VOR dem Aufruf, damit ein erneut fehlender Fix nicht kreist.
+  useEffect(() => {
+    if (!submitNachFreigabeRef.current || pflicht.stand !== 'erfuellt') return;
+    submitNachFreigabeRef.current = false;
+    void doSubmit();
+  }, [pflicht.stand, doSubmit]);
 
   // ─── Render ───────────────────────────────────────────────────────
 
@@ -599,6 +712,32 @@ export default function ProductWizardScreen() {
       </View>
     </View>
   );
+
+  // Standortpflicht vor jeder Phase. Die Fotos bleiben im State — nach der
+  // Freigabe geht es genau dort weiter, wo der Nutzer war.
+  if (pflicht.stand === null) {
+    return <View style={{ flex: 1, backgroundColor: theme.bg }} />;
+  }
+  if (pflicht.stand !== 'erfuellt') {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.bg }}>
+        <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} />
+        <Header title="Standort" sub={marketName || undefined} />
+        <View style={{ flex: 1, justifyContent: 'center' }}>
+          <StandortPflichtHinweis
+            stand={pflicht.stand}
+            art="foto"
+            laeuft={pflicht.laeuft}
+            onErfuellen={() => void pflicht.erfuellen()}
+            // Merker NICHT hier löschen: close() fragt nach, und wer dort
+            // „Abbrechen" wählt, soll nach der Freigabe automatisch weiter
+            // einreichen. Verlässt er den Assistenten, stirbt der Merker mit.
+            onZurueck={close}
+          />
+        </View>
+      </View>
+    );
+  }
 
   if (phase === 'market') {
     // App-wide market picker with the country (Land) filter.
@@ -623,15 +762,12 @@ export default function ProductWizardScreen() {
             setMarketName(m.name);
             setMarketId(m.id);
             setMarketLand((m as any).land ?? null);
-            // Nachfragen nur, wenn es nötig ist: Mit erteilter Freigabe wird
-            // der Ort beim Einreichen still erfasst, dann wäre der Schritt
-            // reine Reibung. Und nur einmal je Sitzung — wer mehrere
-            // Produkte im selben Markt einreicht, steht am selben Ort.
-            //
-            // `standortFrei === null` (Prüfung noch nicht durch) führt
-            // bewusst IN den Schritt: lieber einmal zu viel fragen als die
-            // Pflichtangabe still überspringen.
-            setPhase(confirmedPlace || standortFrei === true ? 'intro' : 'place');
+            // Die Freigabe ist hier schon geprüft (Sperrhinweis oben) — der
+            // Ort wird beim Einreichen still erfasst. Frisch nachlesen, weil
+            // der Markt-Picker lange offen sein kann; fehlt sie inzwischen,
+            // übernimmt der Sperrhinweis.
+            void pflicht.pruefen();
+            setPhase('intro');
           }}
         />
       </View>
@@ -645,11 +781,20 @@ export default function ProductWizardScreen() {
         <Header title="Standort" sub={marketName} />
         <LocationConfirmStep
           marketName={marketName}
+          hinweis={ortHinweis}
+          onFreigabeFehlt={() => void pflicht.pruefen()}
           onConfirm={(place) => {
             setConfirmedPlace(place);
-            setPhase('intro');
+            setOrtHinweis(null);
+            // Aus dem Submit-Gate: zurück zur Übersicht, der Effekt oben
+            // reicht ein.
+            setPhase('review');
           }}
-          onBack={() => setPhase('market')}
+          onBack={() => {
+            setOrtHinweis(null);
+            setPhase('review');
+            submitNachOrtRef.current = false;
+          }}
         />
       </View>
     );
@@ -774,11 +919,7 @@ export default function ProductWizardScreen() {
             // Erst wenn CameraX wirklich streamt, darf ausgelöst werden
             // (sonst Stale-Frame der vorherigen Session).
             onCameraReady={() => setCameraReady(true)}
-            barcodeScannerSettings={
-              step.mode === 'barcode'
-                ? { barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e'] }
-                : undefined
-            }
+            barcodeScannerSettings={step.mode === 'barcode' ? EAN_SCANNER_SETTINGS : undefined}
             onBarcodeScanned={step.mode === 'barcode' ? handleBarcode : undefined}
           />
         ) : null}
@@ -786,13 +927,18 @@ export default function ProductWizardScreen() {
         {/* top bar */}
         <View style={[styles.camTop, { paddingTop: insets.top + 8 }]}>
           {editingFromReview ? (
+            // Während einer Aufnahme gesperrt wie Pills, Übersicht und
+            // Galerie: das Bild landet nach dem Tipp sonst trotzdem im Fach
+            // (gleicher Screen, onCaptured aus dem Render vor dem Tipp) —
+            // „Abbrechen“ würde das alte Foto stillschweigend ersetzen.
             <Pressable
               onPress={() => {
                 setEditingFromReview(false);
                 setPhase('review');
               }}
+              disabled={capturing}
               hitSlop={10}
-              style={styles.cancelBtn}
+              style={[styles.cancelBtn, capturing && { opacity: 0.4 }]}
             >
               <Text style={styles.cancelText}>Abbrechen</Text>
             </Pressable>
@@ -855,6 +1001,7 @@ export default function ProductWizardScreen() {
                 <Pressable
                   key={s.key}
                   onPress={() => goToStep(i)}
+                  disabled={capturing}
                   onLayout={(e) => {
                     chipXRef.current[i] = e.nativeEvent.layout.x;
                   }}
@@ -888,8 +1035,13 @@ export default function ProductWizardScreen() {
 
         {/* bottom bar */}
         <View style={[styles.camBottom, { paddingBottom: insets.bottom + 16 }]}>
-          <Pressable onPress={() => setPhase('review')} disabled={capturedCount === 0} style={styles.iconBtn} hitSlop={12}>
-            <MaterialCommunityIcons name="view-grid-outline" size={26} color={capturedCount === 0 ? 'rgba(255,255,255,0.4)' : '#fff'} />
+          {/* Übersicht während einer Aufnahme gesperrt (wie Pills und Galerie). */}
+          <Pressable onPress={() => setPhase('review')} disabled={capturedCount === 0 || capturing} style={styles.iconBtn} hitSlop={12}>
+            <MaterialCommunityIcons
+              name="view-grid-outline"
+              size={26}
+              color={capturedCount === 0 || capturing ? 'rgba(255,255,255,0.4)' : '#fff'}
+            />
           </Pressable>
           <Pressable
             onPress={onShutter}
@@ -915,46 +1067,35 @@ export default function ProductWizardScreen() {
           </Pressable>
         </View>
 
-        {/* EAN-Eingabe-Overlay — Fallback, wenn der Code nicht aus dem
-            Galeriebild gelesen werden konnte (v.a. iOS: 1D-Barcodes aus
-            Standbild nicht auto-lesbar). Oben positioniert, damit das
-            Zahlenfeld die Karte nicht verdeckt. */}
-        {eanEntryUri ? (
-          <View style={[styles.eanOverlay, { paddingTop: insets.top + 96 }]}>
-            <View style={styles.eanCard}>
-              <Text style={styles.eanTitle}>EAN eingeben</Text>
-              <Text style={styles.eanSub}>
-                Der Strichcode ließ sich aus dem Bild nicht automatisch lesen. Tippe die Nummer
-                unter dem Barcode ein — dein Bild wird trotzdem übernommen.
-              </Text>
-              <TextInput
-                style={styles.eanInput}
-                value={eanEntryValue}
-                onChangeText={(t) => setEanEntryValue(t.replace(/\D/g, '').slice(0, 14))}
-                keyboardType="number-pad"
-                placeholder="z. B. 4337256984164"
-                placeholderTextColor="rgba(0,0,0,0.35)"
-                autoFocus
-                maxLength={14}
-                returnKeyType="done"
-                onSubmitEditing={confirmManualEan}
-              />
-              <View style={styles.eanBtnRow}>
-                <Pressable
-                  onPress={() => {
-                    setEanEntryUri(null);
-                    setEanEntryValue('');
-                  }}
-                  style={[styles.eanBtn, styles.eanBtnGhost]}
-                >
-                  <Text style={styles.eanBtnGhostText}>Abbrechen</Text>
-                </Pressable>
-                <Pressable onPress={confirmManualEan} style={[styles.eanBtn, styles.eanBtnPrimary]}>
-                  <Text style={styles.eanBtnPrimaryText}>Übernehmen</Text>
-                </Pressable>
-              </View>
-            </View>
+        {/* „Nummer eintippen“ — nach EINTIPPEN_NACH_MS ohne bestätigte Lesung
+            (schwer lesbarer Code). Gleiche Stelle wie die Lesbarkeits-Pille,
+            die es im EAN-Schritt nicht gibt. */}
+        {step.mode === 'barcode' && ean.eintippenAnbieten && !capturing && !ean.abfrage ? (
+          <View style={[styles.readPillWrap, { bottom: insets.bottom + 232 }]}>
+            <Pressable
+              onPress={() => void ean.erfassen('eintippen')}
+              hitSlop={8}
+              style={[styles.readPill, { backgroundColor: 'rgba(0,0,0,0.62)' }]}
+            >
+              <MaterialCommunityIcons name="keyboard-outline" size={15} color="#fff" />
+              <Text style={styles.readPillText}>Nummer eintippen</Text>
+            </Pressable>
           </View>
+        ) : null}
+
+        {/* EAN-Eingabe: Nummer zum aufgenommenen Foto bestätigen/wählen/eintippen.
+            Oben positioniert, damit das Zahlenfeld die Karte nicht verdeckt. */}
+        {ean.abfrage ? (
+          <EanEingabe
+            key={ean.abfrage.uri}
+            grund={ean.abfrage.grund}
+            vorschlag={ean.abfrage.vorschlag}
+            vorschlaege={ean.abfrage.vorschlaege}
+            topInset={insets.top + 96}
+            onUebernehmen={ean.uebernehmen}
+            onOhneNummer={ean.ohneNummer}
+            onAbbrechen={ean.abbrechen}
+          />
         ) : null}
       </View>
     );
@@ -1000,9 +1141,33 @@ export default function ProductWizardScreen() {
           </View>
         </ScrollView>
         <View style={[styles.footer, { paddingBottom: insets.bottom + 12, backgroundColor: theme.bg, borderColor: theme.border }]}>
-          <Pressable onPress={doSubmit} disabled={!allCaptured} style={[styles.cta, { backgroundColor: allCaptured ? PURPLE : theme.borderStrong ?? '#ccc', flex: 1 }]}>
-            <MaterialCommunityIcons name="cloud-upload-outline" size={18} color="#fff" />
-            <Text style={styles.ctaText}>{allCaptured ? 'Produkt einreichen' : `Noch ${PRODUCT_PHOTO_STEPS.length - capturedCount}`}</Text>
+          {/* Zwischen Tippen und Einreihen liegen bis zu vier Sekunden für
+              Standort und Aktion. Ohne sichtbaren Zustand wirkt der Knopf tot
+              und wird ein zweites Mal getippt — das erzeugte bis dahin eine
+              zweite Einreichung mit denselben Fotos. */}
+          <Pressable
+            onPress={doSubmit}
+            disabled={!allCaptured || submitZustand !== 'idle'}
+            style={[styles.cta, { backgroundColor: allCaptured && submitZustand === 'idle' ? PURPLE : theme.borderStrong ?? '#ccc', flex: 1 }]}
+          >
+            {submitZustand === 'laeuft' ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <MaterialCommunityIcons
+                name={submitZustand === 'fertig' ? 'check' : 'cloud-upload-outline'}
+                size={18}
+                color="#fff"
+              />
+            )}
+            <Text style={styles.ctaText}>
+              {submitZustand === 'laeuft'
+                ? 'Wird eingereicht …'
+                : submitZustand === 'fertig'
+                  ? 'Eingereicht'
+                  : allCaptured
+                    ? 'Produkt einreichen'
+                    : `Noch ${PRODUCT_PHOTO_STEPS.length - capturedCount}`}
+            </Text>
           </Pressable>
         </View>
       </View>
@@ -1049,18 +1214,6 @@ const styles = StyleSheet.create({
   chipThumbCheck: { position: 'absolute', top: 2, right: 2, width: 15, height: 15, borderRadius: 8, backgroundColor: PURPLE, alignItems: 'center', justifyContent: 'center' },
   shutter: { width: 76, height: 76, borderRadius: 38, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center', borderWidth: 4, borderColor: '#fff' },
   shutterInner: { width: 58, height: 58, borderRadius: 29, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
-  // EAN manual-entry overlay (gallery fallback)
-  eanOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.72)', alignItems: 'center', paddingHorizontal: 24 },
-  eanCard: { width: '100%', maxWidth: 380, backgroundColor: '#fff', borderRadius: 18, padding: 20, gap: 12 },
-  eanTitle: { fontSize: 18, fontWeight: '800', color: '#191c1d', letterSpacing: -0.2 },
-  eanSub: { fontSize: 13, fontWeight: '500', color: '#5a6166', lineHeight: 18 },
-  eanInput: { height: 52, borderRadius: 12, borderWidth: 1.5, borderColor: '#d5dadd', backgroundColor: '#f6f8f9', paddingHorizontal: 14, fontSize: 18, fontWeight: '700', color: '#191c1d', letterSpacing: 1 },
-  eanBtnRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
-  eanBtn: { flex: 1, height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  eanBtnGhost: { backgroundColor: '#eef1f2' },
-  eanBtnGhostText: { fontSize: 15, fontWeight: '700', color: '#5a6166' },
-  eanBtnPrimary: { backgroundColor: PURPLE },
-  eanBtnPrimaryText: { fontSize: 15, fontWeight: '800', color: '#fff' },
   // review
   thumb: { width: '31%', aspectRatio: 0.8, borderRadius: 12, borderWidth: 1.5, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   thumbLabel: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.55)', paddingHorizontal: 6, paddingVertical: 4 },

@@ -13,20 +13,34 @@
  */
 
 import { auth, db, storage } from '@/lib/firebase';
-import { getActiveCashbackCampaigns, getCashbackConfig } from '@/lib/services/cashbackService';
 import {
-  addDoc,
+  getActiveCashbackCampaigns,
+  getActiveCashbackCampaignsStrict,
+  getCashbackConfig,
+  getCashbackConfigStrict,
+} from '@/lib/services/cashbackService';
+import {
+  pickProductCampaign,
+  resolveSubmitCampaign,
+  type ActiveProductCampaign,
+  type CampaignResolveState,
+  type SubmitCampaignResolution,
+} from '@/lib/services/productCampaignPick';
+import { getChosenProductCampaignId } from '@/lib/services/productCampaignChoice';
+import {
   collection,
   doc,
   getDoc,
   onSnapshot,
   query,
   serverTimestamp,
+  setDoc,
   where,
   type Unsubscribe,
 } from '@react-native-firebase/firestore';
 import { putFile, ref as storageRef } from '@react-native-firebase/storage';
 import journeyTrackingService from '@/lib/services/journeyTrackingService';
+import { uploadPruefungVorbereiten } from '@/lib/services/storageUploadPruefung';
 import type { CaptureContext, ClientVersion } from '@/lib/services/captureContext';
 
 // ─── Step config ────────────────────────────────────────────────────
@@ -65,7 +79,10 @@ export const PRODUCT_PHOTO_STEPS: ProductPhotoStepDef[] = [
   { key: 'ean', label: 'EAN / Barcode', hint: 'Strichcode in den Rahmen halten.', icon: 'barcode', mode: 'barcode' },
   { key: 'naehrwerte', label: 'Nährwerte', hint: 'Nährwerttabelle vollständig.', icon: 'nutrition', mode: 'document' },
   { key: 'zutaten', label: 'Zutaten', hint: 'Zutatenliste vollständig.', icon: 'format-list-bulleted', mode: 'document' },
-  { key: 'preis', label: 'Preisschild', hint: 'Preisschild am Regal.', icon: 'tag', mode: 'document' },
+  // Der Bon ist ausdrücklich erwünscht: sein Kopf trägt die Filialadresse, die
+  // beste Ortsquelle (Rang 1, Entscheidung 24.09.2026). Der Server nimmt ihn
+  // als Preisfoto an (crowd-upload-namer liest Preis und Adresse daraus).
+  { key: 'preis', label: 'Preisschild', hint: 'Preisschild am Regal oder dein Kassenbon — am besten mit Filialadresse.', icon: 'tag', mode: 'document' },
 ];
 
 export const REQUIRED_STEPS: ProductPhotoStep[] = PRODUCT_PHOTO_STEPS.map((s) => s.key);
@@ -122,35 +139,157 @@ export function productImagePath(
   return `crowduploads/${uid}/${sessionId}/produkt_${index}/images/${name}`;
 }
 
+/**
+ * Der fachliche Schlüssel einer Einreichung: EIN Produkt-Slot EINER
+ * Wizard-Sitzung = EIN Dokument.
+ *
+ * ═══ Warum das kein `addDoc` mehr sein darf ═══
+ *
+ * `addDoc` prägt bei jedem Aufruf eine neue Zufalls-ID. Damit wird JEDE
+ * Wiederholung zwangsläufig ein zusätzliches Dokument — es gibt keinen
+ * Schlüssel, an dem ein zweiter Schreibvorgang scheitern könnte.
+ *
+ * Gemessen am 10.09.2026: drei Nutzer haben so je 2–3 byteidentische Kopien
+ * derselben Einreichung erzeugt (gleicher Session-Ordner, gleicher Slot,
+ * gleiches `capturedAt`, nur je ein neuer Bild-Token). Ausgelöst hat es der
+ * Einreichen-Knopf, der im ausgelieferten Stand (build 1234, `18b8cb6`) nur
+ * gegen unvollständige Fotos gesperrt war und während ≥4 s GPS-Wartezeit plus
+ * sieben Dateikopien keinerlei Rückmeldung gab — jeder weitere Tipp startete
+ * einen eigenen Lauf. Die 10–13 s zwischen den Kopien sind keine Frist,
+ * sondern die Laufzeit EINES Auftrags in der seriellen Warteschlange.
+ *
+ * Abgelehnt wurde daraufhin jede Kopie, auch die erste korrekte — niemand
+ * bekam etwas. Eine Oberflächensperre allein kuriert nur den Auslöser.
+ *
+ * ═══ Warum ausgerechnet dieser Schlüssel ═══
+ *
+ * `firestore.rules` erlaubt auf `crowd_uploads` `create`, aber
+ * `update, delete: if false`. Eine deterministische ID macht den zweiten
+ * Schreibvorgang deshalb zu einem verbotenen `update`: „der erste gewinnt"
+ * ist damit SERVERSEITIG erzwungen und hängt nicht an der Disziplin des
+ * Clients — auch nicht an der einer künftigen zweiten Aufrufstelle.
+ *
+ * An den drei echten Vorfällen gegengeprüft: alle Kopien einer Gruppe fallen
+ * auf genau einen Schlüssel.
+ *
+ * ═══ Was die Regel NICHT prüft (ehrlich benannt) ═══
+ *
+ * `create` prüft die Nutzlast (`data.userId == auth.uid`), NICHT die Dokument-
+ * ID. Wer uid, `sessionId` UND Slot-Nummer eines anderen kennt, könnte dessen
+ * Slot also vorab besetzen und eine einzelne Einreichung blockieren. Die ID im
+ * Regelwerk an die uid zu binden wäre naheliegend — und wäre falsch: die
+ * Regeln gelten für ALLE Clients, auch die im Feld, die weiter Zufalls-IDs
+ * schreiben. Ein Formatzwang sperrte sie sofort aus, und ein App-Update
+ * braucht Wochen.
+ *
+ * Die praktische Schranke ist stattdessen, dass `sessionId` (12 Bytes Hex)
+ * vor der Einreichung bekannt sein müsste. Auf `crypto.getRandomValues`, wo
+ * vorhanden; ohne Polyfill fällt `newSessionId` auf `Math.random()` zurück —
+ * also KEINE kryptografische Zusage. Der mögliche Schaden ist eine einzelne
+ * blockierte Einreichung, kein Geldfluss und kein Datenzugriff (`read` hängt
+ * weiter an `data.userId`). Sobald die ID-Bindung gefahrlos möglich ist (alle
+ * Clients aktualisiert), gehört sie in die Regeln nachgezogen.
+ */
+export function productSubmissionDocId(
+  uid: string,
+  sessionId: string,
+  productIndex: number,
+): string {
+  // Ohne verwertbaren Schlüssel KEINE Idempotenz erzwingen: zwei
+  // verschiedene Einreichungen auf derselben ID würden bedeuten, dass die
+  // zweite verworfen wird — also genau der Schaden, der hier behoben wird.
+  // Eine Dublette ist das kleinere Übel als eine verlorene Einreichung, und
+  // die serverseitige Doppel-Regel fängt sie auf.
+  const sitzung = String(sessionId ?? '').replace(/[^A-Za-z0-9_-]/g, '');
+  const slot = Number(productIndex);
+  if (!uid || !sitzung || !Number.isFinite(slot)) {
+    console.warn('[productSubmit] kein Slot-Schlüssel möglich — eigene ID', { sessionId, productIndex });
+    return `fallback_${newImageBatchId()}${newImageBatchId()}`;
+  }
+  // Ein Schrägstrich im Schlüssel ergäbe einen verschachtelten Pfad statt
+  // einer Dokument-ID — deshalb wird oben gefiltert, nicht gehofft.
+  return `${uid}_${sitzung}_${slot}`;
+}
+
 // ─── Campaign gating ────────────────────────────────────────────────
 
-export interface ActiveProductCampaign {
-  campaignId: string;
-  rewardCents: number;
+export type { ActiveProductCampaign, CampaignResolveState } from './productCampaignPick';
+
+/**
+ * ALLE laufenden Produktfoto-Aktionen (Reihenfolge: frühestes Enddatum zuerst,
+ * wie `getActiveCashbackCampaigns`). Leer, wenn keine läuft oder Aktionen
+ * global aus sind. Der Reward kommt NUR aus der Aktion — kein Hardcode;
+ * 0 ist erlaubt (Aktion läuft, definiert aber keinen Betrag pro Datensatz).
+ */
+export async function getActiveProductCampaigns(): Promise<ActiveProductCampaign[]> {
+  try {
+    return await getActiveProductCampaignsStrict();
+  } catch {
+    return [];
+  }
 }
 
 /**
- * The currently running product-photo campaign, or null. Cashback for
- * product datasets is ONLY given while such a campaign runs (analogous to
- * receipts in campaign mode) — otherwise data is collected without reward.
+ * Wie {@link getActiveProductCampaigns}, WIRFT aber bei jedem Lesefehler.
+ *
+ * Nötig, weil die duldsame Variante „konnte nicht nachsehen" und „es läuft
+ * keine Aktion" auf dasselbe leere Array abbildet — und `campaignId: null` im
+ * Dokument bedeutet für den Server bis heute „nichts versprochen, nichts
+ * gebucht". Verschärfend: `DEFAULT_CASHBACK_CONFIG.campaignsEnabled` ist
+ * `false`, live steht `true` — ein Config-Lesefehler kehrt die Wahrheit also um
+ * und schaltet die Aktion für diese Sitzung stumm ab (86cbet2nw).
+ */
+export async function getActiveProductCampaignsStrict(): Promise<ActiveProductCampaign[]> {
+  const cfg = await getCashbackConfigStrict();
+  if (!cfg.campaignsEnabled) return [];
+  const all = await getActiveCashbackCampaignsStrict();
+  return all
+    .filter((x) => (x.kind ?? 'receipt') === 'product_photos')
+    .map((c) => ({
+      campaignId: c.id,
+      rewardCents:
+        typeof c.cashbackPerBonCents === 'number' && c.cashbackPerBonCents > 0 ? c.cashbackPerBonCents : 0,
+      title: (typeof c.title === 'string' && c.title.trim()) || c.id,
+    }));
+}
+
+/**
+ * Löst die Aktion im MOMENT DES ABSENDENS auf, statt den beim Öffnen des
+ * Wizards geladenen Stand zu verwenden.
+ *
+ * Zeitlich gedeckelt wie der GPS-Fix: ein Firestore-Read ohne Netz löst auf
+ * Android nicht ab (die App läuft dort bewusst ohne Disk-Cache), der
+ * Absende-Knopf wäre sonst offline tot. Läuft die Frist ab, gilt der beim
+ * Öffnen gemerkte Stand — und `state` hält fest, worauf die Entscheidung beruht.
+ */
+export async function resolveProductCampaignForSubmit(
+  gemerkt: ActiveProductCampaign | null | undefined,
+  timeoutMs = 4000,
+): Promise<SubmitCampaignResolution> {
+  let live: ActiveProductCampaign | null | undefined;
+  try {
+    const liste = await Promise.race([
+      getActiveProductCampaignsStrict(),
+      new Promise<undefined>((res) => setTimeout(() => res(undefined), timeoutMs)),
+    ]);
+    // undefined = Frist abgelaufen, [] = Server sagt „es läuft keine".
+    live = liste === undefined ? undefined : pickProductCampaign(liste, await getChosenProductCampaignId());
+  } catch {
+    live = undefined; // nicht nachsehen können ist nicht dasselbe wie „keine"
+  }
+  return resolveSubmitCampaign(live, gemerkt);
+}
+
+/**
+ * Die Aktion, für die JETZT erfasst wird: die vom Nutzer gewählte (Übersicht
+ * `/product-submit`), sofern sie noch läuft — sonst die erste. Cashback für
+ * Produktdatensätze gibt es nur, während eine Aktion läuft; ohne Aktion wird
+ * ohne Vergütung gesammelt (null).
  */
 export async function getActiveProductCampaign(): Promise<ActiveProductCampaign | null> {
-  try {
-    const cfg = await getCashbackConfig();
-    if (!cfg.campaignsEnabled) return null;
-    const all = await getActiveCashbackCampaigns();
-    const c = all.find((x) => (x.kind ?? 'receipt') === 'product_photos');
-    if (!c) return null;
-    // Reward comes ONLY from the campaign config — no hardcoded amount.
-    // rewardCents may be 0 (campaign runs but defines no per-dataset reward).
-    const rewardCents =
-      typeof c.cashbackPerBonCents === 'number' && c.cashbackPerBonCents > 0
-        ? c.cashbackPerBonCents
-        : 0;
-    return { campaignId: c.id, rewardCents };
-  } catch {
-    return null;
-  }
+  const list = await getActiveProductCampaigns();
+  if (!list.length) return null;
+  return pickProductCampaign(list, await getChosenProductCampaignId());
 }
 
 function codeErr(code: string, message?: string): Error {
@@ -182,6 +321,7 @@ export async function uploadProductImage(
 
   const storagePath = productImagePath(uid, sessionId, index, step, opts?.fileName);
   const ref = storageRef(storage, storagePath);
+  const pruefung = await uploadPruefungVorbereiten(localUri, storagePath, 'image/jpeg');
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
@@ -191,7 +331,7 @@ export async function uploadProductImage(
       clearTimeout(timer);
       fn();
     };
-    const task = putFile(ref, localUri, { contentType: 'image/jpeg' });
+    const task = putFile(ref, localUri, pruefung.metadata);
     const timer = setTimeout(() => {
       try {
         task.cancel();
@@ -208,7 +348,18 @@ export async function uploadProductImage(
         if (total > 0) opts?.onProgress?.((snap.bytesTransferred / total) * 100);
       },
       (err: any) => done(() => reject(err)),
-      () => done(() => resolve()),
+      // Die Erfolgsmeldung allein beweist nichts (Android-SDK schneidet ab,
+      // siehe storageUploadPruefung.ts). Ein unvollständiges Foto scheitert
+      // hier; der Neuversuch der Warteschlange überschreibt es unter
+      // demselben Pfad, bevor submitProduct das Dokument schreibt.
+      // RNFB setzt `task.snapshot` unmittelbar vor diesem Aufruf auf den
+      // Abschluss-Snapshot (StorageTask.js wrapSnapshotEventListener).
+      () =>
+        done(() => {
+          const fehler = pruefung.pruefeAbschluss(task.snapshot);
+          if (fehler) reject(fehler);
+          else resolve();
+        }),
     );
   });
 
@@ -230,6 +381,8 @@ export interface ProductSubmissionInput {
   /** Active product-photo campaign this dataset counts toward (null =
    *  collected without cashback). Server is authoritative for the reward. */
   campaignId?: string | null;
+  /** Worauf `campaignId` beruht — siehe CampaignResolveState. Fehlt bei Altaufträgen. */
+  campaignResolve?: CampaignResolveState | null;
   /** step → storage path */
   images: Partial<Record<ProductPhotoStep, string>>;
   /**
@@ -366,31 +519,92 @@ async function collectContext(
   return ctx;
 }
 
+/** RNFirebase meldet den Regelverstoß als `firestore/permission-denied`. */
+function istZugriffVerweigert(e: any): boolean {
+  return String(e?.code ?? '').includes('permission-denied');
+}
+
+/**
+ * Liegt das Dokument wirklich schon? Mit Zeitdeckel, weil ein Firestore-Read
+ * ohne Netz auf Android nie auflöst (die Disk-Persistenz ist dort bewusst
+ * abgeschaltet, siehe CLAUDE.md). Ein Lesefehler ist KEINE Aussage über die
+ * Einreichung: dann bleibt der Auftrag lieber in der Warteschlange liegen und
+ * wird sichtbar wiederholt, statt still als erledigt zu gelten.
+ */
+async function liegtSchonVor(ref: any, timeoutMs = 8000): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const snap = await Promise.race([
+      getDoc(ref),
+      new Promise<undefined>((res) => {
+        timer = setTimeout(() => res(undefined), timeoutMs);
+      }),
+    ]);
+    return snap !== undefined && (snap as any).exists();
+  } catch {
+    return false;
+  } finally {
+    // Sonst hängt der Timer noch Sekunden nach der Antwort — im Test als
+    // offener Handle sichtbar, im Betrieb als unnötig wach gehaltener Timer.
+    if (timer) clearTimeout(timer);
+  }
+}
+
+export interface SubmitProductOpts {
+  /**
+   * uid, unter der der Produkt-Slot ursprünglich eingereiht wurde. Zieht ein
+   * Gast-Auftrag nach bestätigter Übernahme ins Konto um, bleibt die
+   * Dokument-ID die des Gastes — eine Wiederholung trifft denselben Slot statt
+   * eine zweite Einreichung anzulegen. `userId` ist trotzdem immer `uid`
+   * (Regelwerk: `data.userId == auth.uid`). Hat der Server den Slot schon ins
+   * Konto umgezogen, kann das Konto ihn lesen → `liegtSchonVor` greift.
+   */
+  docUid?: string;
+}
+
 export async function submitProduct(
   uid: string,
   input: ProductSubmissionInput,
+  opts?: SubmitProductOpts,
 ): Promise<string> {
   if (!auth.currentUser) throw codeErr('not_authenticated');
   const context = await collectContext(uid, input.capture ?? null);
-  const docRef = await addDoc(collection(db, 'crowd_uploads'), {
-    userId: uid,
-    sessionId: input.sessionId,
-    productIndex: input.productIndex,
-    marketId: input.marketId ?? null,
-    marketName: input.marketName ?? null,
-    marketLand: input.marketLand ?? null,
-    productName: input.productName ?? null,
-    ean: input.ean ?? null,
-    campaignId: input.campaignId ?? null,
-    images: input.images,
-    stepCount: Object.keys(input.images).length,
-    status: 'pending',
-    ...(input.clientVersion ? { clientVersion: input.clientVersion } : {}),
-    ...context,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-  return docRef.id;
+  const id = productSubmissionDocId(opts?.docUid ?? uid, input.sessionId, input.productIndex);
+  const ref = doc(db, 'crowd_uploads', id);
+  try {
+    await setDoc(ref, {
+      userId: uid,
+      sessionId: input.sessionId,
+      productIndex: input.productIndex,
+      marketId: input.marketId ?? null,
+      marketName: input.marketName ?? null,
+      marketLand: input.marketLand ?? null,
+      productName: input.productName ?? null,
+      ean: input.ean ?? null,
+      campaignId: input.campaignId ?? null,
+      ...(input.campaignResolve ? { campaignResolve: input.campaignResolve } : {}),
+      images: input.images,
+      stepCount: Object.keys(input.images).length,
+      status: 'pending',
+      ...(input.clientVersion ? { clientVersion: input.clientVersion } : {}),
+      ...context,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (e: any) {
+    // Der Slot ist schon geschrieben → die Regeln lehnen den zweiten Versuch
+    // als `update` ab. Das IST der Duplikat-Schutz, kein Fehler.
+    //
+    // Ein echtes `permission-denied` (abgelaufene Anmeldung, fremdes Dokument
+    // auf demselben Pfad) darf dagegen NIEMALS als Erfolg durchgehen — sonst
+    // verschwände eine Einreichung lautlos, und genau dieses Muster hat schon
+    // einmal „144 freigegeben, 0 Cent ausgezahlt" erzeugt. Deshalb wird
+    // nachgesehen, ob das Dokument wirklich da ist; nur dann gilt es als
+    // erledigt.
+    if (!istZugriffVerweigert(e) || !(await liegtSchonVor(ref))) throw e;
+    console.log('[productSubmit] Slot war schon eingereicht — kein zweites Dokument:', id);
+  }
+  return id;
 }
 
 // ─── Read (overview) ────────────────────────────────────────────────
@@ -409,6 +623,13 @@ export interface ProductSubmissionEntry {
   stepCount?: number;
   status?: 'pending' | 'approved' | 'rejected';
   createdAt?: any;
+  // Freigabe-Metadaten (86cbam5ep): maschinenlesbare Gründe aus der Review-
+  // Runde; `reviewNote` ist interner Freitext und wird NICHT angezeigt.
+  holdReasons?: string[];
+  rejectReason?: string | null;
+  reviewedAt?: any;
+  rewardSkipped?: boolean;
+  rewardSkippedReason?: string | null;
 }
 
 /** Live list of the user's product submissions (newest first). */

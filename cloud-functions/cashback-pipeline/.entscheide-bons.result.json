@@ -1,0 +1,266 @@
+[
+ {
+  "id": "bon_mtms355lhxh5ik",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "approved",
+   "creditedCents": 8,
+   "capReason": null
+  }
+ },
+ {
+  "id": "bon_mtmx2e9nmto72a",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "no_reward",
+   "creditedCents": 0,
+   "capReason": "weekly_cap_reached"
+  }
+ },
+ {
+  "id": "bon_mtn6e97cml9lv6",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "approved",
+   "creditedCents": 8,
+   "capReason": null
+  }
+ },
+ {
+  "id": "bon_mtn6veayokyvtw",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "approved",
+   "creditedCents": 8,
+   "capReason": null
+  }
+ },
+ {
+  "id": "bon_mtnbq72ng3kp4i",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "approved",
+   "creditedCents": 8,
+   "capReason": null
+  }
+ },
+ {
+  "id": "bon_mtnc4vijvq1jcu",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "approved",
+   "creditedCents": 8,
+   "capReason": null
+  }
+ },
+ {
+  "id": "bon_mto5af29qcn8jm",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "approved",
+   "creditedCents": 8,
+   "capReason": null
+  }
+ },
+ {
+  "id": "bon_mto6k3wr4ifcm0",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "approved",
+   "creditedCents": 8,
+   "capReason": null
+  }
+ },
+ {
+  "id": "bon_mto8uheoinx8g5",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "approved",
+   "creditedCents": 8,
+   "capReason": null
+  }
+ },
+ {
+  "id": "bon_mtob2focb48apb",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "approved",
+   "creditedCents": 8,
+   "capReason": null
+  }
+ },
+ {
+  "id": "bon_mtoc0055i91zuo",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "approved",
+   "creditedCents": 8,
+   "capReason": null
+  }
+ },
+ {
+  "id": "bon_mtofubbkj37acg",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "approved",
+   "creditedCents": 8,
+   "capReason": null
+  }
+ },
+ {
+  "id": "bon_mtogp1def0yq9h",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "approved",
+   "creditedCents": 8,
+   "capReason": null
+  }
+ },
+ {
+  "id": "bon_mtogtsn3128lky",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "no_reward",
+   "creditedCents": 0,
+   "capReason": "daily_cap_reached"
+  }
+ },
+ {
+  "id": "bon_mtojagyudhjto7",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "approved",
+   "creditedCents": 8,
+   "capReason": null
+  }
+ },
+ {
+  "id": "bon_mtokf545y3rs8n",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "approved",
+   "creditedCents": 8,
+   "capReason": null
+  }
+ },
+ {
+  "id": "bon_mtowluxh4ud5n6",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "approved",
+   "creditedCents": 8,
+   "capReason": null
+  }
+ },
+ {
+  "id": "bon_mtpohy1upqvayj",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "approved",
+   "creditedCents": 8,
+   "capReason": null
+  }
+ },
+ {
+  "id": "bon_mtpvip5rbfc8rj",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "approved",
+   "creditedCents": 8,
+   "capReason": null
+  }
+ },
+ {
+  "id": "bon_mtpxv85hsynmj2",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "approved",
+   "creditedCents": 8,
+   "capReason": null
+  }
+ },
+ {
+  "id": "bon_mtr0vw7xg3piev",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "approved",
+   "creditedCents": 8,
+   "capReason": null
+  }
+ },
+ {
+  "id": "bon_mtr0wupt2g2ouj",
+  "aktion": "approve",
+  "grund": [],
+  "ergebnis": {
+   "ok": true,
+   "http": 200,
+   "status": "approved",
+   "creditedCents": 8,
+   "capReason": null
+  }
+ }
+]

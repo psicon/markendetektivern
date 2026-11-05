@@ -12,7 +12,49 @@ import {
   SHARED_LIST_MAX_MEMBERS,
   type SharedListDoc,
 } from '@/lib/services/sharedListService';
-import { showInfoToast } from '@/lib/services/ui/toast';
+import { isOnline } from '@/lib/services/network';
+import { showInfoToast, showRetryableErrorToast } from '@/lib/services/ui/toast';
+
+// ── Fire-and-forget-Writes (Offline-Regel aus CLAUDE.md) ──
+// Firestore-Write-Promises lösen erst bei SERVER-Ack auf — offline hängen sie
+// bis Reconnect. Deshalb hier NIE awaiten: der Write feuert im Hintergrund,
+// die Live-Subscription (subscribeMySharedLists) treibt die UI sofort aus dem
+// latenzkompensierten lokalen Cache. Ein echter Server-Reject (z.B.
+// permission-denied) landet im catch → Retry-Toast, der dieselbe Aktion
+// erneut feuert (showRetryableErrorToast schließt sich dabei und feuert einmal).
+function fireRotate(listId: string) {
+  // Ein neuer Link gilt erst, wenn der Server ihn hat. Offline zeigte das
+  // Sheet sonst den unbestätigten Code als QR/Link an — wer ihn weitergab,
+  // verschickte eine Einladung, die (auf Android nach App-Ende sogar für
+  // immer) ins Leere läuft.
+  if (!isOnline()) {
+    showInfoToast('Für einen neuen Link brauchst du eine Internetverbindung.', 'info');
+    return;
+  }
+  void SharedListService.rotateInvite(listId)
+    .then(() => showInfoToast('Neuer Link erstellt — 48 Stunden gültig.', 'success'))
+    .catch(() => showRetryableErrorToast('Konnte keinen neuen Link erstellen.', () => fireRotate(listId)));
+}
+
+function fireRename(listId: string, name: string) {
+  void SharedListService.rename(listId, name).catch(() =>
+    showRetryableErrorToast('Konnte die Liste nicht umbenennen.', () => fireRename(listId, name)),
+  );
+}
+
+/** Verweigert/nicht gefunden heißt beim Verlassen: schon kein Mitglied mehr
+ *  (die Rules verlangen die Mitgliedschaft) — das Ziel ist erreicht. */
+function schonDraussen(e: any): boolean {
+  const code = String(e?.code ?? '');
+  return code.includes('permission-denied') || code.includes('not-found');
+}
+
+function fireLeave(listId: string) {
+  void SharedListService.leaveList(listId).catch((e) => {
+    if (schonDraussen(e)) return;
+    showRetryableErrorToast('Konnte die Liste nicht verlassen.', () => fireLeave(listId));
+  });
+}
 
 /**
  * Verwaltungs-Sheet einer geteilten Liste — lebt IM Einkaufszettel (kein
@@ -61,21 +103,13 @@ export function SharedListManageSheet({
       : null;
 
   // Neuen Code erzeugen (Owner) — gemeinsamer Handler für den prominenten
-  // Abgelaufen-Button und den kleinen „Neuen Link erzeugen"-Link. Nach dem
-  // Write liefert die Live-Subscription das Listen-Doc mit neuem Code +
-  // Fenster → QR/Code aktualisieren sich von selbst.
-  const [rotating, setRotating] = useState(false);
-  const onRotate = async () => {
-    if (!list || rotating) return;
-    setRotating(true);
-    try {
-      await SharedListService.rotateInvite(list.id);
-      showInfoToast('Neuer Link erstellt — 48 Stunden gültig.', 'success');
-    } catch {
-      showInfoToast('Konnte keinen neuen Link erstellen.', 'error');
-    } finally {
-      setRotating(false);
-    }
+  // Abgelaufen-Button und den kleinen „Neuen Link erzeugen"-Link. Die Live-
+  // Subscription liefert das Listen-Doc mit neuem Code + Fenster sofort aus
+  // dem lokalen Cache → QR/Code aktualisieren sich von selbst, kein
+  // Busy-State nötig.
+  const onRotate = () => {
+    if (!list) return;
+    fireRotate(list.id);
   };
 
   // ─── Umbenennen (Owner) ───
@@ -89,20 +123,16 @@ export function SharedListManageSheet({
     }
   }, [visible, list?.id, list?.name]);
 
-  const onSaveName = async () => {
+  const onSaveName = () => {
     if (!list) return;
     const next = nameDraft.trim();
     if (!next || next === list.name) {
       setEditingName(false);
       return;
     }
-    try {
-      await SharedListService.rename(list.id, next);
-      setEditingName(false);
-      showInfoToast('Liste umbenannt.', 'success');
-    } catch {
-      showInfoToast('Konnte die Liste nicht umbenennen.', 'error');
-    }
+    setEditingName(false);
+    fireRename(list.id, next);
+    showInfoToast('Liste umbenannt.', 'success');
   };
 
   const memberEntries = useMemo(() => {
@@ -145,14 +175,12 @@ export function SharedListManageSheet({
       {
         text: 'Verlassen',
         style: 'destructive',
-        onPress: async () => {
-          try {
-            await SharedListService.leaveList(list.id);
-            onClose();
-            onLeft();
-          } catch {
-            showInfoToast('Konnte die Liste nicht verlassen.', 'error');
-          }
+        onPress: () => {
+          // Sofort zurück auf „Meine Liste" — der Write läuft im Hintergrund,
+          // die Subscription entfernt die Liste latenzkompensiert.
+          onClose();
+          onLeft();
+          fireLeave(list.id);
         },
       },
     ]);
@@ -288,7 +316,6 @@ export function SharedListManageSheet({
             {isOwner ? (
               <Pressable
                 onPress={onRotate}
-                disabled={rotating}
                 style={({ pressed }) => ({
                   marginTop: 4,
                   backgroundColor: brand.primary,
@@ -298,12 +325,12 @@ export function SharedListManageSheet({
                   alignItems: 'center',
                   flexDirection: 'row',
                   gap: 8,
-                  opacity: pressed || rotating ? 0.85 : 1,
+                  opacity: pressed ? 0.85 : 1,
                 })}
               >
                 <MaterialCommunityIcons name="qrcode-plus" size={18} color="#fff" />
                 <Text style={{ fontFamily, fontWeight: fontWeight.extraBold, fontSize: 14, color: '#fff' }}>
-                  {rotating ? 'Wird erstellt …' : 'Neuen Link erstellen'}
+                  Neuen Link erstellen
                 </Text>
               </Pressable>
             ) : null}
@@ -394,9 +421,9 @@ export function SharedListManageSheet({
         ) : null}
 
         {isOwner && list && !inviteExpired ? (
-          <Pressable onPress={onRotate} disabled={rotating} style={{ alignItems: 'center', paddingVertical: 2 }}>
+          <Pressable onPress={onRotate} style={{ alignItems: 'center', paddingVertical: 2 }}>
             <Text style={{ fontFamily, fontWeight: fontWeight.bold, fontSize: 12, color: theme.textSub }}>
-              {rotating ? 'Neuer Link wird erstellt …' : 'Neuen Link erzeugen (alten ungültig machen)'}
+              Neuen Link erzeugen (alten ungültig machen)
             </Text>
           </Pressable>
         ) : null}

@@ -1,0 +1,990 @@
+[
+ {
+  "id": "93Qaqw99KzUoR6omQA9x",
+  "aktion": "reject",
+  "grund": "ean_fehlt",
+  "ergebnis": "rejected",
+  "hinweis": "ean_fehlt"
+ },
+ {
+  "id": "ZzJp2XzAynK7Yiit6yXq",
+  "aktion": "reject",
+  "grund": "sperre_30_tage_anderer_nutzer",
+  "ergebnis": "rejected",
+  "hinweis": "sperre_30_tage_anderer_nutzer"
+ },
+ {
+  "id": "XHQ5DuD6T8JpsPqvLEBE",
+  "aktion": "reject",
+  "grund": "sperre_30_tage_gleicher_nutzer",
+  "ergebnis": "rejected",
+  "hinweis": "sperre_30_tage_gleicher_nutzer"
+ },
+ {
+  "id": "8jRrLJqKXfQRJRNgkQ7J",
+  "aktion": "reject",
+  "grund": "sperre_30_tage_gleicher_nutzer",
+  "ergebnis": "rejected",
+  "hinweis": "sperre_30_tage_gleicher_nutzer"
+ },
+ {
+  "id": "5OZ1fxhQU2zl9lIK1cD9",
+  "aktion": "reject",
+  "grund": "sperre_30_tage_gleicher_nutzer",
+  "ergebnis": "rejected",
+  "hinweis": "sperre_30_tage_gleicher_nutzer"
+ },
+ {
+  "id": "NhTNoGAejIUyUz4OYJsS",
+  "aktion": "reject",
+  "grund": "sperre_30_tage_anderer_nutzer",
+  "ergebnis": "rejected",
+  "hinweis": "sperre_30_tage_anderer_nutzer"
+ },
+ {
+  "id": "WxsUbfJkb7V5hYFBIi4I",
+  "aktion": "reject",
+  "grund": "fotos_unpassend",
+  "ergebnis": "rejected",
+  "hinweis": "fotos_unpassend"
+ },
+ {
+  "id": "bWoJyOGod1NTx5Cvr170",
+  "aktion": "reject",
+  "grund": "sperre_30_tage_anderer_nutzer",
+  "ergebnis": "rejected",
+  "hinweis": "sperre_30_tage_anderer_nutzer"
+ },
+ {
+  "id": "aE1LekKqrAY0YUmBpeSs",
+  "aktion": "reject",
+  "grund": "doppelt_eingereicht",
+  "ergebnis": "rejected",
+  "hinweis": "doppelt_eingereicht"
+ },
+ {
+  "id": "yIRmEhJpJFSNDExPR1Vp",
+  "aktion": "reject",
+  "grund": "sperre_30_tage_anderer_nutzer",
+  "ergebnis": "rejected",
+  "hinweis": "sperre_30_tage_anderer_nutzer"
+ },
+ {
+  "id": "l68kdTCy2VifEsiw4dTd",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "jY426HzQfTBGi3HHbcQB",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "35UQyN6ZwrDkttPj37lA",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "spo4a9FBgs5ZAd8tGFEb",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "ADLBjncvoQXg030dZob6",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "kl0Uz2midPPVTZuyChyR",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "HYfHMPVYqXp9fkPgTI24",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "lzcRmOkMFf2jAROxvtIM",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "klkGAbuUDiWI3ShbVdnu",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "QR6MQamSgrmWy7NZkhyo",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "f79Z5lteUveCgxfZ0IRr",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "QGdQockusiDuu6CuX0yJ",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "CPvEVZRPBBBgzx9vvgi2",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "YzmRk9HgayzCcZ3jjjbB",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "PGprxeijwlpz2YQyrIqZ",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "82Q5ZDuhNXdehrqqXYzZ",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "FPWfu9wgZeEu0xqIpqdC",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "sdiKRw0V3R6f8KjRNLim",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "oDbPBZSaeOUjKky1CbGP",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "FTSX1rfjMthuOJD3Hbdw",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "tApisOyTBcKC0nVsG6ht",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "ggeKzrJdt9drPdglLUa9",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "awRluJRHC3xiQFsku3lQ",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "aqPYhzovZZo5M700P9H0",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "OrzNoxB4Bke2XrsMGEAi",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "uiT441ZRhKyJEziJJB8s",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "u6yBBONksXZaEqWtAA2J",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "YVyXHSMKE0BqVOqkKjE2",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "YVyN6kuMXxX1q3KNXhRn",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "9GFLOyTV73tBxhwfRMdn",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "KdcYALkMOQJRYK0UAUkc",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "ISImjEi2WJO2bAxgUJRX",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "V1vspXgOwNLZ3w9KEN18",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "QuDmbZN7sM5xMLA7fclW",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "yHwTrrDYRcwvmSmQvdIo",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "11LxYssp2NVEadUgbUAC",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "P2A4RoUfK7ighelqFRLA",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "Gf6uEUa5dWziE8WP94t6",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "FnCOFRqSiEsGH1Da3I28",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "BqjKEmJi3Fwjy6VaVY1F",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "H7SX1GR0pfEaNP8IXLfy",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "gQ6ZNVvMZWQkMOMcYPs3",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "VMRIETpshxl0NpN22V1b",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "2rcRIGo7zKdZV8BrucYc",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "BsTvv7yFQRXDPTRs3Tm0",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "ip2M19ziS1fiFtNpOLmU",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "Ls6pLYidejuNPkDIwaxJ",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "ViVBTHojnVJgkL2L61FR",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "UzhjZ2cHq2jddTFRRho1",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "aXvxGxH25sXAYhHC6oP3",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "J3b7wujwXOoZQJEgn3VI",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "j865IY4R9BI8K5bGafwA",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "NFxqbFMMXDi6Nyr81FaH",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "HYl7iiJuGcM2M2hFRkAH",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "toMLud2eGtvKyha6eTnF",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "JCAtSZUknSl3eBiXaMmI",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "z1aMa71uRhoHPM8rYQUM",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "3AHEKNe8anbschrqb1Xi",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "HN6jDbm6NGfrtbrsQS9w",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "KwaPRSLRCdzASkGRrdyL",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "30r9PyewZqZRE3qeEE2O",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "hZ9Ik1pwA8B9WMKDFqKL",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "hDHiQWCSoDRCZ9dyrkoi",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "vS9jCjmYv4vvyXzFpNJo",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "A8Ortnun3xHAtZWR0XX4",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "ZXCaX8zQEMjm6hIULhbj",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "PxNAYE09mCFNuyAz5BOq",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "O4tL12bqZ4z4X3k78oWe",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "TvAUHRrcORjtvLONHRg1",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "DSMAs4guTP5gIUESwYEb",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "RkYZ2FhNfafFTKQlUbSc",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "zOQIBc3qD4ZCjZT1zykm",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "KRgsUjnZOMHoaQ2RLX0P",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "PmrZqLn0n1Aj0rys48gQ",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "8WZfxtiKYNtrRJaovnPV",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "OYe9z0sujAAjpLLvV1j5",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "u52XrA43Kb5zmVWoM1WM",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "fs9NkWffgjRL6fvzwiI9",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "NQdzY3I8katjpWba1JKr",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "LJv4t3gIgX9UEWIvOX5S",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "sg7CxGpbTLv9EWNedaV1",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "lg4SEp8IBzmt1vOLif2s",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "EOxbphPlYssynGM30P2l",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "6s9KK0QhfdfW8w3sI2Sf",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "wCb3vfj39tHE123rhRyG",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "ZXycbzwvIFK68wlEx0ct",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "7ZHc0ZYSpiXm1aqAwMCk",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "TjuZUzRFxaQI2Kj8ed6Q",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "dYhQGvPAv4E6pCj1447z",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "OkYeT0qR0VPfdKSXX8SC",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "VlEL28lTpEqsCxt05qd4",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "ooTtPUDFXyTey8u2EIgM",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "U2meyZrFLYlWat71Ge94",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "icibj6gLcG7Y0h6uqmXU",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "664KclkNozQlYJ2UN4L9",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "F3HG7fzt3Q6czDqd6QhL",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "1sKhl9gHaumjsJ70AR1i",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "oaEr96eiJSTnzGqc1xDM",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "nYRRERQHSROHFCVjVA2i",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "DyfkbBeJnuxYkvcNxaNb",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "36g2YWWQaAr48wim6lsB",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "xOav34AWFfLBEpgQ0DZH",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "gqEhl7UmI9ilHSq39N73",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "vJE5STLiNb8Cx7EfJ54K",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "dImxZ1QYX9CDNWkqLU1W",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "lz5gIzuBSYhTc0gmvvea",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "QL50j0qXMViv4ZiG10DY",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "cF4p3N9przKCWhRnUDJ1",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "Gzqbj18vg5rpi7vDo2Qh",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "rOZnYwz6XHypqK3IPv0V",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "eTTnPA8puslfIb3aHfsn",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "5iujxGBJYWy6dFPxxaeG",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "X7osqDuYHvUe01j4kEf2",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "KeekJNmNlpc3AEAZD5Pg",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "No1JJbrJNTwzIn3fOqWb",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "ODPsu94Xalqi8zgjApff",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "Ah4y7bQyjI99WExgfFcB",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "YZGnFiDdjyLLzqqHI2Wl",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "doxmBWwfhwrGSMu7tVag",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "HdXNVrlhcrkhuV3cPBKn",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "sUVAs9nGGkdlB8ji9usQ",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "ZfFM8tephZvk1wk26Ozb",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "XzEcFMlIMOkOs5QFIzyg",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "XBukTnaIWXEZbvaXcaeJ",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "Bxnm2w3UBVyPq3XVI8CV",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "RC5s9Fyxmu6Z6DfX2yEY",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "Ynl1zxlwsSWdTS9sAaRV",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "C6pX4Wx4pUv295XcE6VP",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "OCBCIsA9fxR581Jlnr2b",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "06xP02LscW71hS8O0ZeX",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "GAwKe51LodvrPT5ZASuq",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "HwhVfzk1lAwV9skNoMup",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "bpSIOw96Uwg8PRoOxJTg",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "bgpghPd3D7Z3gDPrHGPU",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "H9dqWLU0TZtsQqVXxkBj",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "6YQRMLEtH8Bw2TBjFbMy",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "ysF3yTjDH65TpA90rsTE",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "maW7rmQQDqXUJyhFcEpH",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "XQBtbPPm8mM6mvUW09HC",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "jt77gYbN4AcprswJ8CHL",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "eqCMbEMYHLgH7EUHvdPd",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "V0GQxPv2hoIaunFigip4",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "ZVxkN5HEsCvnRCTxhwk8",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "ytZFPXqwuu0jj4ifcqTn",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "9jhS5RZLz46YtNd7U1FS",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "6FqgOE5YEq8KR9DdC0Fg",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "nF6dTW1cJKQtJ8T3lks0",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "88a2NbBjjs6CtX1DB9M2",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "PXq3OIKmDEaOgRLCHoyY",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "9rJEycrHBmBft4AiFzuv",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "wjEi9tyl19TN0MIX85aZ",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "z7ZpvdLDCZxYDRSX7qUz",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ },
+ {
+  "id": "ETtaIEVrRl979VOsAQmg",
+  "aktion": "approve",
+  "ergebnis": "approved",
+  "hinweis": null
+ }
+]

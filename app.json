@@ -2,7 +2,7 @@
   "expo": {
     "name": "MarkenDetektive",
     "slug": "markendetektive",
-    "version": "6.0.15",
+    "version": "6.0.21",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": [
@@ -30,7 +30,7 @@
       "supportsTablet": false,
       "requireFullScreen": true,
       "bundleIdentifier": "de.markendetektive",
-      "buildNumber": "1264",
+      "buildNumber": "1276",
       "appleTeamId": "MZD2N2F887",
       "googleServicesFile": "./GoogleService-Info.plist",
       "usesAppleSignIn": true,
@@ -40,6 +40,7 @@
         ]
       },
       "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
         "UIDeviceFamily": [
           1
         ],
@@ -49,7 +50,7 @@
           "UIInterfaceOrientationPortrait"
         ],
         "NSCameraUsageDescription": "Diese App benötigt Zugriff auf die Kamera, um Barcodes von Produkten zu scannen und Preise zu vergleichen.",
-        "NSLocationWhenInUseUsageDescription": "Beim Einreichen von Bons, Produktfotos und Umfragen wird dein Standort erfasst und dem Datensatz zugeordnet — nur so ist nachvollziehbar, wo ein Produkt oder Preis zu finden war. Die Standortfreigabe ist Voraussetzung für die Teilnahme am Cashback-Programm.",
+        "NSLocationWhenInUseUsageDescription": "Bei Produktfotos wird dein Standort erfasst und dem Datensatz zugeordnet — so ist nachvollziehbar, wo ein Produkt zu finden war. Bei Bons erfassen wir den Aufnahmeort ebenso, zusätzlich zur Filialadresse vom Bon. Die Standortfreigabe ist Voraussetzung für die Teilnahme am Cashback-Programm (Bons, Produktfotos und vergütete Umfragen). Bei der Registrierung und im Profil kannst du deinen Einkaufsort außerdem per Standort wählen.",
         "NSPhotoLibraryUsageDescription": "Diese App benötigt Zugriff auf deine Fotos, um dein Profilbild aus der Galerie auszuwählen."
       }
     },
@@ -73,7 +74,7 @@
       ],
       "package": "de.markendetektive",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 1234
+      "versionCode": 1248
     },
     "web": {
       "bundler": "metro",
@@ -106,7 +107,9 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Diese App benötigt Zugriff auf deinen Standort, um dir lokale Angebote zu zeigen."
+          "locationWhenInUsePermission": "Bei Produktfotos wird dein Standort erfasst und dem Datensatz zugeordnet — so ist nachvollziehbar, wo ein Produkt zu finden war. Bei Bons erfassen wir den Aufnahmeort ebenso, zusätzlich zur Filialadresse vom Bon. Die Standortfreigabe ist Voraussetzung für die Teilnahme am Cashback-Programm (Bons, Produktfotos und vergütete Umfragen). Bei der Registrierung und im Profil kannst du deinen Einkaufsort außerdem per Standort wählen.",
+          "locationAlwaysAndWhenInUsePermission": false,
+          "locationAlwaysPermission": false
         }
       ],
       "@react-native-firebase/app",

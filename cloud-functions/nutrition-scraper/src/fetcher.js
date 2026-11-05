@@ -15,7 +15,29 @@
  * über Apify's `website-content-crawler` Actor. Apify rendert die
  * Page mit Playwright/Chromium und gibt sauberes Markdown zurück
  * (oder rohes HTML wenn das nicht reicht).
+ *
+ * ═══ Ergebnisvertrag (seit 04.10.2026) ═══
+ *   • Seite geliefert                       → { html, status, finalUrl, via }
+ *     (+ apifyGescheitert: '<grund>', wenn eine dünne Seite direkt geholt
+ *     wurde und das Apify-Rendern scheiterte — src/kandidat.js wertet eine
+ *     solche Seite ohne EAN-Beleg als Abruffehler)
+ *   • Seite gibt es nicht / nichts drin      → null  (404, robots.txt, zu groß,
+ *     leere Antwort — eine Aussage über die Seite)
+ *   • Seite nicht abrufbar (401/403/408/425/429, 5xx, Zeitlimit, Netz)
+ *                                            → wirft SeiteNichtAbrufbarError
+ *   • Apify: gescheiterter Lauf (400 run-failed, 408, 5xx …), leerer
+ *     Datensatz, leeres Markdown, unlesbare Antwort
+ *                                            → wirft SeiteNichtAbrufbarError
+ *     (Crawlee legt für blockierte oder endgültig gescheiterte Seiten kein
+ *     Element ab — „leer“ ist darum keine Aussage über das Produkt)
+ *   • Apify-Konto/-Kontingent (401/402/403/429), Aktor nicht gefunden (404),
+ *     kein Apify-Token                       → wirft FetchUnavailableError
+ * Bis 04.10. kam auch der Abruffehler als null zurück und zählte damit wie
+ * eine leere Seite (siehe src/fehler.js); bei Apify galt das bis zur
+ * Prüfrunde 04.10. weiter für leere Datensätze und gescheiterte Läufe.
  */
+
+const { FetchUnavailableError, SeiteNichtAbrufbarError, istAbrufFehlerStatus } = require('./fehler');
 
 // Echter Chrome-User-Agent. Lernung 2026-05-17: viele Shops
 // (mytime, lidl, rewe, ...) servieren mit Bot-UA nur 380-byte
@@ -54,6 +76,11 @@ const ROBOTS_BYPASS_HOSTS = new Set([
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** AbortSignal.timeout wirft einen DOMException 'TimeoutError'. */
+function istZeitlimit(e) {
+  return e?.name === 'TimeoutError' || e?.name === 'AbortError' || /timeout/i.test(String(e?.message || ''));
 }
 
 function getHost(url) {
@@ -126,17 +153,20 @@ async function isAllowedByRobots(url) {
 }
 
 /** Apify-Render: holt eine SPA-Page via Playwright und gibt
- *  Markdown zurück (Claude bekommt Markdown — kleiner Prompt,
+ *  Markdown zurück (die KI bekommt Markdown — kleiner Prompt,
  *  weniger Tokens, gleicher Inhalt).
  *
- *  Apify-Token wird via Env oder Secret-Manager geleifert
- *  (process.env.APIFY_API_TOKEN). Wenn nicht gesetzt → null. */
-async function fetchViaApify(url, { apifyToken } = {}) {
+ *  Apify-Token wird via Env oder Secret-Manager geliefert
+ *  (process.env.APIFY_API_TOKEN). Fehlt er, wirft der Aufruf
+ *  FetchUnavailableError: eine fehlende Einstellung betrifft jede Seite und
+ *  ist keine Aussage über diese (bis 04.10. kam null = „keine Seite“). */
+async function fetchViaApify(url, { apifyToken, verbrauch } = {}) {
   const token = apifyToken || process.env.APIFY_API_TOKEN;
   if (!token) {
     console.warn('[fetcher] Apify-Token fehlt, kann SPA nicht rendern:', url);
-    return null;
+    throw new FetchUnavailableError('Apify-Token fehlt');
   }
+  if (verbrauch) verbrauch.apifyAbrufe = (verbrauch.apifyAbrufe || 0) + 1;
   const apifyUrl =
     `https://api.apify.com/v2/acts/apify~website-content-crawler/run-sync-get-dataset-items` +
     `?token=${encodeURIComponent(token)}&timeout=90`;
@@ -159,28 +189,49 @@ async function fetchViaApify(url, { apifyToken } = {}) {
       signal: AbortSignal.timeout(120000), // Apify selbst kann bis 90s
     });
   } catch (e) {
+    // Zeitlimit oder Netz beim Rendern DIESER Seite — kein Urteil über sie.
     console.warn(`[fetcher/apify] fetch error for ${url}:`, e?.message);
-    return null;
+    throw new SeiteNichtAbrufbarError(url, { grund: istZeitlimit(e) ? 'apify_zeitlimit' : 'apify_netz' }, e);
   }
 
   if (!resp.ok) {
     const txt = await resp.text().catch(() => '');
     console.warn(`[fetcher/apify] HTTP ${resp.status} for ${url}: ${txt.slice(0, 200)}`);
-    return null;
+    // Konto-/Kontingentfehler betreffen JEDE Seite (Token ungültig, Guthaben
+    // leer, gesperrt, Ratenlimit) — kein Seitenproblem, siehe src/fehler.js.
+    // 404 heißt bei dieser Schnittstelle „Aktor nicht gefunden“ (der Status
+    // der Zielseite steht erst im Datensatz) — ebenfalls jede Seite.
+    if ([401, 402, 403, 404, 429].includes(resp.status)) {
+      throw new FetchUnavailableError(`Apify HTTP ${resp.status}: ${txt.slice(0, 120)}`);
+    }
+    // 400 (run-failed), 408, 5xx …: der Lauf für diese Seite ist gescheitert
+    // (Zeitlimit, Renderer abgestürzt) — kein Urteil über die Seite.
+    throw new SeiteNichtAbrufbarError(url, { status: resp.status, grund: `apify_${resp.status}` });
   }
 
   let data;
   try {
     data = await resp.json();
-  } catch {
-    return null;
+  } catch (e) {
+    console.warn(`[fetcher/apify] Antwort unlesbar für ${url}: ${e?.message}`);
+    throw new SeiteNichtAbrufbarError(url, { grund: 'apify_antwort' }, e);
   }
-  if (!Array.isArray(data) || data.length === 0) return null;
-  const item = data[0];
+  const item = Array.isArray(data) && data.length > 0 ? data[0] : null;
+  if (!item) {
+    // Blockiert oder endgültig gescheitert: Crawlee legt dann kein Element ab.
+    console.warn(`[fetcher/apify] leerer Datensatz für ${url}`);
+    throw new SeiteNichtAbrufbarError(url, { grund: 'apify_leer' });
+  }
+  const zielStatus = item.crawl?.httpStatusCode;
+  if (typeof zielStatus === 'number' && zielStatus >= 400) {
+    console.log(`[fetcher/apify] ${url} → Ziel HTTP ${zielStatus}`);
+    if (istAbrufFehlerStatus(zielStatus)) throw new SeiteNichtAbrufbarError(url, { status: zielStatus });
+    return null; // 404/410: die Seite gibt es nicht
+  }
   const md = item.markdown || item.text || '';
   if (!md || md.length < 100) {
-    // Page leer oder Renderer hat nichts → null
-    return null;
+    console.warn(`[fetcher/apify] leeres Markdown (${md.length} Zeichen) für ${url}`);
+    throw new SeiteNichtAbrufbarError(url, { grund: 'apify_leer' });
   }
   // Markdown wird als "html" zurückgegeben — stripHtml ist no-op auf
   // reinem Text + erkennt Keywords genauso. Marker fürs Logging.
@@ -192,14 +243,17 @@ async function fetchViaApify(url, { apifyToken } = {}) {
   };
 }
 
-/** Throttled fetch per host. Returnt { html, status, finalUrl } oder
- *  null bei Fehler / Block.
+/** Throttled fetch per host. Returnt { html, status, finalUrl, via } oder
+ *  null, wenn es die Seite nicht gibt / robots.txt sperrt; wirft bei
+ *  Abruffehlern (Ergebnisvertrag oben). `via` ist 'direkt' oder 'apify'
+ *  (dann ist `html` Markdown ohne Seitendaten wie JSON-LD).
+ *  `verbrauch` (optional) zählt Seiten- und Apify-Abrufe für die Kosten.
  *
  *  Wenn `requiresJS=true` → routet automatisch via Apify (SPA-Render).
  *  Wenn direct-fetch leeren Content liefert (<1KB ODER ohne Zutaten/
  *  Nährwerte-Keywords), wird AUTOMATISCH ein Apify-Retry versucht
  *  (Apify-Fallback für unbekannte SPAs / Cloudflare-Blocks). */
-async function fetchHtml(url, { skipRobots = false, requiresJS = false, apifyToken } = {}) {
+async function fetchHtml(url, { skipRobots = false, requiresJS = false, apifyToken, verbrauch } = {}) {
   const host = getHost(url);
   if (!host) {
     console.warn('[fetcher] invalid URL:', url);
@@ -208,7 +262,7 @@ async function fetchHtml(url, { skipRobots = false, requiresJS = false, apifyTok
 
   // Wenn der Shop explizit JS-Rendering braucht → direkt via Apify
   if (requiresJS) {
-    return await fetchViaApify(url, { apifyToken });
+    return await fetchViaApify(url, { apifyToken, verbrauch });
   }
 
   if (!skipRobots) {
@@ -228,6 +282,7 @@ async function fetchHtml(url, { skipRobots = false, requiresJS = false, apifyTok
   lastRequestPerHost.set(host, Date.now());
 
   const doFetch = async () => {
+    if (verbrauch) verbrauch.seitenAbrufe = (verbrauch.seitenAbrufe || 0) + 1;
     return await fetch(url, {
       headers: {
         'User-Agent': USER_AGENT,
@@ -249,7 +304,7 @@ async function fetchHtml(url, { skipRobots = false, requiresJS = false, apifyTok
       resp = await doFetch();
     } catch (e2) {
       console.warn(`[fetcher] ${url} retry failed:`, e2?.message);
-      return null;
+      throw new SeiteNichtAbrufbarError(url, { grund: istZeitlimit(e2) ? 'zeitlimit' : 'netz' }, e2);
     }
   }
 
@@ -259,12 +314,17 @@ async function fetchHtml(url, { skipRobots = false, requiresJS = false, apifyTok
       try {
         await sleep(2000);
         resp = await doFetch();
-      } catch {
-        return null;
+      } catch (e3) {
+        throw new SeiteNichtAbrufbarError(url, { grund: istZeitlimit(e3) ? 'zeitlimit' : 'netz' }, e3);
       }
     }
     if (!resp.ok) {
       console.log(`[fetcher] ${url} → HTTP ${resp.status}`);
+      // 403/429/5xx … sagen nichts über das Produkt (Shop sperrt, ist
+      // überlastet oder kaputt). 404/410 usw. heißen: die Seite gibt es nicht.
+      if (istAbrufFehlerStatus(resp.status)) {
+        throw new SeiteNichtAbrufbarError(url, { status: resp.status });
+      }
       return null;
     }
   }
@@ -291,8 +351,9 @@ async function fetchHtml(url, { skipRobots = false, requiresJS = false, apifyTok
       }
     }
   } catch (e) {
+    // Verbindung brach beim Lesen ab — Abruffehler, keine leere Seite.
     console.warn(`[fetcher] ${url} read error:`, e?.message);
-    return null;
+    throw new SeiteNichtAbrufbarError(url, { grund: istZeitlimit(e) ? 'zeitlimit' : 'netz' }, e);
   }
 
   // Concat + decode
@@ -312,11 +373,28 @@ async function fetchHtml(url, { skipRobots = false, requiresJS = false, apifyTok
     !/zutaten|nährwert|naehrwert|brennwert|inhaltsstoff/i.test(html);
   if (looksEmpty && looksSPA && (apifyToken || process.env.APIFY_API_TOKEN)) {
     console.log(`[fetcher] ${url} dünn (${html.length}b, kein Zutaten/Nährwerte-Keyword) → Apify-Retry`);
-    const apifyResult = await fetchViaApify(url, { apifyToken });
+    let apifyResult = null;
+    try {
+      apifyResult = await fetchViaApify(url, { apifyToken, verbrauch });
+    } catch (e) {
+      // Scheitert nur das Rendern dieser Seite, bleibt die direkt geholte
+      // Fassung — mit Vermerk: belegt sie die EAN nicht, ist das ein
+      // Abruffehler (src/kandidat.js), kein Urteil über die Seite.
+      // Konto-/Kontingentfehler (FetchUnavailableError) betreffen jede Seite
+      // und gehen weiter nach oben.
+      if (!(e instanceof SeiteNichtAbrufbarError)) throw e;
+      return {
+        html,
+        status: resp.status,
+        finalUrl: resp.url,
+        via: 'direkt',
+        apifyGescheitert: e.status ? `apify_${e.status}` : e.grund,
+      };
+    }
     if (apifyResult) return apifyResult;
   }
 
-  return { html, status: resp.status, finalUrl: resp.url };
+  return { html, status: resp.status, finalUrl: resp.url, via: 'direkt' };
 }
 
 module.exports = { fetchHtml, isAllowedByRobots, USER_AGENT };

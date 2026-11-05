@@ -15,7 +15,7 @@
  *   {
  *     score: 1..5,
  *     reasoning: "Kurzer Text",
- *     model: "gemini-2.5-flash",
+ *     model: "gemini-3.5-flash",
  *     promptVersion: "v1",
  *     inputHash: "abc123...",  // sha256 von Inputs, kappt 16 chars
  *     updatedAt: Timestamp,
@@ -101,6 +101,7 @@ const {
   callGeminiManufacturer,
 } = require('./src/manufacturer');
 const { inputHash } = require('./src/hash');
+const { ZWECK } = require('./src/genaiClient');
 
 if (!admin.apps.length) admin.initializeApp();
 
@@ -1392,6 +1393,8 @@ async function runExternalAssessment(db, ean, opts = {}) {
       apiKey: apiKey || GEMINI_API_KEY.value(),
       snapshot: snap,
       category: categoryName,
+      // Eigene Kosten-Kennung: externe Produkte getrennt vom Katalog.
+      zweck: ZWECK.EXTERN_BEWERTUNG,
     });
   } catch (e) {
     console.error(`[ai-external] Gemini failed für ${norm}:`, e.message);

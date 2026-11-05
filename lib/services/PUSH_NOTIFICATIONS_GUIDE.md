@@ -19,9 +19,20 @@ Firebase Console + Deep-Link-Routing + Image-Support.
 | **Notification-Bild** | (optional) HTTPS-URL, **1024×512 px**, JPG/PNG, max 1 MB |
 
 ### 3. Ziel auswählen
+> ⚠️ **Konsolen-Kampagnen ignorieren die Abbestellung.** Wer in der App Push
+> ausschaltet, bekommt Kampagnen aus der Konsole trotzdem — die Abbestellung
+> (`users/{uid}.pushNotificationsEnabled`) prüfen nur die beiden Cloud
+> Functions, und die App löscht ihren FCM-Token beim Abbestellen nicht
+> (Prüfung 24.09.2026, ClickUp 12487v2bkkc). Bis das gelöst ist, vor jeder
+> Kampagne bewusst entscheiden.
+
 - **App: MarkenDetektive** (de.markendetektive)
 - **Plattform: iOS + Android** (beide)
-- **Audience: alle / Topic / einzelne Token** (siehe `pushTokens`-Collection)
+- **Audience: alle / Topic / einzelne Token** — Einzeltest: „Testnachricht
+  senden" mit dem FCM-Token aus `users/{uid}/fcmTokens/*`, Feld `token`
+  (NICHT die Dokument-ID, NICHT `pushTokens` — dort liegen Expo-Token, die die
+  Console nicht annimmt). Der Store-Build zeigt den Token nirgends an; lesen
+  per Admin-SDK oder Firebase Console.
 
 ### 4. Scheduling
 - Sofort senden ODER für ein Datum schedulen
@@ -45,15 +56,18 @@ Gültige Routes (Whitelist in `lib/services/pushDeepLinks.ts`):
 | `/noname-detail/{produktId}` | NoName-Produkt-Detail |
 | `/product-comparison/{markenProduktId}` | Marken-Produkt-Vergleich |
 | `/external-product/{ean}` | Externe Produkt-Lookup-Page |
-| `/cashback/review/{bonId}` | Bon-Detail |
+| `/cashback/pending/{bonId}` | Bon-Detail (Ziel der Cashback-Push) |
 | `/achievements` | Achievements / Level |
 | `/shopping-list` | Einkaufszettel |
 | `/favorites` | Favoriten |
 | `/history` | Historie |
 | `/profile` | Profil |
 | `/notification-settings` | Notification-Einstellungen |
+| `/product-submit` | Liste der eigenen Produkt-Einreichungen (Ziel der Vergütungs-Nachricht) |
 
-→ Wenn `deepLink` fehlt oder ungültig: User landet auf der Home-Tab.
+→ Wenn `deepLink` fehlt oder ungültig: der Tap öffnet nur die App (kein
+  Sprung; beim Kaltstart also die Startseite). Bis 17.09.2026 ersetzte die App
+  in diesem Fall den aktuellen Bildschirm per `replace` durch die Tabs.
 
 ### 6. Senden + Audit
 Klick auf **Veröffentlichen** → FCM sendet an alle Tokens. Status sichtbar
@@ -62,45 +76,109 @@ in Firebase Analytics.
 
 ---
 
-## Was technisch passiert (Quick-Reference)
+## Was technisch passiert (Quick-Reference, Stand 17.09.2026)
 
 ```
-Firebase Console
+Firebase Console / cashback-pipeline (sendCashbackReady)
     │
-    │ FCM-Send mit { notification, data: { deepLink } }
+    │ FCM-Send mit { notification, data: { deepLink, pushId } }
+    │ Android: channelId 'cashback' (legt die App beim Start an)
     ▼
-Device (iOS/Android)
+Gerät — Tap auf die Nachricht
     │
-    │ App im Foreground → Notification erscheint, kein automatisches Routing
-    │ App im Background/Closed → Banner; Tap öffnet App
+    │ RNFB: onNotificationOpenedApp (Hintergrund) / getInitialNotification (Kaltstart)
+    │ Android zusätzlich: expo-notifications meldet denselben Tap
     ▼
-expo-notifications.addNotificationResponseReceivedListener
+lib/services/fcmDeepLinks.ts → navigateToDeepLink (pushDeepLinks.ts)
     │
-    │ pushNotificationService.handleNotificationResponse(response)
+    │ Whitelist-Check; derselbe Pfad binnen 5 s nur einmal (Doppelmeldung)
+    │ vor der ersten echten Route: nur vormerken — app/index.tsx ersetzt
+    │ sonst per replace('/(tabs)') das Ziel wieder
     ▼
-extractDeepLink(data) → resolveDeepLink(path)
-    │
-    │ Whitelist-Check, dann router.push(path)
-    ▼
-expo-router navigiert zur Detail-Page
+router.push(path), sobald Route + Nutzer stehen (PushNotificationProvider)
 ```
 
-Cold-Start (App war vorher zu): `Notifications.getLastNotificationResponseAsync()`
-wird beim Provider-Mount geholt und nach 500 ms (Router-Ready-Wait)
-ausgeführt — siehe `PushNotificationProvider.useEffect`.
+Den Server-Link erzeugt `cashback-pipeline/lib/pushLinks.js`; der Vertrag
+mit dem App-Resolver ist per Test festgenagelt
+(`lib/services/__tests__/pushDeepLinkVertrag.test.ts`).
+
+**Zweiter automatischer Sendeweg seit 20.09.2026 (12487v2akvp):**
+`crowd-upload-reward/src/push.js` meldet Produktfoto-Gutschriften — nur wenn
+Geld gebucht wurde, eine Ablehnung bleibt bewusst leise (ihr Grund steht in
+der Liste der Einreichungen). Seit 24.09. **gesammelt**: der Trigger merkt
+nur vor (`crowd_push_sammler/{uid}`), der Zeitplan-Lauf
+`sendeGesammelteGutschriften` schickt jede Minute EINE Nachricht je Nutzer,
+sobald 60 s keine Freigabe mehr dazukam. Aus zehn Freigaben einer Prüfrunde
+wird so eine Nachricht mit der Summe. Ziel `/product-submit`,
+`kind: 'crowd_reward'`. Not-Aus ohne Deploy:
+`cashback_config/v1.crowdPushAus = true`.
+
+**Genau einmal, nur bei Geld (Push-Prüfung 24.09.2026).** Beide Wege
+schicken nur, wenn wirklich gebucht wurde — nie bei Ablehnung, nie bei „ohne
+Prämie". Gegen doppelte Nachrichten und „Ka-ching, danach Storno":
+- **Bons:** `processCashback` schickt nur, wenn SEINE Ledger-Transaktion den
+  Earn geschrieben hat (`frischGebucht`); der Resolver bei `credited > 0`.
+  Vor jedem Versand setzt `sendCashbackReady` den Merker
+  `receipts/{id}.gutschriftPushAt` in einer Transaktion — höchstens eine
+  Nachricht je Bon, auch über Storno und erneute Gutschrift hinweg.
+- **Bons, Wettläufe:** Jeder Pipeline-Lauf meldet sich am Bon an
+  (`verarbeitung.e<eventId>`); eine parallele Doppelzustellung derselben
+  Pub/Sub-Nachricht tut nichts. Die Prüfkonsole meldet ihre Entscheidung in
+  derselben Transaktion an, in der sie den Status prüft (`entscheidungLaeuft`);
+  solange ein Lauf rechnet, antwortet sie `processing_in_progress`, bei einer
+  zweiten gleichzeitigen Entscheidung `decision_in_progress`. Der Kehrlauf legt
+  keinen Bon neu auf, an dem gerade ein Lauf rechnet. Code:
+  `cashback-pipeline/lib/laufAnspruch.js`, `lib/pushMerker.js`.
+- **Fotos:** Merker `rewardPushSentAt` am Upload, Trigger mit Wiederholung
+  (`retry: true`); nach 12 h Fehlern wird `rewardResult` sichtbar vermerkt.
+
+**Texte (Entscheidung Patrick, 24.09.2026) — gleich für Fotos und Bons:**
+Das Geld steht in der Überschrift, die Detektiv-Sprache darunter.
+
+| Fall | Titel | Text |
+|---|---|---|
+| Produktfotos | `Ka-ching! 💰 +0,16 € für dich` | `Deine Produktfotos sind freigegeben. Starke Detektivarbeit!` |
+| Bon | `Ka-ching! 💰 +0,08 € für dich` | `Dein Bon von Lidl ist geprüft. Weiter so, Spürnase!` |
+| 10 € erreicht | `Ka-ching! 🎉 10,06 € zum Auszahlen` | `… dein Guthaben kannst du dir jetzt auszahlen lassen.` |
+
+Der Zahltag-Text kommt nur, wenn genau diese Gutschrift die Schwelle
+überschritten hat UND das Guthaben beim Senden noch darüber liegt (wer im
+Sammelfenster schon ausgezahlt hat, bekommt den normalen Text).
+
+Die Texte stehen zweimal: `cashback-pipeline/lib/pushTexte.js` und
+`crowd-upload-reward/src/push.js` (die Codebases teilen keinen Code). Wer
+den Ton ändert, zieht beide nach.
+
+Testen im Debug-Client: Der Entwickler-Client startet sich nach einem
+Nachrichten-Tap mit seiner eigenen Adresse neu und verwirft dabei die
+Nachrichtendaten — der Kaltstart-Weg lässt sich dort nur simulieren
+(App-Prozess beenden, dann `am start … --es google.message_id '<id aus
+shared_prefs/io.invertase.firebase.xml>'`). „Beenden erzwingen" ist kein
+Kaltstart-Test: Android stellt gestoppten Apps keine Nachrichten zu.
 
 ---
 
-## Token-Verwaltung
+## Token-Verwaltung (Stand 17.09.2026)
 
-Tokens werden bei jedem Login pro UID in zwei Collections gespeichert:
+**Maßgeblich ist der FCM-Token** in `users/{uid}/fcmTokens/{id}`
+(`token`, `platform`, `addedAt`, `lastSeenAt`) — den liest der Server
+(`cashback-pipeline/lib/push.js`) und den nimmt die Firebase Console an.
+Geschrieben von `lib/services/fcmTokenService.ts`, und zwar NUR mit
+Erlaubnis: beim Start (wenn schon erteilt), nach Zustimmung im erklärenden
+Sheet oder auf der Einstellungsseite, und beim Wechsel auf „erlaubt" nach der
+Rückkehr aus den Systemeinstellungen. Warum ein Konto keinen Token hat, steht
+in `users/{uid}.fcmStatus`.
 
-- `users/{uid}.pushToken` — single-token-shape `{ token, platform, deviceName, lastUpdated }`
-- `pushTokens/{token}` — globale Token-Liste für Admin-Broadcasts, mit `active: bool`
+Android 13+: expo-notifications meldet „nie gefragt" als `denied`. Die App
+wertet das über `canAskAgain` als „offen" (`pushPermissionStatus.ts`) — bis
+6.0.17 fehlte das, und kein Android-13+-Nutzer wurde je gefragt.
 
-Beim Disable-Toggle in `/notification-settings` wird `active: false` gesetzt.
-Bei `INVALID_TOKEN`-Errors von FCM sollten wir auch `active: false`
-setzen (TODO Phase 2).
+Nebenbei (nur Expo-Weg, vom Server nicht gelesen):
+- `users/{uid}.pushToken` — `{ token, platform, deviceName, lastUpdated }`
+- `pushTokens/{token}` — Expo-Token mit `active: bool`
+
+Ungültige FCM-Token entfernt der Server beim nächsten Versand
+(`pruneInvalidTokens`).
 
 ---
 

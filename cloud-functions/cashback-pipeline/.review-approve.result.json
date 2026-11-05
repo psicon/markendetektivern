@@ -1,0 +1,26 @@
+{
+ "dry": false,
+ "startedAt": "2026-09-04T09:15:25.866Z",
+ "tally": {
+  "approved": 1
+ },
+ "results": [
+  {
+   "id": "bon_mtmnfx5udq27ot",
+   "uid": "FsF0SmKolbY14j8RRqqtHQD06sI2",
+   "bonDate": "2026-09-04",
+   "campaignId": "september-2026",
+   "plan": {
+    "decision": "approve"
+   },
+   "res": {
+    "http": 200,
+    "ok": true,
+    "status": "approved",
+    "creditedCents": 8,
+    "capReason": null
+   }
+  }
+ ],
+ "finishedAt": "2026-09-04T09:15:32.202Z"
+}

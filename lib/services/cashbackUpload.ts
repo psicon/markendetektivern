@@ -11,6 +11,7 @@
  */
 
 import { auth, storage } from '@/lib/firebase';
+import type { BonGeraeteOrt, ClientVersion } from '@/lib/services/captureContext';
 import {
   collection,
   doc,
@@ -32,11 +33,12 @@ import {
 import { ref as storageRef, putFile } from '@react-native-firebase/storage';
 
 import { db } from '@/lib/firebase';
+import { uploadPruefungVorbereiten } from '@/lib/services/storageUploadPruefung';
 import type { ReceiptDoc } from '@/lib/types/cashback';
 
 // Override via env if you ever run a staging deploy. Region is locked
 // to europe-west3 to match the Cloud Function spec.
-const FUNCTIONS_BASE =
+export const FUNCTIONS_BASE =
   process.env.EXPO_PUBLIC_CASHBACK_FN_BASE ||
   'https://europe-west3-markendetektive-895f7.cloudfunctions.net';
 
@@ -46,7 +48,7 @@ const FUNCTIONS_BASE =
  * minutenlang. 30s-Abort wirft 'upload_timeout'-artig; die Upload-Queue
  * uebernimmt den Retry.
  */
-async function fetchWithTimeout(
+export async function fetchWithTimeout(
   url: string,
   init: RequestInit,
   timeoutMs = 30_000,
@@ -124,11 +126,12 @@ export async function uploadBonImage(
   const timeoutMs = opts?.timeoutMs ?? 60_000;
   const firstTickWaitMs = Math.max(timeoutMs, 30_000);
   let sizeBytes = 0;
+  const pruefung = await uploadPruefungVorbereiten(localUri, storagePath, 'image/jpeg');
 
   await new Promise<void>((resolve, reject) => {
     let task: any;
     try {
-      task = putFile(ref, localUri, { contentType: 'image/jpeg' });
+      task = putFile(ref, localUri, pruefung.metadata);
     } catch (err: any) {
       console.error('[bonUpload] putFile_threw', {
         code: err?.code,
@@ -192,6 +195,18 @@ export async function uploadBonImage(
       },
       () => {
         clearInterval(watchdog);
+        // Die Erfolgsmeldung allein beweist nichts (Android-SDK schneidet ab,
+        // siehe storageUploadPruefung.ts). Der Neuversuch der Warteschlange
+        // lädt unter einem neuen Dateinamen hoch. Das abgeschnittene Objekt
+        // bleibt liegen: storage.rules lässt den Besitzer nicht löschen
+        // (`request.resource` ist beim Löschen null), und ohne Aufruf von
+        // enqueueCashback verweist kein Bon darauf. `task.snapshot` ist hier
+        // der Abschluss-Snapshot (von RNFB direkt vor diesem Aufruf gesetzt).
+        const fehler = pruefung.pruefeAbschluss(task.snapshot);
+        if (fehler) {
+          reject(fehler);
+          return;
+        }
         console.error('[bonUpload] complete', { sizeBytes });
         opts?.onProgress?.(100, sizeBytes, sizeBytes);
         resolve();
@@ -351,6 +366,11 @@ export interface EnqueueArgs {
     filterMetricsMotivation?: any | null;
     viewedProductsCount?: number;
   } | null;
+  /** Standort-Kontext aus dem Moment der Aufnahme. Der Server übernimmt
+   *  daraus nur gpsStatus + geprüfte GPS-Koordinaten (lib/clientKontext.js). */
+  captureContext?: BonGeraeteOrt | null;
+  /** App-Version, die den Bon aufgenommen hat. */
+  clientVersion?: ClientVersion | null;
 }
 
 export interface EnqueueResult {
@@ -582,6 +602,10 @@ export interface CashbackStatusEntry {
   // 86ca0wbg7: echte discounter-DocID (Markt direkt auflösbar).
   discounterId?: string | null;
   merchantLand?: string | null;
+  /** Filiale laut Bon-Kopf (05.09.2026) — Ort/PLZ aus der OCR, nicht aus
+   *  dem Gerätestandort. null, wenn der Bon keine Anschrift trägt. */
+  storeCity?: string | null;
+  storeZip?: string | null;
   bonTotalCents?: number | null;
   rejectReason?: string | null;
   createdAt?: any;

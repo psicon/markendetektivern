@@ -42,6 +42,7 @@ const {
   deleteCleanedImage,
   COLLECTION_TO_SUBFOLDER,
 } = require('./pipeline');
+const { geminiKennung, ZWECK } = require('./geminiKennung');
 
 // ─── Init ──────────────────────────────────────────────────────────
 
@@ -61,6 +62,24 @@ const MEMORY = '1GiB';       // sharp + Gemini SDK fit comfortably.
  * are reused across warm starts, but the client is cheap to create.
  */
 function newGenAI() {
+  // Backend-Umschaltung (Incident 19.08.2026): AI-Studio-Keys haengen am
+  // monatlichen Spending-Cap der Rechnungskontostufe — bei Erreichen liefern
+  // ALLE Keys des Kontos 429. Vertex AI rechnet uebers GCP-Projekt-Billing
+  // und kennt das Limit nicht. gemini-2.5-flash-image (Default-Modell) ist
+  // unter 'global' publiziert (geprueft 19.08.2026). ACHTUNG: die Retry-
+  // Strategie B (gemini-3-pro-image-preview, pipeline.js) ist auf Vertex
+  // NICHT verfuegbar (404 in allen Locations) — sie schlaegt unter Vertex
+  // fehl und das Item endet wie bisher als 'failed'; Nachbearbeitung dieser
+  // seltenen Faelle via retry-failures.js mit GEMINI_USE_VERTEX=false,
+  // sobald der AI-Studio-Cap wieder frei ist.
+  const useVertex = String(process.env.GEMINI_USE_VERTEX ?? 'true') !== 'false';
+  if (useVertex) {
+    return new GoogleGenAI({
+      vertexai: true,
+      project: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'markendetektive-895f7',
+      location: process.env.GEMINI_VERTEX_LOCATION || 'global',
+    });
+  }
   return new GoogleGenAI({ apiKey: GEMINI_API_KEY.value() });
 }
 
@@ -85,6 +104,9 @@ async function runPipeline(collection, productId, source) {
     genAI,
     collection,
     productId,
+    // Kosten-Kennung (08.10.2026): nur wenn genAI ein Vertex-Client ist; gilt
+    // auch für die Strategien A und B (die übernehmen params.options).
+    options: { kennung: geminiKennung(ZWECK.BILD_FREISTELLEN, genAI) },
   });
   const ms = Date.now() - t0;
   if (result.status === 'error') {

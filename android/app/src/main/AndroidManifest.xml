@@ -16,7 +16,52 @@
       <data android:scheme="https"/>
     </intent>
   </queries>
-  <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="true" android:theme="@style/AppTheme" android:supportsRtl="true">
+  <!-- Predictive Back: Übergangs-Opt-out (11.09.2026, ClickUp 86cbgtfqr).
+
+       Ab targetSdk 36 auf einem Android-16-Gerät ruft das System
+       `onBackPressed` NICHT MEHR und verschickt kein KEYCODE_BACK mehr
+       (developer.android.com, Verhaltensänderungen Android 16 — wörtlich:
+       „Additionally, onBackPressed is not called and KeyEvent.KEYCODE_BACK
+       is not dispatched anymore"). React Native 0.79.7 hängt aber
+       ausschließlich am Legacy-Pfad: `ReactActivity.onBackPressed()` →
+       `emitHardwareBackPressed()` → `hardwareBackPress` → expo-routers
+       `useBackButton`-Fork. Weder react-native noch react-native-screens
+       registrieren einen `OnBackInvokedCallback`, und auch beim
+       AndroidX-`OnBackPressedDispatcher` meldet sich nichts an (je 0 Treffer
+       im installierten Stand). Folge: Der Tastendruck erreicht die App nie,
+       Android führt sein Standard-Zurück aus und beendet wegen
+       `launchMode="singleTask"` die Root-Activity — der Nutzer landet auf dem
+       Homescreen. Betroffen waren zwei Drittel der Android-Nutzer, seit
+       targetSdk 36 (Commit 0bf6a71, ausgeliefert ab versionCode 1234).
+
+       Dieses Attribut ist ausdrücklich der von Google vorgesehene Übergang
+       („temporarily opt out by setting the android:enableOnBackInvokedCallback
+       attribute to false"). ES IST KEINE DAUERLÖSUNG: Google baut das Opt-out
+       schrittweise ab. Der zukunftsfeste Weg ist ein react-native- bzw.
+       react-native-screens-Stand, der selbst einen OnBackInvokedCallback
+       registriert — bis dahin darf diese Zeile NICHT entfernt werden.
+
+       Expos `withPredictiveBackGesture` greift hier nicht — nachgemessen am
+       installierten Baum: das Plugin existiert NUR in @expo/config-plugins
+       54.0.2, und die liegt verschachtelt unter `expo-auth-session`; top-level
+       löst das Projekt 10.1.2 auf, wo die Datei fehlt. Zusätzlich läuft
+       `prebuild` hier nie, weil `android/` eingecheckt ist.
+
+       Inhaltlich macht dieses Attribut aber GENAU DAS, was Expo upstream täte:
+       `setPredictiveBackGesture` setzt `android:enableOnBackInvokedCallback`
+       am <application>, und `getPredictiveBackGestureValue` liefert 'false',
+       solange `android.predictiveBackGestureEnabled` nicht ausdrücklich auf
+       true steht ("Default to false" laut ExpoConfig). Der Wert hier ist also
+       der Standardwert, kein Sonderweg.
+
+       ⚠ FALLE für später: Wer `android.predictiveBackGestureEnabled: true` in
+       app.json setzt UND irgendwann `prebuild` laufen lässt (oder auf einen
+       Expo-Stand mit config-plugins >= 54 hebt), überschreibt dieses Attribut
+       mit "true" und holt den Fehler zurück — solange React Native keinen
+       eigenen OnBackInvokedCallback registriert. Der Schlüssel ist heute in
+       app.json NICHT gesetzt und darf es auch nicht werden, bevor Fix 2
+       (RN-/screens-Upgrade) gelandet ist. -->
+  <application android:enableOnBackInvokedCallback="false" android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="true" android:theme="@style/AppTheme" android:supportsRtl="true">
     <meta-data android:name="com.google.android.geo.API_KEY" android:value="AIzaSyCq7kOMAf65qjkZbG-futbMAL9N8NOFNi4"/>
     <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-9082891656550991~6267405772" tools:replace="android:value"/>
     <meta-data android:name="com.google.android.gms.ads.DELAY_APP_MEASUREMENT_INIT" android:value="true" tools:replace="android:value"/>

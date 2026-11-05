@@ -9,18 +9,18 @@
  *     reasoning: string,    // 1-2 Sätze, max ~220 Zeichen, DE
  *   }
  *
- * Modell: per Default `gemini-2.5-flash` (text variant — bereits im
- * Projekt eingesetzt, billig + schnell). Per ENV-Var GEMINI_MODEL
- * überschreibbar, z.B. auf `gemini-3-flash` wenn das verfügbar ist.
+ * Modell: per Default `gemini-3.5-flash` (DEFAULT_MODEL unten), per
+ * ENV-Var GEMINI_MODEL überschreibbar. Keine Kurzläufer (3.6/3.7/3.8)
+ * und keine 2.5er — die schaltet Vertex am 20.10.2026 ab.
  *
  * Cost-Profil:
- *   Pro Comparison ~600 input + ~150 output tokens.
- *   Bei Gemini 2.5 Flash: ~$0.000075/input/1k + $0.0003/output/1k.
- *   Pro Call: ca. $0.0001 (0.01 ¢).
- *   50k Produkte initial: ~$5 für komplettes Backfill.
+ *   Pro Comparison ~600 input + ~150 output tokens (+ Denk-Token).
+ *   Die Werte von früher (~$0.0001 pro Call, ~$5 für 50k Produkte)
+ *   stammen aus der gemini-2.5-flash-Zeit und sind nicht neu gemessen.
  */
 
-const { GoogleGenAI, Type } = require('@google/genai');
+const { Type } = require('@google/genai');
+const { getGenAIClient, geminiKennung, ZWECK } = require('./genaiClient');
 const { scoreNutrition, scoreLabels, combineScore } = require('./scorer');
 
 const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
@@ -360,7 +360,7 @@ async function callGemini({ apiKey, snapshot, model = DEFAULT_MODEL }) {
   const computedFacts = [...nut.facts, ...lab.facts];
 
   // ─── Schritt 2: KI NUR für Zutaten-Verdikt + Reasoning-Text ──────
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = getGenAIClient(apiKey);
   const userContent = buildUserContent({ noname, original, computedFacts });
 
   const response = await ai.models.generateContent({
@@ -371,8 +371,14 @@ async function callGemini({ apiKey, snapshot, model = DEFAULT_MODEL }) {
       responseMimeType: 'application/json',
       responseSchema: RESPONSE_SCHEMA,
       temperature: 0.2,
-      thinkingConfig: { thinkingBudget: 0 },
-      maxOutputTokens: 1024,
+      // thinkingLevel statt thinkingBudget (24.09.2026): Vertex lehnt seit
+      // 22.09. einen Teil der Anfragen mit thinkingBudget: 0 ab (400 „Thinking
+      // budget is not supported for this model"; beim Produktfoto-Namer
+      // gemessen, siehe CLAUDE.md). Die Denk-Token zählen zu maxOutputTokens.
+      thinkingConfig: { thinkingLevel: 'LOW' },
+      maxOutputTokens: 4096,
+      // Kosten-Kennung (08.10.2026), nur auf dem Vertex-Pfad (src/genaiClient.js).
+      ...geminiKennung(ZWECK.PRODUKT_VERGLEICH),
     },
   });
 

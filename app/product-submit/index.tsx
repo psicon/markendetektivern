@@ -10,13 +10,14 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Image as ExpoImage } from 'expo-image';
 import { router, useNavigation } from 'expo-router';
 import { safePush } from '@/lib/utils/safeNav';
-import React, { useEffect, useLayoutEffect, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDownloadURL, ref as storageRef } from '@react-native-firebase/storage';
 
 import { DetailHeader, DETAIL_HEADER_ROW_HEIGHT } from '@/components/design/DetailHeader';
-import { FilterSheet } from '@/components/design/FilterSheet';
+import { FilterSheet, OptionList } from '@/components/design/FilterSheet';
+import { KontoSichernKarte } from '@/components/rewards/KontoSichernKarte';
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { storage } from '@/lib/firebase';
 import { useTokens } from '@/hooks/useTokens';
@@ -25,6 +26,7 @@ import { hasValidCashbackConsent } from '@/lib/services/cashbackService';
 import {
   PRODUCT_PHOTO_STEPS,
   getActiveProductCampaign,
+  getActiveProductCampaigns,
   subscribeUserProductSubmissions,
   type ActiveProductCampaign,
   type ProductPhotoStep,
@@ -35,22 +37,37 @@ import {
   removeJob,
   retryAllFailed,
   retryJob,
+  sichtbareUploadJobs,
   subscribeUploadQueue,
   type UploadJob,
 } from '@/lib/services/uploadQueue';
 import { useNetworkStatus } from '@/lib/services/network';
+import { setChosenProductCampaignId } from '@/lib/services/productCampaignChoice';
+import { describeSubmission, type SubmissionStatusCopy } from '@/lib/utils/productSubmissionCopy';
 
 const PURPLE = '#5b4f9c';
+/** Bis hierhin Karten-Raster, darüber eine Auswahl-Zeile mit Sheet.
+ *  Drei Karten passen über zwei Reihen, ohne den Erfassen-Knopf aus dem
+ *  ersten Bildschirm zu drängen. */
+const GRID_MAX = 3;
 
-function statusVisual(status?: string) {
-  switch (status) {
-    case 'approved':
-      return { label: 'Bestätigt', color: '#2e7d32', bg: 'rgba(46,125,50,0.12)', icon: 'check-circle' };
-    case 'rejected':
-      return { label: 'Abgelehnt', color: '#d6603a', bg: 'rgba(214,96,58,0.12)', icon: 'close-circle' };
+// 86cbam5ep: Status + Grund kommen aus describeSubmission (eine Quelle für
+// Chip, Zeile und Detail-Karte). Farben je Tönung; kein „Abgelehnt"-Rot mehr —
+// der Nutzer soll lernen, nicht sich schämen (Copy-Ton).
+function toneVisual(copy: SubmissionStatusCopy) {
+  switch (copy.tone) {
+    case 'ok':
+      return { color: '#2e7d32', bg: 'rgba(46,125,50,0.12)' };
+    case 'held':
+      return { color: '#8a5a00', bg: 'rgba(176,136,0,0.14)' };
+    case 'pending':
     default:
-      return { label: 'In Prüfung', color: '#b08800', bg: 'rgba(176,136,0,0.12)', icon: 'progress-clock' };
+      return { color: '#b08800', bg: 'rgba(176,136,0,0.12)' };
   }
+}
+function statusVisual(entry: ProductSubmissionEntry) {
+  const copy = describeSubmission(entry);
+  return { ...toneVisual(copy), label: copy.label, icon: copy.icon, copy };
 }
 
 const STEP_LABEL: Record<ProductPhotoStep, string> = PRODUCT_PHOTO_STEPS.reduce(
@@ -113,10 +130,18 @@ export default function ProductSubmitOverview() {
   const navigation = useNavigation();
   const { theme, shadows } = useTokens();
   const [rows, setRows] = useState<ProductSubmissionEntry[]>([]);
-  const [queue, setQueue] = useState<UploadJob[]>([]);
+  const [rohQueue, setQueue] = useState<UploadJob[]>([]);
   const net = useNetworkStatus();
   const [loaded, setLoaded] = useState(false);
   const [campaign, setCampaign] = useState<ActiveProductCampaign | null>(null);
+  // Alle laufenden Produktaktionen — bei mehr als einer wählt der Nutzer hier,
+  // für welche er erfasst (05.09.2026; vorher gewann stumm die oberste).
+  const [campaigns, setCampaigns] = useState<ActiveProductCampaign[]>([]);
+  // Ab GRID_MAX Aktionen wird aus dem Karten-Raster eine Auswahl-Zeile mit
+  // Sheet: zehn Karten würden den „Produkt erfassen"-Knopf aus dem Bild
+  // schieben, und horizontales Scrollen versteckt Optionen, statt sie zu
+  // zeigen. Im Sheet stehen alle untereinander (OptionList, gleicher Haken).
+  const [pickerOpen, setPickerOpen] = useState(false);
   // Tapped submission → detail sheet. URLs are resolved lazily (Storage
   // paths → download URLs) only when a row is opened.
   const [detailRow, setDetailRow] = useState<ProductSubmissionEntry | null>(null);
@@ -144,13 +169,26 @@ export default function ProductSubmitOverview() {
 
   useEffect(() => {
     let alive = true;
-    getActiveProductCampaign().then((c) => {
-      if (alive) setCampaign(c);
+    Promise.all([getActiveProductCampaigns(), getActiveProductCampaign()]).then(([list, c]) => {
+      if (!alive) return;
+      setCampaigns(list);
+      setCampaign(c);
     });
     return () => {
       alive = false;
     };
   }, []);
+
+  const chooseCampaign = useCallback((c: ActiveProductCampaign) => {
+    setCampaign(c);
+    void setChosenProductCampaignId(c.campaignId);
+  }, []);
+
+  /** „0,16 €" bzw. null, wenn die Aktion keinen Betrag je Datensatz definiert. */
+  const rewardLabel = useCallback(
+    (c: ActiveProductCampaign) => (c.rewardCents > 0 ? `${(c.rewardCents / 100).toFixed(2).replace('.', ',')} €` : null),
+    [],
+  );
 
   // Hard guard (86cagb5gh, Spiegel von cashback/capture.tsx): Läuft gerade
   // eine product_photos-Aktion MIT Reward und der Consent fehlt, zurück in
@@ -158,7 +196,10 @@ export default function ProductSubmitOverview() {
   // die am Gate-Service (startProductSubmitFlow) vorbei hierher routen.
   // OHNE laufende Aktion bleibt der Screen ungegatet (Datensammlung ist
   // immer möglich, auch anonym).
-  const { user } = useAuth();
+  const { user, isAnonymous } = useAuth();
+  // Nur Aufträge dieses Kontos (oder vom Server bestätigt übernommene) —
+  // nach einem Kontowechsel wartende Gast-Aufträge gehören nicht hierher.
+  const queue = useMemo(() => sichtbareUploadJobs(rohQueue), [rohQueue, user?.uid]);
   useEffect(() => {
     if (!campaign || campaign.rewardCents <= 0) return;
     let alive = true;
@@ -236,6 +277,92 @@ export default function ProductSubmitOverview() {
           </View>
         </View>
 
+        {/* Aktions-Auswahl — nur wenn mehrere Produktaktionen laufen. Gleiches
+            Muster wie ScopeCard (Belohnungen): aktive Karte = primaryContainer
+            + 1.5px Primary-Rand. Die Wahl gilt für den Wizard (Single Source:
+            productCampaignChoice) und bleibt über App-Starts erhalten. */}
+        {campaigns.length > 1 ? (
+          <View style={{ marginHorizontal: 16, marginTop: 12, gap: 8 }}>
+            <Text style={{ fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.semibold as any, fontSize: 12, color: theme.textMuted, letterSpacing: 0.3 }}>
+              FÜR WELCHE AKTION ERFASST DU?
+            </Text>
+            {campaigns.length <= GRID_MAX ? (
+              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                {campaigns.map((c) => {
+                  const active = campaign?.campaignId === c.campaignId;
+                  const eur = rewardLabel(c);
+                  return (
+                    <Pressable
+                      key={c.campaignId}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      onPress={() => chooseCampaign(c)}
+                      style={{
+                        flexGrow: 1,
+                        flexBasis: '45%',
+                        minHeight: 50,
+                        borderRadius: radii.md,
+                        paddingHorizontal: 10,
+                        paddingVertical: 8,
+                        backgroundColor: active ? theme.primaryContainer : theme.surface,
+                        borderWidth: active ? 1.5 : 1,
+                        borderColor: active ? theme.primary : theme.border,
+                        ...(active ? shadows.sm ?? {} : {}),
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
+                        <Text numberOfLines={2} style={{ flex: 1, fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.extraBold as any, fontSize: 13, color: theme.text }}>
+                          {c.title}
+                        </Text>
+                        {/* Der Haken macht die Auswahl auch ohne Farbvergleich
+                            erkennbar (Rand allein reicht bei Rot-Grün-Schwäche nicht). */}
+                        {active ? (
+                          <MaterialCommunityIcons name="check-circle" size={18} color={theme.primary} style={{ marginTop: -1 }} />
+                        ) : null}
+                      </View>
+                      <Text style={{ fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.medium as any, fontSize: 10, color: theme.textMuted, marginTop: 2 }}>
+                        {eur ? `${eur} pro Datensatz` : 'Ohne Prämie — hilft der Datenbank'}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityHint="Öffnet die Liste aller laufenden Aktionen"
+                onPress={() => setPickerOpen(true)}
+                style={{
+                  minHeight: 50,
+                  borderRadius: radii.md,
+                  paddingHorizontal: 12,
+                  paddingVertical: 9,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 10,
+                  backgroundColor: theme.primaryContainer,
+                  borderWidth: 1.5,
+                  borderColor: theme.primary,
+                  ...(shadows.sm ?? {}),
+                }}
+              >
+                <MaterialCommunityIcons name="check-circle" size={20} color={theme.primary} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text numberOfLines={1} style={{ fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.extraBold as any, fontSize: 13, color: theme.text }}>
+                    {campaign?.title ?? 'Aktion wählen'}
+                  </Text>
+                  <Text style={{ fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.medium as any, fontSize: 10, color: theme.textMuted, marginTop: 2 }}>
+                    {campaign
+                      ? `${rewardLabel(campaign) ? rewardLabel(campaign) + ' pro Datensatz' : 'Ohne Prämie'} · ${campaigns.length} Aktionen zur Auswahl`
+                      : `${campaigns.length} Aktionen zur Auswahl`}
+                  </Text>
+                </View>
+                <MaterialCommunityIcons name="chevron-down" size={20} color={theme.textMuted} />
+              </Pressable>
+            )}
+          </View>
+        ) : null}
+
         {/* CTA */}
         <View style={{ marginHorizontal: 16, marginTop: 12 }}>
           <Pressable
@@ -257,6 +384,14 @@ export default function ProductSubmitOverview() {
             </Text>
           </Pressable>
         </View>
+
+        {/* Gäste mit mindestens einer Einreichung oder einem Auftrag:
+            Belohnung per Konto sichern. */}
+        {isAnonymous && (total > 0 || queue.length > 0) ? (
+          <View style={{ marginHorizontal: 16, marginTop: 12 }}>
+            <KontoSichernKarte ziel="/product-submit" />
+          </View>
+        ) : null}
 
         {/* Background upload queue — the single status surface for in-flight
             uploads. One row per job (progress + retry), no overlays even when
@@ -391,7 +526,7 @@ export default function ProductSubmitOverview() {
           </View>
         ) : (
           rows.slice(0, 20).map((r) => {
-            const v = statusVisual(r.status);
+            const v = statusVisual(r);
             const title = r.productName || `Produkt ${r.productIndex ?? ''}`.trim();
             const land = normalizeLand(r.marketLand);
             const marketLine = r.marketName ? `${r.marketName}${land ? ` (${land})` : ''} · ` : '';
@@ -430,6 +565,11 @@ export default function ProductSubmitOverview() {
                       {formatRelative(r.createdAt)}
                     </Text>
                   </View>
+                  {v.copy.tone === 'held' ? (
+                    <Text numberOfLines={1} style={{ color: v.color, fontFamily: fontFamilyVariants.body, fontSize: 12, marginTop: 4 }}>
+                      {v.copy.headline}
+                    </Text>
+                  ) : null}
                 </View>
                 <MaterialCommunityIcons name="chevron-right" size={24} color={theme.textMuted ?? theme.textSub} />
               </Pressable>
@@ -440,13 +580,32 @@ export default function ProductSubmitOverview() {
 
       {/* Submission detail sheet (tap a row) */}
       <FilterSheet
+        visible={pickerOpen}
+        title="Für welche Aktion erfasst du?"
+        onClose={() => setPickerOpen(false)}
+      >
+        <OptionList
+          value={campaign?.campaignId ?? ''}
+          options={campaigns.map((c) => {
+            const eur = rewardLabel(c);
+            return [c.campaignId, eur ? `${c.title} · ${eur}` : c.title] as const;
+          })}
+          onChange={(id) => {
+            const next = campaigns.find((c) => c.campaignId === id);
+            if (next) chooseCampaign(next);
+            setPickerOpen(false);
+          }}
+        />
+      </FilterSheet>
+
+      <FilterSheet
         visible={!!detailRow}
         title={detailRow ? detailRow.productName || `Produkt ${detailRow.productIndex ?? ''}`.trim() : ''}
         onClose={() => setDetailRow(null)}
       >
         {detailRow
           ? (() => {
-              const v = statusVisual(detailRow.status);
+              const v = statusVisual(detailRow);
               const land = normalizeLand(detailRow.marketLand);
               return (
                 <View style={{ paddingBottom: 8, gap: 14 }}>
@@ -462,14 +621,18 @@ export default function ProductSubmitOverview() {
                     ) : null}
                   </View>
 
-                  {detailRow.status !== 'approved' && detailRow.status !== 'rejected' ? (
-                    <View style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start', backgroundColor: 'rgba(176,136,0,0.10)', borderRadius: 12, padding: 12 }}>
-                      <MaterialCommunityIcons name="progress-clock" size={18} color="#b08800" style={{ marginTop: 1 }} />
-                      <Text style={{ flex: 1, color: theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 13, lineHeight: 18 }}>
-                        Deine Einreichung ist da und wird geprüft — das kann ein bisschen dauern. Danke für deine Geduld, du hilfst, den Katalog zu vervollständigen.
+                  {/* Status-Karte: Grund + nächster Schritt (86cbam5ep) */}
+                  <View style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start', backgroundColor: v.bg, borderRadius: 12, padding: 12 }}>
+                    <MaterialCommunityIcons name={v.icon as any} size={18} color={v.color} style={{ marginTop: 1 }} />
+                    <View style={{ flex: 1, gap: 3 }}>
+                      <Text style={{ color: theme.text, fontFamily: fontFamilyVariants.body, fontWeight: fontWeight.bold as any, fontSize: 13 }}>
+                        {v.copy.headline}
+                      </Text>
+                      <Text style={{ color: theme.textSub, fontFamily: fontFamilyVariants.body, fontSize: 13, lineHeight: 18 }}>
+                        {v.copy.body}
                       </Text>
                     </View>
-                  ) : null}
+                  </View>
 
                   <View style={{ gap: 3 }}>
                     {formatAbsolute(detailRow.createdAt) ? (

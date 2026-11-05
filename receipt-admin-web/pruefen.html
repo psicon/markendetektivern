@@ -1,0 +1,1194 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MarkenDetektive — Prüfen</title>
+    <style>
+      /* Prüf-Werkzeug: ein Fall füllt den Bildschirm, Bilder dominieren,
+         Entscheidung per Taste. Dunkler Grund, damit Verpackungsfotos und
+         Bons kontrastreich wirken. */
+      :root{
+        --bg:#0e1113; --panel:#171c1f; --panel2:#1e2528; --line:#2b3438; --line2:#3a4549;
+        --fg:#e9eff1; --fg2:#9fadb2; --fg3:#6f7d82;
+        --ok:#19b98a; --ok-bg:#10352c; --no:#e2604a; --no-bg:#3a1d17; --warn:#e0a520; --warn-bg:#3a2c0e;
+        --acc:#3ba0e8;
+      }
+      *{box-sizing:border-box}
+      html,body{height:100%}
+      body{margin:0;background:var(--bg);color:var(--fg);font:14.5px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow:hidden}
+      button{font:inherit;cursor:pointer;border:1px solid var(--line2);border-radius:10px;padding:8px 14px;background:var(--panel2);color:var(--fg)}
+      button:hover{border-color:var(--fg3)} button:disabled{opacity:.4;cursor:default}
+      input,select{font:inherit;background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:9px;padding:7px 11px}
+      .kbd{display:inline-block;min-width:18px;padding:1px 5px;border:1px solid var(--line2);border-bottom-width:2px;border-radius:5px;font-size:11px;font-weight:700;color:var(--fg2);background:var(--bg);margin-left:6px}
+
+      /* ── Gerüst ───────────────────────────────────────────── */
+      #app{display:none;grid-template-rows:52px 1fr 68px;height:100vh}
+      #app.on{display:grid}
+      header{display:flex;align-items:center;gap:14px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+      header h1{font-size:14px;font-weight:800;margin:0;letter-spacing:-.2px;white-space:nowrap}
+      .tabs{display:flex;gap:6px}
+      .tab{padding:6px 13px;border-radius:9px;border:1px solid var(--line);background:transparent;color:var(--fg2);font-weight:700;font-size:13px}
+      .tab.on{background:var(--panel2);color:var(--fg);border-color:var(--acc)}
+      .tab b{font-variant-numeric:tabular-nums;margin-left:6px;color:var(--acc)}
+      .grow{flex:1}
+      .prog{font-size:13px;color:var(--fg2);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+      main{display:grid;grid-template-columns:270px 1fr;min-height:0}
+      /* Warteschlange */
+      aside{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+      .qhead{padding:9px 12px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center}
+      .qhead input{flex:1;padding:6px 9px;font-size:13px}
+      .qlist{overflow-y:auto;flex:1}
+      .qi{display:flex;gap:9px;padding:9px 12px;border-bottom:1px solid var(--line);cursor:pointer;align-items:flex-start}
+      .qi:hover{background:var(--panel2)}
+      .qi.on{background:var(--panel2);box-shadow:inset 3px 0 0 var(--acc)}
+      .qi .dot{flex:none;width:8px;height:8px;border-radius:50%;margin-top:5px}
+      .d-ok{background:var(--ok)} .d-locked{background:var(--no)} .d-hold{background:var(--warn)} .d-incomplete{background:var(--warn)}
+      .qi .t{min-width:0;flex:1}
+      .qi .t b{display:block;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .qi .t span{font-size:11.5px;color:var(--fg3)}
+      .qi.done{opacity:.45}
+
+      /* Fall */
+      section{min-width:0;min-height:0;overflow-y:auto;padding:16px 18px}
+      .case{display:grid;grid-template-columns:1fr 330px;gap:18px;align-items:start}
+      @media(max-width:1180px){.case{grid-template-columns:1fr}}
+      .shots{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+      @media(max-width:1500px){.shots{grid-template-columns:repeat(3,1fr)}}
+      figure{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+      figure img{display:block;width:100%;aspect-ratio:3/4;object-fit:cover;background:#fff;cursor:zoom-in}
+      figure .ph{display:flex;align-items:center;justify-content:center;width:100%;aspect-ratio:3/4;color:var(--no);font-size:12px;font-weight:700;background:var(--panel2)}
+      figcaption{padding:6px 9px;font-size:11.5px;font-weight:700;color:var(--fg2);display:flex;justify-content:space-between}
+      /* Vom Namer als abgeschnitten erkannt — unser Upload-Fehler, nicht der des Nutzers. */
+      figure .defekt{padding:5px 9px;font-size:11.5px;font-weight:700;color:var(--no);background:var(--no-bg);border-top:1px solid var(--no)}
+      /* Wert stammt aus der späteren Nachlesung, nicht vom Nutzer oder der Ersterkennung. */
+      .nl{font-weight:600;font-size:11px;color:var(--fg3);margin-left:6px;white-space:nowrap}
+      /* Bon: hohes Bild */
+      .bon{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;text-align:center}
+      .bon img{max-width:100%;max-height:74vh;border-radius:8px;background:#fff;cursor:zoom-in}
+
+      .facts{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;position:sticky;top:0}
+      .facts h2{margin:0 0 2px;font-size:17px;font-weight:800;letter-spacing:-.2px;line-height:1.25}
+      .facts .eyebrow{font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--fg3);margin-bottom:8px}
+      .kv{display:grid;grid-template-columns:88px 1fr;gap:5px 10px;font-size:13px;margin-top:10px}
+      .kv .k{color:var(--fg3)} .kv .v{word-break:break-word}
+      .verdict{margin-top:12px;padding:10px 12px;border-radius:10px;font-size:13px;font-weight:700;border:1px solid}
+      .v-ok{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}
+      .v-locked{background:var(--no-bg);border-color:var(--no);color:var(--no)}
+      .v-hold,.v-incomplete{background:var(--warn-bg);border-color:var(--warn);color:var(--warn)}
+      .verdict small{display:block;font-weight:600;margin-top:3px;color:var(--fg2)}
+      /* Was die Freigabe auslöst — die Frage, die vor jedem Tastendruck steht. */
+      .folge{margin-top:10px;padding:9px 12px;border-radius:10px;font-size:13.5px;border:1px solid}
+      .folge.zahlt{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}
+      .folge.zahlt b{font-size:16px;font-weight:800}
+      .folge.zahlt-nicht{background:var(--panel2);border-color:var(--line2);color:var(--fg2)}
+      .nutzer{margin-top:10px;padding:8px 11px;border-radius:9px;background:var(--panel2);border:1px solid var(--line);font-size:12.5px}
+      .items{margin-top:12px;font-size:12.5px;max-height:38vh;overflow:auto}
+      .items div{display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px dashed var(--line)}
+
+      /* Entscheidungsleiste */
+      footer{display:flex;align-items:center;gap:10px;padding:0 16px;background:var(--panel);border-top:1px solid var(--line)}
+      .big{padding:11px 20px;border-radius:11px;font-weight:800;font-size:15px;border-width:1.5px}
+      .b-ok{background:var(--ok);border-color:var(--ok);color:#04150f}
+      .b-ok:hover{filter:brightness(1.08)}
+      .b-no{background:transparent;border-color:var(--no);color:var(--no)}
+      .b-no:hover{background:var(--no-bg)}
+      .b-warn{background:transparent;border-color:var(--warn);color:var(--warn)}
+      .reasons{display:none;gap:6px;flex-wrap:wrap;flex:1}
+      .reasons.on{display:flex}
+      .rchip{padding:7px 11px;border-radius:9px;border:1px solid var(--line2);background:var(--panel2);font-size:12.5px;font-weight:700;color:var(--fg)}
+      .rchip:hover{border-color:var(--no);color:var(--no)}
+      .toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line2);border-radius:12px;padding:10px 16px;display:flex;gap:12px;align-items:center;opacity:0;pointer-events:none;transition:opacity .18s;z-index:40;font-size:13.5px}
+      .toast.on{opacity:1;pointer-events:auto}
+      .toast.good{border-color:var(--ok)} .toast.bad{border-color:var(--no)}
+      .empty{padding:70px 20px;text-align:center;color:var(--fg3)}
+      /* Vollbild */
+      #light{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;align-items:center;justify-content:center;z-index:60;cursor:zoom-out}
+      #light.on{display:flex}
+      #light img{max-width:96vw;max-height:96vh;object-fit:contain}
+      #light .cap{position:absolute;top:14px;left:50%;transform:translateX(-50%);color:#fff;font-weight:700;font-size:14px;background:rgba(0,0,0,.5);padding:5px 12px;border-radius:8px}
+      /* Login */
+      #login{display:flex;flex-direction:column;align-items:center;gap:14px;padding:90px 20px}
+      #login input{width:290px}
+      .hidden{display:none!important}
+    </style>
+  </head>
+  <body>
+    <div id="login">
+      <h1 style="margin:0;font-size:19px">Prüfen</h1>
+      <p style="color:var(--fg3);margin:0">Admin-Login</p>
+      <input id="loginEmail" type="email" placeholder="E-Mail" autocomplete="username" />
+      <input id="loginPw" type="password" placeholder="Passwort" autocomplete="current-password" />
+      <button id="loginBtn" class="big b-ok">Anmelden</button>
+      <div id="loginMsg" style="color:var(--fg3)"></div>
+    </div>
+
+    <div id="app">
+      <header>
+        <h1>Prüfen</h1>
+        <div class="tabs">
+          <button class="tab on" id="tabPhotos" data-type="photos">Produktfotos <b id="cPhotos">–</b></button>
+          <button class="tab" id="tabReceipts" data-type="receipts">Bons <b id="cReceipts">–</b></button>
+        </div>
+        <div class="grow"></div>
+        <div class="prog" id="prog"></div>
+        <a href="karte.html" style="color:var(--fg3);font-size:12.5px;text-decoration:none">Karte</a>
+        <a href="tagesbericht.html" style="color:var(--fg3);font-size:12.5px;text-decoration:none">Tagesbericht</a>
+        <a href="index.html" style="color:var(--fg3);font-size:12.5px;text-decoration:none">Bon-Matching</a>
+        <button id="logoutBtn" style="padding:6px 12px;font-size:13px">Abmelden</button>
+      </header>
+
+      <main>
+        <aside>
+          <div class="qhead">
+            <input id="q" type="search" placeholder="Suchen …" />
+            <select id="fVerdict" style="width:118px;padding:6px 8px;font-size:12.5px">
+              <option value="all">alle Urteile</option>
+              <option value="ok">Vorprüfung ok</option>
+              <option value="locked">gesperrt</option>
+              <option value="hold">zurückhalten</option>
+              <option value="incomplete">unvollständig</option>
+            </select>
+          </div>
+          <div class="qlist" id="qlist"></div>
+        </aside>
+        <section id="stage"><div class="empty">Lade …</div></section>
+      </main>
+
+      <footer id="bar">
+        <button class="big b-ok" id="bOk">Freigeben <span class="kbd">F</span></button>
+        <button class="big b-no" id="bNo">Ablehnen <span class="kbd">A</span></button>
+        <button class="big b-warn hidden" id="bNoReward">Ohne Prämie <span class="kbd">O</span></button>
+        <div class="reasons" id="reasons"></div>
+        <div class="grow" id="spacer"></div>
+        <button id="bSkip" style="padding:9px 14px">Später <span class="kbd">→</span></button>
+      </footer>
+    </div>
+
+    <div class="toast" id="toast"><span id="toastText"></span><button id="undo" class="hidden" style="padding:5px 11px;font-size:13px">Rückgängig</button></div>
+    <div id="light"><div class="cap" id="lightCap"></div><img alt=""></div>
+
+    <script type="module">
+      import { $, call, esc, euro, fmtDate, fmtDateTime, ago, short, initAdmin } from './admin-common.js';
+
+      // Ablehngründe: Zahl = Tastenkürzel. Reihenfolge nach Häufigkeit.
+      const REASONS_PHOTO = [
+        ['unvollstaendig', 'Fotos fehlen'],
+        ['fotos_unpassend', 'Fotos passen nicht'],
+        ['ean_fehlt', 'Barcode fehlt'],
+        ['kein_produktname', 'Kein Name erkennbar'],
+        ['bilder_wiederverwendet', 'Bilder wiederverwendet'],
+        ['bild_defekt', 'Foto unlesbar'],
+        // 02.10.2026 (Entscheidung Patrick): Wochen-Sperre statt 24 h. Der
+        // Server schreibt dafür den App-Code `doppelt_eingereicht` ans Dokument
+        // (duplicatePolicy.APP_GRUND), der gewählte Grund bleibt in review.reason.
+        ['sperre_woche_gleicher_nutzer', 'Doppelt (selbe Person, binnen 7 Tagen)'],
+        // 26.09.2026: Preis ist Pflicht (Entscheidung Patrick). Taste 8 — die
+        // übrigen Tasten bleiben, wo sie waren; auf 8 lag bis dahin die Sperre
+        // wegen fremder Einreichungen, die es seit 20.09. nicht mehr gibt.
+        ['preis_fehlt', 'Preis fehlt'],
+        ['doppelt_eingereicht', 'Frühere Einreichung offen'],
+        ['sperre_30_tage_anderer_nutzer', 'Doppelt (anderer Nutzer)'],
+      ];
+      const REASONS_RECEIPT = [
+        ['manual_review_rejected', 'Nicht verwertbar'],
+        ['duplicate_content_self', 'Doppelt (selber Nutzer)'],
+        ['duplicate_content_cross_user', 'Doppelt (anderer Nutzer)'],
+      ];
+      const NO_REWARD = [
+        ['daily_cap_reached', 'Tageslimit'],
+        ['weekly_cap_reached', 'Wochenlimit'],
+        ['per_user_cap_reached', 'Nutzerlimit'],
+      ];
+      const VERDICT_DE = { ok: 'Vorprüfung ok', locked: 'gesperrt', hold: 'zurückhalten', incomplete: 'unvollständig' };
+      // Warum bei einer Freigabe kein Geld floss. Ohne diese Zeile ist das nur
+      // über einen Abgleich gegen das Ledger zu sehen — und genau deshalb fiel
+      // monatelang niemandem auf, dass 58 Einreichungen unvergütet blieben.
+      const REWARD_DE = {
+        per_user_cap_reached: 'Nutzer hat das Maximum dieser Aktion erreicht',
+        campaign_budget_exhausted: 'Budget der Aktion ausgeschöpft',
+        campaign_missing: 'Aktion existiert nicht mehr',
+        no_reward_configured: 'Aktion zahlt keinen Betrag je Datensatz',
+        keine_aktion_zur_aufnahmezeit: 'zur Einreichungszeit lief keine Aktion',
+        kein_einreichungsdatum: 'kein Einreichungsdatum am Datensatz',
+        ohne_user_id: 'kein Nutzer am Datensatz',
+        storniert: 'Buchung wurde storniert',
+        no_location: 'ohne Ortsangabe eingereicht',
+        ausserhalb_aktionsgebiet: 'außerhalb des Aktionsgebiets',
+        technischer_fehler: 'Buchung scheiterte auch nach Wiederholung (Technik) — bitte melden',
+        status_geaendert: 'beim Buchen nicht mehr freigegeben',
+      };
+      const REASON_DE = Object.fromEntries([...REASONS_PHOTO, ...REASONS_RECEIPT, ...NO_REWARD, ...[
+        // Antworten des Servers, die keine Ablehngründe sind, aber erscheinen
+        // können — etwa wenn nach einem Netzabriss erneut gedrückt wird.
+        ['status_approved', 'war schon freigegeben'],
+        ['status_rejected', 'war schon abgelehnt'],
+        ['not_found', 'nicht gefunden'],
+        ['already_booked', 'war bereits gebucht'],
+        // Gründe, die nur die Morgenrunde vergibt (keine Taste, nur Anzeige).
+        ['gleiche_ansicht_mehrfach', 'Fast alle Fotos zeigen dieselbe Ansicht'],
+        // Altbestand bis 02.10.2026 (24-h-Sperre).
+        ['sperre_30_tage_gleicher_nutzer', 'Doppelt (selber Nutzer, alte 24-h-Regel)'],
+        // Entscheidungen Patrick 02.10.2026.
+        // Gesperrte Konten: die Runde lässt sie STUMM liegen (keine Ablehnung),
+        // die Konsole verweigert die Freigabe; sie stehen am Ende der Liste.
+        ['konto_gesperrt', 'Konto gesperrt — Freigabe nicht möglich'],
+        ['kontosperre_unbekannt', 'Kontosperre nicht lesbar — nicht freigeben'],
+        ['ean_abweichend', 'Barcode-Foto zeigt andere Nummer als gespeichert'],
+        // Haushalts-Regel (Entscheidung Patrick 17.10.2026): dasselbe Produkt vom
+        // selben Ort binnen 24 Stunden zählt einmal, auch über Konten.
+        ['doppelt_haushalt', 'Doppelt (anderes Konto, selber Ort, binnen 24 Stunden)'],
+        ['haushalt_aelter_offen', 'Selber Ort: Einreichung eines anderen Kontos noch offen — erst die entscheiden'],
+        ['notbremse_haushalt', 'Notbremse (Haushalts-Regel)'],
+        ['ean_unsicher', 'Barcode-Foto: zwei Lesungen uneinig — Nummer selbst prüfen'],
+        ['foto_nummer_doppelt', 'Unter der Foto-Nummer: eigene Freigabe binnen 7 Tagen'],
+        // Barcode-Korrektur der Morgenrunde (Entscheidung Patrick 06.10.2026).
+        ['ean_alt_doppelt', 'Eigene Einreichung dieser Woche unter einer zugehörigen Barcode-Nummer (gespeichert vor einer Korrektur)'],
+        ['ean_alt_ungeprueft', 'Barcode korrigiert — gespeicherte Nummer nicht nachgeprüft'],
+        ['ean_korrektur_fehlt', 'Barcode-Korrektur nicht gespeichert (Technik)'],
+        ['foto_fremdes_konto', 'Gleiches Foto bei einem anderen Konto'],
+        ['foto_aeltere_offen', 'Gleiches Foto in älterer, offener Einreichung'],
+        ['foto_abgleich_gescheitert', 'Foto-Abgleich gescheitert (Technik)'],
+        // Schlussprüfung 03.10.2026: zurückgeholte Ablehnung als Doppel bzw.
+        // mit wiederverwendeten Fotos — Freigabe nur mit Begründung.
+        ['zurueckgeholt_doppel', 'Zurückgeholt — war als Doppel bzw. mit wiederverwendeten Fotos abgelehnt'],
+        // Weitere Gründe, mit denen die Morgenrunde einen Fall liegen lässt
+        // (review.rundeOffen, Prüfrunde 2, 02.10.2026) — nur Anzeige.
+        ['sperre_woche_gleicher_nutzer', 'Doppelt (selbe Person, binnen 7 Tagen)'],
+        ['konto_gesperrt_im_lauf', 'Konto während der Runde gesperrt'],
+        ['beleg_nicht_geschrieben', 'Doppel-Beleg in der Runde nicht gespeichert'],
+        ['notbremse_wochensperre', 'Notbremse (Wochen-Sperre)'],
+        ['notbremse_bildpruefung', 'Notbremse Bildprüfung'],
+        ['notbremse_quote', 'Notbremse Ablehnungsquote'],
+        ['notbremse_preis', 'Notbremse (Preis)'],
+        ['bild_nicht_lesbar_infrastruktur', 'Datei nicht abrufbar (Technik)'],
+        ['nachlesen_gescheitert', 'Nachlesen gescheitert (Technik)'],
+        ['bild_audit_gescheitert', 'Bildprüfung gescheitert (Technik)'],
+        ['kein_bild_audit', 'Nicht geprüft (Zeit)'],
+        ['schreib_fehler', 'Speichern gescheitert (Technik)'],
+        ['lesung_unsicher', 'Name/Barcode unsicher gelesen'],
+        ['preis_unbeurteilt', 'Preis nicht beurteilt (Bildprüfung)'],
+        ['preis_unsicher', 'Preis unsicher — auf dem Preisfoto nachsehen'],
+        ['ort_auffaellig', 'Aufnahmeort passt nicht zum Markt'],
+        ['namer_laeuft_noch', 'Wird noch nachgelesen'],
+        // Bildschirmfoto als Preisbeleg (Patrick 04.10.2026). Am Dokument
+        // steht bei einer Ablehnung `fotos_unpassend`, intern `preis_bildschirm`.
+        ['preis_bildschirm', 'Preisfoto ist ein Bildschirmfoto (App, Online-Shop, Prospekt)'],
+        ['preis_bildschirm_unsicher', 'Preisfoto vielleicht ein Bildschirmfoto — selbst ansehen'],
+        ['preis_kopf_nicht_lesbar', 'Preisfoto-Datei war nicht abrufbar (Technik) — selbst ansehen'],
+        // Preisbeleg „Kassenbon" (Entscheidung Claude im Auftrag Patricks, 04.10.2026)
+        ['preis_beleg_unsicher', 'Preisbeleg unsicher (Warenkorb? fremder Händler?) — selbst ansehen'],
+        ['notbremse_preis_bildschirm', 'Notbremse (Bildschirmfoto als Preis)'],
+      ]]);
+      /** Was die Barcode-Lesung der Morgenrunde ergab (row.eanFoto, src/einreichung.js eanFotoZeile). */
+      const EANFOTO_DE = { abweichend: 'zeigt andere Nummer', unsicher: 'Lesungen uneinig', gleich: 'bestätigt', kein_urteil: 'nicht lesbar' };
+
+      /**
+       * Von der Morgenrunde korrigierte Nummer (row.eanKorrektur, 06.10.2026): die
+       * gespeicherte daneben, damit nachvollziehbar bleibt, was der Scanner lieferte.
+       * Mit Knopf „Korrektur verwerfen" (Prüfrunde 06.10.2026): stimmt die
+       * gespeicherte Nummer doch, gilt sie danach wieder — auch für die
+       * Wochen-Sperre künftiger Einreichungen; die Runde korrigiert nie wieder.
+       * Eine verworfene Korrektur steht fürs Audit klein darunter.
+       */
+      function korrekturZeile(r) {
+        const k = r.eanKorrektur;
+        const v = r.eanKorrekturVerworfen;
+        if (k && k.vorher) {
+          // Strichcode-Leser (Pflicht-Zeuge, Prüfrunde 06.10.2026): eine Korrektur gilt nur mit ihm.
+          const z = k.zeuge && (k.zeuge.gelesen || []).length
+            ? `<br><small style="color:var(--fg3)">Strichcode-Leser bestätigt ${esc(k.zeuge.gelesen.join(', '))} (liest die Striche, nicht die Ziffern)</small>` : '';
+          return `<br><small style="color:var(--warn)">korrigiert vom Barcode-Foto (zweimal gleich gelesen) — gespeichert war ${esc(k.vorher)}</small>${z}
+            <button class="rchip" data-korr-verwerfen="${esc(r.id)}" style="margin-left:8px;font-size:11px;padding:2px 8px">Korrektur verwerfen</button>`;
+        }
+        if (v) return `<br><small style="color:var(--fg3)">Korrektur auf ${esc(v.ean || '?')} verworfen${v.at ? ` am ${esc(fmtDate(v.at))}` : ''} — es gilt die gespeicherte Nummer${v.notiz ? ` („${esc(v.notiz)}")` : ''}</small>`;
+        return '';
+      }
+
+      /**
+       * Korrektur verwerfen — nur für den Fall, der gerade auf dem Schirm steht
+       * (die ID kommt aus dem gerenderten Knopf), mit Pflicht-Notiz. Entscheidet
+       * nichts: ein offener Fall bleibt offen und zeigt danach die Abweichung.
+       */
+      async function verwerfeKorrektur(id) {
+        if (S.busy) return;
+        const note = (window.prompt('Korrektur verwerfen: warum stimmt die gespeicherte Nummer? (steht am Datensatz)') || '').trim();
+        if (note.length < 3) { if (note) toast('Bitte kurz begründen (mindestens 3 Zeichen).', 'bad'); return; }
+        setBusy(true);
+        try {
+          const r = await call('reviewDecideUploads')({ ids: [id], decision: 'ean_korrektur_verwerfen', note });
+          const res = (r.data.results || [])[0] || {};
+          if (res.outcome === 'korrektur_verworfen') {
+            toast('Korrektur verworfen — es gilt die gespeicherte Nummer', 'good');
+            S.cache.delete(id);
+            if (S.zeigt === id) await showCurrent(); else await oeffneEinzelfall(id);
+          } else {
+            toast(`Nicht ausgeführt: ${{ keine_korrektur: 'keine gültige Korrektur', schon_verworfen: 'schon verworfen' }[res.reason] || res.reason || res.outcome}`, 'bad'); // toast setzt textContent
+          }
+        } catch (e) { toast('Fehler: ' + e.message, 'bad'); }
+        setBusy(false);
+      }
+
+      /**
+       * Wer entschieden hat — aus `review.decidedBy`. Vorher hieß alles außer
+       * der Morgenrunde „Prüfkonsole", auch die Hand-Skripte (ops-skript-*) und
+       * Testläufe, deren Urteile teils nach älteren Regeln gerechnet wurden.
+       */
+      function entscheiderName(decidedBy) {
+        const d = typeof decidedBy === 'string' ? decidedBy : '';
+        if (d === 'worker-fotorunde') return 'Morgenrunde';
+        if (/^ops-skript-/.test(d)) return 'Handrunde (Skript)';
+        if (d === 'pruef-test') return 'Test';
+        if (/^[A-Za-z0-9]{28}$/.test(d)) return 'Prüfkonsole';
+        return d ? d.slice(0, 40) : 'unbekannt';
+      }
+
+      // Der Ort als ANTWORT, nicht als Quellenkürzel. Vorher stand hier das
+      // Wort „GPS" — das sagt, woher die Angabe kommt, aber nicht, wo jemand war.
+      // Was der Prüfgrund bedeutet UND was zu tun ist. Eine reine Übersetzung
+      // („Texterkennung unsicher") hilft nicht weiter — die Frage ist, worauf
+      // man beim Bild achten soll.
+      const PRUEFGRUND_DE = {
+        ocr_confidence_low: { titel: 'Texterkennung unsicher', tun: 'Markt, Bon-Datum und Endsumme gegen das Bild prüfen — Artikelnamen sind für die Prämie ohne Belang' },
+        ocr_confidence_medium: { titel: 'Texterkennung teilweise unsicher', tun: 'Markt, Bon-Datum und Endsumme gegen das Bild prüfen' },
+        ocr_confidence_none: { titel: 'Texterkennung ohne brauchbares Ergebnis', tun: 'Bild von Hand lesen — keine Lesung hat die Summenprobe bestanden' },
+        ocr_unavailable: { titel: 'Texterkennung ist nicht gelaufen', tun: 'Technischer Ausfall, keine Aussage über den Bon — im Zweifel erneut verarbeiten lassen' },
+        config_unavailable: { titel: 'Einstellungen waren nicht lesbar', tun: 'Technischer Ausfall, keine Aussage über den Bon — erneut verarbeiten lassen' },
+        lauf_zeitgrenze: { titel: 'Verarbeitung war zu langsam', tun: 'Technischer Ausfall (Google antwortete zu langsam), keine Aussage über den Bon — erneut verarbeiten lassen' },
+        ocr_zeitbudget: { titel: 'Verarbeitung war zu langsam', tun: 'Technischer Ausfall (Google antwortete zu langsam), keine Aussage über den Bon — erneut verarbeiten lassen' },
+        forensics_software: { titel: 'Bild wurde mit einem Bildprogramm bearbeitet', tun: 'Auf Montagen achten: gleichmäßige Schrift, saubere Kanten, doppelte Zeilenabstände' },
+        bon_date_future: { titel: 'Bon-Datum liegt in der Zukunft', tun: 'Datum auf dem Bild prüfen — meist ein Lesefehler bei der Jahreszahl' },
+        duplicate_content_self: { titel: 'Derselbe Bon wurde schon eingereicht', tun: 'Beide Einreichungen vergleichen; die frühere zählt' },
+        duplicate_content_cross_user: { titel: 'Derselbe Bon kam von einem anderen Konto', tun: 'Beide vergleichen — gleicher Markt, gleicher Tag, gleiche Summe' },
+        bild_aehnlich_bezahlt: { titel: 'Bild ähnelt einem schon bezahlten Bon dieser Person', tun: 'Mit JEDEM verlinkten Bon vergleichen (Doppel-Prüfung): beschnitten, Datum, Uhrzeit oder Preise geändert? Derselbe Einkauf wie einer davon → ablehnen als „bereits eingereicht"; ein anderer Einkauf als alle → freigeben. Die Freigabe gilt nur für die Zeilen, die du hier siehst — steht eine als „noch nicht entschieden" da, hält sie diesen Bon wieder fest, bis der andere entschieden ist' },
+        bild_aehnlich_offen: { titel: 'Bild ähnelt einem anderen Bon dieser Person, der noch nicht entschieden war', tun: 'Zuerst den verlinkten Bon entscheiden, der „noch nicht entschieden" ist (Doppel-Prüfung) — solange er offen ist, hält eine Freigabe diesen Bon wieder fest und bestätigt auch die anderen Zeilen nicht. Derselbe Einkauf (beschnitten, Datum, Uhrzeit oder Preise geändert)? Dann diesen ablehnen als „bereits eingereicht"; zwei verschiedene Einkäufe → beide freigeben (ist der andere inzwischen bezahlt, zeigt eine Freigabe hier zuerst den neuen Stand)' },
+        bild_nicht_pruefbar: { titel: 'Bild konnte nicht automatisch auf Kopien geprüft werden', tun: 'Datei ist kein lesbares Foto (PDF, HEIC oder abgeschnitten) — der Vergleich mit früheren Bons fehlt. Original öffnen und mit den letzten bezahlten Bons dieser Person vergleichen: derselbe Einkauf (beschnitten, Datum, Uhrzeit oder Preise geändert)? → ablehnen als „bereits eingereicht"; ein eigener Einkauf → freigeben' },
+        seite_abweichend: { titel: 'Sieht aus wie ein weiterer Teil eines schon bezahlten Belegs dieser Person', tun: 'Mit JEDEM verlinkten Bon vergleichen (Doppel-Prüfung): dieselbe Online-Rechnung bzw. derselbe App-Bon, nur Uhrzeit, Bestellnummer oder Datum anders? Derselbe Einkauf → ablehnen als „bereits eingereicht"; ein anderer Einkauf als alle → freigeben (gilt für alle Zeilen, die du hier siehst)' },
+        mensch_hat_entschieden: { titel: 'Wurde bereits von Hand entschieden', tun: 'Der frühere Beschluss steht; erneut zustellen ändert daran nichts' },
+        support_kulanz_unknown_merchant: { titel: 'Kulanzfall aus dem Support', tun: 'Wie mit dem Support besprochen entscheiden' },
+      };
+      const CONFIDENCE_DE = { high: 'sicher', medium: 'mittel', low: 'unsicher', none: 'kein Ergebnis' };
+      // Doppel-Prüfung der Buchung (cashback-pipeline/lib/doppelBon.js).
+      const DOPPEL_REGEL_DE = {
+        summe: 'gleiche Summe am selben Tag',
+        konten: 'gleicher Bon in einem anderen Konto (Uhrzeit + Summe)',
+        bestellung: 'gleiche Bestellnummer',
+        seite: 'weiterer Teil desselben Belegs (Online-Rechnung oder App-Bon)',
+        artikel: 'gleiche Artikel am selben Tag',
+        datum: 'gleicher Bon mit anderem Datum',
+        kontenArtikel: 'gleiche Artikel in einem anderen Konto',
+        kontenDatum: 'gleicher Bon in einem anderen Konto, anderes Datum',
+        bild: 'Bild ähnelt einem Bon dieser Person — zur Prüfung',
+        seiteAbweichend: 'wie ein weiterer Teil desselben Belegs, nur Uhrzeit, Bestellnummer oder Tag anders — zur Prüfung',
+      };
+      const ABWEICHEND_DE = { uhrzeit: 'Uhrzeit', bestellnummer: 'Bestellnummer', tag: 'Datum', belegart: 'Belegart (Online-Rechnung / App-Bon)' };
+      function doppelZeile(dp) {
+        const t = (dp && dp.treffer) || [];
+        if (!t.length) return '';
+        return `<div class="k">Doppel-Prüfung</div><div class="v">${t.map((x) => `${esc(DOPPEL_REGEL_DE[x.regel] || x.regel)}${
+          x.anteil != null ? ` · ${Math.round(x.anteil * 100)} % gleiche Artikel` : ''}${
+          x.sameUser === false ? ' · anderes Konto' : ''}${x.andererMarkt ? ' · anderer Markt' : ''}${
+          x.offen ? ' · noch nicht entschieden' : ''}${
+          x.abstand ? ` · ${esc(String(x.abstand))} Tage daneben` : ''}${
+          Array.isArray(x.abweichend) && x.abweichend.length ? ` · anders: ${esc(x.abweichend.map((a) => ABWEICHEND_DE[a] || a).join(', '))}` : ''}${
+          x.gegen ? ` · <a href="pruefen.html?tab=receipts&id=${encodeURIComponent(x.gegen)}">${esc(x.gegen)}</a>` : ''}${
+          x.modus === 'beobachtung' ? ' <span style="color:var(--fg3)">· Beobachtungs-Modus, ohne Wirkung</span>' : ''}${
+          x.modus === 'quittiert' ? ' <span style="color:var(--fg3)">· schon von Hand als anderer Einkauf freigegeben</span>' : ''}`).join('<br>')}</div>`;
+      }
+      const LEDGER_DE = { earn: 'gutgeschrieben', reverse: 'storniert', payout: 'ausgezahlt' };
+
+      // Antworten des Bon-Resolvers im Klartext.
+      const RESOLVER_DE = {
+        not_in_review: 'dieser Bon steht nicht mehr in der Prüfung — vermutlich hat ihn jemand anderes gerade entschieden',
+        campaign_missing: 'die Aktion zu diesem Bon existiert nicht mehr',
+        no_cashback_computed: 'für diesen Bon wurde kein Betrag berechnet',
+        not_found: 'der Bon wurde nicht gefunden',
+        receipt_missing: 'der Bon wurde nicht gefunden',
+        decision_in_progress: 'über diesen Bon entscheidet gerade jemand anderes — gleich neu laden',
+        processing_in_progress: 'dieser Bon wird gerade automatisch verarbeitet — in einer Minute erneut versuchen',
+        // Nachprüfung 06.10.2026: Prüfregel in der Buchung getroffen. Der Fall
+        // wird neu geladen und zeigt die Zeile „Doppel-Prüfung"; eine erneute
+        // Freigabe quittiert die Treffer dort (ein noch offener Bon hält weiter).
+        halten: 'Doppel-Verdacht — der Bon ähnelt einem anderen Bon dieser Person. Zeile „Doppel-Prüfung" ansehen, dann erneut entscheiden',
+        forbidden: 'der Zugang zum Resolver wurde abgelehnt',
+        // Keine Antwort: der Resolver kann trotzdem gebucht haben — nicht blind
+        // noch einmal klicken (ein zweiter Klick ergibt dann „nicht mehr in der Prüfung").
+        netzwerk: 'keine Antwort vom Server — das Ergebnis ist unklar, bitte den Bon neu laden, bevor du erneut entscheidest',
+        504: 'Zeitüberschreitung beim Server — das Ergebnis ist unklar, bitte den Bon neu laden, bevor du erneut entscheidest',
+      };
+
+      const FOLGE_DE = {
+        keine_aktion: 'zu dieser Einreichung gehört keine Aktion',
+        konto_gesperrt: 'das Konto ist gesperrt (Entscheidung 02.10.2026) — Freigabe nicht möglich',
+        ort_fehlt: 'ohne Ortsangabe zahlt die Aktion nicht',
+        no_location: 'ohne Ortsangabe zahlt die Aktion nicht',
+        kein_ort_angegeben: 'ohne Ortsangabe zahlt die Aktion nicht',
+        nutzer_am_limit: 'dieser Nutzer hat das Maximum der Aktion erreicht',
+        budget_leer: 'das Budget der Aktion ist aufgebraucht',
+        kein_betrag: 'die Aktion zahlt keinen Betrag je Einreichung',
+        no_active_campaign: 'zur Einreichungszeit lief keine Aktion',
+        ausserhalb_aktionsgebiet: 'der Bon kommt aus einem Gebiet ohne laufende Aktion',
+        below_min_items: 'zu wenige anrechenbare Artikel für eine Prämie',
+        daily_cap_reached: 'für diesen Tag ist bereits ein Bon vergütet',
+        weekly_cap_reached: 'das Wochenlimit dieses Nutzers ist erreicht',
+        per_user_cap_reached: 'dieser Nutzer hat das Maximum der Aktion erreicht',
+        monthly_cap_reached: 'das Monatslimit dieses Nutzers ist erreicht',
+        campaign_budget_exhausted: 'das Budget der Aktion ist aufgebraucht',
+        technischer_fehler: 'die Buchung scheiterte auch nach Wiederholung an einem technischen Fehler — bitte melden',
+        status_geaendert: 'die Einreichung war beim Buchen nicht mehr freigegeben',
+        // Doppel-Schutz in der Buchung (04.10.2026): der Resolver lehnt eine
+        // Freigabe ab, wenn derselbe Bon schon vergütet ist.
+        duplicate_content_self: 'derselbe Bon wurde dieser Person schon vergütet',
+        duplicate_content_cross_user: 'derselbe Bon wurde schon über ein anderes Konto vergütet',
+      };
+      const PREISBILD_DE = {
+        preisschild: 'vom Preisschild',
+        kassenbon: 'vom Kassenbon',
+        beides: 'Preisschild und Bon',
+        produktfoto: '⚠ Bild zeigt das Produkt, keinen Preis',
+        sonstiges: '⚠ Bild zeigt keinen erkennbaren Preis',
+      };
+
+      /** Wer reicht hier ein? Die wichtigste Angabe zur Vertrauenswürdigkeit. */
+      function nutzerZeile(n) {
+        if (!n) return '';
+        const quote = n.einreichungen > 0 ? Math.round((n.abgelehnt / n.einreichungen) * 100) : 0;
+        const ton = n.abgelehnt === 0 ? 'var(--ok)' : quote >= 30 ? 'var(--no)' : 'var(--warn)';
+        const dabei = n.seit ? ` · dabei seit ${fmtDate(n.seit)}` : '';
+        return `<div class="nutzer">
+          <b style="color:${ton}">${n.einreichungen} Einreichungen</b> · ${n.angenommen} angenommen, ${n.abgelehnt} abgelehnt${dabei}
+          <div style="color:var(--fg3);font-size:11.5px;margin-top:2px">Guthaben ${euro(n.guthabenCent)}</div>
+        </div>`;
+      }
+
+      function ortZeile(o) {
+        if (!o || !o.quelle) return '<span style="color:var(--no)">kein Ort erfasst</span>';
+        const genau = o.genauigkeitM == null ? ''
+          : o.genauigkeitM <= 100 ? `± ${o.genauigkeitM} m`
+          : `± ${Math.round(o.genauigkeitM / 1000)} km`;
+        const farbe = o.quelle === 'geraet' || o.quelle === 'filiale' ? 'var(--ok)'
+          : o.quelle === 'land' ? 'var(--fg3)' : 'var(--warn)';
+        const andere = (o.alternativen || []).length
+          ? `<div style="color:var(--fg3);font-size:11.5px;margin-top:2px">auch genannt: ${esc(o.alternativen.map((a) => a.label).join(' · '))}</div>`
+          : '';
+        // Auffälligkeiten stehen ÜBER der Ortsangabe — sie sind der Grund,
+        // warum man hier genauer hinsehen sollte.
+        const warnung = (o.auffaellig || []).map((a) =>
+          `<div style="color:var(--no);font-size:12px;font-weight:700;margin-bottom:3px">⚠ ${esc(a.text)}</div>`).join('');
+        return `${warnung}${esc(o.label)}<div style="color:${farbe};font-size:11.5px">${esc(o.quelleText || '')}${genau ? ` · ${genau}` : ''}</div>${andere}`;
+      }
+
+      // `zeigt` = die ID des Falls, der WIRKLICH auf dem Bildschirm steht.
+      // Ohne diesen Zustand konnte über einen Fall entschieden werden, der noch
+      // lud oder gar nicht mehr angezeigt wurde. `zeigtStand` = Stand der Zeile
+      // „Doppel-Prüfung" dieses Falls (doppelPruefung.at): nur mit ihm
+      // quittiert eine Freigabe die Treffer, die dort stehen (vierte
+      // Prüfrunde 06.10.2026) — ist der Vermerk inzwischen neu, hält der
+      // Resolver fest, und der Fall wird neu geladen.
+      const S = { type: 'photos', queue: [], idx: 0, cache: new Map(), done: new Set(), busy: false, counts: {}, mode: null, zeigt: null, zeigtStand: null, gesucht: '' };
+
+      const cur = () => S.queue[S.idx] || null;
+      // Nach dem Entsperren nur dann wieder freigeben, wenn ein Fall steht.
+      const setBusy = (b) => {
+        S.busy = b;
+        const aus = b || !S.zeigt;
+        ['bOk', 'bNo', 'bNoReward', 'bSkip'].forEach((id) => { $(id).disabled = aus; });
+      };
+
+      // ── Warteschlange ───────────────────────────────────────
+      /**
+       * Entscheidungsleiste stilllegen — Zustand UND Bedienelemente zusammen.
+       *
+       * Die Sichtbarkeit allein reichte nicht: `$('bOk').click()` läuft auch
+       * auf einem unsichtbaren Knopf, und der Tastatur-Zweig ruft genau das.
+       * Nach dem Öffnen eines Falls über die Karte war die Leiste zwar weg,
+       * aber F gab den ersten Fall der Warteschlange frei — einen, den niemand
+       * gesehen hatte, samt Buchung. Darum eine Funktion, die beides tut, und
+       * jeder Weg, der die Bühne wechselt, ruft sie zuerst.
+       */
+      function leisteAus() {
+        S.zeigt = null;
+        S.zeigtStand = null;
+        $('bar').style.visibility = 'hidden';
+        ['bOk', 'bNo', 'bNoReward', 'bSkip'].forEach((id) => { $(id).disabled = true; });
+        hideReasons();
+      }
+      function leisteAn() {
+        $('bar').style.visibility = 'visible';
+        ['bOk', 'bNo', 'bNoReward', 'bSkip'].forEach((id) => { $(id).disabled = false; });
+      }
+
+      /** Ein Fehler ist ein Zustand mit Ausweg, kein ewiges „Lade …". */
+      function zeigeFehler(text, nochmal) {
+        $('stage').innerHTML = `<div class="empty">
+          <div style="font-size:15px;color:var(--fg2);margin-bottom:14px">${esc(text)}</div>
+          <button id="nochmal" class="big" style="border-color:var(--acc);color:var(--acc)">Erneut versuchen</button>
+        </div>`;
+        $('nochmal').onclick = nochmal;
+        leisteAus();
+      }
+
+      async function loadQueue(keepIdx) {
+        leisteAus();
+        $('stage').innerHTML = '<div class="empty">Lade …</div>';
+        let r;
+        try {
+          r = await call('reviewQueue')({ type: S.type, q: $('q').value.trim() || undefined, verdict: S.type === 'photos' ? $('fVerdict').value : undefined });
+        } catch (e) {
+          $('qlist').innerHTML = '';
+          zeigeFehler(`Die Warteschlange ließ sich nicht laden: ${e.message}`, () => loadQueue(keepIdx));
+          return;
+        }
+        S.queue = r.data.rows || [];
+        S.counts = r.data.counts || {};
+        S.gesucht = $('q').value.trim();
+        if (!keepIdx) S.idx = 0;
+        if (S.idx >= S.queue.length) S.idx = Math.max(0, S.queue.length - 1);
+        $(S.type === 'photos' ? 'cPhotos' : 'cReceipts').textContent = S.queue.length;
+        renderQueue();
+        await showCurrent();
+        // Gegenzähler still nachladen, damit beide Reiter Zahlen zeigen.
+        const other = S.type === 'photos' ? 'receipts' : 'photos';
+        call('reviewQueue')({ type: other }).then((x) => { $(other === 'photos' ? 'cPhotos' : 'cReceipts').textContent = x.data.total; }).catch(() => {});
+      }
+
+      function renderQueue() {
+        const l = $('qlist');
+        l.innerHTML = S.queue.map((r, i) => {
+          const done = S.done.has(r.id);
+          // Ohne gelesenen Preis gelb statt grün — nachsehen, nicht blind freigeben.
+          const v = r.verdict === 'ok' && (r.hinweise || []).length ? 'hold' : (r.verdict || 'ok');
+          const titel = S.type === 'photos' ? (r.productName || '(ohne Name)') : (r.merchantName || 'Unbekannter Markt');
+          // Name und EAN sind die effektiven Werte (wie in der Morgenrunde);
+          // nachgelesene sind als solche erkennbar.
+          const zeile2 = S.type === 'photos'
+            ? `${r.nameNachgelesen ? 'Name nachgelesen · ' : ''}${r.ean || 'keine EAN'}${r.eanNachgelesen ? ' (nachgelesen)' : ''}${r.eanKorrigiert ? ' (korrigiert)' : ''} · ${ago(r.createdAt)}`
+            : `${euro(r.bonTotalCents)} · ${r.bonDate || '?'} · ${ago(r.createdAt)}`;
+          return `<div class="qi ${i === S.idx ? 'on' : ''} ${done ? 'done' : ''}" data-i="${i}">
+            <span class="dot d-${esc(v)}"></span>
+            <span class="t"><b>${esc(titel)}</b><span>${esc(zeile2)}</span></span>
+          </div>`;
+        }).join('') || (S.gesucht
+          ? `<div class="empty">Keine Treffer für „${esc(S.gesucht)}"<br><span style="font-size:12.5px">Suchfeld leeren zeigt wieder alle offenen Fälle.</span></div>`
+          : '<div class="empty">Nichts offen 🎉</div>');
+        // Wie viele davon sind auffällig? Bisher wurde das gerechnet und nie gezeigt.
+        // Gesperrte Konten stehen am Ende und zählen getrennt — sie warten auf niemanden.
+        const gesperrt = S.counts.gesperrt || 0;
+        const auff = (S.counts.locked || 0) + (S.counts.hold || 0) + (S.counts.incomplete || 0) - gesperrt;
+        $('prog').textContent = S.queue.length
+          ? `${Math.min(S.idx + 1, S.queue.length)} von ${S.queue.length}${auff ? ` · ${auff} auffällig` : ''}${gesperrt ? ` · ${gesperrt} gesperrte Konten (am Ende)` : ''}`
+          : '';
+        const on = l.querySelector('.qi.on');
+        if (on) on.scrollIntoView({ block: 'nearest' });
+      }
+
+      // ── Fälle laden (mit Vorladen der nächsten) ─────────────
+      /**
+       * Wie lange ein geladener Fall im Speicher als gültig gilt.
+       *
+       * Die Kachel-URLs aus reviewCases sind signiert und laufen ab, frühestens
+       * 6 Stunden nach dem Ausstellen (review-console/src/kachel.js,
+       * GUELTIG_MIN_S). Ein Fall, der länger hier lag, käme mit abgelaufenen
+       * URLs auf den Schirm — kaputte Kacheln, sobald der Browser die Bilder
+       * nicht schon im Cache hat (Tab über Nacht offen, Vorladen gescheitert).
+       * 5 Stunden lassen eine Stunde Luft. Nebenbei sind Vorprüfung und
+       * „Freigabe bucht …" damit nie älter als 5 Stunden.
+       * Wanduhr statt performance.now(): die läuft auch im Ruhezustand weiter,
+       * genau wie der Ablauf der URL.
+       */
+      const FALL_GUELTIG_MS = 5 * 3600 * 1000;
+      const geladenUm = new WeakMap(); // Fall-Objekt → Ladezeitpunkt
+      const frisch = (id) => {
+        const fall = S.cache.get(id);
+        return !!fall && Date.now() - (geladenUm.get(fall) || 0) < FALL_GUELTIG_MS;
+      };
+
+      async function fetchCases(ids) {
+        const fehlen = ids.filter((id) => id && !frisch(id));
+        if (!fehlen.length) return;
+        // Veraltete Einträge vorher entfernen: liefert der Server einen Fall
+        // nicht (mehr), darf nicht der alte Stand angezeigt werden.
+        fehlen.forEach((id) => S.cache.delete(id));
+        const r = await call('reviewCases')({ type: S.type, ids: fehlen });
+        (r.data.cases || []).forEach((c) => {
+          S.cache.set(c.id, c);
+          geladenUm.set(c, Date.now());
+          // Bilder in den Browser-Cache holen, damit der nächste Fall sofort steht.
+          const urls = c.kind === 'photo' ? (c.bilder || []).map((b) => b.url) : [c.imageUrl];
+          urls.filter(Boolean).forEach((u) => { const im = new Image(); im.src = u; });
+        });
+      }
+
+      /**
+       * Zeigt den aktuellen Fall — und gibt die Entscheidungsleiste erst frei,
+       * wenn er WIRKLICH auf dem Bildschirm steht.
+       *
+       * Vorher wurde die Leiste sichtbar geschaltet, bevor der Fall geladen war,
+       * und ein Ladefehler blieb ungefangen. Man konnte also einen Fall
+       * freigeben, den man nie gesehen hat — bei „Lade Fall …" und aktivem F.
+       * `S.zeigt` ist die Sperre: keine Entscheidung ohne einen gerenderten Fall.
+       */
+      async function showCurrent() {
+        const c = cur();
+        leisteAus();
+        if (!c) { $('stage').innerHTML = '<div class="empty">Nichts offen 🎉</div>'; return; }
+        if (!frisch(c.id)) {
+          $('stage').innerHTML = '<div class="empty">Lade Fall …</div>';
+          try {
+            await fetchCases([c.id]);
+          } catch (e) {
+            zeigeFehler(`Der Fall ließ sich nicht laden: ${e.message}`, () => showCurrent());
+            return;
+          }
+        }
+        const fall = S.cache.get(c.id);
+        if (!fall) { zeigeFehler('Der Fall kam leer zurück.', () => { S.cache.delete(c.id); showCurrent(); }); return; }
+        render(fall);
+        S.zeigt = c.id;
+        S.zeigtStand = fall.kind === 'receipt' && fall.row && fall.row.doppelPruefung ? (fall.row.doppelPruefung.at ?? null) : null;
+        leisteAn();
+        // Die nächsten drei still vorladen.
+        const next = S.queue.slice(S.idx + 1, S.idx + 4).map((x) => x.id);
+        if (next.length) fetchCases(next).catch(() => {});
+      }
+
+      function render(c) {
+        if (!c) { $('stage').innerHTML = '<div class="empty">Fall nicht ladbar</div>'; return; }
+        $('stage').innerHTML = c.kind === 'photo' ? renderPhoto(c) : renderReceipt(c);
+        $('bNoReward').classList.toggle('hidden', c.kind !== 'receipt');
+        renderQueue();
+      }
+
+      function renderPhoto(c) {
+        const r = c.row, p = c.precheck || {}, h = r.herkunft || {};
+        // Rückfall auf die Rohfelder, falls die Seite vor der Codebase
+        // ausgerollt wurde (oder die zurückgerollt ist) — sonst stünde jeder
+        // Fall als „(ohne Name)" / Barcode „—" da und würde womöglich abgelehnt.
+        const name = r.anzeigeName ?? (r.productName || r.productNameOcr);
+        const ean = r.anzeigeEan ?? r.ean;
+        const preisBild = r.priceImageKindAnzeige ?? r.priceImageKind;
+        const nl = (text) => `<span class="nl">${esc(text || 'nachgelesen')}</span>`;
+        const shots = (c.bilder || []).map((b) => `<figure>
+            ${b.url ? `<img src="${b.url}" data-full="${b.full || b.url}" data-cap="${esc(b.label)}" alt="${esc(b.label)}" loading="lazy">` : `<div class="ph">${b.fehlt ? 'fehlt' : 'nicht ladbar'}</div>`}
+            ${b.defekt ? '<div class="defekt">Foto beim Hochladen beschädigt</div>' : ''}
+            <figcaption><span>${esc(b.label)}</span>${b.fehlt ? '<span style="color:var(--no)">fehlt</span>' : ''}</figcaption>
+          </figure>`).join('');
+        // Ein entschiedener Fall zeigt das Urteil vom Entscheidungszeitpunkt —
+        // sonst widerspricht die Direktansicht dem Tagesbericht.
+        const entscheider = entscheiderName(r.review && r.review.decidedBy);
+        const urteilHerkunft = p.quelle === 'gespeichert'
+          ? `<small style="color:var(--fg3)">Vorprüfung bei der Entscheidung (${esc(entscheider)})${r.review && r.review.forced ? ' · trotz Vorprüfung freigegeben' : ''}</small>`
+          : p.quelle === 'nachtraeglich'
+            ? '<small style="color:var(--fg3)">Heute neu berechnet — bei der Entscheidung wurde kein Urteil gespeichert</small>'
+            : '';
+        // Der tatsächliche Ablehngrund: Bild-Gründe (gleiche Ansicht, wieder-
+        // verwendet) stehen nicht in der Vorprüfung — ohne diese Zeile stand
+        // über einem abgelehnten Fall nur „Alle Prüfungen bestanden".
+        // Interner Grund zuerst: am Dokument steht seit 02.10.2026 teils der
+        // App-Code (Wochen-Sperre → doppelt_eingereicht), review.reason sagt genauer, was war.
+        const ablehnGrund = r.status === 'rejected' ? ((r.review && r.review.reason) || r.rejectReason) : null;
+        const entschieden = ablehnGrund
+          ? `<div class="folge zahlt-nicht">Abgelehnt wegen: <b>${esc(REASON_DE[ablehnGrund] || ablehnGrund)}</b></div>`
+          : '';
+        const dupHeute = p.dupQuelle === 'heute' ? ' <span class="nl">heute berechnet</span>' : '';
+        // Preis-Pflicht (26.09.2026): nur bei sonst unauffälliger Vorprüfung ersetzen.
+        const ohnePreis = (p.verdict || 'ok') === 'ok' && (p.hinweise || []).includes('preis_nicht_gelesen');
+        const dup = p.dup && p.dup.priorId
+          ? `<div class="kv"><div class="k">Früher</div><div class="v">${c.prior ? `${esc(c.prior.status)} · ${esc(fmtDate(c.prior.createdAt))} · ${p.dup.sameUser ? 'selber Nutzer' : 'anderer Nutzer'}` : esc(short(p.dup.priorId, 10))}${dupHeute}</div>
+             <div class="k">Anders</div><div class="v">${(p.dup.updatedFields || []).length ? esc((p.dup.updatedFields || []).map((f) => ({ price: 'Preis', manufacturer: 'Hersteller', market: 'Markt' }[f] || f)).join(', ')) : '— nichts'}</div></div>`
+          : '';
+        return `<div class="case">
+          <div class="shots">${shots}</div>
+          <div class="facts">
+            <div class="eyebrow">Produktfoto-Einreichung</div>
+            <h2>${esc(name || '(ohne Name)')}${h.nameQuelle === 'nachgelesen' ? nl() : ''}</h2>
+            <div class="verdict v-${esc(ohnePreis ? 'hold' : p.verdict || 'ok')}">${esc(ohnePreis ? 'Preis nicht gelesen — auf dem Preisfoto nachsehen' : VERDICT_DE[p.verdict] || p.verdict || '')}
+              ${(p.reasons || []).length ? `<small>${esc((p.reasons || []).map((x) => REASON_DE[x] || x).join(' · '))}</small>` : `<small>Vollständig, kein Doppel${ohnePreis ? ' · ohne Preis im Foto: ablehnen mit A, dann 8' : ''}</small>`}
+              ${urteilHerkunft}</div>
+            ${entschieden}
+            ${rundeZeile(r)}
+            ${zurueckZeile(r)}
+            ${preisQuelleZeile(p, r)}
+            <div class="folge ${c.folge && c.folge.buchtCent > 0 ? 'zahlt' : 'zahlt-nicht'}">
+              ${c.folge && c.folge.buchtCent > 0
+                ? `Freigabe bucht <b>${euro(c.folge.buchtCent)}</b>`
+                : `Freigabe bucht nichts — ${esc(FOLGE_DE[c.folge && c.folge.grund] || 'kein Betrag hinterlegt')}`}
+            </div>
+            ${nutzerZeile(c.nutzer)}
+            <div class="kv">
+              <div class="k">Barcode</div><div class="v">${esc(ean || '—')}${h.eanNachgelesen ? nl() : ''}${korrekturZeile(r)}${eanFotoZeile(r.eanFoto)}</div>
+              <div class="k">Markt</div><div class="v">${esc(r.marketName || r.marketId || '—')}</div>
+              <div class="k">Preis</div><div class="v">${euro(r.priceCents)} <span style="color:var(--fg3)">${esc(PREISBILD_DE[preisBild] || 'Herkunft unklar')}</span>${h.preisNachgelesen ? nl() : ''}</div>
+              <div class="k">Hersteller</div><div class="v">${esc(r.manufacturer || '—')}${h.herstellerNachgelesen ? nl('nachgelesen · zählt nicht für die Doppel-Prüfung') : ''}</div>
+              <div class="k">Ort</div><div class="v">${ortZeile(c.ort)}</div>
+              <div class="k">Eingereicht</div><div class="v">${esc(fmtDateTime(r.createdAt))}</div>
+              <div class="k">Aktion</div><div class="v">${c.aktion ? esc(c.aktion.titel) : '<span style="color:var(--warn)">keine Aktion zugeordnet</span>'}${r.campaignQuelle ? ' <span style="color:var(--fg3)">(vom Server ergänzt)</span>' : ''}</div>
+              ${r.rewardResult ? `<div class="k">Bisher</div><div class="v">${
+                (r.rewardCents || 0) > 0
+                  ? `<span style="color:var(--ok)">${euro(r.rewardCents)} gebucht</span>`
+                  : `<span style="color:var(--warn)">nicht gebucht — ${esc(REWARD_DE[r.rewardNotCreditedReason || r.rewardSkippedReason] || r.rewardNotCreditedReason || r.rewardSkippedReason || 'Grund unbekannt')}</span>`
+              }</div>` : ''}
+            </div>
+            ${dup}
+          </div>
+        </div>`;
+      }
+
+      /**
+       * Warum die Morgenrunde den Fall liegen ließ (review.rundeOffen, Prüfrunde 2,
+       * 02.10.2026). Vorher stand ein Fall, den die Runde wegen eines Fotos eines
+       * anderen Kontos anhielt, hier als „Vorprüfung ok" — ohne jeden Hinweis.
+       * Sperrende Befunde stehen zusätzlich in der Vorprüfung (Freigabe nur mit
+       * Begründung); hier der Zusammenhang: Grund, Hinweis, Lauf.
+       */
+      function rundeZeile(r) {
+        const ro = r.status === 'pending' ? r.rundeOffen : null;
+        if (!ro || !ro.grund) return '';
+        const was = ro.geplant === 'ablehnen' ? 'würde ablehnen' : ro.geplant === 'freigeben' ? 'würde freigeben' : 'ließ liegen';
+        const wer = ro.trocken ? 'Morgenrunde (Trockenlauf)' : 'Morgenrunde';
+        const wann = ro.at ? ` · ${esc(fmtDateTime(ro.at))}` : '';
+        const zurueck = ro.zurueckgehalten ? ` · zurückgehalten: ${esc(REASON_DE[ro.zurueckgehalten] || ro.zurueckgehalten)}` : '';
+        return `<div class="folge zahlt-nicht">${wer} ${was}: <b>${esc(REASON_DE[ro.grund] || ro.grund)}</b>${zurueck}${wann}
+          ${ro.hinweis ? `<br><small>${esc(ro.hinweis)}</small>` : ''}</div>`;
+      }
+
+      /**
+       * Woraus der Fall zurückgeholt wurde (review.wiedereroeffnet, Schlussprüfung
+       * 03.10.2026). Das Zurückholen löscht den Ablehngrund am Dokument — ohne
+       * diese Zeile sähe man nicht mehr, dass die Runde z. B. wiederverwendete
+       * Fotos gefunden hatte.
+       */
+      function zurueckZeile(r) {
+        const w = r.status === 'pending' ? r.wiedereroeffnet : null;
+        const grund = w && (w.vorherIntern || w.vorherGrund);
+        if (!grund) return '';
+        const wer = w.vorherVon === 'worker-fotorunde' ? 'von der Morgenrunde' : 'in der Konsole';
+        return `<div class="folge zahlt-nicht">Zurückgeholt — vorher ${wer} abgelehnt: <b>${esc(REASON_DE[grund] || grund)}</b></div>`;
+      }
+
+      /**
+       * Bildschirmfoto als Preisbeleg (Patrick 04.10.2026): Befund der
+       * Morgenrunde aus review.rundeOffen.preisBildschirm (einreichung.precheckOf).
+       * Am Dokument steht nur der Befund — woran er hängt (Antwort des
+       * Modells, Dateimerkmale), liest der Einreicher sonst mit; das steht im
+       * Tagesbericht des Laufs. Nur Hinweis, keine Sperre: wer hinsieht,
+       * entscheidet. Kassenbons zählen immer, auch als e-Bon.
+       */
+      function preisQuelleZeile(p, r) {
+        const h = p.hinweise || [];
+        const sicher = h.includes('preis_bildschirm');
+        const pb = (r.rundeOffen && r.rundeOffen.preisBildschirm) || {};
+        const beob = pb.modus !== true ? ' (Beobachtung)' : '';
+        const seit = pb.seit ? ` Befund seit ${esc(pb.seit)}, Einzelheiten im Tagesbericht.` : ' Einzelheiten im Tagesbericht.';
+        // Preisbeleg (05.10.2026): ein „Kassenbon" ohne jedes Kassenbon-Merkmal
+        // (Warenkorb, Bestellliste?) oder von einem Händler, der keiner unserer
+        // Märkte ist. Welcher der beiden, steht im Tagesbericht (das Dokument
+        // liest der Einreicher selbst).
+        if (h.includes('preis_beleg_unsicher')) {
+          return `<div class="folge zahlt-nicht">Preisbeleg: <b>unsicher — selbst ansehen</b>${beob}
+            <br><small>${seit} Zählt: Kassenbon (auch e-Bon, Online-Rechnung) eines unserer Märkte — auch von EDEKA-/REWE-Kaufleuten und Vertriebslinien ohne Kettenlogo (NP, nah und gut, Scheck-in, Hieber, Zurheide, Inhabername wie Krummenerl), erkennbar an Eigenmarken auf dem Bon (G&amp;G / Gut &amp; Günstig = EDEKA, ja! = REWE) oder an der Anschrift. Nicht: Warenkorb oder Bestellliste ohne Kauf, Rechnung eines fremden Händlers (z. B. Amazon). Ablehnen: A, dann 2.</small></div>`;
+        }
+        if (!sicher && !h.includes('preis_bildschirm_unsicher')) return '';
+        return `<div class="folge zahlt-nicht">Preisfoto: <b>${sicher ? 'Bildschirmfoto' : 'vielleicht ein Bildschirmfoto — selbst ansehen'}</b>${beob}
+          <br><small>${seit} Der Preis zählt aus dem Markt (Preisschild, Kassenbon, auch e-Bon). Ablehnen: A, dann 2.</small></div>`;
+      }
+
+      /** Nummer vom Barcode-Foto, wo sie etwas zu sagen hat. */
+      function eanFotoZeile(ef) {
+        if (!ef || ef.art === 'kein_urteil' || ef.art === 'gleich') return '';
+        const nummer = ef.gelesen || ef.roh;
+        const text = `Foto: ${nummer ? esc(nummer) + ' — ' : ''}${esc(EANFOTO_DE[ef.art] || ef.art)}${ef.zweit ? ` (zweite Lesung ${esc(ef.zweit)})` : ''}`;
+        return `<br><small style="color:var(--no)">${text}</small>`;
+      }
+
+      function renderReceipt(c) {
+        const r = c.row;
+        const items = (c.items || []).map((it) => `<div><span>${esc(it.raw || it.name || '')}</span><span>${euro(it.priceCents)}</span></div>`).join('');
+        const sum = (c.items || []).reduce((a, it) => a + (it.priceCents || 0), 0);
+        const grund = PRUEFGRUND_DE[r.reviewReason] || null;
+        // Das Urteil kommt vom Server (bonUrteil), damit Warteschlange und
+        // Fallkarte dasselbe sagen — vorher stand derselbe Bon links grün und
+        // rechts gelb, weil beide Seiten getrennt rechneten.
+        const ton = r.verdict === 'ok' ? 'ok' : r.verdict || 'hold';
+        return `<div class="case">
+          <div class="bon">${c.imageUrl ? `<img src="${c.imageUrl}" data-full="${c.fullUrl || c.imageUrl}" data-cap="Bon — klicken für Vollbild" alt="Bon">` : '<div class="empty">Bild nicht ladbar</div>'}</div>
+          <div class="facts">
+            <div class="eyebrow">Kassenbon in Prüfung</div>
+            <h2>${esc(r.merchantName || 'Unbekannter Markt')}</h2>
+            <div class="verdict v-${ton}">${esc(grund ? grund.titel : (r.reviewReason || 'zur Prüfung'))}
+              <small>${esc(grund ? grund.tun : 'Bild gegen die Angaben rechts prüfen')}</small></div>
+
+            <div class="folge ${c.folge && c.folge.buchtCent > 0 ? 'zahlt' : 'zahlt-nicht'}">
+              ${c.folge && c.folge.buchtCent > 0
+                ? `Freigabe bucht <b>${euro(c.folge.buchtCent)}</b>`
+                : `Freigabe bucht nichts — ${esc(FOLGE_DE[c.folge && c.folge.grund] || 'kein Betrag berechnet')}`}
+            </div>
+            ${nutzerZeile(c.nutzer)}
+
+            <div class="kv">
+              <div class="k">Filiale</div><div class="v">${ortZeile(c.ort)}</div>
+              <div class="k">Bon-Datum</div><div class="v">${esc(r.bonDate || '—')} ${esc(r.bonTime || '')}</div>
+              <div class="k">Summe</div><div class="v">${euro(r.bonTotalCents)} <span style="color:var(--fg3)">· Positionen zusammen ${euro(sum)}${r.reconOk === false ? ` (Abweichung ${((r.reconDeltaCents || 0) / 100).toFixed(2).replace('.', ',')} €)` : ''}</span></div>
+              <div class="k">Anrechenbar</div><div class="v">${r.eligibleItemCount ?? '—'} von ${(c.items || []).length} Positionen</div>
+              <div class="k">Texterkennung</div><div class="v">${esc(CONFIDENCE_DE[r.ocrConfidence] || r.ocrConfidence || '—')}${
+                r.ocrFieldAgreement
+                  ? `<div style="color:var(--fg3);font-size:11.5px">Markt, Datum, Summe und Betrag über ${r.ocrFieldAgreement.zeugen} Lesungen: ${
+                      r.ocrFieldAgreement.ok ? '<span style="color:var(--ok)">einig</span>'
+                        : `<span style="color:var(--warn)">uneinig bei ${esc((r.ocrFieldAgreement.konflikte || []).join(', ') || '—')}</span>`}${
+                      r.ocrFieldAgreement.modus === 'beobachtung' ? ' · Beobachtungs-Modus, ohne Wirkung' : ''}</div>`
+                  : ''
+              }</div>
+              ${doppelZeile(r.doppelPruefung)}
+              <div class="k">Eingereicht</div><div class="v">${esc(fmtDateTime(r.createdAt))}</div>
+              <div class="k">Bisher</div><div class="v">${(c.ledger || []).length
+                ? esc(c.ledger.map((l) => `${LEDGER_DE[l.type] || l.type} ${euro(l.cents)}`).join(', '))
+                : 'noch nichts gebucht'}</div>
+            </div>
+            <div class="items">${items || '<div style="color:var(--fg3)">keine Positionen erkannt</div>'}</div>
+          </div>
+        </div>`;
+      }
+
+      // ── Entscheiden ─────────────────────────────────────────
+      function showReasons(list, onPick) {
+        const box = $('reasons');
+        box.innerHTML = list.map(([k, l], i) => `<button class="rchip" data-r="${esc(k)}">${esc(l)}${i < 9 ? `<span class="kbd">${i + 1}</span>` : ''}</button>`).join('')
+          + '<button class="rchip" data-r="" style="border-style:dashed">Abbrechen<span class="kbd">Esc</span></button>';
+        box.classList.add('on');
+        $('spacer').classList.add('hidden');
+        S.mode = { list, onPick };
+      }
+      function hideReasons() { $('reasons').classList.remove('on'); $('spacer').classList.remove('hidden'); S.mode = null; }
+
+      let undoTimer = null;
+      function toast(text, kind, undoFn) {
+        $('toastText').textContent = text;
+        $('toast').className = 'toast on ' + (kind || '');
+        $('undo').classList.toggle('hidden', !undoFn);
+        $('undo').onclick = undoFn ? () => { $('toast').className = 'toast'; undoFn(); } : null;
+        clearTimeout(undoTimer);
+        undoTimer = setTimeout(() => { $('toast').className = 'toast'; }, undoFn ? 7000 : 2600);
+      }
+
+      /** Entschiedenen Fall aus der Schlange nehmen; der nächste rückt nach. */
+      /**
+       * Entschiedenen Fall aus der Schlange nehmen und den nächsten zeigen.
+       *
+       * Bewusst `await`: ohne das kehrte advance() sofort zurück, die Leiste
+       * wurde freigegeben, und ein zweiter Tastendruck traf den nächsten Fall,
+       * bevor er auf dem Bildschirm stand — zweimal F gab also einen Fall frei,
+       * den niemand gesehen hat.
+       */
+      async function advance(fallId) {
+        const id = fallId ?? cur()?.id;
+        if (!id) return;
+        S.done.add(id);
+        const i = S.queue.findIndex((x) => x.id === id);
+        S.queue = S.queue.filter((x) => x.id !== id);
+        S.idx = Math.min(i < 0 ? S.idx : i, Math.max(0, S.queue.length - 1));
+        $(S.type === 'photos' ? 'cPhotos' : 'cReceipts').textContent = S.queue.length;
+        await showCurrent();
+      }
+
+      /**
+       * Freigabe trotz Sperre — mit Begründung, sonst gar nicht.
+       *
+       * Vorher versprach der Hinweis „erneut F für Freigabe trotz Sperre" und
+       * merkte sich das in einem Schalter, der den Fall überlebte. Der zweite
+       * Druck schickte `force` OHNE Notiz, der Server lehnt genau das ab — und
+       * weil der Schalter nur bei einer geglückten Entscheidung zurückgesetzt
+       * wurde, scheiterte danach JEDE weitere Freigabe der Sitzung, auch auf
+       * unverdächtigen Fällen. Jetzt öffnet eine Sperre ein Eingabefeld; ohne
+       * Text passiert nichts, und der Zustand hängt am Fall, nicht am Werkzeug.
+       */
+      function frageNachBegruendung(sperrgrund, weiter) {
+        const box = $('reasons');
+        box.innerHTML = `
+          <span style="color:var(--no);font-weight:700;font-size:12.5px;white-space:nowrap">${esc(REASON_DE[sperrgrund] || sperrgrund)}</span>
+          <input id="forceNote" placeholder="Warum trotzdem freigeben?" style="flex:1;min-width:170px;padding:7px 11px;font-size:13px" />
+          <button class="rchip" id="forceOk" style="border-color:var(--warn);color:var(--warn)">Trotzdem freigeben</button>
+          <button class="rchip" data-r="" style="border-style:dashed">Abbrechen<span class="kbd">Esc</span></button>`;
+        box.classList.add('on');
+        $('spacer').classList.add('hidden');
+        S.mode = { list: [], onPick: null, force: true };
+        const feld = $('forceNote');
+        feld.focus();
+        const senden = () => {
+          const note = feld.value.trim();
+          if (note.length < 3) { feld.style.borderColor = 'var(--no)'; feld.placeholder = 'Bitte kurz begründen — das steht später am Datensatz'; return; }
+          hideReasons();
+          weiter(note);
+        };
+        $('forceOk').onclick = senden;
+        feld.onkeydown = (e) => { if (e.key === 'Enter') senden(); if (e.key === 'Escape') hideReasons(); };
+      }
+
+      async function decidePhoto(decision, reason, note) {
+        const c = cur();
+        // Nur über einen Fall entscheiden, der auch auf dem Bildschirm steht.
+        if (!c || S.busy || S.zeigt !== c.id) return;
+        // Die ID JETZT festhalten: `S.zeigt` sichert nur den Start. Während die
+        // Anfrage läuft, kann ein Pfeiltaster oder ein Reiterwechsel den
+        // angezeigten Fall wechseln — die Antwort gehört trotzdem zu diesem
+        // hier, nicht zu dem, der inzwischen auf dem Schirm steht.
+        const fallId = c.id;
+        setBusy(true);
+        try {
+          const daten = { ids: [c.id], decision, reason };
+          if (note) { daten.force = true; daten.note = note; }
+          const r = await call('reviewDecideUploads')(daten);
+          const res = (r.data.results || [])[0] || {};
+          if (res.outcome === 'blocked') {
+            // Kein stiller Schalter mehr: die Begründung wird hier und jetzt erfragt.
+            // Die Begründung gilt für DIESEN Fall — auch wenn inzwischen ein
+            // anderer angezeigt wird, wird sie dann nicht angewandt.
+            frageNachBegruendung(res.reason, (begruendung) => {
+              if (S.zeigt !== fallId) { toast('Der Fall hat gewechselt — bitte erneut entscheiden.', 'bad'); return; }
+              decidePhoto('approve', undefined, begruendung);
+            });
+          } else if (res.outcome === 'approved') {
+            toast(note ? 'Trotz Sperre freigegeben ✓' : 'Freigegeben ✓', 'good');
+            await advance(fallId);
+          } else if (res.outcome === 'rejected') {
+            toast(`Abgelehnt: ${REASON_DE[reason] || reason}`, 'bad', () => reopen(fallId));
+            await advance(fallId);
+          } else {
+            toast(`Nicht ausgeführt: ${esc(REASON_DE[res.reason] || res.reason || res.outcome)}`, 'bad');
+            await advance(fallId);
+          }
+        } catch (e) { toast('Fehler: ' + e.message, 'bad'); }
+        setBusy(false);
+      }
+
+      async function reopen(id) {
+        try {
+          await call('reviewDecideUploads')({ ids: [id], decision: 'reopen' });
+          S.done.delete(id); S.cache.delete(id);
+          toast('Zurückgeholt', 'good');
+          loadQueue(true);
+        } catch (e) { toast('Rückgängig fehlgeschlagen: ' + e.message, 'bad'); }
+      }
+
+      async function decideReceipt(decision, reason) {
+        const c = cur();
+        if (!c || S.busy || S.zeigt !== c.id) return;
+        const fallId = c.id;
+        setBusy(true);
+        try {
+          // 95 s: der Server wartet bis zu 75 s auf den Resolver — das SDK gäbe
+          // sonst nach 70 s auf, bevor „Ergebnis unklar" überhaupt ankommt.
+          const doppelStand = decision === 'approve' ? S.zeigtStand : null;
+          const r = await call('reviewDecideReceipt', { timeout: 95000 })({ receiptId: c.id, decision, reason, doppelStand });
+          if (r.data.ok) {
+            // Der Resolver rechnet die Deckel beim Freigeben NEU — ein Bon, der
+            // Tage in der Prüfung lag, kann am Tageslimit hängen und mit
+            // `no_reward` und 0 Cent zurückkommen. Ein grüner Haken darüber
+            // wäre genau das Muster, das schon einmal 144 Freigaben mit 0 Cent
+            // durchgehen ließ. Also: den WIRKLICHEN Ausgang melden, mit Betrag.
+            // (Das Feld heißt `creditedCents` — `cents` gab es nie, der Betrag
+            // stand deshalb nie in der Meldung.)
+            const gebucht = Number(r.data.creditedCents) || 0;
+            const stand = r.data.status || null;
+            if (decision === 'approve') {
+              if (stand === 'rejected') {
+                // Doppel-Schutz in der Buchung (04.10.2026): nichts gebucht,
+                // der Bon ist als Doppel abgelehnt.
+                const warum = FOLGE_DE[r.data.rejectReason] || 'derselbe Bon wurde schon vergütet';
+                toast(`Nicht freigegeben – ${warum}`, 'bad');
+              } else if (gebucht > 0) {
+                toast(`Freigegeben · ${euro(gebucht)} gebucht`, 'good');
+              } else {
+                const warum = FOLGE_DE[r.data.capReason] || FOLGE_DE[stand] || r.data.capReason || 'kein Betrag berechnet';
+                toast(`Angenommen, aber ohne Prämie — ${warum}`, 'bad');
+              }
+            } else {
+              // Eine Bon-Ablehnung lässt sich nicht per Klick zurückholen: der
+              // Resolver kennt keinen Weg von 'rejected' zurück in die Prüfung.
+              // Das gehört gesagt, statt es den Prüfer herausfinden zu lassen.
+              toast(decision === 'no_reward'
+                ? 'Angenommen, ohne Prämie erfasst'
+                : 'Abgelehnt — bei Bons endgültig, kein Zurückholen', 'bad');
+            }
+            await advance(fallId);
+          } else {
+            const code = r.data.code || r.data.http;
+            // Der verlinkte Bon ist noch nicht entschieden: eine erneute
+            // Freigabe hielte wieder fest (dritte Prüfrunde 06.10.2026).
+            const text = code === 'halten' && r.data.reviewReason === 'bild_aehnlich_offen'
+              ? 'Der ähnliche Bon (Zeile „Doppel-Prüfung") ist noch nicht entschieden — zuerst ihn entscheiden, dann diesen'
+              : RESOLVER_DE[code] || code;
+            toast(`Nicht ausgeführt: ${esc(text)}`, 'bad');
+            if (code === 'halten') {
+              // Den Fall frisch laden: die Zeile „Doppel-Prüfung" ist neu.
+              S.cache.delete(fallId);
+              if (S.zeigt === fallId) await showCurrent();
+            }
+          }
+        } catch (e) {
+          // Abbruch ohne Antwort: der Resolver kann trotzdem gebucht haben.
+          const unklar = /deadline-exceeded|unavailable/.test(String(e && e.code));
+          toast(unklar ? `Nicht sicher ausgeführt: ${RESOLVER_DE.netzwerk}` : 'Fehler: ' + e.message, 'bad');
+        }
+        setBusy(false);
+      }
+
+      // ── Bedienung ───────────────────────────────────────────
+      $('bOk').onclick = () => { hideReasons(); S.type === 'photos' ? decidePhoto('approve') : decideReceipt('approve'); };
+      $('bNo').onclick = () => {
+        if (S.mode) return hideReasons();
+        const list = S.type === 'photos' ? REASONS_PHOTO : REASONS_RECEIPT;
+        showReasons(list, (k) => (S.type === 'photos' ? decidePhoto('reject', k) : decideReceipt('reject', k)));
+        if (S.type === 'receipts') {
+          $('reasons').insertAdjacentHTML('afterbegin',
+            '<span style="color:var(--warn);font-weight:700;font-size:12px;white-space:nowrap;align-self:center">endgültig ·</span>');
+        }
+      };
+      $('bNoReward').onclick = () => {
+        if (S.mode) return hideReasons();
+        showReasons(NO_REWARD, (k) => decideReceipt('no_reward', k));
+        // Genauso endgültig wie eine Ablehnung — der Resolver kennt keinen Weg zurück.
+        $('reasons').insertAdjacentHTML('afterbegin',
+          '<span style="color:var(--warn);font-weight:700;font-size:12px;white-space:nowrap;align-self:center">endgültig ·</span>');
+      };
+      $('bSkip').onclick = () => { hideReasons(); if (S.idx < S.queue.length - 1) { S.idx++; showCurrent(); } };
+
+      $('reasons').onclick = (e) => {
+        const b = e.target.closest('.rchip'); if (!b) return;
+        if (b.id === 'forceOk') return; // hat einen eigenen Handler
+        const k = b.dataset.r;
+        const pick = S.mode && S.mode.onPick;
+        hideReasons();
+        if (k && pick) pick(k);
+      };
+
+      document.addEventListener('keydown', (e) => {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+        // Cmd+F / Strg+F ist „Seite durchsuchen", nicht „Freigeben". Und eine
+        // gedrückt gehaltene Taste darf nicht eine Entscheidung nach der
+        // anderen auslösen.
+        if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+        if ($('light').classList.contains('on')) { $('light').classList.remove('on'); return; }
+        if (S.mode) {
+          if (e.key === 'Escape') return hideReasons();
+          if (S.mode.force) return; // Begründung wird getippt, nicht per Ziffer gewählt
+          const n = Number(e.key);
+          if (n >= 1 && n <= S.mode.list.length) {
+            const k = S.mode.list[n - 1][0];
+            const pick = S.mode.onPick;
+            hideReasons();
+            pick(k);
+          }
+          return;
+        }
+        if (e.key === 'f' || e.key === 'F') $('bOk').click();
+        else if (e.key === 'a' || e.key === 'A') $('bNo').click();
+        else if ((e.key === 'o' || e.key === 'O') && S.type === 'receipts') $('bNoReward').click();
+        else if (e.key === 'ArrowRight') $('bSkip').click();
+        // Nicht blättern, solange eine Entscheidung unterwegs ist — sonst
+        // landet ihre Antwort auf einem anderen Fall.
+        else if (e.key === 'ArrowLeft') { if (!S.busy && S.idx > 0) { S.idx--; showCurrent(); } }
+      });
+
+      $('qlist').onclick = (e) => {
+        if (S.busy) return; // laufende Entscheidung nicht überholen
+        const i = e.target.closest('.qi'); if (!i) return;
+        S.idx = Number(i.dataset.i); hideReasons(); showCurrent();
+      };
+      $('stage').onclick = (e) => {
+        const korr = e.target.closest('[data-korr-verwerfen]');
+        if (korr) { verwerfeKorrektur(korr.dataset.korrVerwerfen); return; }
+        const img = e.target.closest('img[data-cap]'); if (!img) return;
+        $('light').querySelector('img').src = img.dataset.full || img.src;
+        $('lightCap').textContent = img.dataset.cap;
+        $('light').classList.add('on');
+      };
+      $('light').onclick = () => $('light').classList.remove('on');
+      document.querySelectorAll('.tab').forEach((t) => { t.onclick = () => {
+        if (S.busy) return; // nicht mitten in einer Entscheidung wechseln
+        document.querySelectorAll('.tab').forEach((x) => x.classList.remove('on'));
+        t.classList.add('on'); S.type = t.dataset.type; S.done.clear(); S.cache.clear();
+        S.queue = []; S.idx = 0; leisteAus(); filterOptionen();
+        $('fVerdict').classList.remove('hidden'); // gilt jetzt für beide Arten
+        loadQueue();
+      }; });
+      $('q').onkeydown = (e) => { if (e.key === 'Enter') loadQueue(); };
+      // Das native ✕ des Suchfeldes löst kein keydown aus — ohne das hier bliebe
+      // die gefilterte Liste stehen, obwohl das Feld leer aussieht.
+      $('q').addEventListener('search', () => { if (!$('q').value.trim()) loadQueue(); });
+      $('fVerdict').onchange = () => loadQueue();
+      /** „unvollständig" gibt es nur bei Fotos — bei Bons wäre die Option tot. */
+      function filterOptionen() {
+        const opt = [...$('fVerdict').options].find((o) => o.value === 'incomplete');
+        if (opt) opt.hidden = S.type !== 'photos';
+        if (S.type !== 'photos' && $('fVerdict').value === 'incomplete') $('fVerdict').value = 'all';
+      }
+
+      /**
+       * Ein Fall, der über die Karte aufgerufen wurde (`?id=…`).
+       *
+       * Die Karte zeigt ALLE Einreichungen, auch längst entschiedene — die
+       * stehen in keiner Warteschlange. Ein Link, der dann stumm auf dem
+       * erstbesten Fall landet, ist schlimmer als keiner: beim zweiten Mal
+       * traut man der Karte nicht mehr. Also: in der Schlange suchen, sonst
+       * den Fall einzeln laden und ohne Entscheidungsleiste zeigen.
+       */
+      async function oeffneEinzelfall(id) {
+        leisteAus();
+        const treffer = S.queue.findIndex((x) => x.id === id);
+        if (treffer >= 0) { S.idx = treffer; await showCurrent(); return; }
+        $('stage').innerHTML = '<div class="empty">Lade Fall …</div>';
+        try {
+          await fetchCases([id]);
+          const c = S.cache.get(id);
+          if (!c) { zeigeFehler('Diesen Fall gibt es nicht (mehr).', () => loadQueue()); return; }
+          render(c);
+          leisteAus();
+          const zustand = c.row && c.row.status ? c.row.status : 'unbekannt';
+          const wort = { approved: 'angenommen', rejected: 'abgelehnt', no_reward: 'angenommen, ohne Prämie', review: 'in Prüfung', pending: 'wartet' }[zustand] || zustand;
+          // Seit die Morgenrunde automatisch ablehnt (24.09.), muss eine
+          // Ablehnung von hier aus zurückholbar sein — der Server erlaubt
+          // „reopen" für jeden abgelehnten Produktfoto-Fall. Freigaben haben
+          // schon gebucht und werden nie per Klick zurückgenommen.
+          const zurueck = zustand === 'rejected' && S.type !== 'receipts';
+          $('stage').insertAdjacentHTML('afterbegin',
+            `<div class="folge zahlt-nicht" style="margin:0 0 14px">Direkt geöffnet · dieser Fall ist bereits <b>${esc(wort)}</b>${zurueck ? '' : ' — hier wird nichts mehr entschieden'}.
+             ${zurueck ? '<button id="zurueckholen" class="rchip" style="margin-left:10px">Zurückholen und neu entscheiden</button>' : ''}
+             <button id="zurueckZurListe" class="rchip" style="margin-left:10px">Zur Warteschlange</button>
+             ${zurueck ? '<div style="margin-top:6px;font-size:12px">Danach bitte gleich entscheiden — sonst prüft die Morgenrunde den Fall am nächsten Morgen erneut.</div>' : ''}</div>`);
+          $('zurueckZurListe').onclick = () => { history.replaceState({}, '', location.pathname + (S.type === 'receipts' ? '?tab=receipts' : '')); loadQueue(); };
+          if (zurueck) {
+            $('zurueckholen').onclick = async () => {
+              $('zurueckholen').disabled = true;
+              try {
+                await call('reviewDecideUploads')({ ids: [id], decision: 'reopen' });
+                S.done.delete(id); S.cache.delete(id);
+                toast('Zurückgeholt — jetzt entscheiden', 'good');
+                await loadQueue(true);
+                await oeffneEinzelfall(id);
+              } catch (e) {
+                $('zurueckholen').disabled = false;
+                toast('Zurückholen fehlgeschlagen: ' + e.message, 'bad');
+              }
+            };
+          }
+        } catch (e) {
+          zeigeFehler('Der Fall ließ sich nicht laden: ' + e.message, () => oeffneEinzelfall(id));
+        }
+      }
+
+      const parameter = new URLSearchParams(location.search);
+      if (parameter.get('tab') === 'receipts') {
+        S.type = 'receipts';
+        document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x.dataset.type === 'receipts'));
+      }
+      initAdmin(async () => {
+        $('app').classList.add('on');
+        filterOptionen(); // gilt auch beim Direkteinstieg über ?tab=receipts
+        await loadQueue();
+        const id = parameter.get('id');
+        if (id) await oeffneEinzelfall(id);
+      });
+    </script>
+  </body>
+</html>

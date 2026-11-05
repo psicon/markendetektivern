@@ -22,7 +22,9 @@
 
 const admin = require('firebase-admin');
 const { FieldValue } = require('firebase-admin/firestore');
-const { GoogleGenAI } = require('@google/genai');
+const logger = require('firebase-functions/logger');
+const { ai, mitKostenLabels, mitZeitlimit, zeitlimitConfig, ZWECK } = require('./gemini');
+const { NACHLAUF_COLLECTION, planeNachlauf } = require('./nachlauf');
 
 const db = admin.firestore();
 
@@ -44,6 +46,39 @@ const REVIEW_MIN = 0.7; // [REVIEW_MIN, AUTO_LOCK) → Mensch-Review
 // Nach Ablauf bekommt die Zeile eine frische Analyse: der Katalog wächst,
 // aus needs_review kann ein Treffer werden.
 const PENDING_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+
+// Zeitbudget je Bon-Zeile (08.10.2026). Ab 01.10. brach der Trigger täglich
+// bis zu 550-mal bei 120 s ab: der Gemini-Pick hatte kein eigenes Zeitlimit
+// und wartete bei langsamem Vertex bis zum 300-s-Limit von Node-fetch. Der
+// Lauf rechnete danach im Hintergrund weiter und schrieb erst bei ~300 s
+// 'pick-failed'. Jetzt hat jede Stufe ein Limit, und die ganze Zeile endet
+// vor der Frist des Aufrufers (Trigger: 120 s − SCHREIB_RESERVE_MS).
+//
+// Werte gemessen (Diagnose 08.10.): kleine Aufrufe von gemini-3.5-flash
+// global an guten Tagen p90 5,3 s, p99 22,6 s; an schlechten Tagen bleibt
+// p50 bei 2,5–4,4 s, ein Teil hängt minutenlang in der Warteschlange. Ein
+// zweiter Versuch landet dann oft schnell. Einbettung p99 0,28 s,
+// Vektorsuche ~0,6 s, alles ohne KI inkl. Schreiben ≤ 5,6 s.
+const ZEILEN_BUDGET_MS = 100_000; // Frist, wenn der Aufrufer keine setzt
+const SCHREIB_RESERVE_MS = 20_000; // Rest der Function-Laufzeit fürs Schreiben + Journey-Abschluss
+const PICK_TIMEOUT_MS = 25_000; // je Versuch
+const PICK_MIN_MS = 5_000; // darunter lohnt kein Versuch mehr (p50 ≈ 3–4 s)
+const PICK_RETRY_MIN_MS = 30_000; // zweiter Versuch nur, wenn danach noch so viel bleibt
+const PICK_MAX_VERSUCHE = 2;
+const PICK_429_PAUSE_MS = 1000; // + bis zu 1 s Zufall, damit nicht alle Zeilen gleichzeitig wiederkommen
+// Einbettung je Versuch: erst 10 s, dann 20 s. Vom Mac aus (08.10.) kostete
+// der erste Embedding-Request auf jeder NEUEN Verbindung ~11 s, und ein
+// abgebrochener Versuch fing wieder von vorn an — mit festen 10 s scheiterten
+// alle drei. In Produktion nicht sichtbar (KI-Zeilen meist 3–7 s, keine
+// Häufung bei 11–13 s; Vertex p99 0,28 s), der längere Folgeversuch fängt es
+// trotzdem ab und kostet nichts, solange nichts hängt.
+const EMBED_TIMEOUTS_MS = [10_000, 20_000, 20_000];
+const EMBED_MIN_MS = 2_000;
+const SHORTLIST_TIMEOUT_MS = 15_000; // Firestore-Vektorsuche (nicht abbrechbar, nur begrenzt)
+
+// Felder, die nur ein Fehler-Ausgang schreibt. Ein späterer fertiger Status
+// (Nachlauf, Hand-Endpunkt mit force) räumt sie wieder ab.
+const FEHLER_FELDER = Object.freeze(['matchError', 'matchErrorDetail', 'pickAttempts', 'pickMs', 'matchNachlauf']);
 
 /**
  * Ist ein Pending-Marker am Alias-Doc frisch genug, um die teure
@@ -119,27 +154,41 @@ function negativeType(name) {
   return null;
 }
 
-let _ai = null;
-function ai() {
-  if (_ai) return _ai;
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('GEMINI_API_KEY not set');
-  _ai = new GoogleGenAI({ apiKey });
-  return _ai;
-}
+const schlafen = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function embedQuery(text) {
-  for (let attempt = 0; attempt < 3; attempt++) {
+/**
+ * Embedding einer Bon-Zeile. Jeder Versuch hat ein eigenes Zeitlimit; mit
+ * `opts.deadlineAt` hört die Funktion zusätzlich auf, sobald die Frist der
+ * Zeile nicht mehr reicht (dann null → 'embed-failed').
+ */
+async function embedQuery(text, opts = {}) {
+  const deadlineAt = Number.isFinite(opts.deadlineAt) ? opts.deadlineAt : Infinity;
+  for (let attempt = 0; attempt < EMBED_TIMEOUTS_MS.length; attempt++) {
+    const ms = Math.min(EMBED_TIMEOUTS_MS[attempt], deadlineAt - Date.now());
+    if (ms < EMBED_MIN_MS) {
+      console.warn('embedQuery: Restzeit der Zeile reicht nicht mehr');
+      return null;
+    }
     try {
-      const r = await ai().models.embedContent({ model: EMB_MODEL, contents: [String(text)], config: { outputDimensionality: EMB_DIM } });
+      const r = await mitZeitlimit(
+        (signal) =>
+          ai().models.embedContent({
+            model: EMB_MODEL,
+            contents: [String(text)],
+            config: { outputDimensionality: EMB_DIM, ...zeitlimitConfig(signal, ms) },
+          }),
+        ms,
+        'embed_timeout',
+      );
       const e = (r.embeddings || [])[0];
       return (e && (e.values || e.embedding)) || null;
     } catch (err) {
-      if (attempt === 2) {
-        console.warn('embedQuery failed:', err.message);
+      const pause = 1200 * (attempt + 1);
+      if (attempt === EMBED_TIMEOUTS_MS.length - 1 || deadlineAt - Date.now() - pause < EMBED_MIN_MS) {
+        console.warn('embedQuery failed:', err.code || '', err.message);
         return null;
       }
-      await new Promise((r) => setTimeout(r, 1200 * (attempt + 1)));
+      await schlafen(pause);
     }
   }
   return null;
@@ -271,7 +320,13 @@ const PICK_SCHEMA = {
   required: ['lineType', 'candidateIdx', 'confidence'],
 };
 
-async function geminiPick(itemName, marktSlug, priceCents, cands, bonSize) {
+/**
+ * EIN Pick-Versuch. `opts.timeoutMs` ist Pflicht im Betrieb (pickMitBudget
+ * setzt es); bei Ablauf wirft die Funktion mit `code = 'pick_timeout'`.
+ * Eine leere oder abgeschnittene Antwort wirft `code = 'pick_json'`.
+ */
+async function geminiPick(itemName, marktSlug, priceCents, cands, bonSize, opts = {}) {
+  const timeoutMs = Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0 ? opts.timeoutMs : PICK_TIMEOUT_MS;
   const user =
     `Bon-Zeile: "${itemName}"\nMarkt: ${marktSlug}\nPreis: ${(priceCents / 100).toFixed(2)} €${bonSize ? `\nGröße/Menge: ${bonSize}` : ''}\n\nKandidaten:\n` +
     cands
@@ -281,18 +336,31 @@ async function geminiPick(itemName, marktSlug, priceCents, cands, bonSize) {
         return `[${i}] ${c.name} | ${c.type === 'noname' ? 'NoName' : 'Marke'}${brand ? ' · ' + brand : ''}${c.size ? ' · ' + c.size : ''}${c.preis != null ? ` · ${Number(c.preis).toFixed(2)}€` : ''}${market}${c.tier === 2 ? ' · (reweapify)' : ''}${c.personal ? ` ★[${c.reason}]` : ''}`;
       })
       .join('\n');
-  const r = await ai().models.generateContent({
-    model: PICK_MODEL,
-    contents: [{ role: 'user', parts: [{ text: user }] }],
-    config: {
-      systemInstruction: PICK_SYS,
-      responseMimeType: 'application/json',
-      responseSchema: PICK_SCHEMA,
-      temperature: 0.1,
-      thinkingConfig: { thinkingBudget: 0 },
-      maxOutputTokens: 200,
-    },
-  });
+  const r = await mitZeitlimit(
+    (signal) =>
+      ai().models.generateContent({
+        model: PICK_MODEL,
+        contents: [{ role: 'user', parts: [{ text: user }] }],
+        config: mitKostenLabels(
+          {
+            systemInstruction: PICK_SYS,
+            responseMimeType: 'application/json',
+            responseSchema: PICK_SCHEMA,
+            temperature: 0.1,
+            // thinkingLevel statt thinkingBudget (24.09.2026): Vertex lehnt seit
+            // 22.09. einen Teil der Anfragen mit thinkingBudget: 0 ab (400 „Thinking
+            // budget is not supported for this model"; beim Produktfoto-Namer
+            // gemessen, siehe CLAUDE.md). Die Denk-Token zählen zu maxOutputTokens.
+            thinkingConfig: { thinkingLevel: 'LOW' },
+            maxOutputTokens: 2048,
+            ...zeitlimitConfig(signal, timeoutMs),
+          },
+          ZWECK.ZUORDNUNG,
+        ),
+      }),
+    timeoutMs,
+    'pick_timeout',
+  );
   let t = null;
   try {
     t = r && r.text;
@@ -303,7 +371,87 @@ async function geminiPick(itemName, marktSlug, priceCents, cands, bonSize) {
     const parts = r && r.candidates && r.candidates[0] && r.candidates[0].content && r.candidates[0].content.parts;
     if (Array.isArray(parts)) t = parts.map((p) => (p && p.text) || '').join('');
   }
-  return JSON.parse(t);
+  // Leere Antwort (JSON.parse(null) wäre null → TypeError beim Lesen von
+  // confidence) oder abgeschnittenes JSON → eigener, wiederholbarer Fehler.
+  let pick = null;
+  try {
+    pick = JSON.parse(t);
+  } catch (e) {
+    /* unten */
+  }
+  if (!pick || typeof pick !== 'object') {
+    const finishReason = (r && r.candidates && r.candidates[0] && r.candidates[0].finishReason) || null;
+    const err = new Error(`Pick-Antwort kein JSON${finishReason ? ` (${finishReason})` : ''}`);
+    err.code = 'pick_json';
+    throw err;
+  }
+  return pick;
+}
+
+// ─── Pick mit Zeitbudget ─────────────────────────────────────────────
+// matchError am Dokument: 'pick-timeout' | 'pick-429' | 'pick-failed'.
+// 504 DEADLINE_EXCEEDED zählt als Zeitlimit: im Rauchtest vom 08.10. kam der
+// Pick mit X-Server-Timeout 26 s nach 23,2 s so zurück (Einzelfall — spricht
+// dafür, dass Vertex den Kopf beachtet; belegt ist das nicht).
+function pickFehlerArt(e) {
+  if (!e) return 'pick-failed';
+  if (e.code === 'pick_timeout' || e.name === 'AbortError') return 'pick-timeout';
+  if (Number(e.status) === 504 || /DEADLINE_EXCEEDED/.test(String(e.message))) return 'pick-timeout';
+  if (Number(e.status) === 429 || /RESOURCE_EXHAUSTED/.test(String(e.message))) return 'pick-429';
+  return 'pick-failed';
+}
+
+/**
+ * Lohnt ein zweiter Versuch? Ja bei Zeitlimit, 429, 5xx, Netzfehlern und
+ * leerer/abgeschnittener Antwort. Nein bei anderen HTTP-4xx (400 = die
+ * Anfrage selbst ist falsch, ein zweiter Versuch scheitert genauso) und bei
+ * unbekannten Fehlern im eigenen Code.
+ */
+function pickWiederholbar(e) {
+  if (!e) return false;
+  if (pickFehlerArt(e) !== 'pick-failed') return true;
+  if (e.code === 'pick_json') return true;
+  const status = Number(e.status);
+  if (Number.isFinite(status) && status >= 400) return status >= 500;
+  const text = `${e.message || ''} ${(e.cause && (e.cause.code || e.cause.message)) || ''}`;
+  return /fetch failed|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ECONNREFUSED|socket hang up|UND_ERR/i.test(text);
+}
+
+function fehlerDetail(e) {
+  if (!e) return null;
+  const status = Number(e.status);
+  const text = `${Number.isFinite(status) ? `HTTP ${status}: ` : ''}${e.message || String(e)}`;
+  return text.slice(0, 200);
+}
+
+/**
+ * Führt den Pick mit Zeitbudget aus: je Versuch höchstens PICK_TIMEOUT_MS und
+ * nie über `deadlineAt` hinaus; ein zweiter Versuch nur bei wiederholbarem
+ * Fehler und wenn danach noch PICK_RETRY_MIN_MS bleiben.
+ * `versuch(ms)` startet EINEN Pick mit diesem Zeitlimit. Uhr und Pause sind
+ * injizierbar, damit die Regeln ohne Netz und ohne Warten testbar sind.
+ * @returns {Promise<{ pick: object|null, versuche: number, fehler: Error|null, ms: number }>}
+ */
+async function pickMitBudget(versuch, deadlineAt, { jetzt = Date.now, pause = schlafen } = {}) {
+  const start = jetzt();
+  let versuche = 0;
+  let fehler = null;
+  while (versuche < PICK_MAX_VERSUCHE) {
+    const ms = Math.min(PICK_TIMEOUT_MS, deadlineAt - jetzt());
+    if (ms < PICK_MIN_MS) break;
+    versuche++;
+    try {
+      const pick = await versuch(ms);
+      return { pick, versuche, fehler: null, ms: jetzt() - start };
+    } catch (e) {
+      fehler = e;
+      if (versuche >= PICK_MAX_VERSUCHE || !pickWiederholbar(e)) break;
+      const warte = pickFehlerArt(e) === 'pick-429' ? PICK_429_PAUSE_MS + Math.floor(Math.random() * 1000) : 0;
+      if (deadlineAt - jetzt() - warte < PICK_RETRY_MIN_MS) break;
+      if (warte) await pause(warte);
+    }
+  }
+  return { pick: null, versuche, fehler, ms: jetzt() - start };
 }
 
 // ─── Outcome-Writer ──────────────────────────────────────────────────
@@ -445,13 +593,45 @@ async function fetchPersonalCandidates(userId) {
 async function matchLine(ctx, opts = {}) {
   const { itemName, marktSlug, priceCents = 0, userId = null, receiptId = null, ppRef = null, merchantName = null, merchantLand = null, bonDate = null } = ctx;
   const dryRun = !!opts.dryRun;
+  const gestartet = Date.now();
+  // Frist der Zeile: der Trigger übergibt sie (Function-Start + 120 s −
+  // Schreibreserve); die Hand-Endpunkte nicht → je Zeile ZEILEN_BUDGET_MS.
+  const deadlineAt = Number.isFinite(opts.deadlineAt) ? opts.deadlineAt : gestartet + ZEILEN_BUDGET_MS;
+  // Nummer des Nachlauf-Versuchs (nachlauf.js), 0 = Trigger/Hand-Endpunkt.
+  const nachlaufVersuch = Number.isInteger(opts.nachlaufVersuch) && opts.nachlaufVersuch > 0 ? opts.nachlaufVersuch : 0;
   const normKey = norm(itemName);
   const writePP = async (data) => {
-    if (!dryRun && ppRef)
-      await ppRef.set(
-        { ...data, normKey, marktSlug: norm(marktSlug), matchVersion: MATCH_VERSION, matchedAt: FieldValue.serverTimestamp() },
-        { merge: true },
-      );
+    if (dryRun || !ppRef) return;
+    // Zeit-/Kontingentfehler: Nachlauf im SELBEN Batch planen (nachlauf.js) —
+    // eine Zeile mit matchVersion fasst sonst kein Leser mehr an.
+    const plan =
+      data.matchStatus === 'error' && ppRef.path
+        ? planeNachlauf({ ppPath: ppRef.path, matchError: data.matchError, versuch: nachlaufVersuch, jetzt: Date.now() })
+        : null;
+    const felder = plan ? { ...data, ...plan.ppFelder } : data;
+    const payload = {
+      ...felder,
+      normKey,
+      marktSlug: norm(marktSlug),
+      matchVersion: MATCH_VERSION,
+      matchedAt: FieldValue.serverTimestamp(),
+      // Herkunft: Ergebnis aus dem Nachlauf? Ein späterer Lauf ohne Nachlauf räumt die Angabe.
+      matchNachlaufVersuch: nachlaufVersuch || FieldValue.delete(),
+    };
+    // Spuren eines früheren Laufs räumen: sonst stünde nach einem geretteten
+    // Nachlauf 'matched' neben 'pick-timeout', oder nach einem 400 im
+    // Nachlauf noch matchNachlauf 'geplant' am Dokument.
+    for (const f of FEHLER_FELDER) if (!(f in felder)) payload[f] = FieldValue.delete();
+    if (!plan) {
+      await ppRef.set(payload, { merge: true });
+      return;
+    }
+    const eintragRef = db.collection(NACHLAUF_COLLECTION).doc(plan.docId);
+    const batch = db.batch();
+    batch.set(ppRef, payload, { merge: true });
+    if (plan.aktion === 'planen') batch.set(eintragRef, plan.daten, { merge: true });
+    else batch.delete(eintragRef);
+    await batch.commit();
   };
 
   if (!normKey) {
@@ -526,24 +706,76 @@ async function matchLine(ctx, opts = {}) {
     }
   }
 
+  // KI pausiert (Patrick 13.10.2026: „Zuordnung pausieren und später gesammelt
+  // nachholen“): Regeln und Alias-Lexikon laufen weiter (kostenlos), der KI-Weg
+  // nicht. Die Zeile bekommt KEINE matchVersion — so findet sie der spätere
+  // Sammellauf (matchBacklogManual ohne force) wieder.
+  if (opts.kiPausiert === true) {
+    if (!dryRun && ppRef) await ppRef.set({ matchStatus: 'pausiert', matchPausiertAt: FieldValue.serverTimestamp() }, { merge: true });
+    return { status: 'pausiert' };
+  }
+
+  // Ab hier KI-Weg: EINE strukturierte Logzeile je Zeile mit allen
+  // Stufenzeiten. Vorher stand ein gescheiterter Pick nirgends im Log
+  // (nur 'pick-failed' am Dokument), die Ursache der Abbrüche blieb deshalb
+  // unsichtbar.
+  const stufen = {};
+  const messe = async (name, fn) => {
+    const t = Date.now();
+    try {
+      return await fn();
+    } finally {
+      stufen[name] = Date.now() - t;
+    }
+  };
+  const kiFertig = (r, extra = {}) => {
+    logger.info('zuordnung-ki', {
+      status: r.status,
+      reason: r.reason || null,
+      detail: r.detail || null,
+      confidence: r.confidence ?? null,
+      ...extra,
+      stufenMs: stufen,
+      gesamtMs: Date.now() - gestartet,
+      restMs: deadlineAt - Date.now(),
+      marktSlug: norm(marktSlug),
+      receiptId,
+      ppId: (ppRef && ppRef.id) || null,
+      nachlaufVersuch,
+      dryRun,
+    });
+    return r;
+  };
+
   // 3) Embedding + Shortlist (markt-agnostisch; Markt nur als Bonus/Signal)
-  const bonMarketIds = await discounterIdsForSlug(marktSlug, merchantLand);
-  const qv = await embedQuery(itemName);
+  const bonMarketIds = await messe('markt', () => discounterIdsForSlug(marktSlug, merchantLand));
+  const qv = await messe('embed', () => embedQuery(itemName, { deadlineAt }));
   if (!qv) {
     await writePP({ matchStatus: 'error', matchError: 'embed-failed' });
-    return { status: 'error', reason: 'embed-failed' };
+    return kiFertig({ status: 'error', reason: 'embed-failed' });
   }
-  const catalogCands = await shortlist(qv, bonMarketIds);
+  // Die Firestore-Vektorsuche lässt sich nicht abbrechen, nur begrenzen: bei
+  // Ablauf schreibt die Zeile ihren Status, die Abfrage läuft folgenlos aus.
+  let catalogCands;
+  try {
+    catalogCands = await messe('shortlist', () =>
+      mitZeitlimit(() => shortlist(qv, bonMarketIds), Math.max(1000, Math.min(SHORTLIST_TIMEOUT_MS, deadlineAt - Date.now())), 'shortlist_timeout'),
+    );
+  } catch (e) {
+    if (e.code !== 'shortlist_timeout') throw e;
+    await writePP({ matchStatus: 'error', matchError: 'shortlist-timeout', matchErrorDetail: fehlerDetail(e) });
+    return kiFertig({ status: 'error', reason: 'shortlist-timeout' });
+  }
   // Bon-Metadaten (Preis/Größe/Datum/Markt) einmal berechnen → an Alias + Queue.
   const bonDateStr = bonDate && bonDate.toDate ? bonDate.toDate().toISOString() : typeof bonDate === 'string' ? bonDate : null;
-  const bonMeta = { priceCents, bonSize: parseSize(itemName), bonDate: bonDateStr, market: await marketInfo(receiptId, merchantName, merchantLand) };
+  const bonMeta = { priceCents, bonSize: parseSize(itemName), bonDate: bonDateStr, market: await messe('marketInfo', () => marketInfo(receiptId, merchantName, merchantLand)) };
   // Persönlicher Anker: Einkaufszettel/kürzliche Käufe nach ECHTER Ähnlichkeit zur
   // Bon-Zeile scoren (Cosine) + moderaten Bonus geben — NICHT blind vornanstellen.
   // So steigt nur ein WIRKLICH passendes Zettel-Item auf; irrelevante sinken unter
   // die Katalog-Treffer und verdrängen sie nicht.
   const PERSONAL_BONUS = 0.88; // ~12% Distanz-Bonus für eigene Absicht
   const PERSONAL_MAX_DIST = 0.42; // nur Zettel-/Kauf-Items die WIRKLICH ähnlich sind dazunehmen
-  const personalScored = (userId ? await fetchPersonalCandidates(userId) : [])
+  const personalScored = (userId ? await messe('persoenlich', () => fetchPersonalCandidates(userId)) : [])
     .map((c) => {
       const { _vec, ...rest } = c;
       const raw = cosineDist(qv, _vec);
@@ -561,17 +793,21 @@ async function matchLine(ctx, opts = {}) {
   if (!cands.length) {
     await bumpExternalMiss(marktSlug, normKey, itemName);
     await writePP({ matchStatus: 'unmapped', productId: null, lineType: 'product' });
-    return { status: 'unmapped', reason: 'no-candidates' };
+    return kiFertig({ status: 'unmapped', reason: 'no-candidates' });
   }
 
-  // 4) Gemini-Pick (mit Bon-Größe als zusätzliches Signal)
-  let pick;
-  try {
-    pick = await geminiPick(itemName, marktSlug, priceCents, cands, parseSize(itemName));
-  } catch (e) {
-    await writePP({ matchStatus: 'error', matchError: 'pick-failed' });
-    return { status: 'error', reason: 'pick-failed', detail: e.message };
+  // 4) Gemini-Pick (mit Bon-Größe als zusätzliches Signal), mit Zeitbudget
+  const bonSize = parseSize(itemName);
+  const lauf = await pickMitBudget((ms) => geminiPick(itemName, marktSlug, priceCents, cands, bonSize, { timeoutMs: ms }), deadlineAt);
+  stufen.pick = lauf.ms;
+  const pickInfo = { pickAttempts: lauf.versuche, pickMs: lauf.ms };
+  if (!lauf.pick) {
+    const matchError = lauf.fehler ? pickFehlerArt(lauf.fehler) : 'pick-timeout';
+    const detail = lauf.fehler ? fehlerDetail(lauf.fehler) : 'Restzeit der Zeile reichte nicht für einen Pick';
+    await writePP({ matchStatus: 'error', matchError, matchErrorDetail: detail, ...pickInfo });
+    return kiFertig({ status: 'error', reason: matchError, detail }, pickInfo);
   }
+  const pick = lauf.pick;
   const conf = Number(pick.confidence) || 0;
   const cand = pick.candidateIdx >= 0 && pick.candidateIdx < cands.length ? cands[pick.candidateIdx] : null;
 
@@ -579,7 +815,7 @@ async function matchLine(ctx, opts = {}) {
   if (pick.lineType === 'pfand' || pick.lineType === 'discount' || pick.lineType === 'nonproduct') {
     if (!dryRun) await lockAlias(marktSlug, normKey, { productId: null, lineType: pick.lineType, confidence: conf, resolvedBy: 'ai-auto', sampleName: itemName });
     await writePP({ matchStatus: pick.lineType, productId: null, lineType: pick.lineType, matchSource: 'ai' });
-    return { status: pick.lineType, source: 'ai', confidence: conf };
+    return kiFertig({ status: pick.lineType, source: 'ai', confidence: conf }, pickInfo);
   }
 
   // Tier-1 eindeutig → automatisch zuordnen. Persönlicher Anker (Zettel/kürzlich
@@ -591,7 +827,7 @@ async function matchLine(ctx, opts = {}) {
     await writePP({ matchStatus: 'matched', productId: cand.id, productSource: cand.source, lineType: 'product', matchConfidence: conf, matchSource: cand.personal ? 'ai-anchor' : 'ai' });
     if (!opts.noClose) await closeJourneyForProduct(userId, cand.id, receiptId);
     if (!dryRun && receiptId) await writeReceiptMatch({ receiptId, ppId: ppRef && ppRef.id, userId, productId: cand.id, productSource: cand.source, confidence: conf, source: 'ai', itemName, marktSlug });
-    return { status: 'matched', tier: 1, productId: cand.id, confidence: conf };
+    return kiFertig({ status: 'matched', tier: 1, productId: cand.id, confidence: conf }, pickInfo);
   }
 
   // Tier-2 (reweapify) plausibel → Promotion-Queue (Mensch gibt frei, kein Auto-Katalog).
@@ -603,7 +839,7 @@ async function matchLine(ctx, opts = {}) {
     // im Lookup gewinnt dann automatisch.
     if (!dryRun) await aliasRef.set({ marktSlug: norm(marktSlug), normKey, pendingStatus: 'promotion_pending', pendingReweapifyId: cand.id, pendingConfidence: conf, pendingMatchVersion: MATCH_VERSION, lastAiAt: FieldValue.serverTimestamp(), sampleName: itemName, lastSeen: FieldValue.serverTimestamp() }, { merge: true });
     await writePP({ matchStatus: 'promotion_pending', reweapifyId: cand.id, lineType: 'product', matchConfidence: conf, matchSource: 'ai' });
-    return { status: 'promotion_pending', tier: 2, reweapifyId: cand.id, confidence: conf };
+    return kiFertig({ status: 'promotion_pending', tier: 2, reweapifyId: cand.id, confidence: conf }, pickInfo);
   }
 
   // Alles andere mit Kandidaten — Tier-1 unsicher ODER KI hat -1 / keinen klaren Treffer.
@@ -613,7 +849,7 @@ async function matchLine(ctx, opts = {}) {
   // Pending-Marker fürs Negativ-Cache — ohne `resolvedBy`, s. Tier-2-Zweig.
   if (!dryRun) await aliasRef.set({ marktSlug: norm(marktSlug), normKey, pendingStatus: 'needs_review', pendingConfidence: conf, pendingMatchVersion: MATCH_VERSION, lastAiAt: FieldValue.serverTimestamp(), sampleName: itemName, lastSeen: FieldValue.serverTimestamp() }, { merge: true });
   await writePP({ matchStatus: 'needs_review', lineType: 'product', matchConfidence: conf, matchSource: 'ai' });
-  return { status: 'needs_review', confidence: conf, suggestion: cand };
+  return kiFertig({ status: 'needs_review', confidence: conf, suggestion: cand }, pickInfo);
 }
 
 function writeReceiptMatch(m) {
@@ -691,4 +927,27 @@ async function enrichCandidates(cands) {
   return cands;
 }
 
-module.exports = { matchLine, norm, aliasId, parseSize, embedQuery, shortlist, enrichCandidates, discounterIdsForSlug, MATCH_VERSION, istPendingFrisch, PENDING_TTL_MS };
+module.exports = {
+  matchLine,
+  norm,
+  aliasId,
+  parseSize,
+  embedQuery,
+  shortlist,
+  enrichCandidates,
+  discounterIdsForSlug,
+  MATCH_VERSION,
+  istPendingFrisch,
+  PENDING_TTL_MS,
+  // Zeitbudget (Trigger rechnet seine Frist damit) + für Tests
+  SCHREIB_RESERVE_MS,
+  ZEILEN_BUDGET_MS,
+  FEHLER_FELDER,
+  PICK_TIMEOUT_MS,
+  PICK_RETRY_MIN_MS,
+  PICK_MIN_MS,
+  geminiPick,
+  pickMitBudget,
+  pickFehlerArt,
+  pickWiederholbar,
+};

@@ -1,0 +1,16 @@
+{
+  "name": "review-console",
+  "description": "Admin-Callables für die Review-Konsole (Produktfotos + Bons prüfen, filtern, freigeben — einzeln und im Batch)",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "@google/genai": "^1.52.0",
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^6.0.0",
+    "sharp": "^0.33.5",
+    "zxing-wasm": "2.2.4"
+  },
+  "private": true
+}

@@ -16,12 +16,27 @@
  * (`polls/{pollId}.rewardCents`), NICHT aus dem (client-geschriebenen)
  * Response-Doc — der Client kann den Betrag nicht fälschen.
  *
+ * Prüfrunde 02.10.2026 (zwei Schranken, beide nur „nicht zahlen"):
+ *  - Nur Umfragen mit `status === 'active'` werden vergütet. Die App lädt seit
+ *    ihrer ersten Version (781a4e8e) ausschließlich solche Umfragen
+ *    (surveyService.getActivePolls); die Firestore-Regeln erlauben aber jedem
+ *    angemeldeten Nutzer, `poll_responses` mit BELIEBIGER pollId anzulegen.
+ *    Gemessen am 02.10.: 9 bezahlte Umfragen, 8 davon 'draft', zusammen rund
+ *    14 € je Konto — über der Auszahlungsschwelle, ohne dass eine Umfrage
+ *    läuft. Keine einzige echte Antwort kam nach Umfrageende (alle 9 geprüft).
+ *  - Kontosperre (Entscheidung Patrick 02.10.2026, „Ja, dann sperr die
+ *    Konten"): gelesen IN der Ledger-Transaktion, Regel in src/kontoSperre.js
+ *    (KOPIE aus cashback-pipeline). Ein Lesefehler lässt die Transaktion
+ *    scheitern — wie jeder andere Fehler dort: Antwort bleibt gespeichert,
+ *    kein Taler, keine Wiederholung (Verhalten dieser Funktion seit Juni).
+ *
  * Deployment-Codebase: survey-reward
  */
 
 const admin = require('firebase-admin');
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { logger } = require('firebase-functions');
+const { sperreRef, istGesperrt } = require('./src/kontoSperre');
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
@@ -84,6 +99,11 @@ exports.onPollResponseCreated = onDocumentCreated(
       const pollSnap = await db.collection('polls').doc(pollId).get();
       if (!pollSnap.exists) return;
       const pd = pollSnap.data() || {};
+      // Nur Umfragen, die eine App überhaupt zeigen kann (siehe Kopf).
+      if (pd.status !== 'active') {
+        logger.info('[survey-reward] skip: poll not active', { pollId, status: pd.status ?? null });
+        return;
+      }
       if (typeof pd.rewardCents === 'number' && pd.rewardCents > 0) rewardCents = Math.round(pd.rewardCents);
       if (pd.rewardTrigger === 'per_answer' || pd.rewardTrigger === 'none') rewardTrigger = pd.rewardTrigger;
       if (typeof pd.budgetCents === 'number') hasBudget = true;
@@ -164,8 +184,16 @@ exports.onPollResponseCreated = onDocumentCreated(
 
     try {
       let creditedCents = 0;
+      let gesperrt = false;
       await db.runTransaction(async (tx) => {
+        gesperrt = false; // pro Versuch — Firestore wiederholt den Callback bei Konflikten
         // ── Reads zuerst (Firestore-Transaktions-Regel) ──
+        // Kontosperre zuerst: gesperrt → keine neue Gutschrift (siehe Kopf).
+        const sperreSnap = await tx.get(sperreRef(db, uid));
+        if (istGesperrt(sperreSnap)) {
+          gesperrt = true;
+          return;
+        }
         const responseDup = await tx.get(ledgerCol.where('surveyResponseId', '==', responseId));
         if (responseDup.docs.some((d) => d.data()?.type === 'earn')) return; // Doppel-Trigger
 
@@ -219,7 +247,9 @@ exports.onPollResponseCreated = onDocumentCreated(
         }
         creditedCents = pay;
       });
-      if (creditedCents > 0) {
+      if (gesperrt) {
+        logger.warn('[survey-reward] skip: konto gesperrt', { uid, pollId });
+      } else if (creditedCents > 0) {
         logger.info('[survey-reward] credited', { uid, pollId, creditedCents });
       }
     } catch (e) {

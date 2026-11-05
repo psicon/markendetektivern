@@ -14,7 +14,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import React, { useCallback, useLayoutEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -31,12 +31,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 
+import { StandortPflichtHinweis } from '@/components/rewards/StandortPflichtHinweis';
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
+import { useAufnahmeKontext } from '@/hooks/useAufnahmeKontext';
+import { useStandortPflicht } from '@/hooks/useStandortPflicht';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { enqueueBon } from '@/lib/services/bonUploadQueue';
+import { bonGeraeteOrt, clientVersion } from '@/lib/services/captureContext';
 import { getSelectedCampaignId } from '@/lib/services/cashbackUpload';
-import { verdictFor, type CapturedBon } from '@/lib/utils/cashbackImage';
+import { hashImageFile, verdictFor, type CapturedBon } from '@/lib/utils/cashbackImage';
 
 const CHECK_ITEMS: { key: 'corners' | 'date' | 'items'; label: string; sub: string }[] = [
   {
@@ -144,6 +148,16 @@ export default function CashbackReviewScreen() {
   const navigation = useNavigation();
   const { theme, shadows } = useTokens();
   const { user } = useAuth();
+  // Standortpflicht (6.0.20): der Scanner prüft beim Öffnen, hier wird vor dem
+  // Einreichen erneut geprüft — die Freigabe kann zwischendurch entzogen oder
+  // die Ortung über die Schnelleinstellungen abgeschaltet worden sein. Das
+  // Bild bleibt erhalten (Routen-Parameter), nach der Freigabe geht es hier
+  // weiter.
+  const pflicht = useStandortPflicht();
+  // Wiedereintritts-Sperre für „Einreichen": gilt ab dem ersten Tipp bis zur
+  // Navigation und fällt nur auf den Abbruchwegen. `submitting` allein reicht
+  // nicht, weil es erst nach der (kurzen) Standortprüfung gesetzt wird.
+  const einreichenLaeuftRef = useRef(false);
 
   const [checks, setChecks] = useState<Record<'corners' | 'date' | 'items', boolean>>({
     corners: false,
@@ -170,15 +184,41 @@ export default function CashbackReviewScreen() {
     }),
     [params.uri, params.width, params.height, params.hash, params.brightness, params.size],
   );
+  const quelle = ((params.source as string) || 'live_camera') as 'live_camera' | 'upload';
+  // Standort zum Zeitpunkt der Aufnahme — startet sofort, fragt nie nach der
+  // Freigabe und hält das Einreichen höchstens ein paar Sekunden auf. Nur bei
+  // der Kamera: bei einem Bild aus der Galerie wäre es der Ort des Einreichens
+  // (meist zuhause), nicht der Aufnahmeort, den der Zweck-Text nennt.
+  const aufnahmeKontext = useAufnahmeKontext(bon.capturedAt, quelle === 'live_camera');
+  // Der Nutzer hat die Seite verlassen („Nochmal", X, Zurück), während das
+  // Einreichen noch auf die Messung wartet → den verworfenen Bon nicht mehr
+  // einreichen und nicht auf dessen Statusseite springen.
+  const verlassenRef = useRef(false);
+  useEffect(
+    () => () => {
+      verlassenRef.current = true;
+    },
+    [],
+  );
 
   const verdict = useMemo(() => verdictFor(bon), [bon]);
   const allChecked = checks.corners && checks.date && checks.items;
   // "Looks ready" drives the visual state (color stays green while
   // submitting). canSubmit gates the actual press handler.
-  const looksReady = allChecked && verdict.hashOk && verdict.sizeOk;
+  // 86cb6twnp: hashOk blockiert NICHT mehr — ein fehlender Hash wird in
+  // handleSubmit einmal nachgerechnet (Fallback) statt stumm zu sperren.
+  // sizeOk bleibt Gate (Storage-Rule 8 MB), ist aber durch die Capture-
+  // seitige Verkleinerung praktisch immer erfüllt — und wenn nicht, sieht
+  // der Nutzer jetzt WARUM (blockerHint unten + Tap-Erklärung am Button).
+  const looksReady = allChecked && verdict.sizeOk;
   const canSubmit = looksReady && !submitting;
 
+  // Sichtbare Erklärung, sobald die Checkboxen bestätigt sind, aber ein
+  // File-Gate blockt. Vorher war der EINZIGE Hinweis ein graues Icon.
+  const blockerHint = allChecked && !verdict.sizeOk ? verdict.sizeLabel : null;
+
   const handleRetake = useCallback(() => {
+    verlassenRef.current = true;
     router.replace('/cashback/capture');
   }, []);
 
@@ -187,6 +227,7 @@ export default function CashbackReviewScreen() {
   // freshly-mounted stack with replace-style entry can land on the
   // hidden index splash; navigate is robust either way.
   const handleDismiss = useCallback(() => {
+    verlassenRef.current = true;
     router.navigate('/(tabs)/rewards');
   }, []);
 
@@ -209,7 +250,35 @@ export default function CashbackReviewScreen() {
       setSubmitError('Bitte melde dich an, um Bons einzureichen.');
       return;
     }
+    // Fehlt die Freigabe, zeigt der Screen den Sperrhinweis (Render unten).
+    if (einreichenLaeuftRef.current) return;
+    einreichenLaeuftRef.current = true;
+    verlassenRef.current = false;
+    // pruefeStandortPflicht wirft nie (Lesefehler → erfüllt).
+    if ((await pflicht.pruefen()) !== 'erfuellt') {
+      einreichenLaeuftRef.current = false;
+      return;
+    }
     setSubmitting(true);
+    // Hash-Fallback (86cb6twnp): schlug das Hashen beim Aufnehmen fehl
+    // (Heap/IO), einmal nachziehen statt hart zu blockieren. Der Server
+    // rechnet ohnehin autoritativ nach — aber Dedup braucht einen Wert.
+    let bytesHash = bon.bytesHash;
+    if (bytesHash.length !== 64) {
+      bytesHash = await hashImageFile(bon.uri);
+      if (bytesHash.length !== 64) {
+        setSubmitError('Das Bild konnte nicht geprüft werden — bitte nimm den Bon noch einmal auf.');
+        setSubmitting(false);
+        einreichenLaeuftRef.current = false;
+        return;
+      }
+    }
+    const kontext = await aufnahmeKontext();
+    if (verlassenRef.current) {
+      setSubmitting(false);
+      einreichenLaeuftRef.current = false;
+      return;
+    }
     // Hand the receipt to the persistent background upload queue: it copies
     // the image to a durable dir + creates the placeholder mirror, then uploads
     // in the background with NetInfo auto-resume. Survives LEAVING this screen
@@ -220,17 +289,20 @@ export default function CashbackReviewScreen() {
       localId = await enqueueBon({
         uid: user.uid,
         imageUri: bon.uri,
-        hash: bon.bytesHash,
+        hash: bytesHash,
         width: bon.width,
         height: bon.height,
         capturedAt: bon.capturedAt,
-        source: ((params.source as string) || 'live_camera') as 'live_camera' | 'upload',
+        source: quelle,
         campaignId: getSelectedCampaignId(),
+        captureContext: kontext ? bonGeraeteOrt(kontext) : null,
+        clientVersion: clientVersion(),
       });
     } catch (e) {
       console.warn('⚠️ enqueueBon failed', e);
       setSubmitError('Konnte nicht vorgemerkt werden — bitte nochmal.');
       setSubmitting(false);
+      einreichenLaeuftRef.current = false;
       return;
     }
     // Submit-Feedback — leichte Haptik. Die volle Banner+Celebration kommt erst
@@ -243,7 +315,7 @@ export default function CashbackReviewScreen() {
         uploadUri: bon.uri, // local preview while the upload runs
       },
     });
-  }, [bon, canSubmit, user?.uid, params.source]);
+  }, [bon, canSubmit, user?.uid, quelle, pflicht.pruefen, aufnahmeKontext]);
 
   const verdictColor = (ok: boolean) => (ok ? theme.primary ?? '#0d8575' : '#d6603a');
 
@@ -365,6 +437,29 @@ export default function CashbackReviewScreen() {
     [theme, shadows, canSubmit, insets.top, insets.bottom],
   );
 
+  if (pflicht.stand !== null && pflicht.stand !== 'erfuellt') {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.bg ?? '#fff', paddingTop: insets.top + 8 }}>
+        <StatusBar barStyle="dark-content" />
+        <View style={{ paddingHorizontal: 12 }}>
+          <Pressable onPress={handleDismiss} hitSlop={10} style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>
+            <MaterialCommunityIcons name="close" size={26} color={theme.text} />
+          </Pressable>
+        </View>
+        <View style={{ flex: 1, justifyContent: 'center' }}>
+          <StandortPflichtHinweis
+            stand={pflicht.stand}
+            art="bon_review"
+            laeuft={pflicht.laeuft}
+            onErfuellen={() => void pflicht.erfuellen()}
+            onZurueck={handleDismiss}
+            zurueckLabel="Bon verwerfen"
+          />
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: '#000' }}>
       <StatusBar barStyle="light-content" />
@@ -447,7 +542,7 @@ export default function CashbackReviewScreen() {
             );
           })}
 
-          {submitError ? (
+          {submitError || blockerHint ? (
             <View
               style={{
                 marginTop: 12,
@@ -461,7 +556,7 @@ export default function CashbackReviewScreen() {
             >
               <MaterialCommunityIcons name="alert-circle-outline" size={18} color="#d6603a" />
               <Text style={{ color: '#d6603a', fontFamily: fontFamilyVariants.body, fontSize: 13, flex: 1, lineHeight: 18 }}>
-                {submitError}
+                {submitError || blockerHint}
               </Text>
             </View>
           ) : null}
@@ -474,8 +569,19 @@ export default function CashbackReviewScreen() {
             <Text style={styles.ctaSecondaryText}>Nochmal</Text>
           </Pressable>
           <Pressable
-            disabled={!canSubmit}
-            onPress={handleSubmit}
+            // 86cb6twnp: NIE mehr ein stummer toter Button. Blockiert ein
+            // Gate, bleibt der Button tippbar und der Tap zeigt die
+            // Erklärung im Fehler-Block — disabled nur während des Submits.
+            disabled={submitting}
+            onPress={
+              canSubmit
+                ? handleSubmit
+                : () =>
+                    setSubmitError(
+                      blockerHint ??
+                        'Bitte bestätige zuerst die drei Punkte oben — dann kannst du einreichen.',
+                    )
+            }
             style={[styles.cta, styles.ctaPrimary, { flex: 1.4 }]}
           >
             {submitting ? (
@@ -484,7 +590,11 @@ export default function CashbackReviewScreen() {
               <>
                 <MaterialCommunityIcons name="cloud-upload-outline" size={18} color={looksReady ? '#fff' : theme.textMuted ?? '#888'} />
                 <Text style={styles.ctaPrimaryText}>
-                  {allChecked ? 'Einreichen' : `Noch ${3 - Object.values(checks).filter(Boolean).length} bestätigen`}
+                  {!allChecked
+                    ? `Noch ${3 - Object.values(checks).filter(Boolean).length} bestätigen`
+                    : blockerHint
+                    ? 'Datei zu groß'
+                    : 'Einreichen'}
                 </Text>
               </>
             )}

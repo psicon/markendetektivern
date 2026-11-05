@@ -18,8 +18,18 @@
  * Komponenten-Tests (jest-expo / React Native Testing Library) kommen als
  * drittes Projekt in einer späteren Phase dazu.
  */
+/**
+ * `tools/company-os` ist ein eingebettetes Fremdprojekt (Paperclip, 4,3 GB,
+ * nicht versioniert) mit eigenem Testlauf. Ohne diesen Ausschluss krabbelt
+ * jest bei JEDEM Lauf durch den Ordner; der Arbeitsspeicher reicht dann
+ * nicht, und einzelne Suiten sterben am SIGTERM des Betriebssystems — was
+ * wie ein Testfehler aussieht und keiner ist (08.09.2026).
+ */
+const FREMDE_ORDNER = ['<rootDir>/tools/company-os/', '<rootDir>/graphify-out/'];
+
 /** @type {import('jest').Config} */
 module.exports = {
+  modulePathIgnorePatterns: FREMDE_ORDNER,
   projects: [
     {
       displayName: 'app',
@@ -34,6 +44,7 @@ module.exports = {
       },
       clearMocks: true,
       resetMocks: false,
+      modulePathIgnorePatterns: FREMDE_ORDNER,
     },
     {
       displayName: 'cf',
@@ -41,8 +52,13 @@ module.exports = {
       roots: [
         '<rootDir>/cloud-functions/ai-product-comparison',
         '<rootDir>/cloud-functions/external-product-lookup',
+        '<rootDir>/cloud-functions/external-misses-processor',
+        '<rootDir>/cloud-functions/nutrition-scraper',
         '<rootDir>/cloud-functions/crowd-upload-location',
         '<rootDir>/cloud-functions/crowd-upload-reward',
+        '<rootDir>/cloud-functions/survey-reward',
+        '<rootDir>/cloud-functions/cashback-pipeline',
+        '<rootDir>/cloud-functions/review-console',
         '<rootDir>/cloud-functions/receipt-matcher',
       ],
       testMatch: ['**/__tests__/**/*.test.js'],
@@ -51,6 +67,7 @@ module.exports = {
       transform: {},
       clearMocks: true,
       resetMocks: true,
+      modulePathIgnorePatterns: FREMDE_ORDNER,
     },
   ],
 };

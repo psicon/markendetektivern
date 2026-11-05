@@ -9,6 +9,7 @@ import React, {
 import { Pressable, Text, View } from 'react-native';
 
 import { FilterSheet } from '@/components/design/FilterSheet';
+import { StandortPflichtHinweis } from '@/components/rewards/StandortPflichtHinweis';
 import { SurveyRunner } from '@/components/survey/SurveyRunner';
 import {
   bannerDataFromCashbackPayout,
@@ -16,10 +17,14 @@ import {
 } from '@/components/ui/GamificationProvider';
 import { fontFamily, fontWeight } from '@/constants/tokens';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { useStandortPflicht } from '@/hooks/useStandortPflicht';
+import type { StandortPflicht } from '@/lib/services/standortPflicht';
 import { useTokens } from '@/hooks/useTokens';
 import { router } from 'expo-router';
 
 import { useAuth } from '@/lib/contexts/AuthContext';
+import { AuthRueckkehr } from '@/lib/services/authRueckkehr';
+import { safePush } from '@/lib/utils/safeNav';
 import { hasValidCashbackConsent } from '@/lib/services/cashbackService';
 import { formatCents } from '@/lib/types/cashback';
 import {
@@ -27,6 +32,7 @@ import {
   submitResponse,
   markDismissed,
   snoozeActionSurveysToday,
+  pollZahltPraemie,
 } from '@/lib/services/surveyService';
 import { setSurveyPrompter } from '@/lib/services/surveyPromptBus';
 import { isAnySheetOpen, setSurveyVisible, whenSheetsIdle } from '@/lib/services/sheetPresence';
@@ -92,6 +98,14 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
     router.push('/cashback/consent?from=rewards' as any);
   }, []);
 
+  // Gäste: vergütete Umfragen gibt es nur mit Konto — „Zum Cashback" führte
+  // sie in eine Einwilligung, nach der immer noch das Konto fehlte
+  // (Prüfrunden 1+2). Nach der Anmeldung zurück zu den Belohnungen.
+  const goToKonto = useCallback(async () => {
+    await AuthRueckkehr.merke('/(tabs)/rewards');
+    safePush('/auth/register');
+  }, []);
+
   const [poll, setPoll] = useState<Poll | null>(null);
   const [visible, setVisible] = useState(false);
   const [activityNonce, setActivityNonce] = useState(0);
@@ -130,6 +144,8 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
   // Bus-Prompter (action-getriggert): entscheidet Sheet vs. Hinweis.
   const promptFromAction = useCallback(
     (p: Poll) => {
+      // Standortpflicht: vergütete Umfragen ohne Freigabe filtert schon
+      // getActionSurvey heraus (vor Session-Sperre und Cooldown).
       const display = p.actionDisplay ?? 'immediate';
       if (display === 'hint') {
         const reward =
@@ -198,15 +214,19 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
       // Reward-Text NUR wenn die Umfrage vergütet. Berechtigt → "unterwegs".
       // Nicht berechtigt → freundlicher Hinweis MIT "Zum Cashback"-Button
       // (führt zur Aktivierung). Positiver Ton, kein Frust.
-      const pays =
-        (p.rewardTrigger ?? 'completion') !== 'none' &&
-        typeof p.rewardCents === 'number' &&
-        p.rewardCents > 0;
+      const pays = pollZahltPraemie(p);
       if (pays && eligible) {
         // Berechtigt → dieselbe Cashback-Gutschrift-Feier wie bei Bons:
         // Glow-Banner statt grauem Mini-Toast (ClickUp 86ca8hqt8). Der CF
         // schreibt den Betrag gleich gut → optimistisch sofort feiern.
         showBanner(bannerDataFromCashbackPayout(p.rewardCents!));
+      } else if (pays && !registered) {
+        showCashbackNudgeToast(
+          `${formatCents(p.rewardCents!)} Guthaben gibt's mit Konto – für Umfragen wie diese.`,
+          () => void goToKonto(),
+          scheme,
+          'Konto erstellen',
+        );
       } else if (pays && !eligible) {
         // Betrag ZUERST — der Hinweis-Toast kürzt lange Texte (2 Zeilen +
         // Action-Pille), sonst wird der Betrag abgeschnitten (86ca…).
@@ -220,7 +240,7 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
       }
       setActivityNonce((n) => n + 1); // Tile-Liste neu laden
     },
-    [poll, user?.uid, scheme, isAnonymous, goToCashback, showBanner],
+    [poll, user?.uid, scheme, isAnonymous, goToCashback, goToKonto, showBanner],
   );
 
   const handleClose = useCallback(() => {
@@ -242,6 +262,26 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
 
   const isActionPoll = poll ? pollTriggerOf(poll).type === 'action' : false;
 
+  // Standortpflicht (6.0.20): vergütete Umfrage + registriertes Konto →
+  // erst die Freigabe, dann die Fragen. Die Sperre ersetzt den Inhalt DIESES
+  // Sheets — ein zweites Modal darüber würde iOS einfrieren.
+  const brauchtFreigabe = !!poll && pollZahltPraemie(poll) && !!user?.uid && !isAnonymous;
+  const pflicht = useStandortPflicht(visible && brauchtFreigabe);
+  // Was das Sheet zeigt. Während der Ausblend-Animation (visible=false, das
+  // Modal bleibt ~260 ms eingehängt) bleibt die zuletzt gezeigte Ansicht
+  // stehen — sonst sprang es beim Schließen aus der Sperre auf die Fragen
+  // bzw. klappte auf den Platzhalter zusammen (der Hook setzt den Stand
+  // beim Deaktivieren auf null).
+  const liveAnsicht: 'runner' | 'platzhalter' | Exclude<StandortPflicht, 'erfuellt'> =
+    !brauchtFreigabe || pflicht.stand === 'erfuellt'
+      ? 'runner'
+      : pflicht.stand === null
+        ? 'platzhalter'
+        : pflicht.stand;
+  const letzteAnsichtRef = useRef(liveAnsicht);
+  if (visible) letzteAnsichtRef.current = liveAnsicht;
+  const ansicht = visible ? liveAnsicht : letzteAnsichtRef.current;
+
   return (
     <SurveyContext.Provider value={{ showSurvey, activityNonce }}>
       {children}
@@ -251,7 +291,20 @@ export function SurveyProvider({ children }: { children: React.ReactNode }) {
         onClose={handleClose}
         registerPresence={false}
       >
-        {poll ? (
+        {poll && ansicht !== 'runner' ? (
+          ansicht === 'platzhalter' ? (
+            <View style={{ height: 160 }} />
+          ) : (
+            <StandortPflichtHinweis
+              stand={ansicht}
+              art="umfrage"
+              laeuft={pflicht.laeuft}
+              onErfuellen={() => void pflicht.erfuellen()}
+              onZurueck={handleClose}
+              zurueckLabel="Später"
+            />
+          )
+        ) : poll ? (
           <View>
             <SurveyRunner poll={poll} onComplete={handleComplete} />
             {isActionPoll ? (

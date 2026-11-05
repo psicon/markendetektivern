@@ -30,11 +30,18 @@ import {
   DETAIL_HEADER_ROW_HEIGHT,
 } from '@/components/design/DetailHeader';
 import { FilterSheet, OptionList } from '@/components/design/FilterSheet';
+import { KontoSichernKarte } from '@/components/rewards/KontoSichernKarte';
 import { fontFamilyVariants, fontWeight, radii } from '@/constants/tokens';
 import { useTokens } from '@/hooks/useTokens';
 import { useAuth } from '@/lib/contexts/AuthContext';
 import { useCashbackUserState } from '@/lib/hooks/useCashbackUserState';
-import { kickBonQueue } from '@/lib/services/bonUploadQueue';
+import {
+  kickBonQueue,
+  retryAllFailedBons,
+  sichtbareBonJobs,
+  subscribeBonQueue,
+  type BonJob,
+} from '@/lib/services/bonUploadQueue';
 import { startReceiptScanFlow } from '@/lib/services/cashbackScanStart';
 import { FirestoreService } from '@/lib/services/firestore';
 import {
@@ -134,7 +141,7 @@ function statusVisual(s: string | undefined, primary: string): StatusVisual {
  * Must stay consistent with the status chip — never "Wird hochgeladen" while
  * the chip already says "Wird geprüft"/"In Prüfung" (Task 86ca5fazh).
  */
-function merchantTitleForStatus(status?: string): string {
+function merchantTitleForStatus(status?: string, rejectReason?: string | null): string {
   switch (status) {
     case 'uploading':
       return 'Neuer Bon';
@@ -145,8 +152,31 @@ function merchantTitleForStatus(status?: string): string {
     case 'matched':
     case 'review':
       return 'Markt wird erkannt …';
+    // 86cb7h3gy: kein Sammel-Fallback „Unbekannte Filiale" mehr — der Titel
+    // folgt dem echten Zustand. „Unbekannte Filiale" las sich wie „Markt nicht
+    // erkannt", galt aber für JEDEN abgelehnten Bon ohne aufgelösten Markt
+    // (z.B. not_a_receipt während des OCR-Ausfalls) — und ALDI-Bons wurden
+    // als „nicht bekannt" missverstanden, obwohl der Markt nie das Problem war.
+    case 'rejected':
+      switch (rejectReason) {
+        case 'unknown_merchant':
+          return 'Markt nicht dabei';
+        case 'not_a_receipt':
+          return 'Kein Kassenbon erkannt';
+        case 'duplicate_content_self':
+        case 'duplicate_content_cross_user':
+          return 'Bereits eingereicht';
+        case 'bon_too_old':
+          return 'Bon außerhalb der Frist';
+        default:
+          return 'Bon nicht berücksichtigt';
+      }
+    case 'superseded':
+      return 'Bereits eingereicht';
+    case 'no_reward':
+      return 'Bon gespeichert';
     default:
-      return 'Unbekannte Filiale';
+      return 'Bon';
   }
 }
 
@@ -181,7 +211,7 @@ export default function CashbackHistoryScreen() {
   const { theme, shadows } = useTokens();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { user } = useAuth();
+  const { user, isAnonymous } = useAuth();
 
   const [entries, setEntries] = useState<CashbackStatusEntry[] | null>(null);
   const [pageLimit, setPageLimit] = useState(PAGE_SIZE);
@@ -210,6 +240,25 @@ export default function CashbackHistoryScreen() {
   useEffect(() => {
     kickBonQueue();
   }, []);
+
+  // 86cb6tx29: lokale Upload-Queue IMMER sichtbar machen — auch wenn der
+  // Mirror-Write (users/{uid}/cashback_status) nie ankam. Vorher war ein
+  // Job ohne Mirror-Zeile app-weit unsichtbar UND unrettbar.
+  const [queueJobs, setQueueJobs] = useState<BonJob[]>([]);
+  useEffect(() => subscribeBonQueue(setQueueJobs), []);
+  // Nur Jobs OHNE Mirror-Zeile als eigene Zeile rendern (sonst doppelt).
+  // Nur Aufträge, die zu DIESEM Konto gehören (oder vom Server bestätigt
+  // übernommen sind) — nach einem Kontowechsel wartende Gast-Aufträge sind
+  // nicht „deine" Bons.
+  const eigeneJobs = useMemo(() => sichtbareBonJobs(queueJobs), [queueJobs, user?.uid]);
+  const orphanJobs = useMemo(
+    () => eigeneJobs.filter((j) => !(entries ?? []).some((e) => e.id === j.id)),
+    [eigeneJobs, entries],
+  );
+  const failedJobCount = useMemo(
+    () => eigeneJobs.filter((j) => j.status === 'failed').length,
+    [eigeneJobs],
+  );
 
   useEffect(() => {
     if (!user?.uid) {
@@ -343,7 +392,7 @@ export default function CashbackHistoryScreen() {
       ? (discLand ? `${disc.name} (${discLand})` : disc.name)
       : isResolvedMerchant(rawMerchant)
         ? rawMerchant
-        : merchantTitleForStatus(item.status);
+        : merchantTitleForStatus(item.status, (item as any).rejectReason ?? null);
     const logoUrl: string | null = disc?.bild || (item as any).merchantLogoUrl || null;
     const cashback = item.cashbackCents ? formatCents(item.cashbackCents) : null;
 
@@ -742,7 +791,7 @@ export default function CashbackHistoryScreen() {
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator color={primary} />
         </View>
-      ) : entries.length === 0 ? (
+      ) : entries.length === 0 && orphanJobs.length === 0 ? (
         <View style={{ paddingTop: headerOffset + 12 }}>
           <Empty />
         </View>
@@ -754,6 +803,102 @@ export default function CashbackHistoryScreen() {
           ListHeaderComponent={
             <View style={{ paddingTop: headerOffset + 8 }}>
               <HeaderCard />
+              {/* Gäste: Belohnungen per Konto sichern. */}
+              {isAnonymous ? (
+                <View style={{ marginHorizontal: 16, marginBottom: 14 }}>
+                  <KontoSichernKarte ziel="/cashback/history" />
+                </View>
+              ) : null}
+              {/* 86cb6tx29: Jobs aus der lokalen Upload-Queue, die (noch)
+                  keine Mirror-Zeile haben — sonst wären sie unsichtbar. */}
+              {failedJobCount > 0 ? (
+                <Pressable
+                  onPress={() => retryAllFailedBons()}
+                  style={{
+                    marginHorizontal: 16,
+                    marginBottom: 10,
+                    paddingVertical: 11,
+                    borderRadius: radii.md,
+                    backgroundColor: primary,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <MaterialCommunityIcons name="refresh" size={17} color="#fff" />
+                  <Text
+                    style={{
+                      color: '#fff',
+                      fontFamily: fontFamilyVariants.semibold,
+                      fontSize: 14,
+                    }}
+                  >
+                    {failedJobCount === 1
+                      ? 'Wartenden Bon erneut hochladen'
+                      : `Alle ${failedJobCount} wartenden Bons erneut hochladen`}
+                  </Text>
+                </Pressable>
+              ) : null}
+              {orphanJobs.map((j) => {
+                const uploading = j.status === 'uploading' || j.status === 'enqueueing';
+                const failed = j.status === 'failed';
+                return (
+                  <Pressable
+                    key={j.id}
+                    onPress={() =>
+                      safePush({ pathname: '/cashback/pending/[id]' as any, params: { id: j.id } })
+                    }
+                    style={{
+                      marginHorizontal: 16,
+                      marginBottom: 10,
+                      padding: 14,
+                      borderRadius: radii.lg - 2,
+                      backgroundColor: theme.surface,
+                      borderWidth: 1,
+                      borderColor: theme.border,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 12,
+                    }}
+                  >
+                    <MaterialCommunityIcons
+                      name={failed ? 'cloud-alert' : uploading ? 'cloud-upload-outline' : 'cloud-outline'}
+                      size={22}
+                      color={failed ? '#d6603a' : primary}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={{
+                          color: theme.text,
+                          fontFamily: fontFamilyVariants.semibold,
+                          fontSize: 14,
+                        }}
+                      >
+                        {failed
+                          ? 'Bon wartet auf erneuten Upload'
+                          : uploading
+                          ? `Bon lädt hoch … ${Math.max(0, j.progress)} %`
+                          : 'Bon wartet auf Upload'}
+                      </Text>
+                      {failed && j.lastError ? (
+                        <Text
+                          style={{
+                            color: theme.textSub,
+                            fontFamily: fontFamilyVariants.body,
+                            fontSize: 12,
+                            marginTop: 2,
+                          }}
+                          numberOfLines={2}
+                        >
+                          {j.lastError}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <MaterialCommunityIcons name="chevron-right" size={20} color={theme.textMuted} />
+                  </Pressable>
+                );
+              })}
             </View>
           }
           ListEmptyComponent={

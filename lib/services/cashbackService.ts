@@ -29,7 +29,9 @@ const CONFIG_DOC_PATH = 'cashback_config/v1';
 
 // In-memory caches (TTL: 5 min for config, no TTL for user state — that
 // always uses snapshot listeners).
-let configCache: { value: CashbackConfigDoc; fetchedAt: number } | null = null;
+// `fromServer` trennt eine frische Server-Auskunft von einem aus AsyncStorage
+// rekonstruierten Stand. Nur Erstere darf als „so ist es" gelten.
+let configCache: { value: CashbackConfigDoc; fetchedAt: number; fromServer: boolean } | null = null;
 const CONFIG_TTL_MS = 5 * 60 * 1000;
 
 // Offline-Fallback (86ca7uhr9): der zuletzt ERFOLGREICH vom Server
@@ -47,22 +49,43 @@ const CONFIG_STORAGE_KEY = 'cashback_config_last_server_v1';
  * Falls back to DEFAULT_CASHBACK_CONFIG if the doc doesn't exist
  * (e.g. before Phase 1 deployment, or if the user is offline).
  */
+/** Server-Read ohne jeden Rückfall. Gemeinsame Basis beider Varianten. */
+async function ladeConfigVomServer(): Promise<CashbackConfigDoc> {
+  const snap = await getDoc(doc(db, CONFIG_DOC_PATH));
+  const value = snap.exists()
+    ? ({ ...DEFAULT_CASHBACK_CONFIG, ...(snap.data() as Partial<CashbackConfigDoc>) } as CashbackConfigDoc)
+    : DEFAULT_CASHBACK_CONFIG;
+  configCache = { value, fetchedAt: Date.now(), fromServer: true };
+  if (snap.exists()) {
+    // Letzten Server-Stand persistieren (fire-and-forget).
+    void AsyncStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(value)).catch(() => {});
+  }
+  return value;
+}
+
+/**
+ * Wie {@link getCashbackConfig}, WIRFT aber, statt zurückzufallen.
+ *
+ * Für Aufrufer, die „konnte nicht nachsehen" von „ist aus" unterscheiden
+ * müssen. Der Code-Default trägt `campaignsEnabled: false`, live steht `true` —
+ * ein Lesefehler als „es läuft keine Aktion" auszugeben, kehrt die Wahrheit um
+ * und kostet Geld (86cbet2nw). Dieselbe Regel wie bei `isPremiumOrNull`:
+ * unbekannt ist nicht dasselbe wie nein.
+ */
+export async function getCashbackConfigStrict(): Promise<CashbackConfigDoc> {
+  if (configCache?.fromServer && Date.now() - configCache.fetchedAt < CONFIG_TTL_MS) {
+    return configCache.value;
+  }
+  return ladeConfigVomServer();
+}
+
 export async function getCashbackConfig(forceRefresh = false): Promise<CashbackConfigDoc> {
   if (!forceRefresh && configCache && Date.now() - configCache.fetchedAt < CONFIG_TTL_MS) {
     return configCache.value;
   }
 
   try {
-    const snap = await getDoc(doc(db, CONFIG_DOC_PATH));
-    const value = snap.exists()
-      ? ({ ...DEFAULT_CASHBACK_CONFIG, ...(snap.data() as Partial<CashbackConfigDoc>) } as CashbackConfigDoc)
-      : DEFAULT_CASHBACK_CONFIG;
-    configCache = { value, fetchedAt: Date.now() };
-    if (snap.exists()) {
-      // Letzten Server-Stand persistieren (fire-and-forget).
-      void AsyncStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(value)).catch(() => {});
-    }
-    return value;
+    return await ladeConfigVomServer();
   } catch (error) {
     console.warn('⚠️ getCashbackConfig failed, trying last server state:', error);
     // Fallback-Kette: Memory-Cache (oben) → AsyncStorage-letzter-
@@ -74,7 +97,8 @@ export async function getCashbackConfig(forceRefresh = false): Promise<CashbackC
           ...DEFAULT_CASHBACK_CONFIG,
           ...(JSON.parse(stored) as Partial<CashbackConfigDoc>),
         } as CashbackConfigDoc;
-        configCache = { value, fetchedAt: Date.now() };
+        // fromServer: false — ein rekonstruierter Stand ist keine frische Auskunft.
+        configCache = { value, fetchedAt: Date.now(), fromServer: false };
         return value;
       }
     } catch {
@@ -93,25 +117,33 @@ let campaignsCache: { value: ActiveCampaign[]; fetchedAt: number } | null = null
  * trotzdem). 5-Min-Cache. Read-only; Quelle der Wahrheit ist der
  * Cloud-Function-Pfad.
  */
-export async function getActiveCashbackCampaigns(forceRefresh = false): Promise<ActiveCampaign[]> {
+/**
+ * Wie {@link getActiveCashbackCampaigns}, WIRFT aber bei Lesefehlern. Ein
+ * leeres Array heißt hier wirklich „es läuft keine" (86cbet2nw).
+ */
+export async function getActiveCashbackCampaignsStrict(forceRefresh = false): Promise<ActiveCampaign[]> {
   if (!forceRefresh && campaignsCache && Date.now() - campaignsCache.fetchedAt < CONFIG_TTL_MS) {
     return campaignsCache.value;
   }
+  const snap = await getDocs(query(collection(db, 'cashback_campaigns'), where('active', '==', true)));
+  const now = Date.now();
+  const list: ActiveCampaign[] = [];
+  snap.forEach((d: any) => {
+    const c = d.data() || {};
+    const startMs = c.startAt?.toMillis?.() ?? 0;
+    const endMs = c.endAt?.toMillis?.() ?? 0;
+    if (now >= startMs && now <= endMs) {
+      list.push({ id: d.id, ...c, endMs } as ActiveCampaign);
+    }
+  });
+  list.sort((a, b) => a.endMs - b.endMs);
+  campaignsCache = { value: list, fetchedAt: Date.now() };
+  return list;
+}
+
+export async function getActiveCashbackCampaigns(forceRefresh = false): Promise<ActiveCampaign[]> {
   try {
-    const snap = await getDocs(query(collection(db, 'cashback_campaigns'), where('active', '==', true)));
-    const now = Date.now();
-    const list: ActiveCampaign[] = [];
-    snap.forEach((d: any) => {
-      const c = d.data() || {};
-      const startMs = c.startAt?.toMillis?.() ?? 0;
-      const endMs = c.endAt?.toMillis?.() ?? 0;
-      if (now >= startMs && now <= endMs) {
-        list.push({ id: d.id, ...c, endMs } as ActiveCampaign);
-      }
-    });
-    list.sort((a, b) => a.endMs - b.endMs);
-    campaignsCache = { value: list, fetchedAt: Date.now() };
-    return list;
+    return await getActiveCashbackCampaignsStrict(forceRefresh);
   } catch (e) {
     console.warn('⚠️ getActiveCashbackCampaigns failed:', e);
     return [];

@@ -230,7 +230,7 @@ App: Foto → Storage-Upload → enqueueCashback (HTTPS, Pre-OCR-Dedup: Byte-Has
 | `cashback_payouts/{id}` | read-own, CF-write | Auszahlungen via Tremendous: `{userId, amountCents, method, status, tremendousOrderId}` |
 | `cashback_review_queue`, `cashback_consumption/{month}`, `cashback_webhook_events` | **komplett server-only** | Review-Queue, Monats-Budget-Verbrauch, Webhook-Log |
 | `receiptMatches`, `receiptAliases` | **CF-intern** (deny-all) | Matcher-Ergebnisse + selbstlernendes Bon-Zeilen-Alias-Lexikon (`aliasId = f(marktSlug, normKey)`) |
-| `crowd_uploads/{id}` | Client create + read-own | Produktfoto-Einreichungen: `{userId, sessionId, marketId/Name, productName, ean, campaignId, images{step→pfad}, status:'pending'}` — Bild-Dateinamen tragen einen eindeutigen Batch-Token |
+| `crowd_uploads/{id}` | Client create + read-own | Produktfoto-Einreichungen: `{userId, sessionId, marketId/Name, productName, ean, campaignId, images{step→pfad}, status:'pending'}` — Bild-Dateinamen tragen einen eindeutigen Batch-Token. **Effektive EAN = `eanKorrektur.ean` → `ean` → `eanRescueOcr`** (`review-console/src/werte.js` `eanOf`); `eanKorrektur` setzt nur die Morgenrunde (Foto-Nummer zweimal gleich gelesen, 06.10.2026, Schalter `cashback_config/v1.barcodeKorrektur`), `ean` bleibt die gescannte/getippte; `eanKorrekturVerworfen` (Prüfkonsole) nimmt eine Korrektur zurück — dann gilt wieder `ean` |
 
 ---
 
@@ -359,11 +359,12 @@ App: Foto → Storage-Upload → enqueueCashback (HTTPS, Pre-OCR-Dedup: Byte-Has
 | **receipt-matcher (Embeddings)** | onWrite `produkte`/`markenProdukte` | Vektor-Embedding nach **`productEmbeddings/{id}`** (separate Collection, nicht ins Katalog-Doc) | `name` vorhanden; neu nur bei geändertem Namen | sofort |
 | **connected-brands-aggregator** | scheduled montags 03:00 | `aggregates/herstellerBrands_v1` (Konzern-Graph) | — | wöchentlich |
 | **top-products-aggregator** | scheduled montags 03:30 (+ HTTP) | `aggregates/topProducts_v1` | — | wöchentlich |
+| **bewertungen** (`aggregateRatingsByPath`, 1st gen, europe-west3) | onWrite `productRatings/{id}` | `ratingCount<K>`/`ratingSum<K>`/`averageRating<K>` (K = Overall, PriceValue, TasteFunction, Similarity, Content) + `ratingCount` auf `produkte/<productID>` bzw. `markenProdukte/<brandProductID>`; Marker `processedRatingEvents/{eventId}` | Wert zählt nur als Zahl 1–5; fehlt das Produkt, legt sie es mit nur diesen Feldern an (Altverhalten) | sofort, ohne Wiederholung bei Fehlern |
 
 ### 12.3 ⚠️ Drei Blackboxen / offene Punkte (dem Externen explizit sagen)
 
 1. **Algolia-Suche:** Im Repo existiert **kein** Record-Sync (kein `saveObjects`, keine Firebase-Extension in `firebase.json`; der Client nutzt nur den Search-Key, Scripts pflegen nur Synonyme/Settings). **Neu angelegte Produkte erscheinen NICHT automatisch durch dieses Repo in der Suche** — der Index-Sync läuft außerhalb (Console-Extension o. ä.). Vor Katalog-Arbeiten klären, wie der Sync konkret läuft.
-2. **`averageRating*`:** Bewertungen landen in `productRatings`, aber **keine Funktion im Repo schreibt die Aggregate zurück** aufs Produkt-Doc (`adminPromote` initialisiert sie nur auf 0; die App aktualisiert nur optimistisch im Speicher). Entweder existiert ein Aggregator außerhalb des Repos oder die Felder veralten — vor Verlass darauf prüfen.
+2. **`averageRating*`:** ~~Kein Aggregator im Repo~~ — geklärt 01.10.2026: der Aggregator `aggregateRatingsByPath` lief seit 2025 nur in der Cloud Console und liegt jetzt als Codebase `cloud-functions/bewertungen` im Repo (Trigger auf `productRatings/{id}`, schreibt `ratingCount<K>`/`ratingSum<K>`/`averageRating<K>` für Overall/PriceValue/TasteFunction/Similarity/Content plus `ratingCount`; Doppelzustellungen fängt `processedRatingEvents/{eventId}` ab). Abgleich mit Produktion am 01.10.2026: 2.503 von 2.508 bewerteten Produkten stimmen exakt mit den heutigen Bewertungen überein; Ausnahmen sind drei namenlose `produkte`-Dokumente mit negativen Zählern vom 10./11.09.2025 und zwei gelöschte Produkte.
 3. **`relatedProdukte`/`relatedProdukteIDs` + `ersparnis`/`ersparnisProz`:** rein manuelle Pflege — es gibt keine Automatik, die sie konsistent hält (z. B. wird `relatedProdukte` NICHT nachgezogen, wenn ein NoName einen `markenProdukt`-Link bekommt).
 
 ### 12.4 Update-Verhalten (Kurzreferenz)

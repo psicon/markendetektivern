@@ -13,9 +13,12 @@
 
 const {
   EXTERNAL_CACHE_MAX_AGE_MS,
-  SOURCE_PRIORITY,
-  UPGRADE_THRESHOLD_INDEX,
-  sourcePriority,
+  QUELLEN_GRUPPEN_RANG,
+  RANG_OPENFOOD,
+  quellenGruppe,
+  quellenRang,
+  istSchwacheQuelle,
+  echterName,
   normaliseEan,
   isExternalCacheStale,
   parseLeadingNumber,
@@ -34,50 +37,82 @@ describe('Konstanten', () => {
     expect(EXTERNAL_CACHE_MAX_AGE_MS).toBe(2419200000);
   });
 
-  test('SOURCE_PRIORITY ist die erwartete geordnete Liste', () => {
-    expect(SOURCE_PRIORITY).toEqual([
-      'rewe',
-      'globus',
-      'metro',
-      'scraper',
-      'openfood',
-    ]);
-  });
-
-  test('UPGRADE_THRESHOLD_INDEX zeigt auf den openfood-Index (4)', () => {
-    expect(UPGRADE_THRESHOLD_INDEX).toBe(4);
-    expect(UPGRADE_THRESHOLD_INDEX).toBe(SOURCE_PRIORITY.indexOf('openfood'));
+  test('Rangtabelle: rewe > globus = metro > scraper > openfood', () => {
+    expect(QUELLEN_GRUPPEN_RANG).toEqual({ rewe: 0, globus: 1, metro: 1, scraper: 2, openfood: 3 });
+    expect(RANG_OPENFOOD).toBe(3);
   });
 });
 
 // ---------------------------------------------------------------------------
-// sourcePriority
+// Quellenrang
 // ---------------------------------------------------------------------------
 
-describe('sourcePriority', () => {
-  test('bekannte Sources → ihr Listen-Index (rewe=0 … openfood=4)', () => {
-    expect(sourcePriority('rewe')).toBe(0);
-    expect(sourcePriority('globus')).toBe(1);
-    expect(sourcePriority('metro')).toBe(2);
-    expect(sourcePriority('scraper')).toBe(3);
-    expect(sourcePriority('openfood')).toBe(4);
+describe('quellenGruppe / quellenRang', () => {
+  test('Gruppennamen behalten ihren Rang', () => {
+    expect(quellenRang('rewe')).toBe(0);
+    expect(quellenRang('globus')).toBe(1);
+    expect(quellenRang('metro')).toBe(1);
+    expect(quellenRang('scraper')).toBe(2);
+    expect(quellenRang('openfood')).toBe(3);
   });
 
-  test('jeder Eintrag aus SOURCE_PRIORITY mappt auf seinen Index', () => {
-    SOURCE_PRIORITY.forEach((src, idx) => {
-      expect(sourcePriority(src)).toBe(idx);
-    });
+  test('Shop-Namen aus der Suche zählen als scraper (früher Rang 99, unter der OFF-API)', () => {
+    for (const shop of ['rossmann', 'budni', 'atundo', 'shop-apotheke', 'fresh-store', 'shop']) {
+      expect(quellenGruppe(shop)).toBe('scraper');
+      expect(quellenRang(shop)).toBe(2);
+    }
   });
 
-  test('unbekannte Source → 99', () => {
-    expect(sourcePriority('unknown')).toBe(99);
-    expect(sourcePriority('REWE')).toBe(99); // case-sensitiv, kein Match
-    expect(sourcePriority('')).toBe(99);
+  test('openfoodfacts-Webseite zählt wie die OFF-API', () => {
+    expect(quellenGruppe('openfoodfacts')).toBe('openfood');
+    expect(quellenRang('openfoodfacts')).toBe(3);
   });
 
-  test('null/undefined → 99 (kein Match)', () => {
-    expect(sourcePriority(undefined)).toBe(99);
-    expect(sourcePriority(null)).toBe(99);
+  test('Groß-/Kleinschreibung und Leerzeichen egal', () => {
+    expect(quellenRang(' REWE ')).toBe(0);
+    expect(quellenRang('OpenFoodFacts')).toBe(3);
+  });
+
+  test('leer/null/undefined → Gruppe null, Rang 99', () => {
+    for (const v of ['', '  ', null, undefined, 42]) {
+      expect(quellenGruppe(v)).toBeNull();
+      expect(quellenRang(v)).toBe(99);
+    }
+  });
+
+  test('istSchwacheQuelle: OpenFoodFacts und Unbekanntes', () => {
+    expect(istSchwacheQuelle('openfood')).toBe(true);
+    expect(istSchwacheQuelle('openfoodfacts')).toBe(true);
+    expect(istSchwacheQuelle(undefined)).toBe(true);
+    expect(istSchwacheQuelle('rewe')).toBe(false);
+    expect(istSchwacheQuelle('rossmann')).toBe(false);
+  });
+});
+
+describe('echterName', () => {
+  test('Platzhalter sind keine Namen', () => {
+    for (const p of ['Produkt', 'produkt', ' Produkt ', 'Unbekannt', 'UNBEKANNT', '', '   ']) {
+      expect(echterName(p)).toBeNull();
+    }
+  });
+
+  test('echte Namen werden getrimmt zurückgegeben', () => {
+    expect(echterName('  Golden Puffs ')).toBe('Golden Puffs');
+    expect(echterName('Produktmix Nüsse')).toBe('Produktmix Nüsse');
+  });
+
+  test('Seitentitel einer Barcode-Datenbank und nackte Nummer → null (06.10.2026)', () => {
+    expect(echterName('4068706509612 Open EAN Database - Datenbank und Produktbewertung')).toBeNull();
+    expect(echterName('5901359174150')).toBeNull();
+    expect(echterName('Barcode-Datenbank: Milch')).toBeNull();
+    // Nummer mitten im Namen (OpenFoodFacts) bleibt ein Name
+    expect(echterName("Queen's Traditional Danish Butter Cookies 0077330345583 Dänische Buttergebäcke")).toBe("Queen's Traditional Danish Butter Cookies 0077330345583 Dänische Buttergebäcke");
+  });
+
+  test('Nicht-Strings → null', () => {
+    expect(echterName(null)).toBeNull();
+    expect(echterName(undefined)).toBeNull();
+    expect(echterName(5)).toBeNull();
   });
 });
 
@@ -306,9 +341,14 @@ describe('normaliseOpenFood', () => {
     expect(r.productName).toBe('Joghurt');
   });
 
-  test('product_name und generic_name fehlen → "Unbekannt"', () => {
+  test('product_name und generic_name fehlen → kein Name (kein Platzhalter mehr)', () => {
     const r = normaliseOpenFood({});
-    expect(r.productName).toBe('Unbekannt');
+    expect(r.productName).toBeUndefined();
+  });
+
+  test('leerer product_name → generic_name greift; Platzhalter gelten als leer', () => {
+    expect(normaliseOpenFood({ product_name: '', generic_name: 'Joghurt' }).productName).toBe('Joghurt');
+    expect(normaliseOpenFood({ product_name: 'Unbekannt' }).productName).toBeUndefined();
   });
 
   test('sparses Objekt → alle nutr_*_val undefined, units bleiben gesetzt', () => {
@@ -458,10 +498,12 @@ describe('normaliseReweapify', () => {
     expect(r.raw).toBe(data);
   });
 
-  test('productName-Fallback-Kette: attr_productName → title → "Produkt"', () => {
+  test('productName-Fallback-Kette: attr_productName → title → kein Name (kein Platzhalter)', () => {
     expect(normaliseReweapify({ attr_productName: 'A' }).productName).toBe('A');
     expect(normaliseReweapify({ title: 'B' }).productName).toBe('B');
-    expect(normaliseReweapify({}).productName).toBe('Produkt');
+    expect(normaliseReweapify({}).productName).toBeUndefined();
+    // Ein gespeicherter Platzhalter wird übersprungen, der nächste echte Name greift.
+    expect(normaliseReweapify({ productName: 'Produkt', title: 'C' }).productName).toBe('C');
   });
 
   test('brandName-Fallback-Kette (attr_BrandId → brandKey → brandName → attr_brand → attr_marke)', () => {
@@ -582,7 +624,7 @@ describe('normaliseReweapify', () => {
 
   test('leeres Objekt → vollständig defaultet, kein Throw', () => {
     const r = normaliseReweapify({});
-    expect(r.productName).toBe('Produkt');
+    expect(r.productName).toBeUndefined();
     expect(r.imageUrl).toBeUndefined();
     expect(r.price).toBeUndefined();
     expect(r.packSize).toBeUndefined();
@@ -592,7 +634,7 @@ describe('normaliseReweapify', () => {
 
   test('undefined/null data → kein Throw (optional chaining), Defaults greifen', () => {
     const r = normaliseReweapify(undefined);
-    expect(r.productName).toBe('Produkt');
+    expect(r.productName).toBeUndefined();
     expect(r.price).toBeUndefined();
     expect(r.nutr_serving_size).toBe(100);
     expect(r.nutr_serving_unit).toBe('g');

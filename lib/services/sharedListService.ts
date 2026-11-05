@@ -20,9 +20,9 @@
 import * as Crypto from 'expo-crypto';
 import {
   addDoc,
+  arrayRemove,
   collection,
   doc,
-  getDoc,
   onSnapshot,
   query,
   serverTimestamp,
@@ -185,25 +185,25 @@ export const SharedListService = {
   },
 
   // — Mitglieder (memberIds nur SCHRUMPFEN; Beitritt via CF) —
+  // arrayRemove statt „lesen, filtern, ganzes Array zurückschreiben": die
+  // gelesene Liste kann veraltet sein (offline aus dem Cache, oder jemand tritt
+  // zwischen Lesen und Schreiben bei). Das zurückgeschriebene Array entfernte
+  // dann still Neu-Beigetretene (Owner) bzw. wurde von den Rules abgelehnt
+  // (Mitglied: alt − neu ≠ [uid]). arrayRemove wirkt serverseitig auf den
+  // aktuellen Stand und braucht keinen Lesevorgang.
   async leaveList(listId: string): Promise<void> {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
-    const snap = await getDoc(doc(db, 'shared_lists', listId));
-    if (!snap.exists) return;
-    const members: string[] = (snap.data() as any)?.memberIds ?? [];
     await updateDoc(doc(db, 'shared_lists', listId), {
-      memberIds: members.filter((m) => m !== uid),
+      memberIds: arrayRemove(uid),
       updatedAt: serverTimestamp(),
     });
   },
 
   /** Owner entfernt ein Mitglied. */
   async removeMember(listId: string, memberUid: string): Promise<void> {
-    const snap = await getDoc(doc(db, 'shared_lists', listId));
-    if (!snap.exists) return;
-    const members: string[] = (snap.data() as any)?.memberIds ?? [];
     await updateDoc(doc(db, 'shared_lists', listId), {
-      memberIds: members.filter((m) => m !== memberUid),
+      memberIds: arrayRemove(memberUid),
       updatedAt: serverTimestamp(),
     });
   },

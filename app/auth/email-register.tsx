@@ -8,7 +8,8 @@ import { MarketSelector } from '@/components/ui/MarketSelector';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
-import { OnboardingService } from '@/lib/services/onboardingService';
+import { AuthRueckkehr } from '@/lib/services/authRueckkehr';
+import { erwarteterAuthFehler } from '@/lib/utils/authFehler';
 import { GENDER_PILL_OPTIONS, normalizeLegacyGender, type Gender } from '@/lib/types/gender';
 import { ageFromBirthDate, ageBucketFromAge, currentAgeFromReported } from '@/lib/utils/age';
 import { AgePicker } from '@/components/ui/AgePicker';
@@ -231,6 +232,16 @@ export default function RegisterScreen() {
     }
   };
 
+  // Erfolg: Onboarding erledigt + zum vorgemerkten Ziel (AuthRueckkehr),
+  // sonst wie bisher Home. Speicherfehler dürfen den Weg nicht blockieren.
+  const abschliessen = async () => {
+    try {
+      await AuthRueckkehr.abschliessen(router);
+    } catch {
+      router.replace('/(tabs)');
+    }
+  };
+
   const handleRegister = async () => {
     // Reset validation errors
     setValidationErrors({});
@@ -293,15 +304,14 @@ export default function RegisterScreen() {
 
       // T5: Onboarding-Status auf 'completed' setzen falls noch nicht
       // (Re-Start-Bug B1: ohne dies würde der User beim nächsten
-      // App-Boot wieder in /onboarding landen).
-      try { await OnboardingService.markCompleted(); } catch {}
-
-      router.replace('/(tabs)');
+      // App-Boot wieder in /onboarding landen) — danach zum vorgemerkten
+      // Ziel (AuthRueckkehr), sonst Home.
+      await abschliessen();
     } catch (error: any) {
-      // Anon-User hat den 'Konto wechseln'-Confirm abgebrochen
-      // (Email gehört bereits einem anderen Account) — kein Fehler,
-      // Form offen lassen.
-      if (error?.code === 'auth/cancelled') {
+      // Anon-User hat den 'Konto wechseln'-Confirm abgebrochen (Email
+      // gehört bereits einem anderen Account) oder für die Mitnahme fehlt
+      // kurz die Verbindung — kein Fehler, Form offen lassen.
+      if (erwarteterAuthFehler(error, colorScheme)) {
         return;
       }
 
@@ -370,9 +380,9 @@ export default function RegisterScreen() {
       setLoading(true);
       const ok = await signInWithGoogle();
       if (!ok) return; // Abbruch = kein Login (86ca7x9ep)
-      try { await OnboardingService.markCompleted(); } catch {}
-      router.replace('/(tabs)');
+      await abschliessen();
     } catch (error: any) {
+      if (erwarteterAuthFehler(error, colorScheme)) return;
       console.error('Google Sign-In error:', error);
       showRetryableErrorToast(
         `Google-Anmeldung fehlgeschlagen: ${error.message || 'Bitte erneut versuchen.'}`,

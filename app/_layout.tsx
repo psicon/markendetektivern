@@ -5,6 +5,11 @@
 // System-Default). Muss VOR jedem Text-Render geladen sein, daher
 // erste Zeile. Siehe lib/utils/androidTextFontPatch.ts.
 import '@/lib/utils/androidTextFontPatch';
+// ─── Side-effect import: registriert RNFBs setBackgroundMessageHandler
+// auf Modul-Ebene (muss VOR dem React-Mount passieren, verlangt RNFB).
+// No-op-Handler — Anzeige macht das System-Tray, Tap-Routing macht
+// lib/services/fcmDeepLinks.ts. Siehe ClickUp 86cb7gfc9.
+import '@/lib/services/fcmBackgroundHandler';
 import { Toasts } from '@backpackapp-io/react-native-toast';
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } from '@react-navigation/native';
 import Constants from 'expo-constants';
@@ -107,6 +112,14 @@ function ThemedApp() {
         // cached ist, lässt positive Treffer in Ruhe).
         const { default: OpenFoodService } = await import('@/lib/services/openfood');
         OpenFoodService.purgeNegativeCacheOnce().catch(() => null);
+        // 86cb6tx29: Upload-Queues (Bons + Produktfotos) beim Boot wecken.
+        // Vorher registrierten sich deren AppState-/NetInfo-Listener erst,
+        // wenn der Nutzer einen Cashback-/Submit-Screen öffnete — nach
+        // App-Kill lagen persistierte Jobs bis dahin unangetastet.
+        const { kickBonQueue } = await import('@/lib/services/bonUploadQueue');
+        const { kickUploadQueue } = await import('@/lib/services/uploadQueue');
+        kickBonQueue();
+        kickUploadQueue();
         if (!cancelled) {
           console.log('🔥 Stöbern Reference-Data prewarmed');
         }

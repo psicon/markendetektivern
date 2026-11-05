@@ -12,7 +12,7 @@ produkte/{id}  ──onCreate / onUpdate──┐
                                        ├──→ runComparison(id)
 markenProdukte/{ref} ──onUpdate (fan-out)──┘     │
                                                  ├─ hash-check (skip wenn unverändert)
-                                                 ├─ Gemini-Call (gemini-2.5-flash)
+                                                 ├─ Gemini-Call (gemini-3.5-flash)
                                                  └─ aiComparison auf produkte/{id} schreiben
 ```
 
@@ -22,7 +22,7 @@ markenProdukte/{ref} ──onUpdate (fan-out)──┘     │
 {
   score?: 1 | 2 | 3 | 4 | 5,     // fehlt wenn skipped/lastError gesetzt
   reasoning?: string,             // 1-2 Sätze DE, max ~220 Zeichen
-  model: string,                  // z.B. 'gemini-2.5-flash'
+  model: string,                  // z.B. 'gemini-3.5-flash'
   promptVersion: string,          // 'v1' — bei Prompt-Update bumpen
   inputHash?: string,             // sha256 der Inputs, 16 chars
   updatedAt: Timestamp,
@@ -81,7 +81,9 @@ Gemini-Call-Rate.
 ## Cost-Profil
 
 Pro Comparison-Call:
-- Gemini 2.5 Flash: ~600 input + 150 output tokens
+- ~600 input + 150 output tokens (gemini-3.5-flash, thinkingLevel LOW —
+  Denk-Token kommen dazu; die Cent-Werte stammen noch aus der Zeit
+  mit gemini-2.5-flash und sind nicht neu gemessen)
 - ~$0.0001 (0.01 Cent) pro Call
 
 50k Produkte (worst case alle qualified):

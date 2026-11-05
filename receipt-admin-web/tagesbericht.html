@@ -1,0 +1,710 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MarkenDetektive — Tagesbericht</title>
+    <style>
+      :root{
+        --bg:#0e1113; --panel:#171c1f; --panel2:#1e2528; --line:#2b3438; --line2:#3a4549;
+        --fg:#e9eff1; --fg2:#9fadb2; --fg3:#6f7d82;
+        --ok:#2fb389; --nein:#e0655a; --offen:#e0a520; --geld:#3ba0e8; --foto:#5b4f9c; --bon:#0d8575;
+      }
+      *{box-sizing:border-box}
+      html,body{margin:0}
+      body{background:var(--bg);color:var(--fg);font:14.5px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+      a{color:var(--geld)}
+      button{font:inherit;cursor:pointer;border:1px solid var(--line2);border-radius:9px;padding:6px 12px;background:var(--panel2);color:var(--fg)}
+      button:hover{border-color:var(--fg3)}
+      button.on{background:var(--geld);border-color:var(--geld);color:#06121c;font-weight:700}
+      input{font:inherit;background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:9px;padding:8px 10px}
+      .hidden{display:none!important}
+
+      #login{max-width:320px;margin:12vh auto;display:flex;flex-direction:column;gap:10px;padding:0 16px}
+
+      header{position:sticky;top:0;display:flex;align-items:center;gap:14px;padding:0 16px;height:52px;background:var(--panel);border-bottom:1px solid var(--line);z-index:10;overflow-x:auto}
+      header h1{font-size:14px;font-weight:800;margin:0;white-space:nowrap}
+      header a{color:var(--fg3);font-size:12.5px;text-decoration:none;white-space:nowrap}
+      header a:hover{color:var(--fg)}
+      .grow{flex:1}
+
+      main{max-width:1180px;margin:0 auto;padding:18px 16px 60px}
+      .lauf{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 16px;margin-bottom:14px}
+      .lauf h2{margin:0;font-size:22px;font-weight:800;letter-spacing:-.3px}
+      .lauf .meta{color:var(--fg3);font-size:13px}
+      .pill{display:inline-block;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:800;letter-spacing:.3px;background:var(--panel2);border:1px solid var(--line2);color:var(--fg2)}
+      .pill.trocken{border-color:var(--offen);color:var(--offen)}
+      .pill.scharf{border-color:var(--ok);color:var(--ok)}
+
+      .warn{border-radius:12px;padding:10px 14px;margin-bottom:8px;display:flex;gap:10px;align-items:flex-start;font-size:14px}
+      .warn.rot{background:rgba(224,101,90,.13);border:1px solid rgba(224,101,90,.55)}
+      .warn.gelb{background:rgba(224,165,32,.11);border:1px solid rgba(224,165,32,.45)}
+      .warn b{white-space:nowrap}
+      .allesgut{border:1px solid rgba(47,179,137,.45);background:rgba(47,179,137,.1);border-radius:12px;padding:10px 14px;margin-bottom:8px;font-size:14px}
+
+      .kacheln{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:16px 0 22px}
+      .kachel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+      .kachel .z{font-size:26px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.5px}
+      .kachel .l{font-size:12px;color:var(--fg3);margin-top:2px}
+
+      .raster{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+      @media (max-width:820px){.raster{grid-template-columns:1fr}}
+      section.box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;min-width:0}
+      section.box h3{margin:0 0 10px;font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--fg3)}
+      .zeile{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+      .zeile:last-child{border-bottom:0}
+      .zeile span:last-child{font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap}
+      .leer{color:var(--fg3);font-size:13px}
+      .fall{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+      .fall:last-child{border-bottom:0}
+      .fall .g{color:var(--fg3);font-size:12px;grid-column:1/-1}
+      .fall a{text-decoration:none}
+      .liste{max-height:340px;overflow-y:auto}
+
+      .diagramm{width:100%;overflow-x:auto}
+      .legende{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--fg2);margin-top:6px}
+      .legende i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+
+      .stufe{display:grid;grid-template-columns:76px 1fr auto;gap:10px;align-items:center;padding:5px 0;font-size:13px}
+      .stufe .spur{height:12px;background:var(--panel2);border-radius:6px;overflow:hidden}
+      .stufe .spur i{display:block;height:100%;border-radius:6px;background:var(--geld)}
+      .stufe .w{font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--fg2)}
+      tr.reif td{background:rgba(47,179,137,.08)}
+      table{width:100%;border-collapse:collapse;font-size:13px}
+      th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+      th{color:var(--fg3);font-weight:700;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px}
+      td.n{text-align:right;font-variant-numeric:tabular-nums}
+      .tabwrap{overflow-x:auto}
+      .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line2);padding:9px 14px;border-radius:10px;opacity:0;transition:opacity .2s;pointer-events:none}
+      .toast.show{opacity:1}
+    </style>
+  </head>
+  <body>
+    <div id="login" class="hidden">
+      <h1 style="margin:0;font-size:19px">Tagesbericht</h1>
+      <p style="color:var(--fg3);margin:0">Admin-Login</p>
+      <input id="loginEmail" type="email" placeholder="E-Mail" autocomplete="username" />
+      <input id="loginPw" type="password" placeholder="Passwort" autocomplete="current-password" />
+      <button id="loginBtn" style="background:var(--geld);border-color:var(--geld);color:#06121c;font-weight:700;padding:9px 18px">Anmelden</button>
+      <div id="loginMsg" style="color:var(--fg3)"></div>
+    </div>
+
+    <div id="app" class="hidden">
+      <header>
+        <h1>Tagesbericht</h1>
+        <div class="grow"></div>
+        <button id="trockenBtn" title="Auch Trockenläufe anzeigen" style="padding:5px 10px;font-size:12.5px">Trockenläufe</button>
+        <a href="pruefen.html">Prüfen</a>
+        <a href="karte.html">Karte</a>
+        <a href="index.html">Bon-Matching</a>
+        <button id="logoutBtn" style="padding:6px 12px;font-size:13px">Abmelden</button>
+      </header>
+      <main>
+        <div id="inhalt"><p class="leer">Lade Berichte …</p></div>
+        <div id="auszahlung" style="margin-top:22px"><p class="leer">Lade Guthaben &amp; Auszahlungen …</p></div>
+        <div id="statistik" style="margin-top:22px"><p class="leer">Lade Statistik …</p></div>
+        <div id="details" style="margin-top:22px"></div>
+      </main>
+    </div>
+
+    <script type="module">
+      import { $, call, esc, euro, fmtDateTime, initAdmin, toast } from './admin-common.js';
+
+      // Gründe in Klartext. Die Codes kommen aus review-console/src/fotoRundeRegeln.js
+      // und der Bon-Pipeline; ein unbekannter Code wird einfach als Code angezeigt.
+      const GRUND = {
+        unvollstaendig: 'Ansichten fehlten',
+        ean_fehlt: 'Barcode fehlt',
+        kein_produktname: 'Name nicht lesbar',
+        sperre_30_tage_gleicher_nutzer: 'Doppelt (dieselbe Person, alte 24-h-Regel)',
+        // Entscheidungen Patrick 02.10.2026
+        sperre_woche_gleicher_nutzer: 'Doppelt (dieselbe Person, binnen 7 Tagen)',
+        // Haushalts-Regel (Entscheidung Patrick 17.10.2026)
+        doppelt_haushalt: 'Doppelt (anderes Konto, selber Ort, binnen 24 Stunden)',
+        haushalt_aelter_offen: 'Selber Ort: Einreichung eines anderen Kontos noch offen',
+        notbremse_haushalt: 'Notbremse (Haushalts-Regel)',
+        kontosperre_unbekannt: 'Kontosperre nicht lesbar (Technik)',
+        konto_gesperrt_im_lauf: 'Konto während der Runde gesperrt',
+        ean_abweichend: 'Barcode-Foto zeigt andere Nummer',
+        ean_unsicher: 'Barcode-Foto: zwei Lesungen uneinig',
+        // Barcode-Korrektur (Entscheidung Patrick 06.10.2026)
+        ean_alt_doppelt: 'Eigene Einreichung dieser Woche unter einer zugehörigen Barcode-Nummer (vor einer Korrektur)',
+        ean_korrektur_fehlt: 'Barcode-Korrektur nicht gespeichert (Technik)',
+        beleg_nicht_geschrieben: 'Doppel-Beleg heute nicht gespeichert',
+        foto_fremdes_konto: 'Gleiches Foto bei anderem Konto',
+        foto_aeltere_offen: 'Gleiches Foto in älterer offener Einreichung',
+        foto_abgleich_gescheitert: 'Foto-Abgleich gescheitert (Technik)',
+        notbremse_wochensperre: 'Notbremse (Wochen-Sperre)',
+        bilder_wiederverwendet: 'Fotos wiederverwendet',
+        fotos_unpassend: 'Fotos unpassend',
+        gleiche_ansicht_mehrfach: 'Immer dieselbe Ansicht',
+        bild_nicht_lesbar_infrastruktur: 'Datei nicht abrufbar (Technik)',
+        doppelt_eingereicht: 'Doppelt eingereicht',
+        nachlesen_gescheitert: 'Nachlesen gescheitert (Google-Limit)',
+        bild_audit_gescheitert: 'Bildprüfung gescheitert (Google-Limit)',
+        kein_bild_audit: 'Nicht geprüft (Zeit)',
+        bild_defekt: 'Datei beschädigt angekommen',
+        notbremse_bildpruefung: 'Notbremse Bildprüfung',
+        notbremse_quote: 'Notbremse Ablehnungsquote',
+        schreib_fehler: 'Speichern gescheitert (Technik)',
+        lesung_unsicher: 'Name/Barcode unsicher gelesen',
+        pruefgrund_bon_date_future: 'Datum liegt in der Zukunft',
+        pruefgrund_ocr_unavailable: 'Bild nicht lesbar',
+        pruefgrund_lauf_zeitgrenze: 'Verarbeitung zu langsam (Technik)',
+        pruefgrund_ocr_zeitbudget: 'Verarbeitung zu langsam (Technik)',
+        pruefgrund_forensics_software: 'Bearbeitungsspuren (Forensik)',
+        pruefgrund_bild_aehnlich_bezahlt: 'Bild ähnelt bezahltem Bon',
+        pruefgrund_bild_aehnlich_offen: 'Bild ähnelt einem noch offenen Bon',
+        pruefgrund_seite_abweichend: 'Weiterer Belegteil, Uhrzeit/Nummer/Datum anders',
+        pruefgrund_bild_nicht_pruefbar: 'Bild nicht prüfbar (PDF/HEIC/abgeschnitten)',
+        zweitlesung_gescheitert: 'Zweitlesung gescheitert (Technik)',
+        kein_kassenbon: 'Zweitlesung: kein Kassenbon',
+        manipulationsverdacht: 'Zweitlesung: Bearbeitungsspuren',
+        datum_widerspricht: 'Datum widerspricht',
+        summe_widerspricht: 'Summe widerspricht',
+        inhalt_wie_bon_anderer_person: 'Gleicher Inhalt wie Bon einer anderen Person',
+        kein_betrag: 'Kein Betrag (unklar warum)',
+        technik: 'Technischer Fehler',
+        datum_nicht_gelesen: 'Zweitlesung: Datum nicht lesbar',
+        summe_nicht_gelesen: 'Zweitlesung: Summe nicht lesbar',
+        jahr_unsicher: 'Jahr des Bons unsicher',
+        markt_widerspricht: 'Markt passt nicht',
+        betrag_uneinig: 'Artikelzahl uneinig (Betrag unsicher)',
+        zwilling_unentschieden: 'Kopie eines noch offenen Bons',
+        zwilling_unsicher: 'Mögliche Kopie (Uhrzeit unsicher)',
+        frueher_beanstandet: 'Früher schon beanstandet',
+        bild_defekt: 'Bild defekt (nicht lesbar)',
+        preis_fehlt: 'Preis fehlt',
+        preis_unbeurteilt: 'Preis nicht beurteilt (Bildprüfung)',
+        preis_unsicher: 'Preis unsicher — bitte ansehen',
+        ort_auffaellig: 'Aufnahmeort passt nicht zum Markt',
+        namer_laeuft_noch: 'Wird noch nachgelesen',
+        notbremse_preis: 'Notbremse (Preis)',
+        // Bildschirmfoto als Preisbeleg (Patrick 04.10.2026)
+        preis_bildschirm: 'Preisfoto ist ein Bildschirmfoto',
+        preis_bildschirm_unsicher: 'Preisfoto vielleicht Bildschirmfoto — bitte ansehen',
+        preis_kopf_nicht_lesbar: 'Preisfoto-Datei nicht abrufbar (Technik) — bitte ansehen',
+        // Preisbeleg „Kassenbon" (Entscheidung Claude im Auftrag Patricks, 04.10.2026)
+        preis_beleg_unsicher: 'Preisbeleg unsicher (Warenkorb? fremder Händler?) — bitte ansehen',
+        notbremse_preis_bildschirm: 'Notbremse (Bildschirmfoto als Preis)',
+        artikelzahl_nicht_gelesen: 'Zweitlesung: Artikelzahl nicht lesbar',
+        veraendert_nach_aufruf: 'Während der Entscheidung verändert',
+        budget_leer: 'Budget der Aktion leer',
+        keine_aktion: 'Keine Aktion zugeordnet',
+        veraendert: 'Bon wurde zwischendurch neu verarbeitet',
+        zeit_abgelaufen: 'Zeit abgelaufen — morgen wieder dran',
+        resolver_netzwerk: 'Server nicht erreicht',
+        // Nachprüfung 06.10.2026: Prüfregel (Bild / weiterer Belegteil) in der
+        // Buchung getroffen — der Resolver hat festgehalten, ein Mensch entscheidet.
+        resolver_halten: 'Doppel-Verdacht beim Buchen — an Menschen übergeben',
+        resolver_504: 'Server-Zeitüberschreitung',
+        artikelzahl_knapp: 'Artikelzahl knapp an einer Betragsgrenze',
+        artikelzahl_widerspricht: 'Artikelzahl passt nicht',
+
+        below_min_items: 'Zu wenige Artikel',
+        unknown_merchant: 'Markt unbekannt',
+        bon_too_old: 'Bon zu alt',
+        daily_cap_reached: 'Tageslimit',
+        weekly_cap_reached: 'Wochenlimit',
+        per_user_cap_reached: 'Pro-Kopf-Deckel',
+        campaign_budget_exhausted: 'Budget leer',
+        technischer_fehler: 'Technischer Fehler (nach Wiederholung)',
+        status_geaendert: 'Nicht mehr freigegeben',
+        duplicate_content_self: 'Doppelt (dieselbe Person)',
+        duplicate_content_cross_user: 'Doppelt (andere Person)',
+        reconciliation_delta: 'Summe passt nicht',
+        no_bon_date: 'Kein Datum',
+        no_active_campaign: 'Keine Aktion',
+        not_a_receipt: 'Kein Kassenbon',
+        not_credited: 'Nicht gebucht',
+        sperre_30_tage_anderer_nutzer: 'Doppelt (andere Person, alte Regel)',
+        ean_fehlt_lose_ware: 'Lose Ware ohne Barcode (alte Regel)',
+        bild_defekt: 'Datei beschädigt',
+        produkt_bereits_verguetet: 'Schon im Katalog (alte Regel)',
+        ohne_grund: 'ohne Angabe',
+        ausserhalb_aktionsgebiet: 'Außerhalb des Aktionsgebiets',
+        duplicate_content: 'Doppelt',
+        max_retries_exceeded: 'Verarbeitung gescheitert',
+        manual_review_rejected: 'Von Hand abgelehnt',
+      };
+      // Unbekannte Codes der Bon-Runde mit Präfix trotzdem lesbar machen.
+      const g = (c) => GRUND[c] || (String(c || '').startsWith('resolver_') ? `Server: ${String(c).slice(9).replace(/_/g, ' ')}`
+        : String(c || '').startsWith('pruefgrund_') ? `Prüfgrund: ${String(c).slice(11).replace(/_/g, ' ')}` : c);
+      // Codes im Hinweistext übersetzen (z. B. „2026-09-24: kein_kassenbon, datum_widerspricht").
+      const gHinweis = (t) => String(t || '').replace(/[a-z]+(?:_[a-z0-9]+)+/g, (c) => GRUND[c] || c);
+      const STATUS = { approved: 'Freigegeben', no_reward: 'Ohne Prämie', rejected: 'Abgelehnt', review: 'In Prüfung', ocr_pending: 'In Arbeit' };
+      const TAG_MS = 86400000;
+
+      let berichte = [];
+      let mitTrocken = false;
+
+      const zeilen = (obj, leer = 'nichts') => {
+        const e = Object.entries(obj || {}).sort((a, b) => b[1] - a[1]);
+        if (!e.length) return `<div class="leer">${leer}</div>`;
+        return e.map(([k, v]) => `<div class="zeile"><span>${esc(g(k))}</span><span>${v}</span></div>`).join('');
+      };
+      const faelle = (liste, leer) => {
+        if (!liste || !liste.length) return `<div class="leer">${leer}</div>`;
+        return `<div class="liste">${liste.map((f) => `
+          <div class="fall">
+            <a href="pruefen.html?id=${encodeURIComponent(f.id)}">${esc(f.name || '?')}</a>
+            <span class="leer">${esc(f.markt || '')}</span>
+            <span class="g">${esc(g(f.grund))}${f.zurueckgehalten ? ` — zurückgehalten: ${esc(g(f.zurueckgehalten))}` : ''}${f.hinweis ? ` · ${esc(String(f.hinweis).slice(0, 110))}` : ''}</span>
+          </div>`).join('')}</div>`;
+      };
+
+      const MODUS_DE = (m) => (m === false ? 'aus' : m === true ? 'scharf' : 'Beobachtung');
+      /**
+       * „Kassenbon", Lesedienst sah keinen: liegt der Fall wirklich? Nur mit
+       * scharfer Regel (`kassenbonOhneLesedienstBonLiegt`, seit 06.10.2026);
+       * ältere Berichte ohne das Feld behalten „liegt".
+       */
+      function kbLiegt(pb) {
+        const n = pb.kassenbonOhneLesedienstBon || 0;
+        const l = pb.kassenbonOhneLesedienstBonLiegt;
+        if (typeof l !== 'number' || l >= n) return 'liegt';
+        return l ? `${l} liegen, die übrigen in der Beobachtung nicht angehalten` : 'Beobachtung: nicht angehalten';
+      }
+      /**
+       * Bildschirmfoto als Preisbeleg (Patrick 04.10.2026): in der
+       * Beobachtungswoche die Messung — was die Regel getan HÄTTE. Danach, was
+       * sie getan hat. Kassenbons (auch e-Bons) zählen immer; wie viele davon
+       * Bildschirm-Merkmale tragen, steht zur Entscheidung (wörtliche Lesart).
+       * Zwei Schalter (Nachprüfung 05.10.2026): Bildschirm-Regel
+       * (`preisBildschirmRegel`, pb.modus) und Preisbeleg (`preisBelegRegel`,
+       * pb.beleg.modus) wirken und enden getrennt. Ältere Berichte kennen nur
+       * den einen Schalter — dann galt er für beide.
+       * Gezählt wird je Regel und nur an einem Morgen (Nachprüfung 05.10.2026):
+       * was ein Befund eines früheren Laufs weiter hält, steht unter „aus
+       * Vortagen", nicht erneut bei „statt Freigabe". Ältere Berichte ohne
+       * `ausVortagen` zählten beides zusammen — dort bleibt die alte Zeile.
+       */
+      function preisBildschirmBox(pb) {
+        const belegModus = pb.beleg && 'modus' in pb.beleg ? pb.beleg.modus : pb.modus;
+        if (pb.modus === false && belegModus === false) return '<section class="box"><h3>Preisfoto: Bildschirmfoto und Preisbeleg</h3><div class="leer">Beide Regeln ausgeschaltet.</div></section>';
+        const beob = pb.modus !== true;
+        const belegBeob = belegModus !== true;
+        const q = pb.quellen || {};
+        const m = pb.merkmal || {};
+        // Je Fall: hat ein scharfer Schalter gewirkt? (`wirkt`, fehlt in älteren Berichten)
+        const BEFUND = (f) => {
+          const b = typeof f.wirkt === 'boolean' ? !f.wirkt : beob;
+          // Befund eines früheren scharfen Laufs, Regel zurückgenommen → heute bezahlt.
+          if (f.vorbefund && f.wirkt === false && f.entscheidung === 'freigeben') return 'nach Rücknahme der Regel freigegeben';
+          return { ablehnen: b ? 'wäre abgelehnt' : 'abgelehnt', halten: b ? 'wäre liegen geblieben' : 'liegt bei dir' }[f.befund] || f.befund;
+        };
+        const liste = (pb.faelle || []).map((f) => `
+          <div class="fall">
+            <a href="pruefen.html?id=${encodeURIComponent(f.id)}">${esc(f.name || '?')}</a>
+            <span class="leer">${esc(f.markt || '')} · ${esc(f.datei || '')}</span>
+            <span class="g">${f.befund === 'halten' && f.ohneRegel === 'ablehnen' ? 'Befund „liegen lassen" ohne Wirkung — aus anderem Grund abgelehnt' : `${esc(BEFUND(f))}${f.ohneRegel === 'freigeben' && !(f.vorbefund && f.entscheidung === 'freigeben') ? ' (sonst freigegeben)' : ''}`} · Bildprüfung: ${esc(f.quelle || 'keine Antwort')}${f.quelleGrund ? ` („${esc(f.quelleGrund)}")` : ''}${f.lesedienstBon ? ' · Lesedienst: Kassenbon' : ''}${f.beleg ? ` · Preisbeleg: ${esc(BELEG_DE[f.beleg] || f.beleg)}${f.belegHaendler ? ` (${esc(f.belegHaendler)})` : ''}` : ''}${f.vorbefund ? ` · Befund vom ${esc(f.vorbefund)}` : ''}</span>
+          </div>`).join('');
+        // Prüfrunde 3 (04.10.2026): „Kassenbon", den der Lesedienst las und nicht
+        // als Bon sah — ohne Bildschirm-Merkmale wird er bezahlt (Warenkorb?).
+        const ENTSCHIEDEN = { freigeben: beob ? 'freigegeben' : 'freigegeben (Kassenbon zählt)', ablehnen: 'abgelehnt (anderer Grund)', offen: 'liegt', uebersprungen: 'übersprungen' };
+        const kbListe = (pb.kassenbonLesedienstOhneBonFaelle || []).map((f) => `
+          <div class="fall">
+            <a href="pruefen.html?id=${encodeURIComponent(f.id)}">${esc(f.name || '?')}</a>
+            <span class="leer">${esc(f.markt || '')} · ${esc(f.datei || '')}</span>
+            <span class="g">${esc(ENTSCHIEDEN[f.entscheidung] || f.entscheidung || '')} · Lesedienst: ${esc(f.lesedienst || '?')}${f.merkmal === true ? ' · Datei wie Bildschirmfoto' : ''}${f.quelleGrund ? ` · Bildprüfung: „${esc(f.quelleGrund)}"` : ''}</span>
+          </div>`).join('');
+        const unbekannt = (roh) => (roh ? ` (Schalter ${esc(roh)} unbekannt — gilt als Beobachtung)` : '');
+        const schirmZeilen = pb.modus === false ? '<div class="zeile"><span>Bildschirm-Regel ausgeschaltet</span><span>–</span></div>' : `
+          <div class="zeile"><span>${beob ? 'wäre abgelehnt' : 'Befund „ablehnen"'}</span><span>${pb.befundAblehnen ?? 0}</span></div>
+          <div class="zeile"><span>${beob ? 'wäre liegen geblieben' : 'Befund „liegen lassen"'}</span><span>${pb.befundHalten ?? 0}</span></div>
+          <div class="zeile"><span>davon ohne Regel freigegeben</span><span>${pb.stattFreigabe ?? 0}</span></div>
+          ${pb.ausVortagen ? `<div class="zeile"><span>Bildschirm-Regel: aus Vortagen, liegt weiter</span><span>${pb.ausVortagen}</span></div>` : ''}
+          <div class="zeile"><span>Kassenbons mit Bildschirm-Merkmalen (zählen)</span><span>${pb.kassenbonMitMerkmal ?? 0}</span></div>`;
+        return `<section class="box"><h3>Preisfoto: Bildschirmfoto — ${MODUS_DE(pb.modus)}${unbekannt(pb.schalterUnbekannt)} · Preisbeleg — ${MODUS_DE(belegModus)}${unbekannt(pb.beleg && pb.beleg.schalterUnbekannt)}</h3>
+          ${schirmZeilen}
+          ${pb.bildschirmTrotzBon ? `<div class="zeile"><span>„Bildschirm", aber Lesedienst sah Kassenbon (nie abgelehnt)</span><span>${pb.bildschirmTrotzBon}</span></div>` : ''}
+          ${pb.kassenbonOhneLesedienstBon ? `<div class="zeile"><span>„Kassenbon", aber Lesedienst sah keinen (${kbLiegt(pb)})</span><span>${pb.kassenbonOhneLesedienstBon}</span></div>` : ''}
+          ${pb.bildschirmTrotzBonAusVortagen || pb.kassenbonOhneLesedienstBonAusVortagen ? `<div class="zeile"><span>dieselben Widersprüche bei Fällen aus Vortagen (schon gemeldet)</span><span>${(pb.bildschirmTrotzBonAusVortagen || 0) + (pb.kassenbonOhneLesedienstBonAusVortagen || 0)}</span></div>` : ''}
+          ${pb.kassenbonLesedienstOhneBon ? `<div class="zeile"><span>„Kassenbon", Lesedienst sah keinen — alle, auch bezahlte (ansehen: Warenkorb statt Bon?)</span><span>${pb.kassenbonLesedienstOhneBon}</span></div>` : ''}
+          ${kbListe ? `<div class="liste" style="margin-top:4px">${kbListe}</div>` : ''}
+          ${belegModus === false ? '<div class="zeile"><span>Preisbeleg „Kassenbon" ausgeschaltet</span><span>–</span></div>' : belegZeilen(pb.beleg, belegBeob)}
+          ${pb.kopfNichtAbrufbar ? `<div class="zeile"><span>Preisfoto-Kopf nicht abrufbar (Technik)</span><span>${pb.kopfNichtAbrufbar}</span></div>` : ''}
+          ${typeof pb.ausVortagen !== 'number' && pb.vorbefund ? `<div class="zeile"><span>Befund früherer Läufe hält weiter</span><span>${pb.vorbefund}</span></div>` : ''}
+          ${pb.nachRuecknahmeFrei ? `<div class="zeile"><span>nach Rücknahme einer Regel freigegeben (Befund früherer Läufe)</span><span>${pb.nachRuecknahmeFrei}</span></div>` : ''}
+          <div class="zeile"><span>Bildprüfung: Laden / Bon / Bildschirm / kein Preis / unklar / ohne Antwort</span><span>${q.laden || 0} / ${q.kassenbon || 0} / ${q.bildschirm || 0} / ${q.keiner || 0} / ${q.unklar || 0} / ${q.ohne_antwort || 0}</span></div>
+          <div class="zeile"><span>Datei wie Bildschirmfoto: ja / nein / unbekannt</span><span>${m.ja || 0} / ${m.nein || 0} / ${m.unbekannt || 0}</span></div>
+          ${liste ? `<div class="liste" style="margin-top:8px">${liste}</div>` : ''}
+        </section>`;
+      }
+
+      /**
+       * Preisbeleg „Kassenbon" (Entscheidung Claude im Auftrag Patricks,
+       * 04.10.2026): ein „Kassenbon" ohne jedes Kassenbon-Merkmal (Händler,
+       * Datum, Summe, Bon-Nr., Zahlung, Steuer-Kennzeichen — Warenkorb oder
+       * Bestellliste?) oder von einem Händler, der keiner unserer Märkte ist
+       * (Amazon …), bleibt liegen. Beide nur Liegenlassen, nie Ablehnung.
+       */
+      const BELEG_DE = { ohne_merkmale: 'ohne Kassenbon-Merkmale (Warenkorb?)', fremder_haendler: 'fremder Händler' };
+      function belegZeilen(b, beob) {
+        if (!b) return '';
+        const ENTSCHIEDEN = { freigeben: 'freigegeben', ablehnen: 'abgelehnt (anderer Grund)', offen: beob ? 'liegt (anderer Grund)' : 'liegt bei dir', uebersprungen: 'übersprungen' };
+        const liste = (b.faelle || []).map((f) => `
+          <div class="fall">
+            <a href="pruefen.html?id=${encodeURIComponent(f.id)}">${esc(f.name || '?')}</a>
+            <span class="leer">${esc(f.markt || '')}${f.haendler || f.lesedienstHaendler ? ` · Händler laut Beleg: ${esc(f.haendler || '–')}${f.lesedienstHaendler ? ` / Lesedienst: ${esc(f.lesedienstHaendler)}` : ''}` : ''}</span>
+            <span class="g">${esc(f.befund ? (BELEG_DE[f.befund] || f.befund) : 'heute kein Befund')} · ${esc(f.vorbefund && f.wirkt === false && f.entscheidung === 'freigeben' ? 'nach Rücknahme der Regel freigegeben' : f.ohneRegel === 'freigeben' && (typeof f.wirkt === 'boolean' ? !f.wirkt : beob) && f.entscheidung === 'freigeben' ? 'freigegeben (wäre liegen geblieben)' : (ENTSCHIEDEN[f.entscheidung] || f.entscheidung || ''))}${Array.isArray(f.merkmale) ? ` · Merkmale: ${esc(f.merkmale.join(', ') || 'keine')}` : f.befund ? ' · Merkmale: keine Antwort' : ''}${f.quelleGrund ? ` · „${esc(f.quelleGrund)}"` : ''}${f.vorbefund ? ` · Befund vom ${esc(f.vorbefund)}` : ''}</span>
+          </div>`).join('');
+        return `
+          <div class="zeile"><span>Preisbeleg „Kassenbon": ohne Kassenbon-Merkmale (Warenkorb?)</span><span>${b.ohneMerkmale ?? 0}</span></div>
+          <div class="zeile"><span>Preisbeleg „Kassenbon": fremder Händler (z. B. Amazon)</span><span>${b.fremderHaendler ?? 0}</span></div>
+          <div class="zeile"><span>${beob ? 'davon wäre liegen geblieben (sonst freigegeben)' : 'davon liegen geblieben statt freigegeben'}</span><span>${b.stattFreigabe ?? 0}</span></div>
+          ${b.ausVortagen ? `<div class="zeile"><span>Preisbeleg: aus Vortagen, liegt weiter</span><span>${b.ausVortagen}</span></div>` : ''}
+          ${b.merkmaleOhneAntwort ? `<div class="zeile"><span>Kassenbon: Merkmal-Frage ohne Antwort</span><span>${b.merkmaleOhneAntwort} von ${b.kassenbon ?? '?'}</span></div>` : ''}
+          ${b.maerkteUnlesbar ? '<div class="zeile"><span>Liste unserer Märkte nicht lesbar (nur feste Ketten)</span><span>!</span></div>' : ''}
+          ${liste ? `<div class="liste" style="margin-top:4px">${liste}</div>` : ''}`;
+      }
+
+      /** Verlauf als gestapelte Balken je Lauf (echte Läufe), dazu der gebuchte Betrag. */
+      function diagramm(liste) {
+        const l = liste.slice().reverse();
+        if (l.length < 2) return '<div class="leer">Der Verlauf erscheint ab dem zweiten Lauf.</div>';
+        const B = 26, L = 8, H = 150, oben = 12, unten = 28;
+        const max = Math.max(1, ...l.map((b) => (b.freigegeben || 0) + (b.abgelehnt || 0) + (b.offen || 0)));
+        const maxCent = Math.max(1, ...l.map((b) => b.gebuchtCents || 0));
+        const w = l.length * (B + L) + 40;
+        let s = `<svg width="${w}" height="${H + oben + unten}" role="img" aria-label="Verlauf der Morgenrunden">`;
+        const y = (v) => oben + H - (v / max) * H;
+        s += `<line x1="0" x2="${w}" y1="${oben + H}" y2="${oben + H}" stroke="var(--line2)"/>`;
+        const punkte = [];
+        l.forEach((b, i) => {
+          const x = 20 + i * (B + L);
+          let basis = 0;
+          for (const [wert, farbe, name] of [[b.freigegeben || 0, 'var(--ok)', 'freigegeben'], [b.abgelehnt || 0, 'var(--nein)', 'abgelehnt'], [b.offen || 0, 'var(--offen)', 'offen']]) {
+            if (!wert) continue;
+            s += `<rect x="${x}" y="${y(basis + wert)}" width="${B}" height="${y(basis) - y(basis + wert)}" fill="${farbe}" rx="2"><title>${esc(b.tag)}: ${wert} ${name}</title></rect>`;
+            basis += wert;
+          }
+          punkte.push([x + B / 2, oben + H - ((b.gebuchtCents || 0) / maxCent) * H, b]);
+          s += `<text x="${x + B / 2}" y="${oben + H + 16}" fill="var(--fg3)" font-size="10" text-anchor="middle">${esc(String(b.tag).slice(8, 10))}.${esc(String(b.tag).slice(5, 7))}</text>`;
+        });
+        s += `<polyline points="${punkte.map((p) => p[0] + ',' + p[1]).join(' ')}" fill="none" stroke="var(--geld)" stroke-width="2"/>`;
+        punkte.forEach(([px, py, b]) => { s += `<circle cx="${px}" cy="${py}" r="3" fill="var(--geld)"><title>${esc(b.tag)}: ${euro(b.gebuchtCents || 0)} gebucht</title></circle>`; });
+        return `<div class="diagramm">${s}</svg></div>
+          <div class="legende"><span><i style="background:var(--ok)"></i>freigegeben</span><span><i style="background:var(--nein)"></i>abgelehnt</span><span><i style="background:var(--offen)"></i>offen</span><span><i style="background:var(--geld)"></i>gebucht (€, eigene Skala)</span></div>`;
+      }
+
+      function zeige() {
+        const echte = berichte.filter((b) => !b.dryRun);
+        // Gibt es noch keinen scharfen Lauf, zeigt die Seite den letzten
+        // Trockenlauf — samt roter Warnung, dass die Runde nichts entscheidet.
+        // Vorher stand hier „Noch kein Lauf", und der Hinweis auf den
+        // ausgeschalteten Schalter erschien nie (Gegenprüfung 24.09.).
+        let sichtbar = berichte.filter((b) => mitTrocken || !b.dryRun);
+        if (!sichtbar.length) sichtbar = berichte;
+        if (!sichtbar.length) {
+          $('inhalt').innerHTML = '<p class="leer">Noch kein Lauf. Die Morgenrunde läuft täglich um 8:00 Uhr.</p>';
+          $('details').innerHTML = '';
+          return;
+        }
+        const b = sichtbar[0];
+        const letzterEchter = echte[0];
+        const warn = [...(b.warnungen || [])];
+        // Die wichtigste Warnung erzeugt die Runde nicht selbst: dass sie heute gar nicht lief.
+        if (!letzterEchter || Date.now() - (letzterEchter.laufAt || 0) > 26 * 60 * 60 * 1000) {
+          warn.unshift({ stufe: 'rot', code: 'runde_fehlt', text: letzterEchter ? `Die Morgenrunde ist seit ${fmtDateTime(letzterEchter.laufAt)} nicht mehr scharf gelaufen.` : 'Die Morgenrunde ist noch nie scharf gelaufen (Schalter fotoWorker?).' });
+        }
+        const bons = b.bons || {};
+        const zp = b.zweitpruefung || {};
+        const aktionen = (b.aktionen || []).slice().sort((x, y) => (x.startAt || 0) - (y.startAt || 0));
+
+        $('inhalt').innerHTML = `
+          <div class="lauf">
+            <h2>${esc(new Date(b.laufAt || Date.now()).toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: 'long' }))}</h2>
+            <span class="pill ${b.dryRun ? 'trocken' : 'scharf'}">${b.dryRun ? 'TROCKENLAUF' : 'SCHARF'}</span>
+            <span class="meta">${esc(fmtDateTime(b.laufAt))} · ${esc(b.ausloeser || '')} · ${Math.round((b.dauerSekunden || 0) / 60)} min · Regeln ${esc(b.regelVersion || '?')}</span>
+          </div>
+          ${warn.length ? warn.map((w) => `<div class="warn ${w.stufe}"><b>${w.stufe === 'rot' ? 'Handeln' : 'Im Blick'}</b><span>${esc(w.text)}</span></div>`).join('') : '<div class="allesgut">Keine Warnungen — alles im normalen Rahmen.</div>'}
+
+          <div class="kacheln">
+            <div class="kachel"><div class="z">${b.geprueft ?? 0}</div><div class="l">geprüft</div></div>
+            <div class="kachel"><div class="z" style="color:var(--ok)">${b.freigegeben ?? 0}</div><div class="l">freigegeben${b.loseWare ? ` · ${b.loseWare} lose Ware` : ''}</div></div>
+            <div class="kachel"><div class="z" style="color:var(--nein)">${b.abgelehnt ?? 0}</div><div class="l">abgelehnt</div></div>
+            <div class="kachel"><div class="z" style="color:var(--offen)">${b.offen ?? 0}</div><div class="l">wartet auf dich</div></div>
+            <div class="kachel"><div class="z" style="color:var(--geld)">${euro(b.gebuchtCents || 0)}</div><div class="l">gebucht${b.buchungAusstehend ? ` · ${b.buchungAusstehend} ausstehend` : ''}</div></div>
+            <div class="kachel"><div class="z">${b.personenBezahlt ?? 0}</div><div class="l">Personen bezahlt</div></div>
+          </div>`;
+        // Oben Warnungen + Kacheln, darunter die Statistik, danach die Laufdetails.
+        $('details').innerHTML = `
+          <h2 style="margin:0 0 12px;font-size:18px">Details zum Lauf</h2>
+          ${'bonRunde' in b ? bonRundeBox(b.bonRunde) : ''}
+          <div class="raster">
+            <section class="box"><h3>Wartet auf dich (${b.offen ?? 0}${(b.wartetAufDich || []).length < (b.offen || 0) ? `, erste ${(b.wartetAufDich || []).length} gezeigt` : ''})</h3>${faelle(b.wartetAufDich, 'Nichts offen.')}</section>
+            <section class="box"><h3>Automatisch abgelehnt (${b.abgelehnt ?? 0}${(b.abgelehntListe || []).length < (b.abgelehnt || 0) ? `, erste ${(b.abgelehntListe || []).length} gezeigt` : ''})</h3>${faelle(b.abgelehntListe, 'Keine Ablehnungen.')}</section>
+            <section class="box"><h3>Ablehngründe</h3>${zeilen(b.ablehnGruende, 'keine')}
+              ${Object.keys(b.nichtGebucht || {}).length ? `<h3 style="margin-top:14px">Freigegeben, aber nicht gebucht</h3>${zeilen(b.nichtGebucht)}` : ''}</section>
+            ${(b.eanKorrektur?.vorgeschlagenFaelle || []).length ? `<section class="box"><h3>Barcode-Korrektur vorgeschlagen — Schalter barcodeKorrektur ist aus (${b.eanKorrektur.vorgeschlagen})</h3><div class="liste">${b.eanKorrektur.vorgeschlagenFaelle.map((f) => `
+              <div class="fall">
+                <a href="pruefen.html?id=${encodeURIComponent(f.id)}">${esc(f.vorher || '?')} → ${esc(f.neu || '?')}</a>
+                <span class="g">liegt wie bisher${f.aus === 'vorbefund' ? ' · Befund aus früherem Lauf' : ''}</span>
+              </div>`).join('')}</div></section>` : ''}
+            ${(b.eanKorrektur?.faelle || []).length ? `<section class="box"><h3>Barcode automatisch korrigiert (${b.eanKorrektur.korrigiert}${b.eanKorrektur.gespeichert === false ? ', nur geplant — Trockenlauf' : ''})</h3><div class="liste">${b.eanKorrektur.faelle.map((f) => `
+              <div class="fall">
+                <a href="pruefen.html?id=${encodeURIComponent(f.id)}">${esc(f.vorher || '?')} → ${esc(f.neu || '?')}</a>
+                <span class="g">${esc(f.entscheidung === 'freigeben' ? 'freigegeben' : f.entscheidung === 'ablehnen' ? `abgelehnt: ${g(f.grund)}` : `liegt: ${g(f.grund)}`)}${f.aus === 'vorbefund' ? ' · Befund aus früherem Lauf' : ''}</span>
+              </div>`).join('')}</div></section>` : ''}
+            <section class="box"><h3>Nachgelesen &amp; Bildprüfung</h3>
+              <div class="zeile"><span>Name</span><span>${b.nachgelesen?.name ?? 0}</span></div>
+              <div class="zeile"><span>Barcode</span><span>${b.nachgelesen?.ean ?? 0}</span></div>
+              <div class="zeile"><span>Preis</span><span>${b.nachgelesen?.preis ?? 0}</span></div>
+              <div class="zeile"><span>Hersteller</span><span>${b.nachgelesen?.hersteller ?? 0}</span></div>
+              <div class="zeile"><span>Bildprüfungen</span><span>${b.bildpruefung?.versucht ?? 0}</span></div>
+              <div class="zeile"><span>davon gescheitert (Technik)</span><span>${b.bildpruefung?.gescheitert ?? 0}</span></div>
+              <div class="zeile"><span>davon unpassend</span><span>${b.bildpruefung?.unpassend ?? 0}</span></div>
+              ${b.kontoSperren?.offenEinreichungen ? `<div class="zeile"><span>gesperrte Konten — liegen still (nicht in „Wartet auf dich")</span><span>${b.kontoSperren.offenEinreichungen}</span></div>` : ''}
+              ${b.eanKorrektur ? `<div class="zeile"><span>Barcode automatisch korrigiert${b.eanKorrektur.ausVorbefund ? ` (davon ${b.eanKorrektur.ausVorbefund} aus früheren Läufen)` : ''}</span><span>${b.eanKorrektur.korrigiert ?? 0}</span></div>` : ''}
+              ${b.eanKorrektur?.gebremst ? `<div class="zeile"><span style="color:var(--nein)">Barcode-Korrektur gebremst — ${b.eanKorrektur.gebremstAnzahl} wären es gewesen (${b.eanKorrektur.quote?.korrigiert ?? '?'} von ${b.eanKorrektur.quote?.geprueft ?? '?'} neu geprüften)${b.eanKorrektur.gebremstVermerkt === false ? ', nichts vermerkt' : ''}</span><span>0</span></div>` : ''}
+              ${b.eanKorrektur?.leser && b.eanKorrektur.kandidaten ? `<div class="zeile"><span>Strichcode-Leser (Pflicht-Zeuge): ${b.eanKorrektur.leser.bestaetigt} bestätigt, ${b.eanKorrektur.leser.widerspricht} widersprochen, ${b.eanKorrektur.leser.nicht_gelesen} nicht gelesen, ${b.eanKorrektur.leser.fehler} Fehler</span><span>${b.eanKorrektur.kandidaten}</span></div>` : ''}
+              ${b.eanKorrektur?.aufgeschoben ? `<div class="zeile"><span>Barcode-Korrekturen aus früheren Läufen aufgeschoben (Tagesgrenze)</span><span>${b.eanKorrektur.aufgeschoben}</span></div>` : ''}
+              ${b.eanKorrektur?.gebremstHaelt ? `<div class="zeile"><span>Barcode von einer Notbremse angehalten — nie automatisch korrigiert</span><span>${b.eanKorrektur.gebremstHaelt}</span></div>` : ''}
+              ${b.eanKorrektur?.uneinigUeberTage ? `<div class="zeile"><span>Barcode über Tage uneinig gelesen — nie automatisch korrigiert</span><span>${b.eanKorrektur.uneinigUeberTage}</span></div>` : ''}
+              ${b.eanFotoVorbefund?.haelt ? `<div class="zeile"><span>Barcode-Befund früherer Läufe hält weiter</span><span>${b.eanFotoVorbefund.haelt}</span></div>` : ''}
+              ${b.fotoVorbefund?.haelt ? `<div class="zeile"><span>Foto-Befund früherer Läufe hält weiter</span><span>${b.fotoVorbefund.haelt}</span></div>` : ''}
+            </section>
+            ${b.preisBildschirm ? preisBildschirmBox(b.preisBildschirm) : ''}
+            <section class="box"><h3>Bons — letzte 24 Stunden (${bons.letzte24h?.gesamt ?? 0})</h3>
+              ${Object.entries(bons.letzte24h?.status || {}).map(([k, v]) => `<div class="zeile"><span>${esc(STATUS[k] || k)}</span><span>${v}</span></div>`).join('') || '<div class="leer">keine</div>'}
+              <h3 style="margin-top:14px">Gründe ohne Prämie / abgelehnt</h3>${zeilen(bons.letzte24h?.gruende, 'keine')}
+            </section>
+            <section class="box"><h3>Bons — Prüfung &amp; Zweitprüfung</h3>
+              <div class="zeile"><span>Warten auf Entscheidung</span><span>${bons.inPruefung ?? 0}</span></div>
+              <div class="zeile"><span>ältester</span><span>${bons.aeltesteTage == null ? '—' : bons.aeltesteTage + ' Tage'}</span></div>
+              <div class="zeile"><span>Zweitprüfung</span><span>${zp.eingeschaltet ? (zp.modus === 'shadow' ? 'Beobachtung' : 'an') : 'aus'}</span></div>
+              <div class="zeile"><span>Zweitprüfungen letzte 48 h</span><span style="color:${zp.eingeschaltet && !zp.laeufeLetzte48h ? 'var(--nein)' : 'inherit'}">${zp.laeufeLetzte48h ?? 0}</span></div>
+            </section>
+            ${b.produktsuche ? produktsucheBox(b.produktsuche) : ''}
+          </div>
+
+          <section class="box" style="margin-top:14px"><h3>Aktionen</h3>
+            <div class="tabwrap"><table>
+              <tr><th>Aktion</th><th>Art</th><th>Zeitraum</th><th class="n">Prämie</th><th class="n">Budget übrig</th></tr>
+              ${aktionen.map((a) => {
+                const quote = a.budgetTotalCents ? Math.round((100 * (a.budgetRemainingCents || 0)) / a.budgetTotalCents) : null;
+                const zustand = (a.startAt || 0) > Date.now() ? 'geplant' : (a.endAt || 0) < Date.now() ? 'beendet' : '';
+                // Aktionen beginnen um 23:59:59 des Vortags (Muster seit Juli) — angezeigt wird der erste volle Tag.
+                const tag = (t) => new Date(t).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Berlin' });
+                return `<tr><td>${esc(a.id)}${zustand ? ` <span class="pill">${zustand}</span>` : ''}</td><td>${a.kind === 'receipt' ? 'Bon' : 'Foto'}</td>
+                  <td>${esc(tag((a.startAt || 0) + 1000))} – ${esc(tag(a.endAt))}</td>
+                  <td class="n">${a.cashbackPerBonCents != null ? a.cashbackPerBonCents + ' ct' : '—'}</td>
+                  <td class="n">${euro(a.budgetRemainingCents)}${quote != null ? ` (${quote} %)` : ''}</td></tr>`;
+              }).join('')}
+            </table></div>
+          </section>
+
+          <section class="box" style="margin-top:14px"><h3>Verlauf (echte Läufe)</h3>${diagramm(echte.slice(0, 30))}</section>
+
+          <section class="box" style="margin-top:14px"><h3>Alle Läufe</h3>
+            <div class="tabwrap"><table>
+              <tr><th>Lauf</th><th>Art</th><th class="n">geprüft</th><th class="n">frei</th><th class="n">abgelehnt</th><th class="n">offen</th><th class="n">gebucht</th><th class="n">Warnungen</th></tr>
+              ${sichtbar.map((x) => `<tr><td>${esc(fmtDateTime(x.laufAt))}</td><td>${x.dryRun ? 'Trocken' : 'Scharf'} · ${esc(x.ausloeser || '')}</td>
+                <td class="n">${x.geprueft ?? 0}</td><td class="n">${x.freigegeben ?? 0}</td><td class="n">${x.abgelehnt ?? 0}</td><td class="n">${x.offen ?? 0}</td>
+                <td class="n">${euro(x.gebuchtCents || 0)}</td><td class="n" style="color:${(x.warnungen || []).some((w) => w.stufe === 'rot') ? 'var(--nein)' : 'inherit'}">${(x.warnungen || []).length}</td></tr>`).join('')}
+            </table></div>
+          </section>`;
+      }
+
+      /* ─── Produktsuche: unbekannte Barcodes, Vortag (src/produktsuche.js) ─── */
+      function produktsucheBox(p) {
+        if (p.unlesbar) return '<section class="box"><h3>Produktsuche (unbekannte Barcodes)</h3><div class="leer">Zahlen nicht lesbar.</div></section>';
+        const z = p.gestern;
+        const zahlDe = (n) => Number(n || 0).toLocaleString('de-DE');
+        const zustand = String(p.zustand || '—');
+        const rot = (bed) => (bed ? ' style="color:var(--nein)"' : '');
+        return `<section class="box"><h3>Produktsuche — ${esc(p.tag ? `${p.tag.slice(8, 10)}.${p.tag.slice(5, 7)}.` : 'gestern')} (unbekannte Barcodes)</h3>
+          ${z ? `<div class="zeile"><span>bearbeitet</span><span>${zahlDe(z.bearbeitet)}${p.tagesDeckel != null ? ` <span class="leer">/ ${zahlDe(p.tagesDeckel)}</span>` : ''}</span></div>
+            <div class="zeile"><span>gefunden</span><span style="color:var(--ok)">${zahlDe(z.gefunden)}</span></div>
+            <div class="zeile"><span>ohne Daten</span><span>${zahlDe(z.keineDaten)}</span></div>
+            <div class="zeile"><span>übersprungen (kostenlos)</span><span>${zahlDe(z.uebersprungen)}</span></div>
+            <div class="zeile"><span>Fehler (Fremddienst)</span><span${rot(z.fehler > 0)}>${zahlDe(z.fehler)}</span></div>
+            ${z.kostenSchaetzungUsd != null ? `<div class="zeile"><span>Kosten (Schätzung)</span><span>${esc(z.kostenSchaetzungUsd.toFixed(2).replace('.', ','))} $</span></div>` : ''}`
+          : '<div class="leer">Gestern keine Zahlen — nicht gelaufen.</div>'}
+          <div class="zeile"><span>Serper-Rest</span><span${rot(p.angehalten === 'serper_guthaben')}>${p.serperRest == null ? '—' : zahlDe(p.serperRest)}</span></div>
+          <div class="zeile"><span>Zustand</span><span${rot(zustand.startsWith('angehalten'))}>${esc(zustand)}</span></div>
+          ${p.wartend != null ? `<div class="zeile"><span>Barcodes warten</span><span>${zahlDe(p.wartend)}</span></div>` : ''}
+          ${p.heute ? `<div class="leer" style="margin-top:6px">Heute bis jetzt: ${zahlDe(p.heute.bearbeitet)} bearbeitet, ${zahlDe(p.heute.gefunden)} gefunden.</div>` : ''}
+        </section>`;
+      }
+
+      /* ─── Bon-Runde (07:45, src/bonRunde.js) ─── */
+      function bonRundeBox(br) {
+        if (!br) return '<section class="box" style="margin-bottom:14px"><h3>Bons — Morgenrunde (7:45)</h3><div class="leer">Heute kein Bericht der Bon-Runde.</div></section>';
+        const offen = (br.faelle || []).filter((f) => f.entscheidung === 'offen');
+        const wort = { freigeben: 'freigegeben', ablehnen: 'abgelehnt', offen: 'offen' };
+        return `<section class="box" style="margin-bottom:14px"><h3>Bons — Morgenrunde (7:45)${br.dryRun ? ' · TROCKENLAUF' : ''}</h3>
+          <div class="kacheln" style="margin:6px 0 10px">
+            ${kachel(br.geprueft ?? 0, 'in der Prüfung vorgefunden')}
+            ${kachel(br.freigegeben ?? 0, br.dryRun ? 'würde freigeben' : 'freigegeben und bezahlt', 'var(--ok)')}
+            ${kachel(br.abgelehnt ?? 0, `${br.dryRun ? 'würde ablehnen' : 'abgelehnt'} (doppelt)`, 'var(--nein)')}
+            ${kachel(br.offen ?? 0, 'wartet auf dich', 'var(--offen)')}
+            ${br.gedeckelt ? kachel(br.gedeckelt, 'freigegeben, aber ohne Prämie (Limit/Budget)') : ''}
+            ${br.doppelImResolver ? kachel(br.doppelImResolver, 'freigegeben, aber derselbe Bon war schon bezahlt (abgelehnt)', 'var(--nein)') : ''}
+            ${kachel(euro(br.gebuchtCents || 0), 'gebucht', 'var(--geld)')}
+          </div>
+          ${offen.length ? `<div class="liste">${offen.map((f) => `<div class="fall"><a href="pruefen.html?tab=receipts&id=${encodeURIComponent(f.id)}">${esc(f.markt || 'Bon')} · ${esc(f.datum || '')}</a><span class="leer">${esc(wort[f.entscheidung] || f.entscheidung)}</span><span class="g">${esc(g(f.grund))}${f.hinweis ? ' · ' + esc(gHinweis(f.hinweis).slice(0, 140)) : ''}</span></div>`).join('')}</div>` : '<div class="leer">Nichts offen.</div>'}
+        </section>`;
+      }
+
+      /* ─── Statistik: letzte 60 Tage aus den echten Daten (reviewStatistik) ─── */
+      function balken(jeTag, serien, geldFeld, hoehe = 140) {
+        const B = 11, L = 3, oben = 10, unten = 26;
+        const max = Math.max(1, ...jeTag.map((t) => serien.reduce((a, s) => a + (t[s.feld] || 0), 0)));
+        const maxGeld = Math.max(1, ...jeTag.map((t) => t[geldFeld] || 0));
+        const w = jeTag.length * (B + L) + 30;
+        const y = (v) => oben + hoehe - (v / max) * hoehe;
+        let svg = `<svg width="${w}" height="${hoehe + oben + unten}" role="img" aria-label="Verlauf je Tag">`;
+        svg += `<line x1="0" x2="${w}" y1="${oben + hoehe}" y2="${oben + hoehe}" stroke="var(--line2)"/>`;
+        const pkt = [];
+        jeTag.forEach((t, i) => {
+          const x = 15 + i * (B + L);
+          let basis = 0;
+          for (const s of serien) {
+            const v = t[s.feld] || 0;
+            if (!v) continue;
+            svg += `<rect x="${x}" y="${y(basis + v)}" width="${B}" height="${y(basis) - y(basis + v)}" fill="${s.farbe}" rx="1.5"><title>${esc(t.tag)}: ${v} ${esc(s.name)}</title></rect>`;
+            basis += v;
+          }
+          pkt.push(`${x + B / 2},${oben + hoehe - ((t[geldFeld] || 0) / maxGeld) * hoehe}`);
+          const d = t.tag.slice(8, 10), m = t.tag.slice(5, 7);
+          if (d === '01' || i === 0 || i === jeTag.length - 1 || d === '15') svg += `<text x="${x + B / 2}" y="${oben + hoehe + 15}" fill="var(--fg3)" font-size="10" text-anchor="middle">${d}.${m}.</text>`;
+        });
+        svg += `<polyline points="${pkt.join(' ')}" fill="none" stroke="var(--geld)" stroke-width="1.8"/>`;
+        jeTag.forEach((t, i) => { svg += `<circle cx="${15 + i * (B + L) + B / 2}" cy="${oben + hoehe - ((t[geldFeld] || 0) / maxGeld) * hoehe}" r="5" fill="transparent"><title>${esc(t.tag)}: ${euro(t[geldFeld] || 0)} gutgeschrieben</title></circle>`; });
+        return `<div class="diagramm">${svg}</svg></div><div class="legende">${serien.map((s) => `<span><i style="background:${s.farbe}"></i>${esc(s.name)}</span>`).join('')}<span><i style="background:var(--geld)"></i>gutgeschrieben (€, eigene Skala)</span></div>`;
+      }
+      const kachel = (z, l, farbe = '') => `<div class="kachel"><div class="z"${farbe ? ` style="color:${farbe}"` : ''}>${z}</div><div class="l">${l}</div></div>`;
+      const top = (obj, n = 10) => zeilen(Object.fromEntries(Object.entries(obj || {}).sort((a, b) => b[1] - a[1]).slice(0, n)), 'keine');
+
+      function zeigeStatistik(st) {
+        const f = st.fotos, b = st.bons;
+        $('statistik').innerHTML = `
+          <div class="lauf"><h2>Statistik — letzte ${st.tage.length} Tage</h2>
+            <span class="meta">aus den echten Daten · Stand ${esc(fmtDateTime(st.stand))}${st.ausCache ? ' (zwischengespeichert)' : ''}</span></div>
+          <section class="box"><h3>Produktfotos</h3>
+            <div class="kacheln" style="margin:6px 0 14px">
+              ${kachel(f.letzte7.freigegeben, `freigegeben · 7 Tage (${f.summe.freigegeben} in ${st.tage.length})`, 'var(--ok)')}
+              ${kachel(f.letzte7.abgelehnt, `abgelehnt · 7 Tage (${f.summe.abgelehnt})`, 'var(--nein)')}
+              ${kachel(euro(f.letzte7.cents), `gutgeschrieben · 7 Tage (${euro(f.summe.cents)})`, 'var(--geld)')}
+              ${kachel(f.letzte7.eingereicht, `eingereicht · 7 Tage (${f.summe.eingereicht})`)}
+              ${kachel(f.offen, 'offen jetzt', 'var(--offen)')}
+            </div>
+            ${balken(f.jeTag, [{ feld: 'freigegeben', name: 'freigegeben', farbe: 'var(--ok)' }, { feld: 'abgelehnt', name: 'abgelehnt', farbe: 'var(--nein)' }], 'cents')}
+            <h3 style="margin-top:14px">Ablehngründe (${st.tage.length} Tage)</h3>${top(f.gruende)}
+          </section>
+          <section class="box" style="margin-top:14px"><h3>Bons</h3>
+            <div class="kacheln" style="margin:6px 0 14px">
+              ${kachel(b.letzte7.eingereicht, `eingereicht · 7 Tage (${b.summe.eingereicht})`)}
+              ${kachel(b.letzte7.approved, `mit Prämie · 7 Tage (${b.summe.approved})`, 'var(--ok)')}
+              ${kachel(b.letzte7.no_reward, `ohne Prämie · 7 Tage (${b.summe.no_reward})`)}
+              ${kachel(b.letzte7.rejected, `abgelehnt · 7 Tage (${b.summe.rejected})`, 'var(--nein)')}
+              ${kachel(euro(b.letzte7.cents), `gutgeschrieben · 7 Tage (${euro(b.summe.cents)})`, 'var(--geld)')}
+              ${kachel(b.inPruefung, 'in Prüfung jetzt', 'var(--offen)')}
+            </div>
+            ${balken(b.jeTag, [{ feld: 'approved', name: 'mit Prämie', farbe: 'var(--ok)' }, { feld: 'no_reward', name: 'ohne Prämie', farbe: 'var(--fg3)' }, { feld: 'rejected', name: 'abgelehnt', farbe: 'var(--nein)' }], 'cents')}
+            <h3 style="margin-top:14px">Gründe ohne Prämie / abgelehnt (${st.tage.length} Tage)</h3>${top(b.gruende)}
+          </section>
+          <p class="leer" style="margin-top:8px">Fotos zählen am Tag der Entscheidung, Bons am Tag des Einreichens. Foto-Beträge kommen aus dem Ledger, Bon-Beträge aus dem Bon.</p>`;
+      }
+
+      /* ─── Guthaben & Auszahlungen (reviewAuszahlungen, src/auszahlung.js) ─── */
+      const KONTO = {
+        konto: ['Konto mit E-Mail', 'kann auszahlen'],
+        ohne_email: ['Konto ohne E-Mail', 'muss erst eine E-Mail hinterlegen'],
+        gast: ['Gast ohne Konto', 'muss erst ein Konto anlegen'],
+        unbekannt: ['unbekannt', 'Konto nicht gefunden oder gesperrt'],
+      };
+      const datum = (t) => (t ? new Date(t).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', timeZone: 'Europe/Berlin' }) : '—');
+      const eur0 = (c) => euro(c).replace(',00 €', ' €');
+      const zahl = (n) => Number(n || 0).toLocaleString('de-DE');
+
+      function zeigeAuszahlung(a) {
+        const s = a.schwelleCents;
+        const az = a.auszahlungen;
+        const nichtAuszahlbar = (a.reifNachKonto.gast?.personen || 0) + (a.reifNachKonto.ohne_email?.personen || 0) + (a.reifNachKonto.unbekannt?.personen || 0);
+        const maxStufe = Math.max(1, ...a.stufen.map((x) => x.cents));
+        const stufeName = (x) => (x.bisCents == null ? `ab ${eur0(x.vonCents)}` : `${eur0(x.vonCents).replace(' €', '')}–${eur0(x.bisCents)}`);
+        const tage = (z) => (z.tageBisSchwelle === 0 ? '<span style="color:var(--ok)">erreicht</span>'
+          : z.tageBisSchwelle == null ? '<span class="leer">sammelt gerade nicht</span>' : z.tageBisSchwelle > 90 ? 'über 90 Tage' : `in ~${z.tageBisSchwelle} Tagen`);
+        const kontoZelle = (z) => (z.test ? '<span class="pill trocken">Testkonto</span>'
+          : z.konto === 'konto' ? '' : `<span style="color:var(--offen)">${esc(KONTO[z.konto]?.[0] || z.konto)} – ${esc(KONTO[z.konto]?.[1] || '')}</span>`);
+        $('auszahlung').innerHTML = `
+          <div class="lauf"><h2>Guthaben &amp; Auszahlungen</h2>
+            <span class="meta">Auszahlung ab ${euro(s)} · Stand ${esc(fmtDateTime(a.stand))}${a.ausCache ? ' (zwischengespeichert)' : ''}</span>
+            <button id="auszahlungNeu" style="padding:4px 10px;font-size:12px">neu laden</button></div>
+          ${a.kontoFehler ? `<div class="warn gelb"><b>Im Blick</b><span>Bei ${zahl(a.kontoFehler)} Personen konnte nicht geprüft werden, ob sie ein Konto haben — sie stehen unter „unbekannt".</span></div>` : ''}
+          ${az.haengt.anzahl ? `<div class="warn rot"><b>Handeln</b><span>${zahl(az.haengt.anzahl)} Auszahlung(en) über ${euro(az.haengt.cents)} sind seit über 15 Minuten angefordert, aber noch nicht an Tremendous übergeben.</span></div>` : ''}
+          <div class="kacheln" style="margin-top:6px">
+            ${kachel(zahl(a.reif.personen), `haben ${eur0(s)} erreicht, noch nicht ausgezahlt · ${euro(a.reif.cents)}${nichtAuszahlbar ? ` · ${nichtAuszahlbar} davon können noch nicht auszahlen` : ''}`, 'var(--ok)')}
+            ${kachel(zahl(a.nah.personen), `nah dran (${eur0(a.nahAbCents)}–${eur0(s)}) · ${euro(a.nah.cents)}`, 'var(--offen)')}
+            ${kachel(`~${zahl(a.vorschau30.personen)}`, `erreichen ${eur0(s)} voraussichtlich in den nächsten 30 Tagen · je mind. ${eur0(s)} (grobe Schätzung)`)}
+            ${kachel(euro(a.gesamt.cents), `offenes Guthaben aller Kunden · ${zahl(a.gesamt.personen)} Personen`, 'var(--geld)')}
+            ${kachel(euro(az.versandt.cents), `an Kunden ausgezahlt seit Start · ${zahl(az.versandt.anzahl)}× an ${zahl(az.empfaenger)} Personen · 30 Tage: ${euro(az.letzte30.cents)}`)}
+          </div>
+          ${(() => {
+            const teile = [];
+            if (a.test.personen) teile.push(`${zahl(a.test.personen)} Testkonto mit ${euro(a.test.cents)} Guthaben (Testgutschrift vom Go-Live — kann trotzdem echt ausgezahlt werden)`);
+            if (az.anTestkonto.anzahl) teile.push(`${zahl(az.anTestkonto.anzahl)} echte Auszahlungen an das Testkonto über ${euro(az.anTestkonto.cents)}`);
+            if (az.testumgebung.anzahl) teile.push(`${zahl(az.testumgebung.anzahl)} Auszahlungen aus der Testumgebung über ${euro(az.testumgebung.cents)} (kein Geld geflossen)`);
+            return teile.length ? `<div class="leer" style="margin:-10px 0 18px">Nicht mitgezählt: ${teile.join(' · ')}.</div>` : '';
+          })()}
+          <div class="raster">
+            <section class="box"><h3>Wie verteilt sich das Guthaben?</h3>
+              ${a.stufen.map((x) => `<div class="stufe"><span>${esc(stufeName(x))}</span>
+                <span class="spur"><i style="width:${x.cents ? Math.max(2, Math.round((100 * x.cents) / maxStufe)) : 0}%;${x.bisCents == null ? 'background:var(--ok)' : x.vonCents >= a.nahAbCents ? 'background:var(--offen)' : ''}"></i></span>
+                <span class="w">${zahl(x.personen)} Pers. · ${euro(x.cents)}</span></div>`).join('')}
+              <div class="leer" style="margin-top:6px">Balkenlänge = Betrag. ${Math.round(100 * a.anteilUnterVierzigProzent)} % des Guthabens liegen bei Personen unter ${eur0(a.vierzigProzentCents)} — das wird so bald nicht fällig.</div>
+            </section>
+            <section class="box"><h3>Wer kann überhaupt auszahlen?</h3>
+              ${['konto', 'ohne_email', 'gast', 'unbekannt'].filter((k) => a.nachKonto[k]?.personen).map((k) => `<div class="zeile"><span>${esc(KONTO[k][0])} <span class="leer">· ${esc(KONTO[k][1])}</span></span><span>${zahl(a.nachKonto[k].personen)} · ${euro(a.nachKonto[k].cents)}</span></div>`).join('') || '<div class="leer">niemand mit Guthaben</div>'}
+              <div class="leer" style="margin-top:8px">Ausgezahlt wird nur, wenn die Person es in der App anfordert. „Ausgezahlt" heißt: Gutschein-Link von Tremendous verschickt — ob er eingelöst wurde, meldet Tremendous nicht zurück.${az.gescheitert30.anzahl ? ` In den letzten 30 Tagen ${zahl(az.gescheitert30.anzahl)}× gescheitert (${euro(az.gescheitert30.cents)}).` : ''}</div>
+            </section>
+          </div>
+          <section class="box" style="margin-top:14px"><h3>Wer ist als Nächstes dran? (alle ab ${eur0(a.listeAbCents)} und alle, die schon einmal ausgezahlt haben · ${zahl(a.liste.length)}${a.listeGekuerzt ? ', Ausschnitt' : ''})</h3>
+            ${a.liste.length ? `<div class="tabwrap"><table>
+              <tr><th>Nutzer (gekürzt)</th><th class="n">Guthaben</th><th class="n">verdient in 30 Tagen</th><th class="n">${eur0(s)} erreicht</th><th>wartet seit</th><th>letzte Auszahlung</th><th></th></tr>
+              ${a.liste.map((z) => `<tr class="${z.cents >= s && !z.test ? 'reif' : ''}"><td><code>${esc(z.kuerzel)}…</code></td><td class="n"><b>${euro(z.cents)}</b></td>
+                <td class="n">${z.verdient30 ? euro(z.verdient30) : '—'}</td><td class="n">${tage(z)}</td>
+                <td>${esc(datum(z.wartetSeit))}</td><td>${esc(datum(z.letzteAuszahlung))}</td><td>${kontoZelle(z)}</td></tr>`).join('')}
+            </table></div>` : '<div class="leer">Noch niemand über der Hälfte der Schwelle.</div>'}
+            <div class="leer" style="margin-top:8px">Die Prognose rechnet das Tempo der letzten 30 Tage weiter — eine grobe Schätzung: Wer neu anfängt und schnell sammelt, ist noch nicht dabei, und nicht jeder hält sein Tempo.</div>
+          </section>`;
+        $('auszahlungNeu').onclick = () => ladeAuszahlung(true);
+      }
+
+      async function ladeAuszahlung(frisch = false) {
+        try {
+          const r = await call('reviewAuszahlungen')({ frisch });
+          zeigeAuszahlung(r.data);
+        } catch (e) {
+          $('auszahlung').innerHTML = `<p class="leer">Guthaben &amp; Auszahlungen konnten nicht geladen werden: ${esc(e.message)}</p>`;
+        }
+      }
+
+      async function ladeStatistik() {
+        try {
+          const r = await call('reviewStatistik')({ tage: 60 });
+          zeigeStatistik(r.data);
+        } catch (e) {
+          $('statistik').innerHTML = `<p class="leer">Statistik konnte nicht geladen werden: ${esc(e.message)}</p>`;
+        }
+      }
+
+      async function lade() {
+        try {
+          const r = await call('reviewTagesberichte')({ anzahl: 60 });
+          berichte = r.data.berichte || [];
+          zeige();
+        } catch (e) {
+          $('inhalt').innerHTML = `<p class="leer">Berichte konnten nicht geladen werden: ${esc(e.message)}</p>`;
+          toast('Laden fehlgeschlagen', 'err');
+        }
+      }
+
+      $('trockenBtn').onclick = () => { mitTrocken = !mitTrocken; $('trockenBtn').classList.toggle('on', mitTrocken); zeige(); };
+      initAdmin(() => { lade(); ladeAuszahlung(); ladeStatistik(); });
+    </script>
+  </body>
+</html>

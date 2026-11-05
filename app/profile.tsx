@@ -1596,12 +1596,6 @@ export default function ProfileScreen() {
               color={theme.primary}
               label="App teilen"
               onPress={handleShareApp}
-            />
-            <MenuRow
-              icon="bell-outline"
-              color={theme.primary}
-              label="Benachrichtigungen"
-              onPress={() => safePush('/notification-settings' as any)}
               last
             />
           </MenuCard>
@@ -1650,6 +1644,19 @@ export default function ProfileScreen() {
                 (ClickUp 86cawth45). Vorher war der Schalter eine
                 Einbahnstraße — einmal manuell gestellt, gab es keinen
                 Weg zurück auf „folgt dem System". */}
+            {/* Benachrichtigungen (09.09.2026): stand vorher unter „Mehr",
+                zwischen „App bewerten" und dem rechtlichen Block — dort hat
+                sie niemand gesucht (User-Rückmeldung: „finde ich nichts").
+                Sie gehört zu den Einstellungen, und hier steht sie oben,
+                weil sie der einzige Punkt der Karte ist, den man von außen
+                sucht. */}
+            <MenuRow
+              icon="bell-outline"
+              color={theme.primary}
+              label="Benachrichtigungen"
+              onPress={() => safePush('/notification-settings' as any)}
+              first
+            />
             <SegmentedRow
               icon={
                 themeMode === 'system'
@@ -1659,7 +1666,6 @@ export default function ProfileScreen() {
                     : 'white-balance-sunny'
               }
               label="Erscheinungsbild"
-              first
             >
               <SegmentedTabs
                 tabs={THEME_TABS}

@@ -39,10 +39,19 @@
  * ein leeres Feld.
  */
 
-const MODEL_VERSION = 'ploc-v1';
+const MODEL_VERSION = 'ploc-v2';
 
-/** Rangfolge. Kleinerer Index gewinnt. `market_country` ist der Boden. */
+/**
+ * Rangfolge. Kleinerer Index gewinnt. `market_country` ist der Boden.
+ *
+ * ploc-v2 (Entscheidung Patrick, 24.09.2026): die Filialadresse vom Kassenbon
+ * auf dem Preisfoto steht ganz oben. Sie belegt, WO das Produkt gekauft wurde
+ * — den Markt, nicht nur ein Koordinaten-Raster. Ihre Koordinate ist die der
+ * Postleitzahl (gemessener Median-Abstand zum echten Standort 2 km), darum
+ * behauptet sie „Stadt", nicht „Punkt".
+ */
 const PRECEDENCE = [
+  'receipt_address',
   'gps_capture',
   'exif_gps',
   'user_confirmed_place',
@@ -63,9 +72,10 @@ const PRECEDENCE = [
  * `market_country` (kennt keine Position). Die IP-Ortung ist gar nicht
  * erst Kandidat.
  */
-const DARF_DEMOTIEREN = new Set(['gps_capture', 'exif_gps', 'user_confirmed_place']);
+const DARF_DEMOTIEREN = new Set(['receipt_address', 'gps_capture', 'exif_gps', 'user_confirmed_place']);
 
 const CONFIDENCE_CAP = {
+  receipt_address: 'high',
   gps_capture: 'high',
   exif_gps: 'high',
   user_confirmed_place: 'medium',
@@ -151,6 +161,10 @@ function basisKonfidenz(kandidat) {
     return 'low'; // belegt den Aufnahme-, nicht den Einreichungsort
   }
 
+  // Bon-Adresse mit bekannter Postleitzahl: der Markt ist belegt. Ohne
+  // auffindbare PLZ bleibt nur der Ortsname — dann wie eine Nutzerangabe.
+  if (kind === 'receipt_address') return kandidat.lat != null ? 'high' : 'medium';
+
   if (kind === 'user_confirmed_place') return 'medium';
   if (kind === 'user_profile_region') return 'low';
 
@@ -176,6 +190,23 @@ function bewerteLocation(roh) {
   // Nur MESSUNGEN und bewusste Nutzerangaben. Die IP-Ortung ist hier
   // absichtlich nicht dabei.
   const kandidaten = [];
+
+  // Filialadresse vom Kassenbon (ploc-v2). Koordinate = Postleitzahl-
+  // Mittelpunkt, vom Aufrufer nachgeschlagen (der Scorer bleibt ohne I/O).
+  if (roh.receiptAddress && (roh.receiptAddress.zip || roh.receiptAddress.city)) {
+    const ra = roh.receiptAddress;
+    const hatPunkt = typeof ra.lat === 'number' && typeof ra.lon === 'number';
+    kandidaten.push({
+      kind: 'receipt_address',
+      lat: hatPunkt ? ra.lat : null,
+      lon: hatPunkt ? ra.lon : null,
+      accuracyM: 2000,
+      city: ra.city ?? null,
+      bundesland: ra.bundesland ?? null,
+      land: ra.land ?? null,
+      ageMinutes: null,
+    });
+  }
 
   if (roh.captureGps && typeof roh.captureGps.lat === 'number') {
     kandidaten.push({

@@ -1,0 +1,937 @@
+{
+ "startedAt": "2026-09-02T10:48:28.203Z",
+ "entries": [
+  {
+   "id": "bon_mti5yfvgq96lde",
+   "uid": "aFoSRdg3oWTwHOLNuwQUV98OmDy1",
+   "bonDate": "2026-08-31",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mti7bnk757cg9o",
+   "uid": "L0NYvsGRTeMhcmwKF4ONxORun7x1",
+   "bonDate": "2026-08-31",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mti7vmo5vwyhxq",
+   "uid": "fnL3RmHgpiZP4CWN5dLizUdyVoy1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mti8wiyobm9c6p",
+   "uid": "gU3SeCDBKVdc2V5J8gRLyCjQxAf1",
+   "bonDate": "2026-08-31",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtikx74404jnl9",
+   "uid": "gU3SeCDBKVdc2V5J8gRLyCjQxAf1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mti969vcg433i1",
+   "uid": "yrlnqbpKOUM7jc1eqMhgyoasWnf1",
+   "bonDate": "2026-08-29",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mti9kg3gu3hmmw",
+   "uid": "WSd4OyPtNeUBFP30ru0iCyby2Gz2",
+   "bonDate": "2026-08-31",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtiabvbhw1usie",
+   "uid": "N9mS6cvCl5a2ZEZxdvYuji0oByk2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtiakd9eyr91aa",
+   "uid": "cTmjtYSzxcNoi1LOeTKcLAlKVe02",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtiatg6b6xn4xv",
+   "uid": "kfIshWope1aUUPfv2lHOT89UB3e2",
+   "bonDate": "2026-08-31",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtiazzl1jijn7o",
+   "uid": "kfIshWope1aUUPfv2lHOT89UB3e2",
+   "bonDate": "2026-08-31",
+   "action": "daily_cap_direct"
+  },
+  {
+   "id": "bon_mtiaw5tcydoogf",
+   "uid": "ltk4KN4sHGcyovLGBzYhHWYDhxH2",
+   "bonDate": "2026-08-29",
+   "action": "daily_cap_direct"
+  },
+  {
+   "id": "bon_mticcvebl70d19",
+   "uid": "Ec0cfgaN2HhlgvU7ufUsz8M53122",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtidje8cncjnv4",
+   "uid": "GkWPsI2QyVRMpsXBr1J7Q6td6c42",
+   "bonDate": "2026-08-28",
+   "action": "daily_cap_direct"
+  },
+  {
+   "id": "bon_mtie9seivs9b90",
+   "uid": "kHpeyEsh4wSQpIQFPcU7rBUVuvg1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtiy57qsu6itv5",
+   "uid": "kHpeyEsh4wSQpIQFPcU7rBUVuvg1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtiy5pohlvyk5n",
+   "uid": "kHpeyEsh4wSQpIQFPcU7rBUVuvg1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtiy67rsburxk5",
+   "uid": "kHpeyEsh4wSQpIQFPcU7rBUVuvg1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtiy6k6cle4ay5",
+   "uid": "kHpeyEsh4wSQpIQFPcU7rBUVuvg1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtiegmusv6snm6",
+   "uid": "hCwYIoeNK2N49AOZnDKHdO2sBze2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtieqnrfhh3rc0",
+   "uid": "tPiwehWincT2IM3eknQumRf4zfi1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtiespbv7va8p3",
+   "uid": "tPiwehWincT2IM3eknQumRf4zfi1",
+   "bonDate": "2026-09-01",
+   "action": "daily_cap_direct"
+  },
+  {
+   "id": "bon_mtier6z9uyz7fh",
+   "uid": "dWdCap8UuPdxSIfhrzSnxbUZiX12",
+   "bonDate": "2026-08-31",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtiext2ajczgph",
+   "uid": "DDJuUAh1wles39KnBMGZwbzAHGQ2",
+   "bonDate": "2026-09-01",
+   "action": "daily_cap_direct"
+  },
+  {
+   "id": "bon_mtif5d0zzwvq7p",
+   "uid": "twkAeCqcT0XsU7eEIPaiAf5MSuf1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtif5na3guxyjg",
+   "uid": "twkAeCqcT0XsU7eEIPaiAf5MSuf1",
+   "bonDate": "2026-08-31",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtif5usakpnmlg",
+   "uid": "twkAeCqcT0XsU7eEIPaiAf5MSuf1",
+   "bonDate": "2026-08-31",
+   "action": "daily_cap_direct"
+  },
+  {
+   "id": "bon_mtif9gu4xkrlk7",
+   "uid": "fXTbitYISfUxnJyQykPrAC0yF9j1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtif9oye0kk48q",
+   "uid": "fXTbitYISfUxnJyQykPrAC0yF9j1",
+   "bonDate": "2026-09-01",
+   "action": "daily_cap_direct"
+  },
+  {
+   "id": "bon_mtig9unj5082uj",
+   "uid": "gk1tsfy9kfQIbCogJnbHgp4RINw2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtigb60yoqaf4f",
+   "uid": "gk1tsfy9kfQIbCogJnbHgp4RINw2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "review[ocr_confidence_low]",
+   "note": null
+  },
+  {
+   "id": "bon_mtigrr2p4iqqxy",
+   "uid": "A8AD3hXGssMdnsOQyCGXye21v252",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtigssq2ehupsm",
+   "uid": "A8AD3hXGssMdnsOQyCGXye21v252",
+   "bonDate": "2026-09-01",
+   "action": "daily_cap_direct"
+  },
+  {
+   "id": "bon_mtigtuhg11xzvj",
+   "uid": "JKz5TfeKj0ggOSGWHFL4hcDWTT43",
+   "bonDate": "2026-08-31",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtigx4j2fcbl4u",
+   "uid": "7vF8yEqczWRCvq3t91JOHCqwStB3",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtihblii6cf010",
+   "uid": "FBg3Y72wwFcyPH6xoOiPmJrvrLh2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtihh2n6xyd86p",
+   "uid": "FBg3Y72wwFcyPH6xoOiPmJrvrLh2",
+   "bonDate": "2026-09-01",
+   "action": "daily_cap_direct"
+  },
+  {
+   "id": "bon_mtihhbcm3bqvgj",
+   "uid": "49padbaM4BfpODDf0I0JSPVU4s13",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtirhm61kyvi8i",
+   "uid": "49padbaM4BfpODDf0I0JSPVU4s13",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtihjewg5jtroc",
+   "uid": "GIVBlbH5DYPZHf4bKcXuqBLpNG33",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtii0z9m72wfhu",
+   "uid": "KrRnCL25nyW5YaX8zeJTdvzlVqJ3",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtiiqczbuccpdt",
+   "uid": "Ae3a1AeGUhbhMzjSAMohfChh03C2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtij0ge5o18zyw",
+   "uid": "3XjaOkU0aJgKFiiH1g2q6Xv17yX2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtij4ajh7u4pz1",
+   "uid": "KSBJPIBenvUJx0Of8tgKOs5naEg1",
+   "bonDate": "2026-08-28",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtij64wqpluf7y",
+   "uid": "vZ2I81xBGSP83XdCjGGHKNo3Fa43",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtijadmdfp2ec2",
+   "uid": "JfvGzRebKiO7NCHTDNKZgYPTlnB2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtijh3bsohvrbr",
+   "uid": "YXrf25t8MeezyizL3L8HU3UvDMi2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtijl8dmyy8vzr",
+   "uid": "YXrf25t8MeezyizL3L8HU3UvDMi2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtiklw1vpg2tzo",
+   "uid": "MJhABeyJnnfodn5tRfVXUy1zgwQ2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtikmbpl8ea6uv",
+   "uid": "eElEzl036FfrET8BRyZuLoFxswz2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtikojpgjzpi3w",
+   "uid": "gqGyMrnCw3TCGIEjoP1rGhFtD3A3",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtikrfh7qpufli",
+   "uid": "Cukiwe6Z9RfqKGSbcbawhpnCu2t1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtizg9ogwoei6z",
+   "uid": "Cukiwe6Z9RfqKGSbcbawhpnCu2t1",
+   "bonDate": "2026-08-31",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtil8w4727cjb3",
+   "uid": "v63INkTVDohyti07eL1nEUXpqgM2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtilbfxvhdsrk0",
+   "uid": "v63INkTVDohyti07eL1nEUXpqgM2",
+   "bonDate": "2026-08-31",
+   "action": "daily_cap_direct"
+  },
+  {
+   "id": "bon_mtilqkevdjygj5",
+   "uid": "XK7ZjhZvNkazP8dMs0mFPSLgmF03",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtim9tqi463hdg",
+   "uid": "GaCEce62W5S1kwAagCpadexacA42",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtimc0dbtyl68r",
+   "uid": "4Da9pLrM3TXxSs5SX1rw3HZio3b2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtimd1hlodp6ac",
+   "uid": "3JPqZei5FLahNuaQswzefnWx5Jx2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtimn7od5vna6l",
+   "uid": "6qj51BeHUTQF7aJGVMvDAcxi3Rc2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtioaw0nocg7au",
+   "uid": "bIkfXfUULeUfn0gchWpcsjfaW4j2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtiop9ep0c2wum",
+   "uid": "ZfE11P5dTafHOdyBAPbzDLu3Dzm2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtiplfybz3zhjg",
+   "uid": "DpM8BQtaH0NdggZA7GinXsygybw2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtiplml8setm8h",
+   "uid": "DpM8BQtaH0NdggZA7GinXsygybw2",
+   "bonDate": "2026-08-26",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtipo8zpm56vwi",
+   "uid": "6qgxG1LoWGdy8WA6V67nuiN0pWH2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtipqow727tghc",
+   "uid": "2PVxY5RVbhOq7Nxoms9ZCFiRk3x1",
+   "bonDate": "2026-08-31",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtipsyn2x8dx10",
+   "uid": "Ozp3KklPlMchB7K4yHI4fSrYGH73",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtiq1hn4k5ov4v",
+   "uid": "jzBCQQamLmfkWYf6hc4wR2OFjRF3",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtiq1t1o67kkw0",
+   "uid": "jzBCQQamLmfkWYf6hc4wR2OFjRF3",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtiqjoojdaadf7",
+   "uid": "KG2tDR18JNe5HEm04f1KvoEewtk2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtiqm3jlpnw0rf",
+   "uid": "odxbNIGxcXR4yoyuJsAInCafgEH3",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtiqoi9hm77bdt",
+   "uid": "3E2t386ra1YdwLvoc2bG6hQncyz1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtiqtl4qtiv44r",
+   "uid": "279VEFyTBtOCcTCeQSGDqIOH6Am2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtiqvwn3l09f70",
+   "uid": "rujVan4YhAVq5yNIfmSADASq3W23",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtiqyvdzrrqfsv",
+   "uid": "YdJFmU1DR9d3CVUzkNUytsjhaC22",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtireyjj6fx3db",
+   "uid": "htlw6hjiNpROuLuXyrQuYptnEZ02",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtirf5uzvhn737",
+   "uid": "htlw6hjiNpROuLuXyrQuYptnEZ02",
+   "bonDate": "2026-08-31",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtis2ftrpn6x7k",
+   "uid": "wuU6EUcLkBffsIAyjFARiDPkTRy1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtis2rq6ddqh3k",
+   "uid": "wuU6EUcLkBffsIAyjFARiDPkTRy1",
+   "bonDate": "2026-09-01",
+   "action": "daily_cap_direct"
+  },
+  {
+   "id": "bon_mtisn5wptx3snn",
+   "uid": "wmVo5RX1gAZPemazYarCjSZTJs23",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtitjy7cqr8y7t",
+   "uid": "lpq64n7ViYcypsZIinKzeV5l7DJ2",
+   "bonDate": "2026-08-31",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtitrqvbw0n3ly",
+   "uid": "1dDiSG6QmGbzYEM0ElyjVAL0xHX2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtiuntbwd8giio",
+   "uid": "rklyFbjslNcTVjZ8PCa8Y8p5BYo1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtiuo93jbr8sr8",
+   "uid": "rklyFbjslNcTVjZ8PCa8Y8p5BYo1",
+   "bonDate": "2026-09-01",
+   "action": "daily_cap_direct"
+  },
+  {
+   "id": "bon_mtiv2lle5idqhw",
+   "uid": "lWnOklT3OlORsGpnw1sJEhoQyS43",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtiv6o04o7jmd6",
+   "uid": "lWnOklT3OlORsGpnw1sJEhoQyS43",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtiv9zsaszdeoh",
+   "uid": "lWnOklT3OlORsGpnw1sJEhoQyS43",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtiv63redrkrig",
+   "uid": "RxZTdHIN8tbQtZEHezy0wBEf07l1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtiva3hr4fouy4",
+   "uid": "RxZTdHIN8tbQtZEHezy0wBEf07l1",
+   "bonDate": "2026-09-01",
+   "action": "daily_cap_direct"
+  },
+  {
+   "id": "bon_mtiva3sey7gh9m",
+   "uid": "lvxWP2ZSLER2F6g7RcmeJp492fC2",
+   "bonDate": "2026-08-29",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtivn3m8tef9yv",
+   "uid": "xbtm2v6TA7SUPdbUpWSJkNWEJIq1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtiw9atrzewt2i",
+   "uid": "cBKNIdVjFUQ5WuReyd9EaFPsxHP2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtiw9u2uuzkiew",
+   "uid": "cBKNIdVjFUQ5WuReyd9EaFPsxHP2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtiwafoa0aby9z",
+   "uid": "cBKNIdVjFUQ5WuReyd9EaFPsxHP2",
+   "bonDate": "2026-09-01",
+   "action": "daily_cap_direct"
+  },
+  {
+   "id": "bon_mtiwo34xb2jk42",
+   "uid": "HposMP6eYhSTgEgiCOVPDl9jgj62",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtiwplhjq0zdrf",
+   "uid": "hU1TI0qXLKXKAAxHgryjO5akfpo2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtiwvasybv36x3",
+   "uid": "aJ4qCf8uGqafPF5GyqO9TqJfISz1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtix7dz7utqk2d",
+   "uid": "BRER8CrWKRf3yK61lZqQbP50Hch1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtixf323tzr0t2",
+   "uid": "Q4IdRAMjpuURWNXuZJlcskeAqAr2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtixhjmpymwhzi",
+   "uid": "Q4IdRAMjpuURWNXuZJlcskeAqAr2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtixpcgcwjvp81",
+   "uid": "7tNNAb2JACXvP8NKFrOWG025fHC2",
+   "bonDate": "2026-08-29",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtiyettdc9t4g9",
+   "uid": "xSXoV6b8ggV6Qit9eg3etmK1i9H2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtiz3ldwxhgaar",
+   "uid": "nPW7oKgtmDPj0339tNkFGGqWiNj1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtizfuw6vj3zfd",
+   "uid": "o78Ht9Bs1NZVQamIyFn0Hy6aDAs1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtj0s6fva5ceji",
+   "uid": "f7YrO271rvWBMxz5fuvonahb5Tz2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtj13t7y8y280j",
+   "uid": "97YVWe40HoZVjLLY4odYoX6JSNP2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtj27i4bfy0soq",
+   "uid": "gJ7fU1aRaWMyqYY8cVXX6wo0NOh1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtj2ca3kpgn4ha",
+   "uid": "gJ7fU1aRaWMyqYY8cVXX6wo0NOh1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtj2lw6l5udwsm",
+   "uid": "gJ7fU1aRaWMyqYY8cVXX6wo0NOh1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtj28hmwtbvfth",
+   "uid": "7Ik8o6zIBdSPgHD9xzfK1Yfr53v2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtj3nv1h4dqlxu",
+   "uid": "oiFeOrtc5fOE92hbwkeOybCji8k1",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtj6h36weck309",
+   "uid": "oftE8SDTJnQkUrMw3VCa8lq5QLd2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtj6kfubd12cyn",
+   "uid": "sTod7rfZq4PPS3oRu53m4oIzery1",
+   "bonDate": "2026-08-29",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtjkrl516to5v9",
+   "uid": "khdClBfFYVWVuMVYbfZFN7Ny4a22",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtjljd99yoqh1p",
+   "uid": "aBAfVkAsASTgfsJcenGD6eIiTPF2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": null,
+   "note": null
+  },
+  {
+   "id": "bon_mtjlw5zyr7c65g",
+   "uid": "pWSBfkFoGfax1Qf9Rce8HNQTwRh2",
+   "bonDate": "2026-08-31",
+   "action": "republish",
+   "final": "no_reward(below_min_items)",
+   "note": null
+  },
+  {
+   "id": "bon_mtjlx6czcm20ku",
+   "uid": "pWSBfkFoGfax1Qf9Rce8HNQTwRh2",
+   "bonDate": "2026-08-31",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtjlxscmcwtkmm",
+   "uid": "pWSBfkFoGfax1Qf9Rce8HNQTwRh2",
+   "bonDate": "2026-09-01",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtjnwzla6p7w7e",
+   "uid": "GgFPWx2pnKSIH8SuZqgPg3oSoSv1",
+   "bonDate": "2026-08-31",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  },
+  {
+   "id": "bon_mtjnzd9g0x4eab",
+   "uid": "GgFPWx2pnKSIH8SuZqgPg3oSoSv1",
+   "bonDate": "2026-08-27",
+   "action": "republish",
+   "final": "approved",
+   "note": null
+  }
+ ]
+}

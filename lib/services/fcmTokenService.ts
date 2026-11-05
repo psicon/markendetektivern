@@ -22,8 +22,37 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules, Platform, TurboModuleRegistry } from 'react-native';
 import { doc, getDoc, setDoc, serverTimestamp } from '@react-native-firebase/firestore';
 import { db } from '@/lib/firebase';
+import { anfragenOhneHaenger } from './berechtigungsWaechter';
+import { berechtigungAusExpo } from './pushPermissionStatus';
 
 let _registered = false;
+
+/**
+ * Der EINE onTokenRefresh-Hörer dieses Geräts.
+ *
+ * Bis 17.09.2026 legte jeder erfolgreiche Aufruf einen weiteren Hörer an:
+ * einen beim Start (AuthContext), einen nach dem Frage-Sheet (Provider, dessen
+ * Aufräumfunktion verworfen wurde). Nach einem Kontowechsel schrieb der alte
+ * Hörer einen erneuerten Token weiter unter die ALTE uid. Jetzt gilt: höchstens
+ * ein Hörer, immer für die zuletzt registrierte uid.
+ */
+let tokenHoerer: { uid: string; abbestellen: () => void } | null = null;
+
+/**
+ * Die uid des zuletzt BEGONNENEN Aufrufs. Eine Registrierung hängt teils lange
+ * in Netz-Wartezeiten; wechselt währenddessen das Konto, darf der verspätete
+ * Aufruf den Hörer des neuen Kontos nicht mehr ersetzen.
+ */
+let zuletztAngefragteUid: string | null = null;
+
+function hoererEntfernen(): void {
+  try {
+    tokenHoerer?.abbestellen();
+  } catch {
+    /* Aufräumen darf nie werfen */
+  }
+  tokenHoerer = null;
+}
 
 /**
  * Warum die Registrierung endete — und zwar SERVERSEITIG sichtbar.
@@ -38,14 +67,27 @@ let _registered = false;
  *
  *   ok                → Token geschrieben
  *   no_module         → natives Messaging-Modul nicht verlinkt
- *   permission_denied → iOS-Berechtigung nicht AUTHORIZED/PROVISIONAL
+ *   permission_denied → iOS-Berechtigung ausdrücklich abgelehnt
+ *   permission_not_determined → nie gefragt (oder Dialog steht noch aus)
  *   token_failed      → getToken() warf (typisch: kein APNs-Token da)
  *   write_failed      → persistToken() warf (Rules, offline)
  */
 export type FcmState =
   | 'ok'
   | 'no_module'
+  /** Der Nutzer hat den System-Dialog ausdrücklich abgelehnt (iOS: endgültig). */
   | 'permission_denied'
+  /**
+   * Es wurde nie gefragt — entweder weil der Dialog noch aussteht oder weil
+   * wir bewusst nur provisorisch registrieren.
+   *
+   * Bis zum 09.09.2026 fielen beide Fälle unter `permission_denied`, und die
+   * Unterscheidung steckte nur im Freitext `reason`. Das hat prompt zu einer
+   * Fehldeutung geführt: In React Native Firebase ist `DENIED = 0` und
+   * `NOT_DETERMINED = -1` — wer das verwechselt, liest 10.665 Ablehnungen als
+   * „nie gefragt" und baut die falsche Abhilfe.
+   */
+  | 'permission_not_determined'
   | 'token_failed'
   | 'write_failed';
 
@@ -106,7 +148,7 @@ async function recordState(uid: string, state: FcmState, reason?: string): Promi
  * when the dev-client hasn't been rebuilt with @react-native-firebase
  * /messaging yet.
  */
-function isMessagingLinked(): boolean {
+export function isMessagingLinked(): boolean {
   try {
     // RNFB modules register under the `RNFBMessagingModule` name on
     // the bridge (different across versions; we probe both).
@@ -124,7 +166,7 @@ function isMessagingLinked(): boolean {
   }
 }
 
-async function getMessagingModule(): Promise<any | null> {
+export async function getMessagingModule(): Promise<any | null> {
   if (!isMessagingLinked()) {
     console.log('[fcm] native module not linked — skipping push registration');
     return null;
@@ -184,12 +226,49 @@ export async function persistToken(uid: string, token: string): Promise<void> {
 }
 
 /**
- * Wire up FCM token registration for the given user. Idempotent —
- * safe to call multiple times (e.g. on every AuthContext mount).
+ * Ohne Erlaubnis: echte Ablehnung — oder kann noch gefragt werden?
  *
- * Returns a teardown function that unbinds the onTokenRefresh listener.
+ * RNFB kennt auf Android nur 1 oder 0 (`areNotificationsEnabled()`). Eine nie
+ * angefragte Berechtigung unter Android 13+ stand deshalb bis 17.09.2026 als
+ * `permission_denied` in der Datenbank — 7.362 Konten, von denen keines je
+ * gefragt worden war. expo liefert mit `canAskAgain` die Unterscheidung
+ * (pushPermissionStatus.ts); auf Android heißt `permission_not_determined`
+ * damit: „Android würde den Dialog noch zeigen".
+ */
+async function ablehnungEinordnen(rnfbSagtAbgelehnt: boolean): Promise<FcmState> {
+  const ausRnfb: FcmState = rnfbSagtAbgelehnt ? 'permission_denied' : 'permission_not_determined';
+  if (Platform.OS !== 'android') return ausRnfb;
+  try {
+    // Gleiche Ladeart wie in `harteBerechtigungAnfragen` unten.
+    const Notifications = require('expo-notifications');
+    const perm = await Notifications.getPermissionsAsync();
+    return berechtigungAusExpo(perm, Platform.OS, Platform.Version) === 'denied'
+      ? 'permission_denied'
+      : 'permission_not_determined';
+  } catch {
+    return ausRnfb;
+  }
+}
+
+/**
+ * Token registrieren — ABER NUR, wenn die Erlaubnis schon vorliegt.
+ *
+ * Fragt selbst nichts und holt ohne Erlaubnis auch keinen Token (§ 25
+ * TDDDG, siehe unten). Für Rückkehrer, die längst zugestimmt haben, ist das
+ * der Weg, auf dem sich ein erneuerter Token einträgt. Für alle anderen ist
+ * es ein Nichtstuer — bis der Nutzer im erklärenden Sheet zustimmt und
+ * `harteBerechtigungAnfragen` übernimmt.
+ *
+ * Idempotent, gefahrlos bei jedem Mount aufrufbar.
+ * Rückgabe: Aufräumfunktion für den onTokenRefresh-Hörer.
  */
 export async function registerFcmTokenForUser(uid: string): Promise<() => void> {
+  // Ein Hörer für eine ANDERE uid gehört weg, auch wenn diese Registrierung
+  // gleich ohne Erlaubnis aussteigt — sonst schriebe ein erneuerter Token
+  // weiter unter das vorige Konto.
+  if (tokenHoerer && tokenHoerer.uid !== uid) hoererEntfernen();
+  zuletztAngefragteUid = uid;
+
   const Messaging = await getMessagingModule();
   if (!Messaging) {
     void recordState(uid, 'no_module');
@@ -197,30 +276,47 @@ export async function registerFcmTokenForUser(uid: string): Promise<() => void> 
   }
 
   try {
-    if (Platform.OS === 'ios') {
-      const authStatus = await Messaging().requestPermission({
-        alert: true,
-        badge: true,
-        sound: true,
-      });
-      const enabled =
+    // ═══ HIER WIRD NICHT GEFRAGT — und ohne Erlaubnis auch nichts geholt ═══
+    //
+    // Zwei Gründe, und der zweite wiegt schwerer als der erste.
+    //
+    // 1. Der Dialog ist eine Ressource, die man einmal ausgibt. Bis zum
+    //    09.09.2026 gab die App sie beim allerersten Öffnen aus, anonym,
+    //    ohne Zusammenhang: von 33.841 iOS-Konten haben 10.665 abgelehnt.
+    //    Auf iOS ist das endgültig.
+    //
+    // 2. Das Abholen des Geräte-Tokens ist selbst schon ein Zugriff auf das
+    //    Endgerät und braucht eine Einwilligung (§ 25 TDDDG). Die
+    //    veröffentlichte Datenschutzerklärung nennt dafür ausdrücklich die
+    //    Zustimmung des Nutzers als Rechtsgrundlage. Ein Token, den wir
+    //    holen, bevor jemand ein Wort gelesen hat, ist von dieser Erklärung
+    //    nicht gedeckt — egal wie nützlich er wäre.
+    //
+    // Diese Funktion registriert deshalb NUR, wenn die Erlaubnis bereits
+    // vorliegt: bei Rückkehrern, deren Token sich erneuern muss. Gefragt
+    // wird ausschließlich über `harteBerechtigungAnfragen`, und die ruft
+    // der Provider erst, nachdem der Nutzer im erklärenden Sheet
+    // ausdrücklich zugestimmt hat.
+    let erlaubt = false;
+    try {
+      const authStatus = await Messaging().hasPermission();
+      erlaubt =
         authStatus === Messaging.AuthorizationStatus.AUTHORIZED ||
         authStatus === Messaging.AuthorizationStatus.PROVISIONAL;
-      if (!enabled) {
-        console.log('[fcm] iOS permission denied');
-        // Den konkreten AuthorizationStatus mitschreiben: DENIED und
-        // NOT_DETERMINED sehen im Ergebnis gleich aus, unterscheiden
-        // sich aber fachlich (bewusst abgelehnt vs. Dialog nie
-        // beantwortet) — und nur ersteres ist endgultig.
-        void recordState(uid, 'permission_denied', `authStatus=${authStatus}`);
+      if (!erlaubt) {
+        void recordState(
+          uid,
+          await ablehnungEinordnen(authStatus === Messaging.AuthorizationStatus.DENIED),
+          `beim_start authStatus=${authStatus}`,
+        );
         return () => {};
       }
-    } else if (Platform.OS === 'android') {
-      // Android 13+ runtime POST_NOTIFICATIONS permission — handled by
-      // requestPermission() too (no-op on older Android).
-      try {
-        await Messaging().requestPermission();
-      } catch {}
+    } catch (e: any) {
+      // Nicht lesbar heißt nicht erlaubt. Fail-closed ist hier richtig: ein
+      // Fehler darf nicht dazu führen, dass wir ohne Erlaubnis registrieren.
+      console.warn('[fcm] Berechtigungsstand nicht lesbar:', e?.message);
+      void recordState(uid, 'permission_not_determined', `lesefehler: ${String(e?.message ?? e).slice(0, 120)}`);
+      return () => {};
     }
 
     // getToken() und persistToken() getrennt fangen: beide landeten
@@ -259,6 +355,14 @@ export async function registerFcmTokenForUser(uid: string): Promise<() => void> 
     // das ist der bekannte fehlende Retry (Handover Punkt 4), bewusst
     // noch nicht angefasst, bis die Telemetrie zeigt, ob der Fall
     // uberhaupt eintritt.
+    //
+    // Höchstens EIN Hörer (siehe `tokenHoerer`): steht schon einer für diese
+    // uid, bleibt es bei ihm.
+    if (tokenHoerer?.uid === uid) return () => {};
+    // Inzwischen läuft eine Registrierung für ein anderes Konto — die
+    // entscheidet über den Hörer, nicht dieser verspätete Aufruf.
+    if (zuletztAngefragteUid !== uid) return () => {};
+    hoererEntfernen();
     const unsubscribe = Messaging().onTokenRefresh(async (newToken: string) => {
       if (!newToken) return;
       try {
@@ -269,14 +373,126 @@ export async function registerFcmTokenForUser(uid: string): Promise<() => void> 
         void recordState(uid, 'write_failed', `refresh: ${String(e?.message ?? e).slice(0, 180)}`);
       }
     });
+    const dieser = {
+      uid,
+      abbestellen: typeof unsubscribe === 'function' ? unsubscribe : () => {},
+    };
+    tokenHoerer = dieser;
 
-    return typeof unsubscribe === 'function' ? unsubscribe : () => {};
+    // Aufräumen nur, solange es noch DIESER Hörer ist — ein späterer Aufrufer
+    // kann ihn inzwischen ersetzt haben.
+    return () => {
+      if (tokenHoerer === dieser) hoererEntfernen();
+    };
   } catch (e: any) {
     // Alles, was oberhalb noch werfen kann — im Wesentlichen
     // requestPermission(). Vorher endete das hier stumm.
     console.warn('[fcm] registerFcmTokenForUser failed:', e?.message);
     void recordState(uid, 'token_failed', `outer: ${String(e?.message ?? e).slice(0, 180)}`);
     return () => {};
+  }
+}
+
+/**
+ * Die HARTE Berechtigung anfragen — der eine System-Dialog.
+ *
+ * Der EINZIGE Weg, auf dem diese App je nach Erlaubnis fragt — und damit
+ * auch der einzige, auf dem je ein Token entsteht.
+ *
+ * Nur aufrufen, nachdem der Nutzer im erklärenden Sheet ausdrücklich Ja
+ * gesagt hat (`PrePermissionSheet`). Dieses Ja IST die Einwilligung im
+ * Sinne der Datenschutzerklärung; der System-Dialog danach regelt nur noch,
+ * wie laut zugestellt wird. Danach ist die Gelegenheit verbraucht:
+ * lehnt er hier ab, lässt iOS den Dialog nie wieder zu, und nur der Weg über
+ * die Systemeinstellungen bleibt.
+ *
+ * Nach dem Ja wird der Token geholt und gespeichert — vorher nie.
+ *
+ * @returns true, wenn danach die volle Erlaubnis vorliegt.
+ */
+export async function harteBerechtigungAnfragen(uid: string): Promise<boolean> {
+  const Messaging = await getMessagingModule();
+  if (!Messaging) {
+    void recordState(uid, 'no_module');
+    return false;
+  }
+  try {
+    // Android: über expo-notifications, weil RNFB dort nicht fragt (siehe
+    // oben). iOS: über RNFB, weil dort auch die provisorische Stufe hängt.
+    if (Platform.OS === 'android') {
+      const Notifications = require('expo-notifications');
+      // Mit Wächter: Ist die Sperre endgültig, antwortet Android ohne Dialog,
+      // und die Antwort kam sonst erst beim nächsten Aufwachen der App — das
+      // Sheet schloss, und nichts passierte (Prüfung 25.09.2026,
+      // berechtigungsWaechter.ts). So geht es nach kurzer Zeit mit dem
+      // gelesenen Stand weiter (→ Einstellungs-Umweg).
+      const antwort = await anfragenOhneHaenger<any>(
+        () => Notifications.requestPermissionsAsync(),
+        () => Notifications.getPermissionsAsync(),
+      );
+      // Dieselbe Einordnung wie beim Start (ablehnungEinordnen): nach der
+      // ersten Ablehnung würde Android noch einmal fragen — das ist nicht
+      // 'permission_denied'. Sonst wechselte das Feld für dasselbe Gerät bei
+      // jedem Start zwischen zwei Werten.
+      const stand = berechtigungAusExpo(antwort, Platform.OS, Platform.Version);
+      if (stand !== 'granted') {
+        void recordState(
+          uid,
+          stand === 'denied' ? 'permission_denied' : 'permission_not_determined',
+          `android nach_sheet status=${antwort?.status}`,
+        );
+        return false;
+      }
+      try {
+        const token = await Messaging().getToken();
+        if (token) {
+          await persistToken(uid, token);
+          void recordState(uid, 'ok', 'android nach_sheet');
+        } else {
+          // Vorher stand hier auch ohne Token 'ok' — ein 'ok' ohne
+          // Token-Dokument hat die Diagnose am 17.09.2026 in die Irre geführt.
+          void recordState(uid, 'token_failed', 'android nach_sheet: empty_token');
+        }
+      } catch (e: any) {
+        void recordState(uid, 'token_failed', `android nach_sheet: ${String(e?.message ?? e).slice(0, 140)}`);
+      }
+      return true;
+    }
+
+    const authStatus = await Messaging().requestPermission({
+      alert: true,
+      badge: true,
+      sound: true,
+    });
+    const voll = authStatus === Messaging.AuthorizationStatus.AUTHORIZED;
+    if (!voll) {
+      void recordState(
+        uid,
+        authStatus === Messaging.AuthorizationStatus.DENIED
+          ? 'permission_denied'
+          : 'permission_not_determined',
+        `nach_sheet authStatus=${authStatus}`,
+      );
+      return false;
+    }
+    try {
+      const token = await Messaging().getToken();
+      if (token) {
+        await persistToken(uid, token);
+        void recordState(uid, 'ok', 'nach_sheet');
+      } else {
+        // Auf iOS möglich, solange der APNs-Token fehlt. Der Hörer, den der
+        // Provider danach über registerFcmTokenForUser anlegt, holt ihn nach.
+        void recordState(uid, 'token_failed', 'nach_sheet: empty_token');
+      }
+    } catch (e: any) {
+      void recordState(uid, 'token_failed', `nach_sheet: ${String(e?.message ?? e).slice(0, 160)}`);
+    }
+    return true;
+  } catch (e: any) {
+    console.warn('[fcm] harte Anfrage fehlgeschlagen:', e?.message);
+    void recordState(uid, 'token_failed', `sheet_outer: ${String(e?.message ?? e).slice(0, 160)}`);
+    return false;
   }
 }
 

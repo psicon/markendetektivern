@@ -26,6 +26,8 @@
 
 const { ImageAnnotatorClient } = require('@google-cloud/vision');
 const { GoogleGenAI } = require('@google/genai');
+const { vertexStandort } = require('./geminiModelle');
+const { geminiKennung, nutztVertex, ZWECK } = require('./geminiKennung');
 const {
   SYSTEM_PROMPT,
   buildUserPrompt,
@@ -48,15 +50,37 @@ function getVisionClient() {
   return _vision;
 }
 
-let _genai = null;
-function getGenAIClient() {
-  if (_genai) return _genai;
+const _genaiClients = new Map(); // Cache: Vertex-Location bzw. 'apikey' → GoogleGenAI
+function getGenAIClient(model) {
+  // Backend-Umschaltung (Incident 19.08.2026): AI-Studio-Keys haengen am
+  // monatlichen Spending-Cap der Rechnungskontostufe. Ist der erreicht,
+  // liefern ALLE Gemini-Calls 429 RESOURCE_EXHAUSTED — die OCR faellt dann
+  // auf den isReceipt:false-Stub zurueck und der Nutzer sieht faelschlich
+  // "kein Kassenbon". Vertex AI rechnet ueber die normale GCP-Abrechnung
+  // und kennt dieses Stufenlimit nicht. Default = Vertex; per
+  // GEMINI_USE_VERTEX=false zurueck auf den AI-Studio-Key. Dieselbe Regel
+  // entscheidet, ob die Kosten-Kennung mitgeht (lib/geminiKennung.js).
+  if (nutztVertex()) {
+    // Standort ist MODELL-abhaengig — dieselbe Aufloesung wie ocr.js
+    // (lib/geminiModelle.js, gemessen 01.10.2026).
+    const location = vertexStandort(model);
+    if (_genaiClients.has(location)) return _genaiClients.get(location);
+    const client = new GoogleGenAI({
+      vertexai: true,
+      project: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'markendetektive-895f7',
+      location,
+    });
+    _genaiClients.set(location, client);
+    return client;
+  }
+  if (_genaiClients.has('apikey')) return _genaiClients.get('apikey');
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY not set on Cloud Function env');
   }
-  _genai = new GoogleGenAI({ apiKey });
-  return _genai;
+  const client = new GoogleGenAI({ apiKey });
+  _genaiClients.set('apikey', client);
+  return client;
 }
 
 // ─── Cloud Vision: image → raw text ─────────────────────────────────
@@ -97,7 +121,7 @@ async function callGeminiTextParser(ocrText, model) {
 
   const callOnce = async () => {
     const started = Date.now();
-    const response = await getGenAIClient().models.generateContent({
+    const response = await getGenAIClient(model).models.generateContent({
       model,
       contents: [{ role: 'user', parts: [{ text: buildUserPrompt(safeText) }] }],
       config: {
@@ -109,6 +133,8 @@ async function callGeminiTextParser(ocrText, model) {
         // Bons werden mittendrin abgeschnitten → kaputtes JSON →
         // cv_hybrid_json_decode. gemini-2.5-flash kann deutlich mehr.
         maxOutputTokens: 32768,
+        // Kosten-Kennung (08.10.2026), nur auf dem Vertex-Pfad.
+        ...geminiKennung(ZWECK.BON_OCR_TEXT),
       },
     });
     const latencyMs = Date.now() - started;

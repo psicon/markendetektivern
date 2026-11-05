@@ -6,7 +6,8 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useAuth } from '@/lib/contexts/AuthContext';
-import { OnboardingService } from '@/lib/services/onboardingService';
+import { AuthRueckkehr } from '@/lib/services/authRueckkehr';
+import { erwarteterAuthFehler } from '@/lib/utils/authFehler';
 import {
   showInfoToast,
   showRetryableErrorToast,
@@ -61,6 +62,16 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
+  // Erfolg: Onboarding-Status committen (T5, Re-Start-Bug B1 — idempotent)
+  // und zum vorgemerkten Ziel (AuthRueckkehr), sonst wie bisher Home.
+  const abschliessen = async () => {
+    try {
+      await AuthRueckkehr.abschliessen(router);
+    } catch {
+      router.replace('/(tabs)');
+    }
+  };
+
   const handleLogin = async () => {
     if (!formData.email || !formData.password) {
       showInfoToast('Bitte fülle alle Felder aus.', 'error', colorScheme ?? 'light');
@@ -71,14 +82,11 @@ export default function LoginScreen() {
 
     try {
       await signIn(formData.email, formData.password);
-      // T5: Onboarding-Status committen damit Re-Start-Bug B1
-      // weg ist (idempotent — no-op wenn schon completed).
-      try { await OnboardingService.markCompleted(); } catch {}
-      router.replace('/(tabs)');
+      await abschliessen();
     } catch (error: any) {
-      // Anon-User hat den 'Konto wechseln'-Confirm abgebrochen —
-      // kein Fehler, einfach Form offen lassen.
-      if (error?.code === 'auth/cancelled') {
+      // Anon-User hat den 'Konto wechseln'-Confirm abgebrochen oder für
+      // die Mitnahme fehlt kurz die Verbindung — Form offen lassen.
+      if (erwarteterAuthFehler(error, colorScheme)) {
         return;
       }
 
@@ -150,15 +158,12 @@ export default function LoginScreen() {
       setLoading(true);
       const okGoogle = await signInWithGoogle();
       if (!okGoogle) return; // Abbruch = kein Login (86ca7x9ep)
-      // T5: Onboarding-Status committen damit Re-Start-Bug B1
-      // weg ist (idempotent — no-op wenn schon completed).
-      try { await OnboardingService.markCompleted(); } catch {}
-      router.replace('/(tabs)');
+      await abschliessen();
     } catch (error: any) {
       // User-Cancel (Sheet abgebrochen ODER Confirm-Dialog
       // 'Konto wechseln' verneint) → kein Toast, Login-Screen
-      // bleibt sichtbar.
-      if (error?.code === 'auth/cancelled') return;
+      // bleibt sichtbar. Fehlende Verbindung für die Mitnahme → Hinweis.
+      if (erwarteterAuthFehler(error, colorScheme)) return;
       console.error('Google Sign-In error:', error);
       showRetryableErrorToast(
         `Google-Anmeldung fehlgeschlagen: ${error.message || 'Bitte erneut versuchen.'}`,
@@ -188,12 +193,9 @@ export default function LoginScreen() {
       }
       const okApple = await signInWithApple();
       if (!okApple) return; // Abbruch = kein Login (86ca7x9ep)
-      // T5: Onboarding-Status committen damit Re-Start-Bug B1
-      // weg ist (idempotent — no-op wenn schon completed).
-      try { await OnboardingService.markCompleted(); } catch {}
-      router.replace('/(tabs)');
+      await abschliessen();
     } catch (error: any) {
-      if (error?.code === 'auth/cancelled') return;
+      if (erwarteterAuthFehler(error, colorScheme)) return;
       console.error('Apple Sign-In error:', error);
       showRetryableErrorToast(
         `Apple-Anmeldung fehlgeschlagen: ${error.message || 'Bitte erneut versuchen.'}`,
@@ -212,10 +214,9 @@ export default function LoginScreen() {
       setLoading(true);
       const okFb = await signInWithFacebook();
       if (!okFb) return; // Abbruch = kein Login (86ca7x9ep)
-      try { await OnboardingService.markCompleted(); } catch {}
-      router.replace('/(tabs)');
+      await abschliessen();
     } catch (error: any) {
-      if (error?.code === 'auth/cancelled') return;
+      if (erwarteterAuthFehler(error, colorScheme)) return;
       // T17.2: FB-SDK-Unavailable (Sim) als warn, nicht error.
       if (error?.code === 'auth/facebook-sdk-unavailable') {
         console.warn('[Login] Facebook SDK unavailable:', error?.message);
