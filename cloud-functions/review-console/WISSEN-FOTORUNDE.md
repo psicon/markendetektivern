@@ -1659,7 +1659,8 @@ gesetzt und kein geplanter Nachlauf `namerNachlesenAb` (crowd-upload-namer
 `src/ablauf.js`) — ein vorhandenes Signal, der Namer bleibt unverändert. Erst
 dann liest er `fotoLive` und stellt einen Auftrag in die Cloud-Tasks-
 Warteschlange `fotoSchattenPruefen` (Name je Einreichung fest, ein zweiter
-wird verworfen; Takt 3 gleichzeitig, 1 je Sekunde, 3 Versuche). Der Arbeiter
+wird verworfen; Takt 1 gleichzeitig, 1 je Sekunde, 3 Versuche — Auflage PO 05.11.
+„kein Risiko für den Produktivbetrieb“, mehr erst nach Messung). Der Arbeiter
 übernimmt den Fall in einer Transaktion am eigenen Dokument, prüft den
 Betrugsschutz (vor jedem Modellaufruf) und rechnet sonst mit der Morgenrunde
 SELBST: `taeglicheRunde({ nurFaelle: [id] })`.

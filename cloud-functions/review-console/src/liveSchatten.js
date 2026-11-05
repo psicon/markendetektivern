@@ -72,7 +72,10 @@ const ARBEITSZEIT_MS = 4 * 60 * 1000;
 /** Versuche je Auftrag (Cloud Tasks retryConfig.maxAttempts, index.js). */
 const VERSUCHE = 3;
 /** Takt der Warteschlange (index.js): so viele Fälle gleichzeitig, so viele je Sekunde. */
-const TAKT = Object.freeze({ gleichzeitig: 3, jeSekunde: 1 });
+// Für die ersten Tage 1 gleichzeitig (Auflage PO 05.11.2026 „kein Risiko für den
+// Produktivbetrieb“): kaum Last auf dem Vertex-Kontingent von Namer und Bon-OCR.
+// Mehr erst nach Messung — Änderung hier, per Deploy (index.js liest TAKT).
+const TAKT = Object.freeze({ gleichzeitig: 1, jeSekunde: 1 });
 /** Kosten-Kennung: zusätzlich zum Zweck der Runde, damit die Rechnung den Schatten trennt. */
 const KENNUNG_WEG = 'live-schatten';
 
