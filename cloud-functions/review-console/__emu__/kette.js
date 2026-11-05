@@ -29,7 +29,7 @@ async function warteAuf(pfad, bedingung, ms = 60000) {
 }
 
 (async () => {
-  await db.doc('cashback_config/v1').set({ fotoLive: 'shadow', fotoWorker: false });
+  await db.doc('cashback_config/v1').set({ fotoLive: 'shadow', fotoLiveAnteil: 1, fotoWorker: false });
   await admin.auth().createUser({ uid: 'u1' });
   const ref = db.doc('crowd_uploads/a');
   await ref.set({ userId: 'u1', ean: '4061464833821', status: 'pending', images: {}, createdAt: FieldValue.serverTimestamp() });

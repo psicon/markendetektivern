@@ -79,7 +79,7 @@ const { bildDefektOf } = require('./einreichung');
 const { warnungen } = require('./warnungen');
 const { mitWiederholung, arbeite, schlafe, geminiKennung, KI_ZWECK } = require('./ki');
 const { ladeProduktsuche } = require('./produktsuche');
-const { schattenFuerBericht } = require('./liveSchattenBericht');
+const { schattenFuerBericht, schattenFuerGroesse } = require('./liveSchattenBericht');
 const {
   modusPreisBildschirm, modusPreisBeleg, schalterRohOf, preisQuelleOf, lesedienstBonOf, lesedienstOhneBonOf, bildKopf, bildschirmMerkmal, preisBildschirmLage,
   preisBildschirmVorbefund, preisBildschirmMitVorbefund,
@@ -735,7 +735,9 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
 
   // Märkte aus `discounter` für den Händler-Abgleich des Preisbelegs (05.10.2026,
   // preisBildschirm.preisBelegBefund) — nur mit eingeschaltetem Preisbeleg.
+  const ladeStart = Date.now();
   const [alleSnap, sperren, maerkte] = await Promise.all([db.collection(COL).get(), ladeSperren(db), belegModus !== false ? ladeMaerkte(db) : Promise.resolve({ namen: null, unlesbar: false })]);
+  const ladeMs = Date.now() - ladeStart;
   const marktSchluesselHeute = marktSchluessel(maerkte.namen);
   // `zeit`: Server-Zeitpunkt des Dokuments (createTime) — die Regeln rechnen
   // damit, nicht mit dem vom Client geschriebenen `createdAt` (werte.einreichZeit).
@@ -791,7 +793,9 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
   //    gegen die im Lauf offenen; seit Beginn 1 Freigabe trotz identischem Foto
   //    einer eigenen älteren Freigabe, 2 mit Foto eines fremden Kontos.
   const storage = admin.storage().bucket(bucket);
+  const listeStart = Date.now();
   const liste = await dateiListe(storage);
+  const listeMs = Date.now() - listeStart;
   const metaVon = new Map();
   await arbeite(zuBearbeiten, async (d) => {
     const metas = await Promise.all(Object.entries(d.x.images || {}).map(async ([k, p]) => {
@@ -1427,6 +1431,8 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     return {
       // Dieselbe Regelversion wie im Tagesbericht — der Live-Schatten legt sie je Fall ab.
       regelVersion: regelVersion(pbModus, belegModus, korrekturAn, haushaltAn, zweifelAn),
+      // Ladezeiten (ganze Sammlung + Sperren, Storage-Liste) — der Live-Schatten legt sie je Fall ab.
+      zeiten: { ladeMs, listeMs },
       notbremse: bremse,
       eanKorrektur: korrekturBericht(),
       fotoAbgleich: { dateien: liste ? liste.size : null },
@@ -2010,6 +2016,9 @@ async function taeglicheRunde({ dryRun = false, projekt, bucketName, ausloeser =
     aktionen: aktionen.filter((a) => a.active && a.endAt > start - 7 * 24 * 60 * 60 * 1000).map(({ id, kind, startAt, endAt, budgetRemainingCents, budgetTotalCents, cashbackPerBonCents }) => ({ id, kind, startAt, endAt, budgetRemainingCents, budgetTotalCents, cashbackPerBonCents })),
     warnungen: warn,
   };
+  // Firestore erlaubt 1 MiB je Dokument: wird der Bericht zu groß, fallen zuerst
+  // die Einzelfälle des Live-Schattens weg, seine Kennzahlen bleiben (05.11.2026).
+  bericht.liveSchatten = schattenFuerGroesse(bericht, 'liveSchatten');
   await db.collection(BERICHTE).doc(lauf).set(bericht);
   // `aktuell` liest der Morgen-Chat. Geschrieben von jedem ZEITPLAN-Lauf, auch
   // als Trockenlauf (mit dryRun:true) — sonst meldete der Chat bei

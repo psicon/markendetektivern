@@ -48,6 +48,14 @@ const { SCHATTEN_COL, LAUF_HAENGT_MS, fehlerCode } = require('./liveSchattenBeri
 
 const SCHALTER = 'fotoLive';
 /**
+ * Stichprobe (Kosten, 05.11.2026): `cashback_config/v1.fotoLiveAnteil`, Anteil der
+ * Einreichungen 0…1, Standard 0,5 — wirkt ohne Deploy. Deterministisch je ID
+ * (inStichprobe); geprüft VOR dem Einstellen: ein Fall außerhalb bekommt keinen
+ * Auftrag, kostet also weder Modell noch Lesen. Der Bericht zählt ihn unter `fehlt`.
+ */
+const SCHALTER_ANTEIL = 'fotoLiveAnteil';
+const ANTEIL_STANDARD = 0.5;
+/**
  * Betrugsschutz (Entscheidung Patrick 05.11.2026: „Ja“) — EINE Stelle.
  * Solche Fälle simuliert der Schatten nicht, er vermerkt nur, dass sie in der
  * Morgenrunde blieben (`wuerdeMorgenrunde: 'betrugsschutz'`).
@@ -76,6 +84,27 @@ function fotoLiveModus(roh) {
   if (roh === true) return { an: true, modus: 'shadow', scharfAngefragt: true, roh };
   const unbekannt = roh != null && roh !== false;
   return { an: false, modus: false, scharfAngefragt: false, roh: unbekannt ? String(JSON.stringify(roh)).slice(0, 40) : roh ?? null, unbekannt };
+}
+
+/** FNV-1a über die ID, 32 Bit, IMMER unsigned (`>>> 0`) — sonst würden negative Werte die Stichprobe verschieben. */
+function hash32(text) {
+  let h = 0x811c9dc5;
+  const t = String(text);
+  for (let i = 0; i < t.length; i++) {
+    h ^= t.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h >>> 0;
+}
+
+/** Rohwert von `fotoLiveAnteil` → Anteil 0…1; fehlt er oder ist er keine Zahl in 0…1, gilt der Standard 0,5. */
+function anteilVon(roh) {
+  return typeof roh === 'number' && Number.isFinite(roh) && roh >= 0 && roh <= 1 ? roh : ANTEIL_STANDARD;
+}
+
+/** Nimmt die Einreichung an der Stichprobe teil? hash32(id) mod 1000 < Anteil × 1000. */
+function inStichprobe(id, anteil) {
+  return hash32(id) % 1000 < Math.round(anteilVon(anteil) * 1000);
 }
 
 /** Hat der Namer fertig gelesen — ohne geplanten Nachlauf (crowd-upload-namer src/ablauf.js)? */
@@ -280,7 +309,7 @@ async function schattenFall({ db, id, projekt, bucketName, ai, kontoErstellt, ve
     const e = (r.plan || []).find((p) => p.id === id);
     // Nicht im Plan: inzwischen entschieden oder gelöscht (die Runde lädt neu).
     if (!e) return await fertig({ ergebnis: 'schon_entschieden', grund: 'nicht_offen_beim_laden', regelVersion: r.regelVersion || null, modelMs: messung.ms, modellAufrufe: messung.aufrufe });
-    return await fertig({ ...ergebnisAusPlan(e), regelVersion: r.regelVersion || null, modelMs: messung.ms, modellAufrufe: messung.aufrufe });
+    return await fertig({ ...ergebnisAusPlan(e), regelVersion: r.regelVersion || null, modelMs: messung.ms, modellAufrufe: messung.aufrufe, ...(r.zeiten ? { ladeMs: r.zeiten.ladeMs, listeMs: r.zeiten.listeMs } : {}) });
   } catch (err) {
     // Am Dokument nur ein Code — ein Firestore-Fehlertext kann Pfade mit der uid tragen.
     const fehler = fehlerCode(err);
@@ -297,7 +326,7 @@ async function schattenFall({ db, id, projekt, bucketName, ai, kontoErstellt, ve
  * wird erst gelesen, wenn der Übergang passt (der Trigger läuft bei JEDEM
  * Update einer Einreichung). Ein zweiter Auftrag derselben Einreichung wird
  * von Cloud Tasks verworfen (`task-already-exists`) — kein Fehler.
- * @returns {Promise<'kein_uebergang'|'aus'|'eingestellt'|'schon_eingestellt'>}
+ * @returns {Promise<'kein_uebergang'|'aus'|'ausserhalb_stichprobe'|'eingestellt'|'schon_eingestellt'>}
  */
 async function ausloeserFall({ db, id, vorher, nachher, einstellen, logger = null }) {
   if (!schattenAusloesen(vorher, nachher)) return 'kein_uebergang';
@@ -311,6 +340,7 @@ async function ausloeserFall({ db, id, vorher, nachher, einstellen, logger = nul
     if (modus.unbekannt && logger) logger.warn('Live-Schatten: unbekannter Wert von fotoLive — gilt als aus', { roh: modus.roh });
     return 'aus';
   }
+  if (!inStichprobe(id, cfg[SCHALTER_ANTEIL])) return 'ausserhalb_stichprobe';
   try {
     await einstellen({ id }, auftragsName(id));
     return 'eingestellt';
@@ -321,7 +351,7 @@ async function ausloeserFall({ db, id, vorher, nachher, einstellen, logger = nul
 }
 
 module.exports = {
-  SCHALTER, BETRUGSSCHUTZ, ARBEITSZEIT_MS, LAUF_HAENGT_MS, VERSUCHE, TAKT, KENNUNG_WEG,
+  SCHALTER, SCHALTER_ANTEIL, ANTEIL_STANDARD, hash32, anteilVon, inStichprobe, BETRUGSSCHUTZ, ARBEITSZEIT_MS, LAUF_HAENGT_MS, VERSUCHE, TAKT, KENNUNG_WEG,
   fotoLiveModus, namerFertig, schattenAusloesen, auftragsName, betrugsschutzUrteil, einreichungen24h,
   messendeKi, ergebnisAusPlan, rundeSchalter, uebernehmen, abschliessen, schattenFall, ausloeserFall,
 };

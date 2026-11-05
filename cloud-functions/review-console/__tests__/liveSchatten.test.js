@@ -180,7 +180,8 @@ beforeEach(() => {
   mockLage.aufrufe = []; mockLage.labels = []; mockLage.preisNachlese = new Map();
   konten.clear();
   dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => T0);
-  mockStore.set('cashback_config/v1', { fotoWorker: true, barcodeKorrektur: true, zweifelFreigabe: false, fotoLive: 'shadow' });
+  // Stichprobe 100 % in den Bestandstests; die Stichprobe selbst prüft ein eigener Block.
+  mockStore.set('cashback_config/v1', { fotoWorker: true, barcodeKorrektur: true, zweifelFreigabe: false, fotoLive: 'shadow', fotoLiveAnteil: 1 });
 });
 afterEach(() => dateSpy.mockRestore());
 
@@ -387,7 +388,7 @@ describe('Der Schatten entscheidet nichts', () => {
     let t = T0;
     await lauf('a', { uhr: () => { t += 1000; return t; } });
     const s = schatten('a');
-    expect(s).toMatchObject({ status: 'fertig', uploadMs: T0 - 45 * 1000, startedMs: T0 + 1000, lauf: expect.stringMatching(/^schatten_/), regelVersion: expect.stringMatching(/^[0-9a-f]{10}$/), modellAufrufe: 1 });
+    expect(s).toMatchObject({ status: 'fertig', uploadMs: T0 - 45 * 1000, startedMs: T0 + 1000, lauf: expect.stringMatching(/^schatten_/), regelVersion: expect.stringMatching(/^[0-9a-f]{10}$/), modellAufrufe: 1, ladeMs: expect.any(Number), listeMs: expect.any(Number) });
     expect(s.gesamtMs).toBe(s.fertigMs - (T0 - 45 * 1000));
     expect(s.dauerMs).toBe(s.fertigMs - s.startedMs);
     expect(Number.isFinite(s.modelMs)).toBe(true);
@@ -454,6 +455,38 @@ describe('Auslöser (Trigger-Seite)', () => {
     expect(await ls.ausloeserFall({ ...o, id: 'b' })).toBe('aus');
     expect(eingestellt.length).toBe(1);
     expect(mockWrites).toEqual([]);
+  });
+
+  it('Stichprobe fotoLiveAnteil: außerhalb kein Auftrag, Standard 0,5, deterministisch je ID', async () => {
+    const ids = Array.from({ length: 2000 }, (_, i) => `uid${i % 37}_sess${i}_${i % 5}`);
+    const anteil = (a) => ids.filter((id) => ls.inStichprobe(id, a)).length / ids.length;
+    expect(anteil(0.5)).toBeGreaterThan(0.45);
+    expect(anteil(0.5)).toBeLessThan(0.55);
+    expect(anteil(1)).toBe(1);
+    expect(anteil(0)).toBe(0);
+    // Fehlt oder ungültig → 0,5.
+    for (const roh of [undefined, null, 'halb', 1.5, -0.1, NaN]) expect(ls.anteilVon(roh)).toBe(0.5);
+    expect(ls.ANTEIL_STANDARD).toBe(0.5);
+    // Deterministisch und unsigned (nie negativ).
+    for (const id of ids.slice(0, 50)) {
+      expect(ls.hash32(id)).toBe(ls.hash32(id));
+      expect(ls.hash32(id)).toBeGreaterThanOrEqual(0);
+      expect(ls.hash32(id)).toBeLessThan(2 ** 32);
+    }
+    expect(ls.hash32('a')).toBe(0xe40c292c); // FNV-1a 32 Bit, Referenzwert
+    // Wer bei 0,3 drin ist, ist es auch bei 0,5 (wachsender Anteil nimmt nur dazu).
+    expect(ids.filter((id) => ls.inStichprobe(id, 0.3)).every((id) => ls.inStichprobe(id, 0.5))).toBe(true);
+    // Trigger: außerhalb der Stichprobe kein Auftrag.
+    const drin = ids.find((id) => ls.inStichprobe(id, 0.5));
+    const draussen = ids.find((id) => !ls.inStichprobe(id, 0.5));
+    mockStore.set('cashback_config/v1', { fotoLive: 'shadow' });
+    const eingestellt = [];
+    const o = (id) => ({ db: mockDb, id, vorher: { status: 'pending' }, nachher: fertig, einstellen: async (d, name) => eingestellt.push(name) });
+    expect(await ls.ausloeserFall(o(draussen))).toBe('ausserhalb_stichprobe');
+    expect(await ls.ausloeserFall(o(drin))).toBe('eingestellt');
+    expect(eingestellt).toEqual([ls.auftragsName(drin)]);
+    mockStore.set('cashback_config/v1', { fotoLive: 'shadow', fotoLiveAnteil: 0 });
+    expect(await ls.ausloeserFall(o(drin))).toBe('ausserhalb_stichprobe');
   });
 
   it('Schalter nicht lesbar → kein Auftrag (vorsichtige Richtung)', async () => {
@@ -533,6 +566,18 @@ describe('Abgleich im Tagesbericht (src/liveSchattenBericht.js)', () => {
     const { schattenFuerBericht } = require('../src/liveSchattenBericht');
     const db = { collection: () => ({ doc: (id) => ({ id }) }), getAll: async () => { throw new Error('UNAVAILABLE'); } };
     expect(await schattenFuerBericht(db, [{ id: 'a', entscheidung: 'freigeben' }], null, T0)).toEqual({ aktiv: null, unlesbar: true });
+  });
+
+  it('Berichtsgröße: über 900 KB fallen die Einzelfälle weg, die Kennzahlen bleiben', () => {
+    const { schattenFuerGroesse, BERICHT_MAX_BYTES } = require('../src/liveSchattenBericht');
+    const ls0 = { verglichen: 3, gleich: 2, faelle: [{ f: 'x' }], lockerer: [{ f: 'y' }], strenger: [] };
+    expect(BERICHT_MAX_BYTES).toBe(900 * 1024);
+    expect(schattenFuerGroesse({ a: 1, liveSchatten: ls0 }, 'liveSchatten')).toBe(ls0);
+    const gross = { wartetAufDich: 'x'.repeat(950 * 1024), liveSchatten: ls0 };
+    const r = schattenFuerGroesse(gross, 'liveSchatten');
+    expect(r).toEqual({ verglichen: 3, gleich: 2, einzelfaelleWeggelassen: true, berichtBytes: expect.any(Number) });
+    expect(r.berichtBytes).toBeGreaterThan(BERICHT_MAX_BYTES);
+    expect(schattenFuerGroesse({ liveSchatten: { unlesbar: true } }, 'liveSchatten')).toEqual({ unlesbar: true });
   });
 
   it('fehlerCode: nur Codes, kein Freitext', () => {

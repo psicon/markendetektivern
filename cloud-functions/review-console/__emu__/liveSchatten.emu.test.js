@@ -88,7 +88,7 @@ const einstellenIn = (liste) => async (daten, name) => {
 
 beforeEach(async () => {
   await leeren();
-  await db.doc('cashback_config/v1').set({ fotoWorker: true, zweifelFreigabe: false, fotoLive: 'shadow' });
+  await db.doc('cashback_config/v1').set({ fotoWorker: true, zweifelFreigabe: false, fotoLive: 'shadow', fotoLiveAnteil: 1 });
 });
 afterAll(async () => { await leeren(); await admin.app().delete(); });
 

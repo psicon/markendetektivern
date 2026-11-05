@@ -22,6 +22,8 @@ const crypto = require('crypto');
 const SCHATTEN_COL = 'crowd_live_schatten';
 /** Höchstens so viele Paare je Bericht als Einzelzeile (der Rest nur gezählt). */
 const MAX_FAELLE = 300;
+/** Ab dieser Größe des Tagesberichts (Firestore-Grenze 1 MiB) entfallen die Einzelfälle des Schattens. */
+const BERICHT_MAX_BYTES = 900 * 1024;
 /** χ²-Grenze für p < 0,05 bei einem Freiheitsgrad (McNemar). */
 const CHI2_GRENZE_5_PROZENT = 3.841;
 
@@ -193,4 +195,24 @@ async function schattenFuerBericht(db, plan, logger = null, jetzt = null) {
   }
 }
 
-module.exports = { SCHATTEN_COL, LAUF_HAENGT_MS, VERGLEICH_FENSTER_MS, fehlerCode, fallKennung, quantil, schattenSeite, schattenVergleich, schattenFuerBericht, MAX_FAELLE };
+/** Ungefähre Größe eines Dokuments in Byte (JSON, UTF-8) — null, wenn nicht messbar. */
+function groesseVon(obj) {
+  try { return Buffer.byteLength(JSON.stringify(obj), 'utf8'); } catch (e) { return null; }
+}
+
+/**
+ * Der Schatten-Teil für den Bericht `bericht[feld]` — bei mehr als BERICHT_MAX_BYTES
+ * ohne die Einzelfälle (`faelle`, `lockerer`, `strenger`), mit allen Kennzahlen.
+ * Wirft nie; ändert sonst nichts am Bericht.
+ */
+function schattenFuerGroesse(bericht, feld, max = BERICHT_MAX_BYTES) {
+  const ls = bericht && bericht[feld];
+  if (!ls || typeof ls !== 'object') return ls;
+  const g = groesseVon(bericht);
+  if (g == null || g <= max) return ls;
+  const { faelle, lockerer, strenger, ...rest } = ls;
+  return { ...rest, einzelfaelleWeggelassen: true, berichtBytes: g };
+}
+
+module.exports = {
+  BERICHT_MAX_BYTES, groesseVon, schattenFuerGroesse, SCHATTEN_COL, LAUF_HAENGT_MS, VERGLEICH_FENSTER_MS, fehlerCode, fallKennung, quantil, schattenSeite, schattenVergleich, schattenFuerBericht, MAX_FAELLE };

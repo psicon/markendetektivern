@@ -1725,10 +1725,15 @@ fertig → `nachRundenstart`. Fehler stehen am Dokument nur als Code (ein
 Firestore-Text kann Pfade mit der uid tragen). Der Goldstandard
 (Entscheidungen in der Konsole) ist noch nicht drin.
 
-**Kosten.** Modellaufrufe wie die Runde (≈ +2,2 €/Tag für zwei Wochen; kein
-zusätzliches Nachlesen — gelesen wird nur, was dem Namer fehlt). Dazu liest
-jeder Fall die ganze Sammlung wie die Runde (geschätzt ≈ 10.000 Dokumente je Fall,
-≈ 1,9 Mio. Lesevorgänge am Tag, Schätzung ≈ 0,7–1,1 €/Tag). Billiger geht
+**Kosten** (Schätzung aus der Prüfrunde 05.11.2026, gemessen ist noch nichts):
+bei 100 % der Einreichungen ≈ 3,5–4,5 €/Tag — Firestore-Lesen 1,0–1,4 € (jeder
+Fall liest die ganze Sammlung wie die Runde, geschätzt ≈ 10.000 Dokumente je
+Fall), Modell 2,2–2,8 € (Aufrufe wie die Runde; kein zusätzliches Nachlesen —
+gelesen wird nur, was dem Namer fehlt), Cloud Run 0,3–0,5 €. Deshalb eine
+**Stichprobe**: `cashback_config/v1.fotoLiveAnteil` (Standard 0,5, wirkt ohne
+Deploy) — ein Fall nimmt teil, wenn hash32 seiner ID (FNV-1a, unsigned `>>>`)
+mod 1000 < Anteil × 1000; geprüft im Trigger VOR dem Auftrag, außerhalb also
+keine Kosten (im Bericht unter `fehlt`). Bei 50 % ≈ 1,8–2,3 €/Tag. Billiger geht
 es erst mit Schritt 0 aus t8 (Felder `eanKey`/`eanNummern`, Sammlung
 `crowd_fotos/{md5}` mit Bestand-Nachtrag) — für den Schatten bewusst nicht
 gebaut.
@@ -1737,21 +1742,29 @@ gebaut.
 <deploy-zweig>..<zweig> -- cloud-functions/review-console` für jeden aktiven
 Zweig): `functions:review-console` allein; der Schalter steht danach auf
 nichts = aus. Prüfen, dass die Warteschlange `fotoSchattenPruefen` angelegt
-ist (`gcloud tasks queues describe fotoSchattenPruefen --location=europe-west1`)
-und das Dienstkonto der Functions (Compute-Standardkonto) Aufträge einstellen
-und den Arbeiter aufrufen darf: `roles/cloudtasks.enqueuer`,
-`roles/iam.serviceAccountUser` (auf sich selbst, für das OIDC-Token) und
-`roles/run.invoker` auf dem Dienst `fotoschattenpruefen`. Dann `fotoLive:
-'shadow'` und nach den ersten Einreichungen `crowd_live_schatten` sowie die Logs
-„Live-Schatten: Auftrag" / „Live-Schatten: Fall" ansehen.
+ist (`gcloud tasks queues describe fotoSchattenPruefen --location=europe-west1`).
+Die Rechte des Compute-Standardkontos (Aufträge einstellen, OIDC-Token, Arbeiter
+aufrufen) sind heute über `roles/editor` und das projektweite `run.invoker`
+vorhanden (Prüfrunde 05.11.2026) — wer diese Rollen einschränkt, muss
+`roles/cloudtasks.enqueuer`, `roles/iam.serviceAccountUser` und
+`roles/run.invoker` auf `fotoschattenpruefen` einzeln vergeben. Dann `fotoLive:
+'shadow'` und `fotoLiveAnteil: 0.5`, nach den ersten Einreichungen
+`crowd_live_schatten` sowie die Logs „Live-Schatten: Auftrag" / „Live-Schatten:
+Fall" ansehen.
 
 Die Einreichung liest der Arbeiter AUSSERHALB seiner Transaktion (Prüfrunde
 05.11.2026): ein Lesen in der Transaktion sperrt das Dokument und hielte
 Transaktionen von Runde, Namer, Konsole oder Vergütung auf. Um 08:00 teilen
-sich Schatten und Runde die Vertex-Quote; ein 429, das die Wiederholungen
-übersteht, lässt in der Runde einen Fall offen (offen: den Schatten dort
-pausieren). **Rückweg:** `fotoLive: false`
-(ohne Deploy); die Dokumente in `crowd_live_schatten` wirken auf nichts.
+sich Schatten und Runde die Vertex-Quote. Messvorgabe: den ersten
+Schatten-Morgen gegen den 14-Tage-Schnitt der Runde vergleichen (Bildprüfung
+gescheitert, `nichtGeschafft`, offen wegen Technik) — liegt er auffällig
+darüber, den Schatten um 08:00 aussetzen. **Rückweg:** `fotoLive: false`
+(ohne Deploy), im Notfall die Warteschlange `fotoSchattenPruefen` pausieren;
+die Functions nicht löschen. Die Dokumente in `crowd_live_schatten` wirken auf
+nichts. Der Bericht lässt die Einzelfälle des Schattens weg, wenn er über
+900 KB käme (Firestore-Grenze 1 MiB); die Kennzahlen bleiben
+(`einzelfaelleWeggelassen`). Je Fall stehen auch `ladeMs` (ganze Sammlung +
+Sperren) und `listeMs` (Storage-Liste) am Schatten-Dokument.
 
 **Tests:** `__tests__/liveSchatten.test.js` (Einzelfall gegen Stapel,
 Schalter, Betrugsschutz, Idempotenz, nichts entscheiden, Bericht);
