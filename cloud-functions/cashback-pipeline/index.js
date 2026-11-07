@@ -2821,7 +2821,8 @@ async function verarbeiteCashback(event, { laufStart = Date.now() } = {}) {
           // lib/ocr_robust.js prüft dieselbe Regel noch einmal dort, wo die
           // Stufe gesendet wird (eine Quelle: ocrDenkstufeWirksam).
           const ocrPromptVersion = promptVersionAus(config.ocrPrompt);
-          const denkWahl = ocrDenkstufeWirksam(config.ocrDenkstufe, ocrPromptVersion);
+          // Mit Modell: gemini-3.8-flash darf LOW auch mit v1.4 (07.11.2026, lib/geminiModelle.js).
+          const denkWahl = ocrDenkstufeWirksam(config.ocrDenkstufe, ocrPromptVersion, config.ocrModel);
           if (denkWahl.grund === 'ungueltig') {
             logger.warn('ocr-denkstufe-ungueltig', { cashbackId, wert: String(config.ocrDenkstufe).slice(0, 40) });
           } else if (denkWahl.grund === 'ohne_v15') {

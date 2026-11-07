@@ -99,6 +99,39 @@ const ESKALATION_AUSWEICH_DENKSTUFE_STANDARD = 'LOW';
  */
 const EU_ERREICHBAR = new Set(['gemini-3.5-flash', 'gemini-3.5-flash-lite']);
 
+/**
+ * Standort der Grundlesungen je Modell, wenn GEMINI_VERTEX_LOCATION fehlt
+ * (07.11.2026). Ohne Eintrag: `global` wie bisher — für gemini-3.5-flash bleibt
+ * jede Anfrage also unverändert. gemini-3.8-flash gibt es nur unter `global`
+ * und `eu`; der PO hat `eu` vorgegeben (Verarbeitung in der EU).
+ *
+ * ═══ MESSUNG_38 (07.11.2026, nur lesend) ═══
+ * 70 entschiedene Bons (03.–06.11., geschichtet: 26 Haiku+Zeuge, 18 2-aus-3,
+ * 12 Zwei-Gemini-Einigung, 14 schwer), Prompt v1.4, je Bon 1× 3.5-flash wie
+ * live (ohne Denkvorgabe, hier in eu) und 2× 3.8-flash LOW in eu, verglichen
+ * mit dem gespeicherten Ergebnis und Entscheid:
+ *                       Markt  Datum  Summe  Artikel  Summenprobe  exakt  Entscheid
+ *   3.5 (Kontrolle)     65/66  65/66  61/66  61/66    62/66        61/66  65/66
+ *   3.8 LOW, 1 Lesung   69/70  69/70  65/70  65/70    59/70        55/70  64/70
+ *   3.8 LOW, 2 einig    40/41  41/41  41/41  41/41    41/41        41/41  41/41
+ * 3.5 lief 4 × bis MAX_TOKENS (keine Antwort), 3.8 nie. Exakter Abgleich ist
+ * mit 3.8 schlechter (nur 3.5 exakt 6, nur 3.8 exakt 0; McNemar p = 0,03):
+ * Artikelrabatte werden ohne Denken seltener verrechnet — wie bei 3.5 LOW +
+ * v1.4. Folge sind mehr Folgelesungen, kein falsches Geld: kein Bon, auf dem
+ * 3.8 abgleicht und anders entschieden hätte als 3.5. Zwei 3.8-Lesungen einigen
+ * sich (Exakt-Regel unter LOW) auf 41 von 70 Bons. Median 5,3 s statt 14,4 s,
+ * p90 14,6 s statt 28,2 s. € je Lesung (Liste eu) 0,010 statt 0,041.
+ * 3.8 LOW + v1.6 war nicht besser (Summenprobe 55/66, 4 Zeitabbrüche).
+ *
+ * Umschalten ohne Deploy (nach dem Ausrollen dieses Stands):
+ *   cashback_config/v1.ocrModel = 'gemini-3.8-flash', ocrDenkstufe = 'LOW'.
+ * Rückweg ohne Deploy: ocrModel = 'gemini-3.5-flash', ocrDenkstufe entfernen.
+ * Eskalation (3.5-flash HIGH, eu) und Zweitprüfung (3.1-pro-preview) bleiben.
+ * Achtung Lebensdauer (Kopf der Datei): 3.8-flash hat „kürzere Verfügbarkeit"
+ * (Abschaltung mit 45 Tagen Vorlauf) — der Rückweg oben muss deshalb bleiben.
+ */
+const STANDORT_JE_MODELL = Object.freeze({ 'gemini-3.8-flash': 'eu' });
+
 /** Standort für Eskalation/Rückfall: Env-Wert, sonst eu wenn erreichbar, sonst Modell-Standard. */
 function ausweichStandort(model, envWert) {
   if (envWert) return envWert;
@@ -158,23 +191,36 @@ const OCR_DENKSTUFEN = new Set(['LOW']);
 /** Prompt-Fassungen, mit denen die Denkstufe wirkt (v1.5 gemessen, v1.6 = deren Nachbesserung). */
 const OCR_DENKSTUFE_PROMPTE = new Set(['v1.5', 'v1.6']);
 
+/**
+ * ═══ Gemini 3.8 Flash als Grundleser (07.11.2026) ═══
+ * Modelle, für die LOW auch mit dem Live-Prompt v1.4 wirkt. Die Kopplung an
+ * v1.5/v1.6 oben stammt aus der Messung von gemini-3.5-flash (v1.4 + LOW lehnte
+ * dort Coupon-Bons ab). gemini-3.8-flash LOW + v1.4 ist eigens gemessen
+ * (MESSUNG_38 oben); für jedes andere Modell bleibt die Kopplung.
+ */
+const DENKSTUFE_MIT_V14 = new Set(['gemini-3.8-flash']);
+
 /** Wert von `cashback_config/v1.ocrDenkstufe` → 'LOW' | null (keine Vorgabe). */
 function denkstufeAus(wert) {
   return typeof wert === 'string' && OCR_DENKSTUFEN.has(wert) ? wert : null;
 }
 
 /**
- * Wirksame Denkstufe einer Leiter: gültiger Wert UND Prompt v1.5 oder v1.6.
+ * Wirksame Denkstufe einer Leiter: gültiger Wert UND Prompt v1.5 oder v1.6 —
+ * beim Modell gemini-3.8-flash auch v1.4 (DENKSTUFE_MIT_V14).
  * @param {*} wert Schalterwert `ocrDenkstufe`
  * @param {string} promptVersion bereits geprüfte Version (lib/prompt.js promptVersionAus)
+ * @param {string} [model] Modell der Grundlesungen; ohne Angabe gilt die Kopplung an v1.5/v1.6.
  * @returns {{ denkstufe: 'LOW'|null, grund: null|'ungueltig'|'ohne_v15' }}
  *   grund null = nichts zu melden (Wert fehlt, oder er wirkt).
  */
-function ocrDenkstufeWirksam(wert, promptVersion) {
+function ocrDenkstufeWirksam(wert, promptVersion, model) {
   if (wert == null) return { denkstufe: null, grund: null };
   const stufe = denkstufeAus(wert);
   if (!stufe) return { denkstufe: null, grund: 'ungueltig' };
-  if (!OCR_DENKSTUFE_PROMPTE.has(promptVersion)) return { denkstufe: null, grund: 'ohne_v15' };
+  const promptPasst = OCR_DENKSTUFE_PROMPTE.has(promptVersion)
+    || (promptVersion === 'v1.4' && DENKSTUFE_MIT_V14.has(String(model || '')));
+  if (!promptPasst) return { denkstufe: null, grund: 'ohne_v15' };
   return { denkstufe: stufe, grund: null };
 }
 
@@ -203,7 +249,7 @@ function vertexStandort(model, { standort, env = process.env } = {}) {
   // Nur noch als Rückweg bis zur Abschaltung am 20.10.2026 (Env-Override
   // CASHBACK_OCR_PRO_MODEL=gemini-2.5-pro): dort, wo es bisher lief.
   if (istGemini25Pro(model)) return env.GEMINI_VERTEX_LOCATION_PRO || 'europe-west4';
-  return env.GEMINI_VERTEX_LOCATION || 'global';
+  return env.GEMINI_VERTEX_LOCATION || STANDORT_JE_MODELL[String(model || '')] || 'global';
 }
 
 /**
@@ -254,6 +300,8 @@ module.exports = {
   ocrDenkstufeWirksam,
   OCR_DENKSTUFEN,
   OCR_DENKSTUFE_PROMPTE,
+  DENKSTUFE_MIT_V14,
+  STANDORT_JE_MODELL,
   ESKALATION_MODELL_STANDARD,
   ESKALATION_DENKSTUFE_STANDARD,
   ESKALATION_AUSWEICH_DENKSTUFE_STANDARD,
