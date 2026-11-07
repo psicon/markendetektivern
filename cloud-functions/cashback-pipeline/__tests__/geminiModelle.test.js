@@ -115,3 +115,29 @@ describe('Modellklassen', () => {
     expect(istGemini25Pro(null)).toBe(false);
   });
 });
+
+describe('gemini-3.8-flash als Grundleser (07.11.2026)', () => {
+  const { ocrDenkstufeWirksam } = require('../lib/geminiModelle');
+
+  test('3.8-flash liest ohne Env-Standort in eu, 3.5-flash bleibt global', () => {
+    expect(vertexStandort('gemini-3.8-flash', { env: {} })).toBe('eu');
+    expect(vertexStandort('gemini-3.5-flash', { env: {} })).toBe('global');
+  });
+
+  test('Env-Standort und ausdrücklicher Standort haben weiter Vorrang', () => {
+    expect(vertexStandort('gemini-3.8-flash', { env: { GEMINI_VERTEX_LOCATION: 'global' } })).toBe('global');
+    expect(vertexStandort('gemini-3.8-flash', { standort: 'global', env: {} })).toBe('global');
+  });
+
+  test('LOW wirkt mit v1.4 nur bei gemini-3.8-flash', () => {
+    expect(ocrDenkstufeWirksam('LOW', 'v1.4', 'gemini-3.8-flash')).toEqual({ denkstufe: 'LOW', grund: null });
+    expect(ocrDenkstufeWirksam('LOW', 'v1.4', 'gemini-3.5-flash')).toEqual({ denkstufe: null, grund: 'ohne_v15' });
+    expect(ocrDenkstufeWirksam('LOW', 'v1.4')).toEqual({ denkstufe: null, grund: 'ohne_v15' });
+  });
+
+  test('ohne Schalter und mit ungültigem Wert ändert sich auch bei 3.8 nichts', () => {
+    expect(ocrDenkstufeWirksam(undefined, 'v1.4', 'gemini-3.8-flash')).toEqual({ denkstufe: null, grund: null });
+    expect(ocrDenkstufeWirksam('MEDIUM', 'v1.4', 'gemini-3.8-flash')).toEqual({ denkstufe: null, grund: 'ungueltig' });
+    expect(ocrDenkstufeWirksam('LOW', 'v1.6', 'gemini-3.8-flash')).toEqual({ denkstufe: 'LOW', grund: null });
+  });
+});

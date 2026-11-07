@@ -489,7 +489,8 @@ async function extractReceiptRobust(imageBytes, mimeType, opts = {}) {
   // Denkstufen (`thinkingLevel`); ein älteres Modell nimmt nur `thinkingBudget`
   // — dann wirkt der Schalter nicht. Beides sichtbar gemeldet, der Bon
   // dokumentiert null.
-  const denkWahl = ocrDenkstufeWirksam(opts.denkstufe, prompt.promptVersion);
+  // Modell mitgeben: gemini-3.8-flash darf LOW auch mit v1.4 (geminiModelle.js DENKSTUFE_MIT_V14).
+  const denkWahl = ocrDenkstufeWirksam(opts.denkstufe, prompt.promptVersion, model);
   if (denkWahl.grund === 'ohne_v15') console.warn('ocr-denkstufe-ohne-v15', { promptVersion: prompt.promptVersion, denkstufe: denkstufeAus(opts.denkstufe) });
   const denkstufe = denkWahl.denkstufe && istGemini3(model) ? denkWahl.denkstufe : null;
   if (denkWahl.denkstufe && !denkstufe) console.warn('ocr-denkstufe-ignoriert', { model, denkstufe: denkWahl.denkstufe });
